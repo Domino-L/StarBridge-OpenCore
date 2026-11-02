@@ -38,6 +38,7 @@ internal sealed partial class CommunityClient
                   catch (HttpRequestException) { }
                 current(); token.ThrowIfCancellationRequested();
                 var managementAvailable = false;
+                var managementConfirmed = true;
                 CommunityNotificationTask[] tasks = [];
                 try {
                     var ownership = await ReadWpfS2Ownership(bearer, fleet, viewerId, token);
@@ -52,11 +53,11 @@ internal sealed partial class CommunityClient
                                 WpfTimestamp(row, "createdAt") ?? throw Invalid())).ToArray();
                         managementAvailable = true;
                     }
-                } catch (AccountBridgeHostException) { tasks = []; }
-                  catch (HttpRequestException) { tasks = []; }
+                } catch (AccountBridgeHostException) { tasks = []; managementConfirmed = false; }
+                  catch (HttpRequestException) { tasks = []; managementConfirmed = false; }
                 current(); token.ThrowIfCancellationRequested();
                 sources.Add(new(key, name, joined, chatAvailable, chat, managementAvailable, tasks,
-                    Notifications.NotificationPolicyStore.Organization(code, joined)));
+                    Notifications.NotificationPolicyStore.Organization(code, joined), managementConfirmed));
             }
             current(); token.ThrowIfCancellationRequested();
             return new(_targetClock.GetUtcNow(), sources.ToArray());
@@ -70,14 +71,26 @@ internal sealed partial class CommunityClient
     {
         var channel = FleetChatIdentity.FleetChannelId(code);
         var channels = await WorkspaceJson(bearer, "/api/fleets/chat/channels?fleetCode=" + Uri.EscapeDataString(code), token);
+        var unread = NotificationChannelUnread(channels, channel);
+        var target = new Target(code, "notification-read", _targetClock.GetUtcNow(), name, viewerId);
+        var page = await WpfS2ChatPage(bearer, target, channel, 0, 0, token, limit: 1);
+        return NotificationChat(page, unread);
+    }
+
+    private static int NotificationChannelUnread(JsonElement channels, string channel)
+    {
         ChatObject(channels);
         var rows = Rows(channels, "channels", 1);
         if (rows.Length != 1 || Text(rows[0], "type", 16) != FleetChatChannelTypes.Fleet ||
             !Text(rows[0], "channelId", 272).Equals(channel, StringComparison.OrdinalIgnoreCase)) throw Invalid();
         var unread = Number(rows[0], "unreadCount", 0, 500);
         if (Number(channels, "totalUnread", 0, 500) != unread) throw Invalid();
-        var target = new Target(code, "notification-read", _targetClock.GetUtcNow(), name, viewerId);
-        var page = await WpfS2ChatPage(bearer, target, channel, 0, 0, token, limit: 1);
+        return unread;
+    }
+
+    private static CommunityNotificationChat NotificationChat(JsonElement page, int unread, bool includeCallsign = true)
+    {
+        if (Number(page, "schemaVersion", 1, 1) != 1) throw Invalid();
         var sequence = ChatSequence(page, "latestSequence");
         var server = DateTimeOffset.Parse(Timestamp(page, "serverTime") ?? throw Invalid());
         var messages = Rows(page, "messages", 1);
@@ -90,7 +103,7 @@ internal sealed partial class CommunityClient
         var created = DateTimeOffset.Parse(Timestamp(message, "createdAt") ?? throw Invalid());
         if (created > server) throw Invalid();
         return new(sequence, unread, !message.GetProperty("isSelf").GetBoolean(), server, created,
-            Text(message, "senderCallsign", 512), Text(message, "text", 1000, true));
+            includeCallsign ? Text(message, "senderCallsign", 512) : "", Text(message, "text", 1000, true));
     }
 
     private static string NotificationKey(string scope, string code, DateTimeOffset joined, string id) =>

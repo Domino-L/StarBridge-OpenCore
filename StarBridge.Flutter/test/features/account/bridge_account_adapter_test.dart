@@ -10,6 +10,181 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  test('retired legacy login keeps SCM generation unchanged', () async {
+    final host = _AccountHostHarness(
+      legacyLoginAvailable: true,
+      legacyLoginOutcome: 'retired',
+    );
+    addTearDown(host.close);
+    expect(
+      (await host.adapter.loginLegacy('old@example.invalid', 'short')).outcome,
+      'retired',
+    );
+    expect(host.requestNames, ['account.loginLegacy']);
+    expect(host.requests.single.accountContext, isNull);
+    expect(host._session.activeGeneration, 7);
+  });
+
+  testWidgets('optional avatar timeout preserves SCM login without a write', (
+    tester,
+  ) async {
+    final host = _AccountHostHarness(
+      avatarAvailable: true,
+      delayedRequest: 'account.readAvatar',
+      responseDelay: const Duration(seconds: 65),
+    );
+    addTearDown(host.close);
+    final read = host.adapter.read();
+    await tester.pump();
+    expect(host.requestNames, contains('account.readAvatar'));
+    await tester.pump(const Duration(seconds: 61));
+    final result = await read;
+    expect(result.snapshot?.sessionState, AccountSessionState.signedIn);
+    expect(result.snapshot?.profile?.displayName, 'Aster Lin');
+    expect(result.snapshot?.profile?.avatarImageData, isNull);
+    expect(
+      host.requestNames.any(
+        (name) => name.contains('update') || name.contains('migration'),
+      ),
+      isFalse,
+    );
+    await tester.pump(const Duration(seconds: 5));
+  });
+  test('SCM display callsign follows inherited then manually edited Java presentation', () async {
+    final host = _AccountHostHarness(
+      avatarAvailable: true,
+      presentationCallSign: 'Inherited Commander',
+    );
+    addTearDown(host.close);
+    final inherited = await host.adapter.read();
+    expect(inherited.snapshot?.profile?.displayName, 'Inherited Commander');
+    expect(inherited.snapshot?.identity.authoritativeHandle, 'Aster-Lin');
+    expect(inherited.snapshot?.route?.subject, 'synthetic-subject');
+    host.presentationCallSign = 'New Commander';
+    final refreshed = await host.adapter.read();
+    expect(refreshed.snapshot?.profile?.displayName, 'New Commander');
+    expect(
+      host.requests
+          .where((r) => r.name == 'account.readAvatar')
+          .every(
+            (r) =>
+                r.accountContext?.subject == 'synthetic-subject' &&
+                r.sessionGeneration == 7,
+          ),
+      isTrue,
+    );
+    expect(
+      host.requestNames,
+      isNot(contains('personalProfile.migrationConfirm')),
+    );
+  });
+
+  test('missing Java presentation does not invalidate SCM login or borrow an old callsign', () async {
+    final host = _AccountHostHarness(avatarAvailable: true);
+    addTearDown(host.close);
+    final result = await host.adapter.read();
+    expect(result.snapshot?.sessionState, AccountSessionState.signedIn);
+    expect(result.snapshot?.profile?.displayName, 'Aster Lin');
+  });
+  test(
+    'saving SCM locale does not replace StarBridge callsign or avatar',
+    () async {
+      final host = _AccountHostHarness(
+        avatarAvailable: true,
+        presentationCallSign: 'Inherited Commander',
+      );
+      addTearDown(host.close);
+      await host.adapter.read();
+      final result = await host.adapter.execute(
+        const SaveAccountPreferences(
+          patch: AccountPreferencePatch(
+            localeSpecified: true,
+            timeZoneSpecified: false,
+            locale: 'en-US',
+          ),
+        ),
+      );
+      expect(result.snapshot?.profile?.displayName, 'Inherited Commander');
+      expect(
+        result.snapshot?.profile?.avatarImageData,
+        'data:image/png;base64,synthetic-java-avatar',
+      );
+    },
+  );
+
+  test(
+    'SCM snapshot reads the confirmed Java avatar on the current account scope',
+    () async {
+      final harness = _AccountHostHarness(avatarAvailable: true);
+      final result = await harness.adapter.read();
+      expect(result.snapshot?.sessionState, AccountSessionState.signedIn);
+      expect(
+        result.snapshot?.profile?.avatarImageData,
+        'data:image/png;base64,synthetic-java-avatar',
+      );
+      final request = harness.requests.singleWhere(
+        (r) => r.name == 'account.readAvatar',
+      );
+      expect(request.accountContext?.subject, 'synthetic-subject');
+      expect(request.sessionGeneration, 7);
+      expect(harness.requestNames, isNot(contains('account.legacyLogin')));
+      await harness.close();
+    },
+  );
+  test(
+    'optional Java avatar failure does not invalidate authenticated account',
+    () async {
+      final harness = _AccountHostHarness(
+        avatarAvailable: true,
+        avatarError: 'account.avatar_unavailable',
+      );
+      final result = await harness.adapter.read();
+      expect(result.snapshot?.sessionState, AccountSessionState.signedIn);
+      expect(result.snapshot?.profile?.avatarImageData, isNull);
+      await harness.close();
+    },
+  );
+  test('failed startup presentation recovers on ordinary read without login or write', () async {
+    final host = _AccountHostHarness(
+      avatarAvailable: true,
+      avatarError: 'account.avatar_unavailable',
+      presentationCallSign: 'Recovered Commander',
+    );
+    addTearDown(host.close);
+    final failed = await host.adapter.read();
+    expect(failed.snapshot?.sessionState, AccountSessionState.signedIn);
+    expect(failed.snapshot?.profile?.avatarImageData, isNull);
+    host.avatarError = null;
+    final recovered = await host.adapter.read();
+    expect(recovered.snapshot?.sessionState, AccountSessionState.signedIn);
+    expect(recovered.snapshot?.profile?.displayName, 'Recovered Commander');
+    expect(
+      recovered.snapshot?.profile?.avatarImageData,
+      'data:image/png;base64,synthetic-java-avatar',
+    );
+    expect(
+      recovered.snapshot?.route?.environment,
+      failed.snapshot?.route?.environment,
+    );
+    expect(
+      recovered.snapshot?.route?.authority,
+      failed.snapshot?.route?.authority,
+    );
+    expect(recovered.snapshot?.route?.subject, failed.snapshot?.route?.subject);
+    expect(
+      host.requests.where((r) => r.name == 'account.readAvatar').length,
+      2,
+    );
+    expect(
+      host.requestNames.any(
+        (name) =>
+            name.contains('update') ||
+            name.contains('migration') ||
+            name.toLowerCase().contains('login'),
+      ),
+      isFalse,
+    );
+  });
   test(
     'legacy login waits for delayed account.changed before returning',
     () async {
@@ -144,6 +319,19 @@ void main() {
       (await host.adapter.loginLegacy('old@example.invalid', 'short')).outcome,
       'unavailable',
     );
+  });
+  test('bound legacy login preserves actionable SCM requirement', () async {
+    final host = _AccountHostHarness(
+      legacyLoginAvailable: true,
+      legacyLoginOutcome: 'scmRequired',
+    );
+    addTearDown(host.close);
+    expect(
+      (await host.adapter.loginLegacy('old@example.invalid', 'short')).outcome,
+      'scmRequired',
+    );
+    expect(host.requestNames, ['account.loginLegacy']);
+    expect(host._session.activeGeneration, 7);
   });
   test(
     'legacy login cancels pending requests without duplicate sends',
@@ -332,6 +520,92 @@ void main() {
     );
   });
 
+  test('proof service outage has actionable copy and retains SCM sign-in', () async {
+    final harness = _AccountHostHarness(
+      linkAvailable: true,
+      linkError: 'account.legacy_proof_unavailable',
+    );
+    addTearDown(harness.close);
+    await harness.adapter.read();
+    final result = await harness.adapter.execute(
+      const LinkLegacyAccount(credential: LegacyAccountCredential(
+        accountName: 'synthetic', password: 'synthetic',
+      )),
+    );
+    expect(result.failure?.messageKey, 'account.error.legacyProofUnavailable');
+    final refreshed = await harness.adapter.read();
+    expect(refreshed.snapshot?.sessionState, AccountSessionState.signedIn);
+    expect(refreshed.snapshot?.compatibility.identityState,
+        AccountCompatibilityIdentityState.unlinked);
+  });
+  for (final failure in <String, String>{
+    'account.compatibility_conflict': 'account.error.compatibilityConflict',
+    'account.compatibility_proof_rejected':
+        'account.error.compatibilityProofRejected',
+  }.entries) {
+    test('S2 ${failure.key} preserves SCM and maps local message', () async {
+      final harness = _AccountHostHarness(
+        linkAvailable: true,
+        linkError: failure.key,
+      );
+      addTearDown(harness.close);
+      await harness.adapter.read();
+      final rejected = await harness.adapter.execute(
+        const LinkLegacyAccount(
+          credential: LegacyAccountCredential(
+            accountName: 'synthetic',
+            password: 'synthetic',
+          ),
+        ),
+      );
+      expect(rejected.outcome, AccountActionOutcome.failed);
+      expect(rejected.failure?.code, failure.key);
+      expect(rejected.failure?.messageKey, failure.value);
+      final refreshed = await harness.adapter.read();
+      expect(refreshed.snapshot?.sessionState, AccountSessionState.signedIn);
+      expect(
+        refreshed.snapshot?.compatibility.identityState,
+        AccountCompatibilityIdentityState.unlinked,
+      );
+      expect(
+        harness.requestNames.where(
+          (name) => name == 'account.linkLegacyAccount',
+        ),
+        hasLength(1),
+      );
+    });
+  }
+
+  test(
+    'proof service outage has actionable copy and retains SCM sign-in',
+    () async {
+      final harness = _AccountHostHarness(
+        linkAvailable: true,
+        linkError: 'account.legacy_proof_unavailable',
+      );
+      addTearDown(harness.close);
+      await harness.adapter.read();
+      final result = await harness.adapter.execute(
+        const LinkLegacyAccount(
+          credential: LegacyAccountCredential(
+            accountName: 'synthetic',
+            password: 'synthetic',
+          ),
+        ),
+      );
+      expect(
+        result.failure?.messageKey,
+        'account.error.legacyProofUnavailable',
+      );
+      final refreshed = await harness.adapter.read();
+      expect(refreshed.snapshot?.sessionState, AccountSessionState.signedIn);
+      expect(
+        refreshed.snapshot?.compatibility.identityState,
+        AccountCompatibilityIdentityState.unlinked,
+      );
+    },
+  );
+
   test(
     'S2 cancellation targets the pending request and rechecks state',
     () async {
@@ -491,6 +765,76 @@ void main() {
     expect(result.snapshot?.profile?.locale, 'en-US');
     expect(harness.requestNames, ['profile.patchPreferences']);
   });
+  test('confirmation without directory preserves prepared options without another read', () async {
+    final harness = _AccountHostHarness(confirmationDirectoryIncluded: false);
+    addTearDown(harness.close);
+    final before = (await harness.adapter.read()).snapshot!;
+    expect(before.timeZoneOptions.length, 2);
+    harness.requests.clear();
+    for (var i = 0; i < 2; i++) {
+      final result = await harness.adapter.execute(
+        const SaveAccountPreferences(
+          patch: AccountPreferencePatch(
+            localeSpecified: true,
+            locale: 'en-US',
+            timeZoneSpecified: false,
+          ),
+        ),
+      );
+      expect(result.outcome, AccountActionOutcome.completed);
+      expect(result.snapshot?.profile?.locale, 'en-US');
+      expect(
+        result.snapshot?.timeZoneOptions.map((zone) => zone.value),
+        before.timeZoneOptions.map((zone) => zone.value),
+      );
+      expect(result.snapshot?.supportsPreferenceWrite, isTrue);
+    }
+    expect(harness.requestNames, [
+      'profile.patchPreferences',
+      'profile.patchPreferences',
+    ]);
+  });
+  testWidgets(
+    'late directory-free confirmation cannot cross account generation',
+    (tester) async {
+      final harness = _AccountHostHarness(
+        confirmationDirectoryIncluded: false,
+        delayedRequest: 'profile.patchPreferences',
+        responseDelay: const Duration(seconds: 2),
+      );
+      addTearDown(harness.close);
+      await harness.adapter.read();
+      harness.requests.clear();
+      final pending = harness.adapter.execute(
+        const SaveAccountPreferences(
+          patch: AccountPreferencePatch(
+            localeSpecified: true,
+            locale: 'en-US',
+            timeZoneSpecified: false,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(harness.requestNames, ['profile.patchPreferences']);
+      await harness._host.send(
+        const BridgeEnvelope(
+          protocolVersion: 1,
+          messageType: 'event',
+          name: 'account.changed',
+          sessionGeneration: 8,
+          sequence: 1,
+          payload: {'schemaVersion': 1},
+        ),
+      );
+      await tester.pump();
+      expect((await pending).outcome, AccountActionOutcome.failed);
+      await tester.pump(const Duration(seconds: 3));
+      expect(harness.requestNames, ['profile.patchPreferences']);
+      final refreshed = (await harness.adapter.read()).snapshot!;
+      expect(refreshed.generation, 8);
+      expect(refreshed.profile?.locale, 'zh-CN');
+    },
+  );
   for (final delayedRequest in [
     'account.getCurrent',
     'profile.getSelf',
@@ -694,6 +1038,98 @@ void main() {
     },
   );
 
+  test(
+    'network outage retains confirmed display but no account route or actions',
+    () async {
+      final harness = _AccountHostHarness(
+        accountState: 'credentialTemporarilyUnavailable',
+        retainedDisplay: {
+          'displayName': 'Retained Pilot',
+          'cachedAtUtc': '2026-01-01T00:00:00Z',
+          'readId': '1234567890abcdef1234567890abcdef',
+        },
+      );
+      addTearDown(harness.close);
+      final result = await harness.adapter.read();
+      expect(result.outcome, AccountActionOutcome.completed);
+      expect(result.snapshot?.profile?.displayName, 'Retained Pilot');
+      expect(result.snapshot?.profileFreshness, AccountProfileFreshness.cached);
+      expect(result.snapshot?.cachedAt, DateTime.utc(2026));
+      expect(result.snapshot?.route, isNull);
+      expect(result.snapshot?.supportsPreferenceWrite, isFalse);
+      expect(result.snapshot?.supportsCacheClear, isFalse);
+      expect(
+        result.snapshot?.retainedReadId,
+        '1234567890abcdef1234567890abcdef',
+      );
+      final projection = AccountProjection.fromSnapshot(result.snapshot!);
+      expect(
+        projection
+            .copyWith(operation: AccountOperation.refreshing)
+            .retainedReadId,
+        result.snapshot!.retainedReadId,
+      );
+      expect(
+        projection
+            .copyWith(generation: projection.generation + 1)
+            .retainedReadId,
+        isNull,
+      );
+      expect(projection.copyWith(clearProfile: true).retainedReadId, isNull);
+      expect(
+        projection
+            .copyWith(sessionState: AccountSessionState.signedOut)
+            .retainedReadId,
+        isNull,
+      );
+      expect(harness.requestNames, ['account.getCurrent']);
+    },
+  );
+
+  for (final bad in <Map<String, Object?>>[
+    {
+      'displayName': 'Pilot',
+      'cachedAtUtc': '2026-01-01T00:00:00Z',
+      'readId': 'invalid',
+    },
+    {'displayName': 'Pilot', 'cachedAtUtc': '2999-01-01T00:00:00Z'},
+    {'displayName': 'Pilot', 'cachedAtUtc': '2026-01-01T00:00:00'},
+    {'displayName': '', 'cachedAtUtc': '2026-01-01T00:00:00Z'},
+    {
+      'displayName': 'Pilot',
+      'cachedAtUtc': '2026-01-01T00:00:00Z',
+      'subject': 'untrusted',
+    },
+  ]) {
+    test('invalid retained display is rejected: $bad', () async {
+      final harness = _AccountHostHarness(
+        accountState: 'credentialTemporarilyUnavailable',
+        retainedDisplay: bad,
+      );
+      addTearDown(harness.close);
+      expect(
+        (await harness.adapter.read()).outcome,
+        AccountActionOutcome.failed,
+      );
+    });
+  }
+  for (final state in ['signedOut', 'reauthorizationRequired']) {
+    test('$state cannot inherit retained display', () async {
+      final harness = _AccountHostHarness(
+        accountState: state,
+        retainedDisplay: {
+          'displayName': 'Retained Pilot',
+          'cachedAtUtc': '2026-01-01T00:00:00Z',
+        },
+      );
+      addTearDown(harness.close);
+      expect(
+        (await harness.adapter.read()).outcome,
+        AccountActionOutcome.failed,
+      );
+    });
+  }
+
   for (final state in ['ready', 'unavailable']) {
     test(
       'historical relay $state cannot reactivate old compatibility',
@@ -794,12 +1230,16 @@ final class _AccountHostHarness {
     bool compatibilityAvailable = false,
     bool recoveryAvailable = false,
     bool legacyLoginAvailable = false,
+    bool avatarAvailable = false,
+    this.presentationCallSign,
+    this.avatarError,
     this.legacyLoginOutcome,
     this.recoveryOutcome,
     bool linkAvailable = false,
     this.linkError,
     this.advanceGenerationOnFirstRead = false,
     this.actionsAvailable = true,
+    this.confirmationDirectoryIncluded = true,
     this.identityAllowsMismatch = false,
     this.relayState,
     this.compatibilityError,
@@ -807,6 +1247,7 @@ final class _AccountHostHarness {
     this.delayedRequest,
     this.responseDelay = Duration.zero,
     this.accountState = 'signedIn',
+    this.retainedDisplay,
     this.contextAuthority = 'scm-test',
   }) {
     final pair = InMemoryBridgeConnection.createPair();
@@ -816,12 +1257,18 @@ final class _AccountHostHarness {
       sessionGeneration: 7,
     );
     adapter = BridgeAccountAdapter(_session);
-    if (compatibilityAvailable ||
+    if (avatarAvailable ||
+        compatibilityAvailable ||
         linkAvailable ||
         recoveryAvailable ||
         legacyLoginAvailable) {
       _session.acceptHostCapabilities([
-        'account.compatibility.read',
+        if (compatibilityAvailable ||
+            linkAvailable ||
+            recoveryAvailable ||
+            legacyLoginAvailable)
+          'account.compatibility.read',
+        if (avatarAvailable) 'account.avatar.read',
         if (linkAvailable) 'account.compatibility.linkExisting',
         if (recoveryAvailable) 'account.passwordRecovery',
         if (legacyLoginAvailable) 'account.legacyLogin',
@@ -834,15 +1281,19 @@ final class _AccountHostHarness {
   final bool advanceGenerationOnFirstRead;
   bool _advancedGeneration = false;
   final bool actionsAvailable;
+  final bool confirmationDirectoryIncluded;
   final String? relayState;
   final String? compatibilityError;
   final String? recoveryOutcome;
   final String? legacyLoginOutcome;
   final String? linkError;
   final String? profileError;
+  String? avatarError;
+  String? presentationCallSign;
   final String? delayedRequest;
   final Duration responseDelay;
   final String accountState;
+  final Map<String, Object?>? retainedDisplay;
   final String contextAuthority;
   late final BridgeConnection _host;
   late final BridgeClientSession _session;
@@ -871,6 +1322,7 @@ final class _AccountHostHarness {
       'account.getCompatibilityState' => compatibilityError,
       'account.linkLegacyAccount' => linkError,
       'profile.getSelf' => profileError,
+      'account.readAvatar' => avatarError,
       _ => null,
     };
     if (errorCode != null) {
@@ -894,9 +1346,15 @@ final class _AccountHostHarness {
       return;
     }
     final payload = switch (request.name) {
+      'account.readAvatar' => <String, Object?>{
+        'schemaVersion': 1,
+        'imageData': 'data:image/png;base64,synthetic-java-avatar',
+        if (presentationCallSign != null) 'callSign': presentationCallSign,
+      },
       'account.getCurrent' => <String, Object?>{
         'schemaVersion': 1,
         'state': accountState,
+        if (retainedDisplay != null) 'retainedDisplay': retainedDisplay,
         'maskedAccount': accountState.startsWith('legacy')
             ? 'o****@example.invalid'
             : null,
@@ -924,24 +1382,31 @@ final class _AccountHostHarness {
         'source': 'live',
         'cachedAtUtc': null,
         'preferencesPolicy': <String, Object?>{
+          if (request.name == 'profile.patchPreferences' &&
+              !confirmationDirectoryIncluded)
+            'directoryIncluded': false,
           if (actionsAvailable)
             'availableActions': [
               'profile.patchPreferences',
               'profile.clearLocalCache',
             ],
           'locales': ['zh-CN', 'en-US'],
-          'timeZones': [
-            <String, Object?>{
-              'value': 'Asia/Shanghai',
-              'label': 'Shanghai',
-              'offset': 'UTC+08:00',
-            },
-            <String, Object?>{
-              'value': 'America/Regina',
-              'label': 'Regina',
-              'offset': 'UTC-06:00',
-            },
-          ],
+          'timeZones':
+              request.name == 'profile.patchPreferences' &&
+                  !confirmationDirectoryIncluded
+              ? []
+              : [
+                  <String, Object?>{
+                    'value': 'Asia/Shanghai',
+                    'label': 'Shanghai',
+                    'offset': 'UTC+08:00',
+                  },
+                  <String, Object?>{
+                    'value': 'America/Regina',
+                    'label': 'Regina',
+                    'offset': 'UTC-06:00',
+                  },
+                ],
         },
       },
       'gameIdentity.getPolicy' => <String, Object?>{

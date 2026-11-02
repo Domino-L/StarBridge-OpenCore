@@ -9,7 +9,6 @@ import 'package:starbridge_flutter/design_system/components/coming_soon.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/operations/operations_feature.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_feature.dart';
-import 'package:starbridge_flutter/features/tools/tools_feature.dart';
 import 'package:starbridge_flutter/features/notifications/notifications_feature.dart';
 import 'package:starbridge_flutter/features/settings/settings_capability_catalog.dart';
 import 'package:starbridge_flutter/features/settings/settings_entry_dialog.dart';
@@ -22,7 +21,6 @@ void main() {
   for (final feature in [
     operationsFeature,
     marketplaceFeature,
-    toolsFeature,
     notificationsFeature,
   ]) {
     testWidgets('${feature.id} renders coming soon instead of blank content', (

@@ -1,17 +1,17 @@
+import 'menu_overlay_locale.dart';
 import 'dart:async';
-
-import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
-
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-
-import '../localization/app_strings.dart';
-
-import 'menu_overlay_theme.dart';
-import 'menu_overlay_frame.dart';
+import 'menu_surface_loading.dart';
+import 'menu_surface_app_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart'
+    show InteractionSource;
+import '../../platform/window/menu_interaction_presentation.dart';
+import 'menu_read_source_argument.dart';
+import 'menu_exec_hangar_snapshot_cache.dart';
+import 'menu_profile_update.dart';
 import 'menu_bridge_preview.dart';
 import 'menu_local_tools.dart';
 import 'menu_native_popup.dart';
@@ -19,8 +19,9 @@ import 'menu_friends_view.dart';
 import 'menu_comms_view.dart';
 import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
+import 'menu_surface_features.dart';
 import '../../platform/window/menu_window_preferences.dart';
-import '../../platform/window/menu_restore_preferences.dart';
+import 'menu_layout_sync.dart';
 import 'menu_recovery_prompt.dart';
 import '../../platform/window/menu_shortcut_settings.dart';
 import '../../platform/window/surface_menu_shortcut_settings.dart';
@@ -30,26 +31,20 @@ import '../../platform/window/menu_browser_resume.dart';
 import '../../platform/window/surface_menu_browser_resume.dart';
 import '../../platform/window/menu_screenshot_directory.dart';
 import '../../platform/window/surface_menu_screenshot_directory.dart';
-
-// Auxiliary entry point: no account/bootstrap, disk access, plugins or Host.
-void runMenuOverlaySurface({bool workspacePreview = false}) {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(MenuOverlaySurfaceApp(workspacePreview: workspacePreview));
-}
-
+import '../../platform/window/menu_exec_hangar_summary.dart';
+export 'menu_surface_entry.dart' show runMenuOverlaySurface;
 class MenuOverlaySurfaceApp extends StatefulWidget {
   const MenuOverlaySurfaceApp({super.key, this.workspacePreview = false});
   final bool workspacePreview;
-
   @override
   State<MenuOverlaySurfaceApp> createState() => _MenuOverlaySurfaceAppState();
 }
-
 class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
   final _nativePopups = MenuNativePopupObserver();
   static const _channel = MethodChannel('starbridge/menu-surface');
   int _opening = -1;
   bool _wanted = false;
+  late final _layoutSync = MenuLayoutSync(_savePreferences);
   bool _workspacePreview = false;
   Map<Object?, Object?> _labels = const {};
   MenuFriendsView _friends = const MenuFriendsView('idle');
@@ -65,9 +60,22 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
   final _featureRevisions = <String, int>{};
   final _featureTimers = <String, Timer>{};
   final _featureVisible = <String>{};
+  late final _featureData = MenuSurfaceFeatures(
+    locale: () => menuOverlayLocale(_interaction.value.language),
+    features: _features,
+    revisions: _featureRevisions,
+    visible: _featureVisible,
+    timers: _featureTimers,
+    opening: () => _opening,
+    wanted: () => _wanted,
+    enabled: () => _labels['liveFeatures'] == true,
+    update: (apply) => setState(apply),
+  );
   MenuWindowPreferences _preferences = MenuWindowPreferences.defaults;
   bool _preferencesFailed = false;
+  final _interaction = MenuInteractionReceiver();
   bool _recoveryPending = false, _recoveryBusy = false, _recoveryFailed = false;
+  InteractionSource _recoveryFeedbackSource = InteractionSource.programmatic;
   int _recoveryRevision = 0;
   List<String>? _contextValues;
   int _contextRevision = -1;
@@ -80,7 +88,32 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
   MenuShortcutSettingsPort? _shortcutSettings;
   MenuBrowserResumePort? _browserResume;
   MenuScreenshotDirectoryPort? _screenshotDirectory;
-
+  MenuExecHangarSummaryPort? _hangar;
+  final _hangarCache = MenuExecHangarSnapshotCache();
+  bool _hangarOpenFailed = false;
+  bool _hangarOpening = false;
+  Future<void> _openHangar() async {
+    if (_hangarOpening || !_wanted || _labels['execHangar'] != true) return;
+    final opening = _opening;
+    setState(() {
+      _hangarOpening = true;
+      _hangarOpenFailed = false;
+    });
+    try {
+      final opened = await _channel
+          .invokeMethod<bool>('openExecHangar', {'opening': opening})
+          .timeout(const Duration(seconds: 6));
+      if (opened != true) throw const FormatException('Tool did not open');
+    } on Object {
+      if (mounted && _wanted && opening == _opening) {
+        setState(() => _hangarOpenFailed = true);
+      }
+    } finally {
+      if (mounted && opening == _opening) {
+        setState(() => _hangarOpening = false);
+      }
+    }
+  }
   Future<Object?> _localToolCall(
     String action,
     Map<String, Object?> arguments,
@@ -99,12 +132,15 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     }
     return result;
   }
-
   @override
   void initState() {
     super.initState();
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'snapshot') _accept(call.arguments);
+      if (call.method == 'interactionPresentation' &&
+          _interaction.accept(call.arguments)) {
+        setState(() {});
+      }
       if (call.method == 'noticeView' && call.arguments is Map) {
         final args = call.arguments as Map;
         if (_wanted &&
@@ -176,50 +212,26 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
         }
       }
       if (call.method == 'featureView') {
-        final data = call.arguments;
-        if (data is Map &&
-            _wanted &&
-            _labels['liveFeatures'] == true &&
-            data['opening'] == _opening &&
-            data['revision'] is int) {
-          final entry = MenuFeatureView.envelope(data['payload']);
-          if (entry != null &&
-              _featureVisible.contains(entry.$1) &&
-              (data['revision'] as int) > (_featureRevisions[entry.$1] ?? -1)) {
-            _featureTimers.remove(entry.$1)?.cancel();
-            setState(() {
-              _featureRevisions[entry.$1] = data['revision'] as int;
-              _features[entry.$1] = entry.$2;
-            });
-          }
-        }
+        _featureData.accept(call);
+      }
+      if (call.method == 'imageMaintenance') {
+        final receipt = _featureData.retire(call.arguments);
+        await WidgetsBinding.instance.endOfFrame;
+        return receipt;
       }
       if (call.method == 'profileView') {
-        final data = call.arguments;
-        if (data is Map &&
-            _wanted &&
-            _labels['liveFriends'] == true &&
-            data['opening'] == _opening &&
-            data['revision'] is int) {
-          try {
-            final payload = data['payload'];
-            if (payload is String && utf8.encode(payload).length <= 1048576) {
-              final view = jsonDecode(payload);
-              if (view is Map && view['window'] is String) {
-                final id = view['window'] as String;
-                final revision = data['revision'] as int;
-                if (_profiles.containsKey(id) &&
-                    revision > (_profileRevisions[id] ?? -1)) {
-                  setState(() {
-                    _profileRevisions[id] = revision;
-                    _profiles[id] = MenuProfileView.parse(view);
-                  });
-                }
-              }
-            }
-          } on Object {
-            /* Reject malformed envelopes without opening unsolicited windows. */
-          }
+        final update = parseMenuProfileUpdate(
+          call.arguments,
+          enabled: _wanted && _labels['liveFriends'] == true,
+          opening: _opening,
+          openWindows: _profiles.keys,
+          revisions: _profileRevisions,
+        );
+        if (update != null) {
+          setState(() {
+            _profileRevisions[update.window] = update.revision;
+            _profiles[update.window] = update.view;
+          });
         }
       }
       if (call.method == 'commsView') {
@@ -253,20 +265,8 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
         }
       }
     });
-    unawaited(_ready());
+    unawaited(MenuSurfaceLoading.ready(_channel, _accept));
   }
-
-  Future<void> _ready() async {
-    try {
-      _accept(await _channel.invokeMethod<Object?>('ready'));
-    } on PlatformException {
-      // The native first-frame timeout owns safe recovery; never reveal an
-      // unconfigured/blank surface after a failed handshake.
-    } on MissingPluginException {
-      // Not a stand-alone desktop app. No fallback to the account bootstrap.
-    }
-  }
-
   void _accept(Object? value) {
     if (!mounted || value is! Map) return;
     final opening = value['opening'];
@@ -282,18 +282,26 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       return;
     }
     final newOpening = opening != _opening;
+    final visibilityChanged = wanted != _wanted;
+    if (newOpening || visibilityChanged) {
+      MenuSurfaceLoading.snapshot(opening, wanted);
+    }
     setState(() {
       // A local-only native epoch changes on account/session detach, never on
       // ordinary menu hiding. Keep tools across openings, not across accounts.
       final epoch = value['localToolsEpoch'];
       if (epoch is int && epoch >= 0) {
         if (epoch != _localToolsEpoch) {
+          _hangarCache.clear();
           _localTools?.dispose();
           _localTools = null;
           _localToolsEpoch = epoch;
         }
         if (wanted && value['nativeTools'] == true) {
-          _localTools ??= MenuLocalToolsController(_localToolCall);
+          _localTools ??= MenuLocalToolsController(
+            _localToolCall,
+            locale: () => menuOverlayLocale(_interaction.value.language),
+          );
           _localTools!.screenshotDirectoryAvailable =
               value['screenshotDirectory'] == true;
         }
@@ -304,16 +312,21 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
         _localToolsEpoch = null;
       }
       _opening = opening;
+      _featureData.adopt(value['resourceEpoch'] ?? 0);
       _wanted = wanted;
       _workspacePreview = value['workspacePreview'] == true;
+      _interaction.open(opening, wanted, value['interactionPresentation']);
       _labels = wanted ? Map<Object?, Object?>.from(value) : const {};
       if (newOpening || !wanted) {
+        _hangarOpening = false;
+        _hangarOpenFailed = false;
         _recoveryPending =
             wanted &&
             value['liveFriends'] == true &&
             value['recoveryPending'] == true;
         _recoveryBusy = false;
         _recoveryFailed = false;
+        _recoveryFeedbackSource = InteractionSource.programmatic;
         _shortcutSettings = wanted && value['shortcutSettings'] == true
             ? SurfaceMenuShortcutSettings(
                 _channel,
@@ -326,6 +339,18 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
               )
             : null;
         _contextValues = null;
+        _hangar = wanted && value['execHangar'] == true
+            ? SurfaceMenuExecHangarSummary(
+                _channel,
+                opening,
+                () =>
+                    mounted &&
+                    _wanted &&
+                    opening == _opening &&
+                    _labels['execHangar'] == true,
+                gameOverlayAvailable: value['execHangarGameOverlay'] == true,
+              )
+            : null;
         _browserResume = wanted && value['browserResume'] == true
             ? SurfaceMenuBrowserResume(
                 _channel,
@@ -399,9 +424,9 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       });
     }
   }
-
   Future<void> _notify(String method, [Object? argument]) async {
     final opening = _opening;
+    argument = menuReadSourceArgument(method, argument);
     if (method == 'friendsVisible' &&
         argument is Map &&
         argument['visible'] == false) {
@@ -454,7 +479,6 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       // Native lifetime ended. Do not launch another client to recover.
     }
   }
-
   void _profileFailure(Object? argument) {
     if (argument is Map && _profiles.containsKey(argument['window'])) {
       setState(
@@ -464,20 +488,18 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       );
     }
   }
-
   void _featureFailure(int opening, Object? argument) {
     if (!mounted || !_wanted || opening != _opening || argument is! Map) return;
     final tool = argument['tool'];
     if (tool is! String || !_featureVisible.contains(tool)) return;
     _featureTimers.remove(tool)?.cancel();
     setState(
-      () => _features[tool] = const MenuFeatureView(
+      () => _features[tool] = MenuFeatureView(
         'unavailable',
-        notice: '连接中断，请刷新核对当前状态。',
+        notice: menuText(context, 'menu.overlay.errors.disconnected'),
       ),
     );
   }
-
   void _friendsFailure(int opening) {
     if (!mounted || !_wanted || opening != _opening) return;
     _friendsAck?.cancel();
@@ -494,7 +516,6 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       ),
     );
   }
-
   void _profileAction(String action, String window, String source, String key) {
     // The preview owns opaque window keys only; account references stay primary.
     if (action == 'close') {
@@ -513,25 +534,25 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       }),
     );
   }
-
   @override
   void dispose() {
     for (final timer in _featureTimers.values) {
       timer.cancel();
     }
     _friendsAck?.cancel();
+    _layoutSync.cancel();
     _channel.setMethodCallHandler(null);
     _localTools?.dispose();
     _nativePopups.dispose();
     super.dispose();
   }
-
   Future<void> _chooseRecovery(String action) async {
     if (!_wanted || !_recoveryPending || _recoveryBusy) return;
     final opening = _opening;
     setState(() {
       _recoveryBusy = true;
       _recoveryFailed = false;
+      _recoveryFeedbackSource = captureStarBridgeActivationSource()();
     });
     try {
       final reply = await _channel
@@ -564,7 +585,6 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       }
     }
   }
-
   void _savePreferences() {
     if (!_wanted || _recoveryPending || _labels['preferences'] is! String) {
       return;
@@ -574,201 +594,193 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     unawaited(
       _notify('preferencesChanged', {
         'opening': _opening,
-        'payload': MenuWindowPreferences(_preferences.revision, {
-          ...(_windowLayout ?? _preferences.layout),
-          if (!MenuRestorePreferences.fromSettings(_preferences.settings)!
-              .remembersWindows)
-            'open': <String>[],
-        }, _preferences.settings).encode(),
+        'payload': MenuLayoutSync.payload(_preferences, _windowLayout),
       }),
     );
   }
-
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    navigatorObservers: [_nativePopups],
-    scrollBehavior: const StarBridgeScrollBehavior(),
-    debugShowCheckedModeBanner: false,
-    locale: const Locale('zh', 'CN'),
-    supportedLocales: AppStrings.supportedLocales,
-    localizationsDelegates: const [
-      AppStringsDelegate(),
-      GlobalMaterialLocalizations.delegate,
-      GlobalWidgetsLocalizations.delegate,
-      GlobalCupertinoLocalizations.delegate,
-    ],
-    theme: buildMenuOverlayTheme(const Locale('zh')),
-    home: TickerMode(
-      enabled: _wanted,
-      child: (widget.workspacePreview || _workspacePreview)
-          ? MenuBridgePreview(
-              key: ValueKey('$_opening:$_localToolsEpoch:$_recoveryRevision'),
-              recoveryOverlay: _recoveryPending
-                  ? MenuRecoveryPrompt(
-                      busy: _recoveryBusy,
-                      failed: _recoveryFailed,
-                      onChoose: _chooseRecovery,
-                    )
-                  : null,
-              visible: _wanted,
-              startupMode:
-                  const {'safe', 'unverified'}.contains(_labels['startupMode'])
-                  ? _labels['startupMode'] as String
-                  : 'normal',
-              attention: _attention,
-              notice: _notice,
-              initialSettings: _preferences.settings,
-              shortcutSettings: _shortcutSettings,
-              browserResume: _browserResume,
-              screenshotDirectory: _screenshotDirectory,
-              system24Hour: _labels['system24Hour'] is bool
-                  ? _labels['system24Hour'] as bool
-                  : null,
-              preferencesFailed: _preferencesFailed,
-              contextValues: _contextValues,
-              onSettingsChanged: (settings) {
-                _preferences = MenuWindowPreferences(
-                  _preferences.revision,
-                  _preferences.layout,
-                  settings,
-                );
-                _savePreferences();
-              },
-              localCall: _labels['nativeTools'] == true
-                  ? (action, arguments) => _channel.invokeMethod<Object?>(
-                      'localTool',
-                      {'opening': _opening, 'action': action, ...arguments},
-                    )
-                  : null,
-              localToolsController: _localTools,
-              initialLayout: _windowLayout,
-              onLayoutChanged: (layout) {
-                _windowLayout = layout;
-                _savePreferences();
-              },
-              profiles: Map.unmodifiable(_profiles),
-              features: Map.unmodifiable(_features),
-              onFeatureVisible: _labels['liveFeatures'] == true
-                  ? (tool, visible) {
-                      visible
-                          ? _featureVisible.add(tool)
-                          : _featureVisible.remove(tool);
-                      if (!visible) _featureTimers.remove(tool)?.cancel();
-                      if (visible) {
-                        final opening = _opening;
-                        _featureTimers[tool] = Timer(
-                          const Duration(seconds: 18),
-                          () => _featureFailure(opening, {'tool': tool}),
+  Widget build(BuildContext context) => MenuSurfaceLoading.content(
+    wanted: _wanted,
+    child: MenuSurfaceAppFrame(
+      interaction: _interaction.value,
+      observer: _nativePopups,
+      toolPages: MenuToolPageOpener(_channel, () => _wanted ? _opening : null),
+      child: TickerMode(
+        enabled: _wanted,
+        child: (widget.workspacePreview || _workspacePreview)
+            ? MenuBridgePreview(
+                key: ValueKey('$_opening:$_localToolsEpoch:$_recoveryRevision'),
+                recoveryOverlay: _recoveryPending
+                    ? MenuRecoveryPrompt(
+                        busy: _recoveryBusy,
+                        failed: _recoveryFailed,
+                        busySource: _recoveryFeedbackSource,
+                        onChoose: _chooseRecovery,
+                      )
+                    : null,
+                visible: _wanted,
+                startupMode:
+                    const {
+                      'safe',
+                      'unverified',
+                    }.contains(_labels['startupMode'])
+                    ? _labels['startupMode'] as String
+                    : 'normal',
+                attention: _attention,
+                hangar: _hangar,
+                hangarOpenFailed: _hangarOpenFailed,
+                hangarInitial: _hangarCache.current,
+                onHangarSnapshot: _hangarCache.accept,
+                onOpenHangar: _hangar == null
+                    ? null
+                    : () => unawaited(_openHangar()),
+                notice: _notice,
+                initialSettings: _preferences.settings,
+                shortcutSettings: _shortcutSettings,
+                browserResume: _browserResume,
+                screenshotDirectory: _screenshotDirectory,
+                system24Hour: _labels['system24Hour'] is bool
+                    ? _labels['system24Hour'] as bool
+                    : null,
+                preferencesFailed: _preferencesFailed,
+                contextValues: _contextValues,
+                onSettingsChanged: (settings) {
+                  _preferences = MenuWindowPreferences(
+                    _preferences.revision,
+                    _preferences.layout,
+                    settings,
+                  );
+                  _savePreferences();
+                },
+                localCall: _labels['nativeTools'] == true
+                    ? (action, arguments) => _channel.invokeMethod<Object?>(
+                        'localTool',
+                        {'opening': _opening, 'action': action, ...arguments},
+                      )
+                    : null,
+                localToolsController: _localTools,
+                initialLayout: _windowLayout,
+                onLayoutChanged: (layout) {
+                  _windowLayout = layout;
+                  _layoutSync.changed();
+                },
+                profiles: Map.unmodifiable(_profiles),
+                features: Map.unmodifiable(_features),
+                onFeatureVisible: _labels['liveFeatures'] == true
+                    ? (tool, visible) {
+                        visible
+                            ? _featureVisible.add(tool)
+                            : _featureVisible.remove(tool);
+                        if (!visible) _featureTimers.remove(tool)?.cancel();
+                        if (visible) {
+                          final opening = _opening;
+                          _featureTimers[tool] = Timer(
+                            const Duration(seconds: 18),
+                            () => _featureFailure(opening, {'tool': tool}),
+                          );
+                        }
+                        unawaited(
+                          _notify('featureVisible', {
+                            'opening': _opening,
+                            'tool': tool,
+                            'visible': visible,
+                          }),
                         );
                       }
-                      unawaited(
-                        _notify('featureVisible', {
+                    : null,
+                onFeatureAction: _labels['liveFeatures'] == true
+                    ? (tool, key, value) {
+                        _featureTimers.remove(tool)?.cancel();
+                        final opening = _opening;
+                        _featureTimers[tool] = Timer(
+                          const Duration(seconds: 5),
+                          () {
+                            if (mounted && _wanted && _opening == opening) {
+                              setState(
+                                () => _features[tool] = MenuFeatureView(
+                                  'unavailable',
+                                  notice: menuText(
+                                    context,
+                                    'menu.overlay.errors.checkResult',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        );
+                        unawaited(
+                          _notify('featureAction', {
+                            'opening': _opening,
+                            'tool': tool,
+                            'key': key,
+                            'value': value,
+                          }),
+                        );
+                      }
+                    : null,
+                onProfileAction: _labels['liveFriends'] == true
+                    ? _profileAction
+                    : null,
+                friends: _labels['liveFriends'] == true ? _friends : null,
+                comms: _labels['liveComms'] == true ? _comms : null,
+                commsDisconnected: _commsDisconnected,
+                onCommsVisible: _labels['liveComms'] == true
+                    ? (visible) => unawaited(
+                        _notify('commsVisible', {
                           'opening': _opening,
-                          'tool': tool,
                           'visible': visible,
                         }),
-                      );
-                    }
-                  : null,
-              onFeatureAction: _labels['liveFeatures'] == true
-                  ? (tool, key, value) {
-                      _featureTimers.remove(tool)?.cancel();
-                      final opening = _opening;
-                      _featureTimers[tool] = Timer(
-                        const Duration(seconds: 5),
-                        () {
-                          if (mounted && _wanted && _opening == opening) {
-                            setState(
-                              () => _features[tool] = const MenuFeatureView(
-                                'unavailable',
-                                notice: '操作结果未确认，请刷新核对。',
-                              ),
-                            );
-                          }
-                        },
-                      );
-                      unawaited(
-                        _notify('featureAction', {
+                      )
+                    : null,
+                onCommsAction: _labels['liveComms'] == true
+                    ? (action, key) => unawaited(
+                        _notify('commsAction', {
                           'opening': _opening,
-                          'tool': tool,
+                          'action': action,
+                          'key': key,
+                        }),
+                      )
+                    : null,
+                onCommsCompose: _labels['liveComms'] == true
+                    ? (action, key, text, revision) => unawaited(
+                        _notify('commsCompose', {
+                          'opening': _opening,
+                          'action': action,
+                          'key': key,
+                          'text': text,
+                          'revision': revision,
+                        }),
+                      )
+                    : null,
+                onFriendsVisible: _labels['liveFriends'] == true
+                    ? (visible) => unawaited(
+                        _notify('friendsVisible', {
+                          'opening': _opening,
+                          'visible': visible,
+                        }),
+                      )
+                    : null,
+                onFriendsAction: _labels['liveFriends'] == true
+                    ? (action, key, value) => unawaited(
+                        _notify('friendsAction', {
+                          'opening': _opening,
+                          'action': action,
                           'key': key,
                           'value': value,
                         }),
-                      );
-                    }
-                  : null,
-              onProfileAction: _labels['liveFriends'] == true
-                  ? _profileAction
-                  : null,
-              friends: _labels['liveFriends'] == true ? _friends : null,
-              comms: _labels['liveComms'] == true ? _comms : null,
-              commsDisconnected: _commsDisconnected,
-              onCommsVisible: _labels['liveComms'] == true
-                  ? (visible) => unawaited(
-                      _notify('commsVisible', {
-                        'opening': _opening,
-                        'visible': visible,
-                      }),
-                    )
-                  : null,
-              onCommsAction: _labels['liveComms'] == true
-                  ? (action, key) => unawaited(
-                      _notify('commsAction', {
-                        'opening': _opening,
-                        'action': action,
-                        'key': key,
-                      }),
-                    )
-                  : null,
-              onCommsCompose: _labels['liveComms'] == true
-                  ? (action, key, text, revision) => unawaited(
-                      _notify('commsCompose', {
-                        'opening': _opening,
-                        'action': action,
-                        'key': key,
-                        'text': text,
-                        'revision': revision,
-                      }),
-                    )
-                  : null,
-              onFriendsVisible: _labels['liveFriends'] == true
-                  ? (visible) => unawaited(
-                      _notify('friendsVisible', {
-                        'opening': _opening,
-                        'visible': visible,
-                      }),
-                    )
-                  : null,
-              onFriendsAction: _labels['liveFriends'] == true
-                  ? (action, key, value) => unawaited(
-                      _notify('friendsAction', {
-                        'opening': _opening,
-                        'action': action,
-                        'key': key,
-                        'value': value,
-                      }),
-                    )
-                  : null,
-              onDismiss: () => unawaited(_notify('dismiss')),
-            )
-          : !_wanted
-          ? const SizedBox.expand()
-          : CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.escape): () =>
-                    unawaited(_notify('dismiss')),
-              },
-              child: Focus(
-                autofocus: true,
-                child: MenuOverlayFrame(
-                  contextLabel: _labels['contextLabel']! as String,
-                  returnLabel: _labels['returnLabel']! as String,
-                  settingsLabel: _labels['settingsLabel']! as String,
-                  onReturn: () => unawaited(_notify('dismiss')),
-                  tools: const [],
-                ),
+                      )
+                    : null,
+                onDismiss: () => unawaited(_notify('dismiss')),
+              )
+            : !_wanted
+            ? const SizedBox.expand()
+            : MenuSurfaceFallback(
+                contextLabel: _labels['contextLabel']! as String,
+                returnLabel: _labels['returnLabel']! as String,
+                settingsLabel: _labels['settingsLabel']! as String,
+                onReturn: () => unawaited(_notify('dismiss')),
               ),
-            ),
+      ),
     ),
   );
 }

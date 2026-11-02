@@ -11,6 +11,13 @@ String flutterInstallationText(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
+  'checking': ('正在检查安装状态…', '正在檢查安裝狀態…', 'Checking installation…'),
+  'cleaning': (
+    '正在清理失效安装记录…',
+    '正在清理失效安裝記錄…',
+    'Removing the stale installation record…',
+  ),
+  'uninstalling': ('正在打开卸载向导…', '正在開啟解除安裝精靈…', 'Opening the uninstall wizard…'),
   'title': ('安装与卸载', '安裝與解除安裝', 'Installation and uninstall'),
   'scope': (
     '管理本机的星海舰桥安装。个人数据和旧版客户端会保留。',

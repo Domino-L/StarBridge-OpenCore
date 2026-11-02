@@ -57,7 +57,7 @@ void main() {
       expect(calls, 0);
     });
   }
-  testWidgets('dock active follows HUD state and pending toggle is disabled', (
+  testWidgets('dock active follows HUD state and stays usable while pending', (
     tester,
   ) async {
     size(tester, const Size(1600, 1100));
@@ -87,8 +87,9 @@ void main() {
       final action = tester.widget<BridgeMenuAction>(
         find.byKey(const ValueKey('menu-tool-overlay')),
       );
-      expect(action.onPressed == null, enabled);
-      expect(find.byKey(const ValueKey('menu-panel-hud')), findsNothing);
+      // The dock opens the quick panel window; only the header switch waits.
+      expect(action.onPressed, isNotNull);
+      expect(find.byKey(const ValueKey('menu-hud-quick')), findsNothing);
     }
   });
   testWidgets(

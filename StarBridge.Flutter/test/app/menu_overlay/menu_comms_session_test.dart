@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_comms_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_comms_view.dart';
@@ -90,6 +92,56 @@ DirectPage page(
 );
 
 void main() {
+  testWidgets('late identity refresh republishes without retiring chat', (
+    tester,
+  ) async {
+    final identity = ValueNotifier<int>(0);
+    final port = Port(), views = <Map<String, Object?>>[];
+    var avatarReads = 0;
+    final lease = MenuCommsSession(
+      port,
+      views.add,
+      identityChanges: identity,
+      ownAvatar: () {
+        avatarReads++;
+        return null;
+      },
+    );
+    addTearDown(identity.dispose);
+    addTearDown(lease.dispose);
+    lease.show(true);
+    port.directories.single.complete([peer('A')]);
+    await tester.pump();
+    final key = MenuCommsView.parse(jsonEncode(views.last)).rows.single.key;
+    lease.act('select', key);
+    port.histories.single.reply.complete(page('secret-A'));
+    await tester.pump();
+    lease.compose('edit', key, 'keep this draft', 1);
+    expect(views.last['draft'], 'keep this draft');
+    final target = lease.profileTarget(key)!;
+    final before = Map<String, Object?>.from(views.last);
+    final count = views.length, cancels = port.cancels;
+    final reads = avatarReads;
+    identity.value++;
+    await tester.pump();
+    expect(views.length, count + 1);
+    expect(views.last, before);
+    expect(avatarReads, reads + 1);
+    expect(target.isCurrent(), isTrue);
+    expect(port.directories, hasLength(1));
+    expect(port.histories, hasLength(1));
+    expect(port.cancels, cancels);
+    expect(port.sends, 0);
+    lease.show(false);
+    final hidden = views.length;
+    identity.value++;
+    expect(views, hasLength(hidden));
+    lease.dispose();
+    final disposed = views.length;
+    identity.value++;
+    expect(views, hasLength(disposed));
+    await tester.pump();
+  });
   testWidgets(
     'notice context stays primary-only and retires with visible chat',
     (tester) async {
@@ -242,7 +294,7 @@ void main() {
     lease.show(false);
     late.complete(page('secret-Pilot'));
     await tester.pump(const Duration(seconds: 30));
-    expect(views.last, {'state': 'idle'});
+    expect(views.last, {'state': 'idle', 'readFeedback': null});
     expect(port.histories.length, 4);
     lease.dispose();
   });
@@ -260,10 +312,14 @@ void main() {
           .key;
       lease.act('select', oldKey);
       port.events.add(null);
-      expect(views.last, {'state': 'loading'});
+      final newRead = {
+        'state': 'loading',
+        'readFeedback': {'request': 3, 'source': 'programmatic'},
+      };
+      expect(views.last, newRead);
       port.histories.last.reply.complete(page('secret-Old'));
       await tester.pump();
-      expect(views.last, {'state': 'loading'});
+      expect(views.last, newRead);
       port.directories.last.complete([peer('New')]);
       await tester.pump();
       lease.act('select', oldKey);
@@ -289,19 +345,19 @@ void main() {
       );
       port.histories.last.reply.complete(page('different-target'));
       await tester.pump();
-      expect(views.last, {'state': 'unavailable'});
+      expect(views.last, {'state': 'unavailable', 'readFeedback': null});
       lease.act('retry', '');
       port.directories.last.completeError(const DirectReadFailure('forbidden'));
       await tester.pump();
-      expect(views.last, {'state': 'restricted'});
+      expect(views.last, {'state': 'restricted', 'readFeedback': null});
       lease.act('retry', '');
       final cancels = port.cancels;
       await tester.pump(const Duration(seconds: 11));
       expect(port.cancels, greaterThan(cancels));
-      expect(views.last, {'state': 'unavailable'});
+      expect(views.last, {'state': 'unavailable', 'readFeedback': null});
       port.directories.last.complete([peer('Late')]);
       await tester.pump();
-      expect(views.last, {'state': 'unavailable'});
+      expect(views.last, {'state': 'unavailable', 'readFeedback': null});
       lease.dispose();
     },
   );

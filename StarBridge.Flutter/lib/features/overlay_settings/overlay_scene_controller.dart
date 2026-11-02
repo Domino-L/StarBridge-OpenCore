@@ -22,6 +22,8 @@ final class OverlaySceneState {
     this.temporarySourceId,
     this.resolvedSourceIds,
     this.status = 'loading',
+    this.fleetStatus,
+    this.fleetName,
     this.targets = const [],
     this.available = false,
     this.busy = false,
@@ -29,6 +31,22 @@ final class OverlaySceneState {
   });
   final int revision;
   final String mode, status;
+  // Main fleet source state from the Host: ready, notMember, unavailable or
+  // loading. Null when the Host cannot show the main fleet at all.
+  final String? fleetStatus;
+  // The main fleet's own name; it is listed like one more organization.
+  final String? fleetName;
+
+  /// Whether the main fleet is offered as a choice. The name only exists after
+  /// a confirmed membership read, so not a member (or not known yet) means the
+  /// entry is simply absent, and a failed read never invents one.
+  bool get offersFleet => fleetName != null && fleetStatus != 'notMember';
+
+  /// "Domino Pizza · 主舰队": the fleet's name, marked so it is not mistaken
+  /// for a community organization of the same name.
+  String fleetLabel(String Function(String key) copy) => offersFleet
+      ? '$fleetName · ${copy('overlay.source.fleet')}'
+      : copy('overlay.source.missing');
   final String? code, actualId;
   final String? sourceOwnerKey;
   final String? automaticPresetSourceId;
@@ -54,6 +72,8 @@ final class OverlaySceneState {
         temporarySourceId: temporarySourceId,
         resolvedSourceIds: resolvedSourceIds,
         status: status,
+        fleetStatus: fleetStatus,
+        fleetName: fleetName,
         targets: List.unmodifiable(
           targets.map(
             (row) => row.code == targetCode
@@ -77,6 +97,8 @@ final class OverlaySceneState {
     temporarySourceId: temporarySourceId,
     resolvedSourceIds: failed ? null : resolvedSourceIds,
     status: failed ? 'unavailable' : status,
+    fleetStatus: fleetStatus,
+    fleetName: fleetName,
     targets: targets,
     available: available,
     busy: !failed,
@@ -89,6 +111,7 @@ abstract interface class OverlayScenePort {
   Future<OverlaySceneState> read();
   Future<OverlaySceneState> select(int revision, String mode, String? code);
   Future<OverlaySceneState> focusCommunity(String code);
+  Future<OverlaySceneState> focusFleet();
   void close();
 }
 
@@ -97,7 +120,7 @@ final class OverlaySceneController {
     _events = _port.invalidations.listen((_) {
       _epoch++;
       _pendingNames.clear();
-      _pageCode = null;
+      _pageId = null;
       _focusDirty = false;
       _busy = false;
       _view.value = const OverlaySceneState();
@@ -112,18 +135,29 @@ final class OverlaySceneController {
     }
   }
   final OverlayScenePort _port;
-  Future<bool> Function(String id)? selectTemporary;
+  // Wired by the settings coordinator. A selection is always the remembered
+  // account choice and never creates a session-only source (the Host drops a
+  // leftover one once no plan fixes a source). A plan's fixed source is
+  // released explicitly.
+  Future<bool> Function()? followShared;
   final _view = ValueNotifier(const OverlaySceneState());
   ValueListenable<OverlaySceneState> get projection => _view;
   late final StreamSubscription<void> _events;
   Timer? _timer;
   bool _closed = false, _busy = false;
-  int _epoch = 0;
-  String? _pageCode;
+  int _epoch = 0, _failedReads = 0;
+  // The page the user is on, as a source id: 'org:<code>' or 'fleet'.
+  String? _pageId;
   bool _focusDirty = false;
   void focusCommunity(String code) {
-    if (_closed || code.isEmpty || _pageCode == code) return;
-    _pageCode = code;
+    if (code.isNotEmpty) _focusPage('org:$code');
+  }
+
+  void focusFleet() => _focusPage('fleet');
+
+  void _focusPage(String id) {
+    if (_closed || _pageId == id) return;
+    _pageId = id;
     _focusDirty = true;
     unawaited(refresh());
   }
@@ -146,24 +180,32 @@ final class OverlaySceneController {
     if (_closed || _busy) return;
     _busy = true;
     final epoch = _epoch;
-    final focused = _focusDirty ? _pageCode : null;
+    final focused = _focusDirty ? _pageId : null;
     _pendingNames.clear();
     try {
       final state = focused == null
           ? await _port.read()
-          : await _port.focusCommunity(focused);
+          : focused == 'fleet'
+          ? await _port.focusFleet()
+          : await _port.focusCommunity(focused.substring(4));
       if (!_closed && epoch == _epoch) {
+        _failedReads = 0;
         _view.value = _mergeNames(state);
-        if (focused == _pageCode) _focusDirty = false;
+        if (focused == _pageId) _focusDirty = false;
       }
     } catch (_) {
-      if (!_closed && epoch == _epoch && focused == null) {
+      // A missed background read keeps the last answer; the timer reads again
+      // in 10 s. Only repeated misses (about half a minute) are shown.
+      if (!_closed &&
+          epoch == _epoch &&
+          focused == null &&
+          ++_failedReads >= 3) {
         _view.value = _view.value.pending(failed: true);
       }
     } finally {
       if (epoch == _epoch) {
         _busy = false;
-        if (!_closed && _focusDirty && focused != _pageCode) {
+        if (!_closed && _focusDirty && focused != _pageId) {
           unawaited(refresh());
         }
       }
@@ -171,21 +213,40 @@ final class OverlaySceneController {
   }
 
   Future<bool> select(String id) async {
-    if (_closed ||
-        _view.value.busy ||
-        !_view.value.available ||
-        id == 'fleet') {
-      return false;
-    }
-    final mode = id.startsWith('org:') ? 'community' : id;
-    final code = mode == 'community' ? id.substring(4) : null;
-    if (!(id == 'resumeBinding' && _view.value.presetBindingId != null) &&
-        (!['auto', 'room', 'community'].contains(mode) ||
-            mode == 'community' &&
-                !_view.value.targets.any((x) => x.code == code))) {
+    if (_closed || _view.value.busy || !_view.value.available) {
       return false;
     }
     final before = _view.value;
+    if (id == 'followShared') {
+      if (before.presetBindingId == null || followShared == null) return false;
+      return _run(before, () async {
+        if (!await followShared!()) throw StateError('Plan source kept');
+        return null;
+      }, (result) => result.presetBindingId == null);
+    }
+    final mode = id.startsWith('org:') ? 'community' : id;
+    final code = mode == 'community' ? id.substring(4) : null;
+    // A plan's fixed source wins over the account choice, so the pickers offer
+    // "follow" first instead of a write that would visibly change nothing.
+    if (before.presetBindingId != null ||
+        !['auto', 'room', 'community', 'fleet'].contains(mode) ||
+        mode == 'fleet' && !before.offersFleet ||
+        mode == 'community' && !before.targets.any((x) => x.code == code)) {
+      return false;
+    }
+    return _run(
+      before,
+      () => _port.select(before.revision, mode, code),
+      (result) => result.mode == mode && result.code == code,
+    );
+  }
+
+  /// [work] returns the Host result, or null to confirm by reading.
+  Future<bool> _run(
+    OverlaySceneState before,
+    Future<OverlaySceneState?> Function() work,
+    bool Function(OverlaySceneState result) applied,
+  ) async {
     _pendingNames.clear();
     _busy = true;
     // A visible picker must not silently discard clicks during a background
@@ -193,22 +254,12 @@ final class OverlaySceneController {
     final epoch = ++_epoch;
     _view.value = before.pending();
     try {
-      final temporary = before.presetBindingId != null;
-      if (temporary &&
-          (selectTemporary == null || !await selectTemporary!(id))) {
-        throw StateError('Temporary source not applied');
-      }
+      final written = await work();
       if (_closed || epoch != _epoch) return false;
-      final result = temporary
-          ? await _port.read()
-          : await _port.select(before.revision, mode, code);
+      final result = written ?? await _port.read();
       if (_closed || epoch != _epoch) return false;
       _view.value = _mergeNames(result);
-      return temporary
-          ? (id == 'resumeBinding'
-                ? result.temporarySourceId == null
-                : result.temporarySourceId == id)
-          : result.mode == mode && result.code == code;
+      return applied(result);
     } catch (_) {
       if (!_closed && epoch == _epoch) {
         _view.value = _mergeNames(before.pending(failed: true));

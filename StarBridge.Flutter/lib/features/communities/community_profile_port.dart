@@ -50,6 +50,8 @@ final class CommunityEditingProfile {
     this.revision,
     this.hasLogo,
     this.hasBanner,
+    this.hasBackground,
+    this.wideImagesSupported,
     this.canEditProfile,
     this.canEditLogo,
     this.canEditBanner,
@@ -57,12 +59,21 @@ final class CommunityEditingProfile {
   );
   final String targetRef, editRef, code, name;
   final int revision;
-  final bool hasLogo, hasBanner, canEditProfile, canEditLogo, canEditBanner;
+  final bool hasLogo,
+      hasBanner,
+      hasBackground,
+      wideImagesSupported,
+      canEditProfile,
+      canEditLogo,
+      canEditBanner;
   final Map<String, Object?> fields;
 
   bool permits(String field) => switch (field) {
     'logoText' || 'logoImageData' || 'clearLogoImage' => canEditLogo,
-    'clearBannerImage' => canEditBanner,
+    'bannerImageData' ||
+    'clearBannerImage' ||
+    'backgroundImageData' ||
+    'clearBackgroundImage' => canEditBanner,
     _ => canEditProfile,
   };
 
@@ -128,6 +139,11 @@ final class CommunityEditingProfile {
       revision,
       _flag(payload, 'hasLogo'),
       _flag(payload, 'hasBanner'),
+      payload.containsKey('hasBackground')
+          ? _flag(payload, 'hasBackground')
+          : false,
+      // Only a server that proves banner/background support enables uploads.
+      payload['wideImagesSupported'] == true,
       profile,
       logo,
       banner,
@@ -174,8 +190,17 @@ Object? communityProfileChange(String field, Object? value) {
   }
   if (communityProfileFlags.contains(field) ||
       field == 'clearLogoImage' ||
-      field == 'clearBannerImage') {
+      field == 'clearBannerImage' ||
+      field == 'clearBackgroundImage') {
     if (value is! bool) throw const FormatException();
+    return value;
+  }
+  if (field == 'bannerImageData' || field == 'backgroundImageData') {
+    if (value is! String ||
+        value.length > 2796236 ||
+        !RegExp(r'^data:image/(png|jpeg);base64,').hasMatch(value)) {
+      throw const FormatException();
+    }
     return value;
   }
   if (field == 'logoImageData') {

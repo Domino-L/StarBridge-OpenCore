@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../platform/bridge/bridge_account_access.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 
 class InboxItem {
   const InboxItem(
@@ -58,22 +59,52 @@ class NotificationInboxController extends ChangeNotifier {
         if (busy) {
           _wakePending = true;
         } else {
-          unawaited(refresh(quiet: true));
+          unawaited(_refreshAutomatically(quiet: true));
         }
       });
     }
     _events = session?.events.listen((event) {
+      if (event.name == 'notificationInbox.changed' &&
+          event.sessionGeneration == session?.activeGeneration &&
+          event.payload['schemaVersion'] == 1 &&
+          event.payload['scmPushHealthy'] is bool &&
+          event.payload.length == 2) {
+        _scmHealthVersion++;
+        if (event.payload['scmPushHealthy'] == false) {
+          _scmCacheSupported = false;
+        }
+        _lastSuccessfulRead = null;
+        if (busy) {
+          _wakePending = true;
+        } else {
+          unawaited(_refreshAutomatically(quiet: true));
+        }
+      }
+      if (event.name == 'notificationSettings.pendingManagement') {
+        final payload = event.payload;
+        final count = payload['count'];
+        if (payload.length == 2 &&
+            payload['schemaVersion'] == 1 &&
+            count is int &&
+            count >= 0 &&
+            count <= 640000 &&
+            event.sessionGeneration == session?.activeGeneration) {
+          pendingManagement.value = count;
+        }
+      }
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
         _epoch++;
+        _scmCacheSupported = false;
         _wakePending = false;
         _owner = null;
         items = const [];
         ready = false;
         busy = false;
         unread.value = 0;
+        pendingManagement.value = 0;
         notifyListeners();
-        unawaited(refresh());
+        unawaited(_refreshAutomatically());
       }
     });
   }
@@ -82,6 +113,9 @@ class NotificationInboxController extends ChangeNotifier {
   DateTime? _lastSuccessfulRead;
   int? _readGeneration;
   final unread = ValueNotifier<int>(0);
+  // Management work remains pending even after its inbox notice is read.
+  // The existing authenticated Host feed owns this count, not this inbox UI.
+  final pendingManagement = ValueNotifier<int>(0);
   StreamSubscription<BridgeEnvelope>? _events;
   StreamSubscription<void>? _activity;
   Timer? _timer;
@@ -89,21 +123,37 @@ class NotificationInboxController extends ChangeNotifier {
   int _epoch = 0;
   bool _disposed = false;
   bool _wakePending = false;
+  bool _scmCacheSupported = false;
+  int _scmHealthVersion = 0;
   bool busy = false, ready = false;
   String? error;
   List<InboxItem> items = const [];
   void start() {
-    unawaited(refresh());
+    unawaited(_refreshAutomatically());
     if (session == null) return;
     _timer ??= Timer.periodic(const Duration(seconds: 60), (_) {
-      if (!busy) unawaited(refresh(quiet: true));
+      if (!busy) unawaited(_refreshAutomatically(quiet: true));
     });
   }
+
+  // Classify the actual automatic caller. Quiet UI presentation alone does not
+  // make a public/manual refresh passive, and markRead readback stays with it.
+  Future<bool> _refreshAutomatically({bool quiet = false}) =>
+      backgroundLoadingRead(
+        () => _read(quiet: quiet, allowScmCache: _scmCacheSupported),
+      );
 
   bool _current(int epoch, int generation) =>
       !_disposed && epoch == _epoch && generation == session?.activeGeneration;
 
-  Future<bool> refresh({bool quiet = false, bool reuseFresh = false}) async {
+  Future<bool> refresh({bool quiet = false, bool reuseFresh = false}) =>
+      _read(quiet: quiet, reuseFresh: reuseFresh);
+
+  Future<bool> _read({
+    bool quiet = false,
+    bool reuseFresh = false,
+    bool allowScmCache = false,
+  }) async {
     if (_disposed || busy) return false;
     final bridge = session;
     if (bridge == null ||
@@ -139,20 +189,29 @@ class NotificationInboxController extends ChangeNotifier {
         items = const [];
         ready = false;
         unread.value = 0;
+        pendingManagement.value = 0;
         _owner = null;
         error = 'signedOut';
         return false;
       }
-      if (_owner != null && _owner != account.accountContext) {
+      // Wire decoding creates a new DTO each time. Identity, environment and
+      // generation determine ownership; object identity is not an account key.
+      final nextOwner = account.accountContext!;
+      if (_owner != null &&
+          (_readGeneration != generation ||
+              _owner!.environment != nextOwner.environment ||
+              _owner!.authority != nextOwner.authority ||
+              _owner!.subject != nextOwner.subject)) {
         items = const [];
         ready = false;
         unread.value = 0;
       }
-      _owner = account.accountContext;
+      _owner = nextOwner;
+      final healthVersion = _scmHealthVersion;
       final response = await bridge.request(
         'notificationInbox.read',
         accountContext: _owner,
-        payload: const {'schemaVersion': 1},
+        payload: {'schemaVersion': 1, if (allowScmCache) 'allowScmCache': true},
       );
       if (!_current(epoch, generation)) return false;
       final body = response.payload;
@@ -167,6 +226,11 @@ class NotificationInboxController extends ChangeNotifier {
           body['unreadCount'] != next.where((v) => !v.read).length) {
         throw const FormatException('Invalid inbox count');
       }
+      // A response started before a disconnect cannot restore cache permission.
+      if (body['scmPushHealthy'] != true ||
+          healthVersion == _scmHealthVersion) {
+        _scmCacheSupported = body['scmPushHealthy'] == true;
+      }
       items = List.unmodifiable(next);
       unread.value = next.where((v) => !v.read).length;
       ready = true;
@@ -174,8 +238,21 @@ class NotificationInboxController extends ChangeNotifier {
       _lastSuccessfulRead = _now();
       _readGeneration = generation;
       return true;
-    } catch (_) {
-      if (_current(epoch, generation)) error = 'read';
+    } catch (failure) {
+      if (_current(epoch, generation)) {
+        final recoverable =
+            failure is BridgeClientException &&
+            (failure.retryable || failure is BridgeCancelledException);
+        if (!recoverable) {
+          items = const [];
+          ready = false;
+          unread.value = 0;
+          _owner = null;
+          _readGeneration = null;
+          _lastSuccessfulRead = null;
+        }
+        error = 'read';
+      }
       return false;
     } finally {
       if (_current(epoch, generation)) {
@@ -183,7 +260,7 @@ class NotificationInboxController extends ChangeNotifier {
         notifyListeners();
         if (_wakePending) {
           _wakePending = false;
-          unawaited(refresh(quiet: true));
+          unawaited(_refreshAutomatically(quiet: true));
         }
       }
     }
@@ -227,7 +304,7 @@ class NotificationInboxController extends ChangeNotifier {
     if (confirmed && _current(epoch, generation)) return refresh();
     if (_wakePending && _current(epoch, generation)) {
       _wakePending = false;
-      unawaited(refresh(quiet: true));
+      unawaited(_refreshAutomatically(quiet: true));
     }
     return false;
   }
@@ -240,6 +317,7 @@ class NotificationInboxController extends ChangeNotifier {
     unawaited(_events?.cancel());
     unawaited(_activity?.cancel());
     unread.dispose();
+    pendingManagement.dispose();
     super.dispose();
   }
 }

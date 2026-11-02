@@ -14,6 +14,11 @@ internal sealed record FriendView(string Callsign, string GameId, string Relatio
 {
     [JsonIgnore] public string AccountId { get; init; } = "";
     [JsonIgnore] public string? ObservedPresence { get; init; }
+    // False when Relay cannot deliver a request to this search result.
+    [JsonIgnore] public bool Addable { get; init; } = true;
+    [JsonIgnore] public bool Blockable { get; init; } = true;
+    // False for a friend confirmed by search only: chat needs the identity the friend list holds.
+    [JsonIgnore] public bool ChatAvailable { get; init; } = true;
     public string? TargetRef { get; init; }
     public string? ConversationKey { get; init; }
     public string? ChatTargetRef { get; init; }
@@ -46,13 +51,25 @@ internal sealed partial class FriendsReader : IDisposable
     internal const int MaxBytes = 2 * 1024 * 1024;
     private readonly Uri _origin;
     private readonly HttpClient _http;
-    internal FriendsReader(Uri origin, HttpMessageHandler? handler = null)
+    /// <summary>Realtime protocol v1 connection, used for activity waits when the
+    /// relay offers it; absent or unhealthy means the HTTP long polls as before.</summary>
+    internal StarBridge.HostRuntime.Realtime.RelayRealtimeClient? RealtimeClient { get; }
+    /// <summary>Local gateway lifecycle codes (see RealtimeGatewayJournal).</summary>
+    internal Action<string, string>? RealtimeDiagnostic
+    {
+        init { if (RealtimeClient is { } client) client.Diagnostic = value; }
+    }
+    internal FriendsReader(Uri origin, HttpMessageHandler? handler = null, bool realtime = false)
     {
         if (!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 ||
             origin.Fragment.Length != 0 || (origin.Scheme != "https" && !(origin.Scheme == "http" && origin.IsLoopback)))
             throw new ArgumentException("A trusted Relay origin is required.", nameof(origin));
         _origin = origin;
-        _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(12) };
+        _http = new(handler ?? new HttpClientHandler {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+        }) { Timeout = TimeSpan.FromSeconds(12) };
+        if (realtime) RealtimeClient = new StarBridge.HostRuntime.Realtime.RelayRealtimeClient(origin, handler);
     }
 
     internal static string? ParseQuery(JsonElement payload)
@@ -60,16 +77,24 @@ internal sealed partial class FriendsReader : IDisposable
         try
         {
             var names = payload.EnumerateObject().Select(p => p.Name).ToArray();
-            if (names.Distinct().Count() != names.Length || names.Any(n => n is not ("schemaVersion" or "query")) ||
+            if (names.Distinct().Count() != names.Length || names.Any(n => n is not ("schemaVersion" or "query" or "cachedDisplayProgress" or "pagedResponse")) ||
                 payload.GetProperty("schemaVersion").GetInt32() != 1) throw InvalidRequest();
+            if (payload.TryGetProperty("cachedDisplayProgress", out var progress) &&
+                progress.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw InvalidRequest();
+            if (payload.TryGetProperty("pagedResponse", out var paged) && paged.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw InvalidRequest();
             if (!payload.TryGetProperty("query", out var value)) return null;
             var query = value.GetString()?.Trim();
-            if (query is null || query.Length is < 2 or > 128 || query.Any(char.IsControl)) throw InvalidRequest();
+            if (query is null || query.Length is < 2 or > 128 || query.Any(char.IsControl) || WantsCachedDisplay(payload)) throw InvalidRequest();
             return query;
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         { throw InvalidRequest(); }
     }
+
+    internal static bool WantsCachedDisplay(JsonElement payload) =>
+        payload.TryGetProperty("cachedDisplayProgress", out var progress) && progress.ValueKind == JsonValueKind.True;
+    internal static bool WantsPagedResponse(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("pagedResponse", out var paged) && paged.ValueKind == JsonValueKind.True;
 
     internal async Task<FriendsView> ReadAsync(string bearer, string? query, CancellationToken token, string scope = "", bool observePresence = false, bool sharing = false, bool issueTargets = true)
     {
@@ -81,13 +106,17 @@ internal sealed partial class FriendsReader : IDisposable
             "/api/friends/search?includePresence=false&q=" + Uri.EscapeDataString(query);
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        var probePhase = FriendsProbePhase.RelayHttp;
+        var probeStatus = 0;
         try
         {
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            probeStatus = (int)response.StatusCode;
             // A missing ACTIVE Link is not proof that the SCM login expired.
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw new AccountBridgeHostException("friends.identity_unavailable");
             if (response.StatusCode == HttpStatusCode.Forbidden) throw new AccountBridgeHostException("friends.forbidden");
-            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("friends.read_unavailable", true);
+            if (!response.IsSuccessStatusCode) throw FriendsReadFailures.FromStatus(response.StatusCode);
+            probePhase = FriendsProbePhase.RelayProjection;
             if (response.Content.Headers.ContentLength > MaxBytes) throw Invalid();
             using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var buffer = new MemoryStream();
@@ -99,12 +128,24 @@ internal sealed partial class FriendsReader : IDisposable
                 buffer.Write(chunk, 0, count);
             }
             var view = Parse(buffer.ToArray(), query, observePresence, sharing);
+            FriendsReadProbeDiagnostics.Record(probePhase, probeStatus);
             return issueTargets ? IssueTargets(view, bearer, scope) : view;
         }
-        catch (OperationCanceledException) when (!token.IsCancellationRequested)
-        { throw new AccountBridgeHostException("friends.read_unavailable", true); }
+        catch (OperationCanceledException error) when (!token.IsCancellationRequested)
+        {
+            FriendsReadProbeDiagnostics.Record(probePhase, probeStatus, error);
+            throw FriendsReadFailures.FromTransport(error, token);
+        }
         catch (Exception error) when (error is HttpRequestException or IOException)
-        { throw new AccountBridgeHostException("friends.read_unavailable", true); }
+        {
+            FriendsReadProbeDiagnostics.Record(probePhase, probeStatus, error);
+            throw FriendsReadFailures.FromTransport(error, token);
+        }
+        catch (Exception error)
+        {
+            FriendsReadProbeDiagnostics.Record(probePhase, probeStatus, error);
+            throw;
+        }
     }
 
     internal static FriendsView Parse(byte[] json, string? query = null, bool observePresence = false, bool sharing = false)
@@ -190,5 +231,9 @@ internal sealed partial class FriendsReader : IDisposable
     }
     private static AccountBridgeHostException Invalid() => new("friends.data_invalid");
     private static AccountBridgeHostException InvalidRequest() => new("friends.invalid_request");
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        RealtimeClient?.Dispose();
+        _http.Dispose();
+    }
 }

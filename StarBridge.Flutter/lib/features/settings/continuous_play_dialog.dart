@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -11,8 +13,8 @@ import 'settings_entry_catalog.dart';
 Future<void> showContinuousPlayDialog(
   BuildContext context,
   ContinuousPlayController controller,
-) => showDialog<void>(
-  context: context,
+) => showStarBridgeDialog<void>(
+  context,
   builder: (context) => Dialog(
     key: const Key('settings-entry-continuous-play'),
     insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -30,9 +32,11 @@ Future<void> showContinuousPlayDialog(
             SizedBox(height: context.tokens.space.sm),
             Align(
               alignment: AlignmentDirectional.centerEnd,
-              child: TextButton(
-                key: const Key('settings-entry-close'),
-                onPressed: () => Navigator.of(context).pop(),
+              child: StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('settings-entry-close'),
+                onActivate: (source) =>
+                    dismissStarBridgeDialog(context, source: source),
                 child: Text(settingsEntryText(AppStrings.of(context), 'close')),
               ),
             ),

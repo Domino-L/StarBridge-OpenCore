@@ -1,5 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../common/user_avatar_menu.dart';
+
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import '../../app/legal/cig_fankit_notice.dart';
 import '../../app/localization/app_strings.dart';
@@ -11,6 +21,7 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'personal_profile_avatar.dart';
 import '../account/account_avatar_editor.dart';
 import 'personal_profile_models.dart';
+import 'personal_profile_draft.dart';
 import 'personal_profile_playstyle_editor.dart';
 import 'personal_profile_schedule_editor.dart';
 import 'personal_profile_wallpaper_catalog.dart';
@@ -23,6 +34,8 @@ class PersonalProfileEditorPanel extends StatefulWidget {
     required this.onSaved,
     required this.moduleLayout,
     required this.onWallpaperChanged,
+    this.initialDraft,
+    this.ownerRequiresReload,
     super.key,
   });
 
@@ -33,6 +46,8 @@ class PersonalProfileEditorPanel extends StatefulWidget {
   final VoidCallback onSaved;
   final List<PersonalProfileModuleLayoutItem> moduleLayout;
   final ValueChanged<String> onWallpaperChanged;
+  final PersonalProfileEditorDraft? initialDraft;
+  final bool? ownerRequiresReload;
 
   @override
   State<PersonalProfileEditorPanel> createState() =>
@@ -56,11 +71,16 @@ class PersonalProfileEditorPanelState
   late int _avatarStyle;
   late String _wallpaperId;
   late PersonalProfileVisibility _visibility;
-  bool _saving = false;
+  bool _sending = false;
+  bool get _saving =>
+      _sending ||
+      widget.projection.operation == PersonalProfileOperation.saving;
+  bool _requiresReload = false;
   final _formKey = GlobalKey<FormState>();
   PersonalProfilePlayStyle? _playStyle;
   PersonalProfileSchedule? _schedule;
   bool _validationError = false;
+  StarBridgeDialogRoute<String>? _backgroundRoute;
 
   @override
   void initState() {
@@ -72,10 +92,37 @@ class PersonalProfileEditorPanelState
     _avatarStyle = widget.projection.avatarStyle;
     _wallpaperId = widget.projection.wallpaperId;
     _visibility = widget.projection.visibility;
+    if (widget.initialDraft case final draft?) {
+      final edit = draft.edit;
+      _callSignController.text = edit.callSign;
+      _aboutController.text = edit.about;
+      _avatarStyle = edit.avatarStyle;
+      _wallpaperId = edit.wallpaperId;
+      _visibility = edit.visibility;
+      _playStyle = edit.playStyle;
+      _schedule = edit.schedule;
+      _requiresReload = draft.requiresReload;
+      _validationError = draft.validationError;
+    }
   }
 
+  PersonalProfileEditorDraft captureDraft() => PersonalProfileEditorDraft(
+    PersonalProfileEdit(
+      callSign: _callSignController.text,
+      about: _aboutController.text,
+      avatarStyle: _avatarStyle,
+      wallpaperId: _wallpaperId,
+      visibility: _visibility,
+      moduleLayout: List.unmodifiable(widget.moduleLayout),
+      playStyle: _playStyle,
+      schedule: _schedule,
+    ),
+    requiresReload: _requiresReload || _saving,
+    validationError: _validationError,
+  );
   @override
   void dispose() {
+    retireStarBridgeDialog(_backgroundRoute, includeClosing: true);
     _callSignController.dispose();
     _aboutController.dispose();
     super.dispose();
@@ -97,13 +144,17 @@ class PersonalProfileEditorPanelState
           SizedBox(height: tokens.space.sm),
           Row(
             children: [
-              UserAvatarMenu(name: widget.projection.callSign, isSelf: true, child: PersonalProfileAvatar(
-                key: const Key('profile-current-avatar'),
-                callSign: widget.projection.callSign,
-                styleIndex: _avatarStyle,
-                imageData: widget.projection.avatarImageData,
-                size: tokens.density.controlHeight * 1.5,
-              )),
+              UserAvatarMenu(
+                name: widget.projection.callSign,
+                isSelf: true,
+                child: PersonalProfileAvatar(
+                  key: const Key('profile-current-avatar'),
+                  callSign: widget.projection.callSign,
+                  styleIndex: _avatarStyle,
+                  imageData: widget.projection.avatarImageData,
+                  size: tokens.density.controlHeight * 1.5,
+                ),
+              ),
               SizedBox(width: tokens.space.md),
               Expanded(child: const AccountAvatarEditor()),
             ],
@@ -162,13 +213,21 @@ class PersonalProfileEditorPanelState
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                   SizedBox(height: tokens.space.xs),
-                  DropdownButtonFormField<PersonalProfileVisibility>(
+                  StarBridgeSelectFormField<PersonalProfileVisibility>(
+                    identity: 'profile-visibility',
+                    controlKey: const Key('profile-visibility-trigger'),
+                    semanticLabel: strings.text('profile.edit.visibility'),
                     key: const Key('profile-visibility-selector'),
                     initialValue: _visibility,
                     isExpanded: true,
                     items: [
-                      for (final visibility in PersonalProfileVisibility.values.where(
-                        (v) => v != PersonalProfileVisibility.friendsFleetAndOrganizations))
+                      for (final visibility
+                          in PersonalProfileVisibility.values.where(
+                            (v) =>
+                                v !=
+                                PersonalProfileVisibility
+                                    .friendsFleetAndOrganizations,
+                          ))
                         DropdownMenuItem(
                           key: Key(_visibilityKey(visibility)),
                           value: visibility,
@@ -193,24 +252,36 @@ class PersonalProfileEditorPanelState
               ),
             ),
           SizedBox(height: tokens.space.lg),
-          TextField(
-            key: const Key('profile-call-sign-field'),
-            controller: _callSignController,
-            maxLength: 32,
-            decoration: InputDecoration(
-              labelText: strings.text('profile.edit.callSign'),
+          StarBridgeFieldFrame(
+            enabled: !_saving,
+            builder: (_, focus) => TextField(
+              key: const Key('profile-call-sign-field'),
+              focusNode: focus,
+              controller: _callSignController,
+              maxLength: 32,
+              decoration: InputDecoration(
+                labelText: strings.text('profile.edit.callSign'),
+                helperText: widget.projection.local?.accountCallSign == true
+                    ? strings.text('profile.callsign.hint')
+                    : null,
+                helperMaxLines: 3,
+              ),
+              onChanged: (_) => setState(() {}),
             ),
-            onChanged: (_) => setState(() {}),
           ),
           SizedBox(height: tokens.space.sm),
-          TextField(
-            key: const Key('profile-about-field'),
-            controller: _aboutController,
-            minLines: 4,
-            maxLines: 7,
-            maxLength: 500,
-            decoration: InputDecoration(
-              labelText: strings.text('profile.edit.about'),
+          StarBridgeFieldFrame(
+            enabled: !_saving,
+            builder: (_, focus) => TextField(
+              key: const Key('profile-about-field'),
+              focusNode: focus,
+              controller: _aboutController,
+              minLines: 4,
+              maxLines: 7,
+              maxLength: 500,
+              decoration: InputDecoration(
+                labelText: strings.text('profile.edit.about'),
+              ),
             ),
           ),
           SizedBox(height: tokens.space.xs),
@@ -224,16 +295,20 @@ class PersonalProfileEditorPanelState
             SizedBox(height: tokens.space.lg),
             PersonalProfilePlayStyleEditor(
               key: _positionsKey,
+              initial: _playStyle,
               projection: widget.projection,
               enabled: !_saving,
               onChanged: (value) => _playStyle = value,
             ),
             PersonalProfileScheduleEditor(
-              initial: PersonalProfileSchedule(
-                timeZoneId: widget.projection.timeZoneLabel,
-                rhythm: widget.projection.activityRhythm,
-                windows: widget.projection.availabilityWindows,
-              ),
+              initiallyChanged: _schedule != null,
+              initial:
+                  _schedule ??
+                  PersonalProfileSchedule(
+                    timeZoneId: widget.projection.timeZoneLabel,
+                    rhythm: widget.projection.activityRhythm,
+                    windows: widget.projection.availabilityWindows,
+                  ),
               timeZones: local.timeZones,
               enabled: !_saving,
               onChanged: (value) => _schedule = value,
@@ -246,16 +321,20 @@ class PersonalProfileEditorPanelState
       spacing: tokens.space.sm,
       runSpacing: tokens.space.sm,
       children: [
-        OutlinedButton(
-          key: const Key('profile-edit-cancel'),
-          onPressed: _saving ? null : widget.onCancel,
+        StarBridgeActionButton(
+          controlKey: const Key('profile-edit-cancel'),
+          onActivate: _saving ? null : (_) => widget.onCancel(),
           child: Text(strings.text('common.cancel')),
         ),
-        FilledButton(
-          key: const Key('profile-save'),
-          onPressed: _saving || _callSignController.text.trim().isEmpty
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('profile-save'),
+          onActivate:
+              _saving ||
+                  (widget.ownerRequiresReload ?? _requiresReload) ||
+                  _callSignController.text.trim().isEmpty
               ? null
-              : _save,
+              : (_) => _save(),
           child: Text(
             strings.text(
               _saving
@@ -288,7 +367,9 @@ class PersonalProfileEditorPanelState
                   Text(
                     strings.text(
                       widget.projection.local != null
-                          ? 'profile.local.description'
+                          ? widget.projection.local!.accountCallSign
+                                ? 'profile.local.accountDescription'
+                                : 'profile.local.description'
                           : 'profile.edit.description',
                     ),
                     style: Theme.of(context).textTheme.bodyMedium
@@ -354,12 +435,13 @@ class PersonalProfileEditorPanelState
   }
 
   Future<void> _save() async {
+    if (_saving || (widget.ownerRequiresReload ?? _requiresReload)) return;
     if (!(_formKey.currentState?.validate() ?? false)) {
       setState(() => _validationError = true);
       return;
     }
     setState(() {
-      _saving = true;
+      _sending = true;
       _validationError = false;
     });
     final result = await widget.onSave(
@@ -381,13 +463,32 @@ class PersonalProfileEditorPanelState
       widget.onSaved();
       return;
     }
-    setState(() => _saving = false);
+    setState(() {
+      _sending = false;
+      _requiresReload = result.requiresReload;
+    });
   }
 
-  Future<void> _chooseBackground() async {
-    final selectedId = await showDialog<String>(
-      context: context,
-      builder: (context) => _BackgroundPickerDialog(selectedId: _wallpaperId),
+  Future<void> _chooseBackground(InteractionSource source) async {
+    final selectedId = await showStarBridgeDialog<String>(
+      context,
+      source: source,
+      traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+      onRouteCreated: (route) {
+        _backgroundRoute = route;
+        unawaited(
+          route.completed.then((_) {
+            if (identical(_backgroundRoute, route)) _backgroundRoute = null;
+          }),
+        );
+      },
+      builder: (context) => Semantics(
+        scopesRoute: true,
+        explicitChildNodes: true,
+        child: SafeArea(
+          child: _BackgroundPickerDialog(selectedId: _wallpaperId),
+        ),
+      ),
     );
     if (!mounted || selectedId == null || selectedId == _wallpaperId) {
       return;
@@ -404,7 +505,7 @@ class _CurrentBackgroundSelection extends StatelessWidget {
   });
 
   final PersonalProfileWallpaperPreset preset;
-  final VoidCallback? onChoose;
+  final ValueChanged<InteractionSource>? onChoose;
 
   @override
   Widget build(BuildContext context) {
@@ -442,9 +543,9 @@ class _CurrentBackgroundSelection extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               SizedBox(height: tokens.space.sm),
-              OutlinedButton(
-                key: const Key('profile-background-picker-open'),
-                onPressed: onChoose,
+              StarBridgeActionButton(
+                controlKey: const Key('profile-background-picker-open'),
+                onActivate: onChoose,
                 child: Text(strings.text('profile.edit.backgroundChoose')),
               ),
             ],
@@ -510,10 +611,12 @@ class _BackgroundPickerDialog extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    key: const Key('profile-background-picker-close'),
-                    tooltip: strings.text('common.cancel'),
-                    onPressed: () => Navigator.of(context).pop(),
+                  StarBridgeIconAction(
+                    controlKey: const Key('profile-background-picker-close'),
+                    label: strings.text('common.cancel'),
+                    consumeHintEscape: false,
+                    onActivate: (source) =>
+                        dismissStarBridgeDialog(context, source: source),
                     icon: const StarBridgeIcon(
                       StarBridgeIconSemantic.windowClose,
                     ),
@@ -538,7 +641,11 @@ class _BackgroundPickerDialog extends StatelessWidget {
                       key: Key('profile-wallpaper-choice-${preset.id}'),
                       preset: preset,
                       selected: selectedId == preset.id,
-                      onPressed: () => Navigator.of(context).pop(preset.id),
+                      onPressed: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: preset.id,
+                      ),
                     );
                   },
                 ),
@@ -561,50 +668,61 @@ class _BackgroundChoice extends StatelessWidget {
 
   final PersonalProfileWallpaperPreset preset;
   final bool selected;
-  final VoidCallback onPressed;
+  final ValueChanged<InteractionSource> onPressed;
 
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: preset.hasImage
-          ? preset.displayNumber
-          : strings.text(preset.labelKey),
-      child: InkWell(
-        onTap: onPressed,
+    return DecoratedBox(
+      // Static fill belongs below the feedback layer. An opaque child would
+      // hide Rail/Glow's pointer press while its animation still runs.
+      decoration: BoxDecoration(
+        color: tokens.surfaces.status.fill,
         borderRadius: tokens.shape.small,
-        child: Container(
-          padding: EdgeInsets.all(tokens.space.xxs),
-          decoration: BoxDecoration(
-            color: tokens.surfaces.status.fill,
-            borderRadius: tokens.shape.small,
-            border: Border.all(
-              color: selected
-                  ? tokens.colors.focusRing
-                  : tokens.surfaces.status.border,
-              width: selected
-                  ? tokens.stroke.focusWidth
-                  : tokens.stroke.hairline,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _BackgroundPreview(preset: preset),
-              SizedBox(height: tokens.space.xs),
-              Text(
-                preset.hasImage
-                    ? preset.displayNumber
-                    : strings.text(preset.labelKey),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelSmall,
+      ),
+      child: StarBridgeActionRow(
+        controlKey: Key('profile-wallpaper-target-${preset.id}'),
+        semanticSelected: selected,
+        semanticLabel: preset.hasImage
+            ? preset.displayNumber
+            : strings.text(preset.labelKey),
+        baseRadius: tokens.shape.radiusSmall,
+        onActivate: (_, source) => onPressed(source),
+        child: DefaultTextStyle.merge(
+          style: DefaultTextStyle.of(context).style,
+          child: ExcludeSemantics(
+            child: Container(
+              padding: EdgeInsets.all(tokens.space.xxs),
+              decoration: BoxDecoration(
+                borderRadius: tokens.shape.small,
+                border: Border.all(
+                  color: selected
+                      ? tokens.colors.focusRing
+                      : tokens.surfaces.status.border,
+                  width: selected
+                      ? tokens.stroke.focusWidth
+                      : tokens.stroke.hairline,
+                ),
               ),
-            ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Flexible(child: _BackgroundPreview(preset: preset)),
+                  SizedBox(height: tokens.space.xs),
+                  Text(
+                    preset.hasImage
+                        ? preset.displayNumber
+                        : strings.text(preset.labelKey),
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -664,7 +782,8 @@ String _visibilityDescriptionKey(
   PersonalProfileVisibility.everyone => 'profile.visibility.publicDescription',
   PersonalProfileVisibility.friendsAndMainFleet =>
     'profile.visibility.friendsAndMainFleetDescription',
-  PersonalProfileVisibility.friendsFleetAndOrganizations => 'profile.visibility.related',
+  PersonalProfileVisibility.friendsFleetAndOrganizations =>
+    'profile.visibility.related',
   PersonalProfileVisibility.friendsOnly =>
     'profile.visibility.friendsOnlyDescription',
   PersonalProfileVisibility.onlyMe => 'profile.visibility.privateDescription',

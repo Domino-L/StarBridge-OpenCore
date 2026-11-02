@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
@@ -153,8 +154,12 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           tester
-              .widget<CheckboxListTile>(
-                find.byKey(const Key('profile-favorite-$shipA')),
+              .widget<StarBridgeCheckboxTile>(
+                find.byWidgetPredicate(
+                  (w) =>
+                      w is StarBridgeCheckboxTile &&
+                      w.controlKey == const Key('profile-favorite-$shipA'),
+                ),
               )
               .onChanged,
           isNull,
@@ -164,8 +169,12 @@ void main() {
         expect(find.textContaining('1/1'), findsOneWidget);
         expect(
           tester
-              .widget<CheckboxListTile>(
-                find.byKey(const Key('profile-favorite-$shipB')),
+              .widget<StarBridgeCheckboxTile>(
+                find.byWidgetPredicate(
+                  (w) =>
+                      w is StarBridgeCheckboxTile &&
+                      w.controlKey == const Key('profile-favorite-$shipB'),
+                ),
               )
               .value,
           isTrue,

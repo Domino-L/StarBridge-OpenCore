@@ -220,8 +220,11 @@ void main() {
     expect(find.textContaining('其他设备联网后也会同步清零'), findsOneWidget);
     await tester.tap(find.text('保留时长'));
     await tester.pumpAndSettle();
-    expect(find.byType(GameplayTimePanel), findsOneWidget,
-        reason: 'Cancelling reset must not pop the underlying settings route');
+    expect(
+      find.byType(GameplayTimePanel),
+      findsOneWidget,
+      reason: 'Cancelling reset must not pop the underlying settings route',
+    );
     expect(find.byKey(const Key('gameplay-reset-open')), findsOneWidget);
     expect(
       h.requests.where((r) => r.name == 'gameplayTime.resetConfirm'),
@@ -237,7 +240,10 @@ void main() {
       await tester.ensureVisible(find.byKey(const Key('gameplay-reset-open')));
       await tester.tap(find.byKey(const Key('gameplay-reset-open')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('gameplay-reset-confirmation')), findsOneWidget);
+      expect(
+        find.byKey(const Key('gameplay-reset-confirmation')),
+        findsOneWidget,
+      );
       if (dismissal == 'confirm') {
         await tester.tap(find.byKey(const Key('gameplay-reset-confirm')));
       } else if (dismissal == 'accountChange') {
@@ -247,9 +253,14 @@ void main() {
       }
       await tester.pumpAndSettle();
       expect(find.byType(GameplayTimePanel), findsOneWidget);
-      expect(find.byKey(const Key('gameplay-reset-confirmation')), findsNothing);
-      expect(h.requests.where((r) => r.name == 'gameplayTime.resetConfirm'),
-          hasLength(dismissal == 'confirm' ? 1 : 0));
+      expect(
+        find.byKey(const Key('gameplay-reset-confirmation')),
+        findsNothing,
+      );
+      expect(
+        h.requests.where((r) => r.name == 'gameplayTime.resetConfirm'),
+        hasLength(dismissal == 'confirm' ? 1 : 0),
+      );
       await h.close(tester);
     });
   }
@@ -576,12 +587,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);
-      expect(find.textContaining('本机累计'), findsOneWidget);
+      expect(find.text('本机累计'), findsOneWidget);
       await tester.tap(find.text('预览访客视角'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);
       expect(find.textContaining('本机累计'), findsNothing);
-      expect(find.text('已有历史时长'), findsOneWidget);
+      expect(find.text('账号汇总'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       profile.dispose();
       await h.close(tester);

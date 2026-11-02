@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/features/common/organization_holo_choice.dart';
 import 'package:starbridge_flutter/features/common/user_avatar_menu.dart';
 import 'package:starbridge_flutter/features/communities/community_online_members_controller.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_port.dart';
@@ -102,6 +103,9 @@ void main() {
         CommunityOnlineMembersController.visibleOnline(member),
         ['InGame', 'AppOnline', 'Away'].contains(state),
       );
+      if (!['InGame', 'AppOnline', 'Away'].contains(state)) {
+        expect(member.publicPresence, 'offline');
+      }
     }
     expect(
       CommunityOnlineMembersController.visibleOnline(
@@ -163,8 +167,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<ChoiceChip>(
-              find.byKey(const Key('community-section-members')),
+            .widget<OrganizationHoloChoice>(
+              find.ancestor(
+                of: find.byKey(const Key('community-section-members')),
+                matching: find.byType(OrganizationHoloChoice),
+              ),
             )
             .selected,
         isTrue,

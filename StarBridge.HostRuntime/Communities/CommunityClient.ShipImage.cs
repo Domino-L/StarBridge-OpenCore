@@ -24,6 +24,13 @@ internal sealed partial class CommunityClient
         if (Resolve(reference, scope).Code != target.Code || !_shipTargets.TryGetValue(shipRef, out var stillCurrent) ||
             stillCurrent.Id != ship.Id || stillCurrent.Code != ship.Code || stillCurrent.Scope != scope ||
             stillCurrent.Expires <= DateTimeOffset.UtcNow) throw new AccountBridgeHostException("communities.refreshRequired");
+        if (Text(root, "code", 256) != target.Code || Text(root, "shipId", 64) != ship.Id) throw Invalid();
+        var result = ProjectImageChunk(root, reference, shipRef, offset, version);
+        RenewTarget(reference, target, token);
+        return result;
+    });
+    private static object ProjectImageChunk(JsonElement root, string reference, string shipRef, int offset, string? version)
+    {
         ShipObject(root);
         var actualVersion = Text(root, "version", 64);
         var contentHash = Text(root, "contentHash", 64);
@@ -32,16 +39,15 @@ internal sealed partial class CommunityClient
         var data = Text(root, "data", 256 * 1024);
         var count = Convert.FromBase64String(data).Length;
         int? next = root.GetProperty("next").ValueKind == JsonValueKind.Null ? null : Number(root, "next", 1, total);
-        if (Number(root, "schemaVersion", 1, 1) != 1 || Text(root, "code", 256) != target.Code ||
-            Text(root, "shipId", 64) != ship.Id || !ShipHash(actualVersion) || !ShipHash(contentHash) ||
+        if (Number(root, "schemaVersion", 1, 1) != 1 || !ShipHash(actualVersion) || !ShipHash(contentHash) ||
             version is not null && version != actualVersion || mime is not ("image/png" or "image/jpeg") ||
             Number(root, "offset", 0, total) != offset || offset >= total ||
             count != Math.Min(192 * 1024, total - offset) || next != (offset + count < total ? offset + count : null)) throw Invalid();
         var cropFocusX = ShipCrop(root, "cropFocusX", 0, 1);
         var cropFocusY = ShipCrop(root, "cropFocusY", 0, 1);
         var cropZoom = ShipCrop(root, "cropZoom", 1, 3);
-        RenewTarget(reference, target, token);
         return new { schemaVersion = 1, targetRef = reference, shipRef, version = actualVersion, contentHash,
             mimeType = mime, totalBytes = total, offset, next, data, cropFocusX, cropFocusY, cropZoom };
-    });
+    }
+
 }

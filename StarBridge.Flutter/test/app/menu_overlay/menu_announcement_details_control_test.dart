@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_announcement_details_control.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_announcement_details_view.dart';
@@ -90,7 +91,7 @@ void main() {
       expect(find.text('编辑乙'), findsOneWidget);
       expect(
         find.byWidgetPredicate(
-          (w) => w is Tooltip && (w.message?.startsWith('2026-10-01') ?? false),
+          (w) => w is StarBridgeTooltip && w.message.startsWith('2026-10-01'),
         ),
         findsNWidgets(4),
       );

@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -88,7 +90,7 @@ void main() {
     session.show(true);
     await ready(session, 'chat');
     await Future<void>.delayed(const Duration(milliseconds: 150));
-    final before = MenuFeatureView.parse(session.currentView);
+    final before = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     expect(before.organization!.logo, isNotNull);
     expect(before.organization!.overview!.online, isNotNull);
     expect(before.rows.every((r) => r.avatar != null), isTrue);
@@ -191,7 +193,7 @@ void main() {
       changed = Completer<void>();
       previews.refresh([target]);
       await changed.future;
-      expect(previews.value(target)['summary'], '暂时无法读取聊天摘要');
+      expect(resolvedMenuCopy(previews.value(target))['summary'], '暂时无法读取聊天摘要');
       expect(previews.value(target)['unread'], isNull);
     },
   );
@@ -206,7 +208,10 @@ void main() {
       await ready(session, 'chat');
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(
-        MenuFeatureView.parse(session.currentView).rows.first.avatar,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .rows
+            .first
+            .avatar,
         isNotNull,
       );
       port.renewal++;
@@ -218,7 +223,10 @@ void main() {
       await session.refresh(silent: true);
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(
-        MenuFeatureView.parse(session.currentView).rows.first.avatar,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .rows
+            .first
+            .avatar,
         isNull,
       );
     },

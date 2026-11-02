@@ -5,7 +5,7 @@ namespace StarBridge.HostRuntime.Support;
 /// <summary>Device-local acknowledgement compatible with WPF. Never reads credentials.</summary>
 public sealed class TestBuildNoticeStore(string dataRoot)
 {
-    public const string TermsVersion = "2026-08-01-v3";
+    public const string TermsVersion = "2026-10-31-v4";
     private readonly string _root = Path.GetFullPath(dataRoot);
     private string FilePath => Path.Combine(_root, "official-binary-license.accepted.json");
 

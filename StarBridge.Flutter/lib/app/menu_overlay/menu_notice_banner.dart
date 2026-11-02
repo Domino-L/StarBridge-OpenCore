@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
 import '../../design_system/icons/standard_icon.dart';
+import '../../design_system/interaction/starbridge_native_icon_action.dart';
 
 import '../../platform/window/menu_notice.dart';
+import '../../platform/window/native_viewport_visibility.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 
@@ -64,14 +67,24 @@ class _MenuNoticeBannerState extends State<MenuNoticeBanner> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    IconButton(
-                      tooltip: MaterialLocalizations.of(context)
-                          .closeButtonTooltip,
-                      onPressed: () {
-                        _expiry?.cancel();
-                        setState(() => _visible = false);
-                      },
-                      icon: const StandardIcon(StandardIconSemantic.close),
+                    TooltipVisibility(
+                      visible:
+                          TooltipVisibility.of(context) &&
+                          NativeViewportScope.isActive(context),
+                      child: NativeViewportMenu(
+                        builder: (open, close) => StarBridgeNativeIconAction(
+                          controlKey: const Key('menu-notice-close'),
+                          label: MaterialLocalizations.of(context)
+                              .closeButtonTooltip,
+                          onHintVisibilityChanged: (visible) =>
+                              visible ? open() : close(),
+                          onActivate: (_) {
+                            _expiry?.cancel();
+                            setState(() => _visible = false);
+                          },
+                          icon: const StandardIcon(StandardIconSemantic.close),
+                        ),
+                      ),
                     ),
                   ],
                 ),

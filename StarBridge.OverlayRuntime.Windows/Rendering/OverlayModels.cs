@@ -9,8 +9,8 @@ internal enum OverlaySkinRenderKind
 {
     Default,
     NightShadow,
-    LagrangeWeave,
-    Verdict
+    Verdict = 3,
+    Installed
 }
 
 internal static class OverlayStartupTransitionPolicy
@@ -49,7 +49,16 @@ public sealed record OverlayChatMessage(
     bool IsSelf,
     string SenderColor,
     string? SourceLabel = null,
-    string? SourceKey = null);
+    string? SourceKey = null)
+{
+    // Native-only author authority; never serialized or persisted.
+    internal DateTimeOffset? AuthorValidUntil { get; init; }
+
+    internal OverlayChatMessage WithoutExpiredAuthor(DateTimeOffset now) =>
+        AuthorValidUntil is { } until && now >= until
+            ? this with { SenderCallsign = "", SenderGameId = "", SenderColor = "" }
+            : this;
+}
 
 public sealed record MemberAvatarRow(
     string Name,

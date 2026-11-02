@@ -3,6 +3,8 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityCreationCopy = <String, (String, String, String)>{
+  'loadingOptions': ('正在读取创建选项…', '正在讀取建立選項…', 'Loading creation options…'),
+  'cropping': ('正在处理裁剪…', '正在處理裁切…', 'Processing crop…'),
   'title': ('创建组织', '建立組織', 'Create organization'),
   'name': ('组织名称', '組織名稱', 'Organization name'),
   'nameHint': (

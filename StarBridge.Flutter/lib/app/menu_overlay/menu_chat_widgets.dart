@@ -1,5 +1,8 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../features/direct_messages/chat_message_bubble.dart';
 import 'menu_inline_avatar.dart';
@@ -107,20 +110,21 @@ class MenuChatSendBar extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               Text(
-                'Enter 发送 · Shift+Enter 换行',
+                menuText(context, 'menu.overlay.comms.enterHint'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
         ),
         const SizedBox(width: 12),
-        FilledButton(
-          key: sendKey,
-          onPressed: onSend,
-          style: FilledButton.styleFrom(
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: sendKey,
+          onActivate: onSend == null ? null : (_) => onSend!(),
+          nativeStyle: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           ),
-          child: const Text('发送'),
+          child: Text(menuText(context, 'menu.overlay.comms.send')),
         ),
       ],
     ),

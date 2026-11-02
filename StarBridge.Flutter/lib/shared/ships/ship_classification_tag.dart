@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_tooltip.dart';
+
 /// The same compact classification tag in personal and organization hangars.
 class ShipClassificationTag extends StatelessWidget {
   const ShipClassificationTag({
@@ -21,12 +23,14 @@ class ShipClassificationTag extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: .6)),
         borderRadius: BorderRadius.circular(2),
       ),
-      child: Tooltip(
+      child: StarBridgeTooltip(
         message: label,
+        consumeEscape: false,
         child: Text(
           label,
           maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          overflow: TextOverflow.fade,
+          softWrap: false,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
         ),
       ),

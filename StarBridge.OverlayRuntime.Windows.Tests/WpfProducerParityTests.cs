@@ -53,7 +53,7 @@ internal static class WpfProducerParityTests
             var host = Activator.CreateInstance(Tracker, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 binder: null, args: [null], culture: null)!;
             var now = DateTimeOffset.Parse("2026-09-30T12:00:00Z");
-            void Line(string body) { Observe.Invoke(host, [$"<{now:O}> {body}"]); now = now.AddSeconds(1); }
+            void Line(string body) { Observe.Invoke(host, [$"<{now:O}> {body}", false]); now = now.AddSeconds(1); }
             Line("nickname=\"FixturePilot\" playerGEID=12345");
             Line("<Join PU> shard[pub_use1_fixture_alpha]");
             Line(route);
@@ -99,7 +99,7 @@ internal static class WpfProducerParityTests
             if (parsed.Player.Equals("LocalPlayer", StringComparison.OrdinalIgnoreCase)) parsed = parsed with { Player = player };
             parsed = quantum.Resolve(FleetEventShipNormalizer.Normalize(parsed));
             legacyFleet.Apply(parsed);
-            Observe.Invoke(host, [line]);
+            Observe.Invoke(host, [line, false]);
             if (step == 0) continue; // Host identity warmup deliberately does not publish a player row.
             var expected = legacyFleet.Players.Single(p => p.Name == player);
             var actual = ((FleetState)Fleet.GetValue(host)!).Players.Single(p => p.Name == "LocalPlayer");

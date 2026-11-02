@@ -16,6 +16,8 @@ import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart'
 import 'package:starbridge_flutter/app/localization/party_rooms_strings.dart';
 import 'package:starbridge_flutter/features/party_rooms/room_display.dart';
 import 'package:starbridge_flutter/features/party_rooms/room_directory_card.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_expansion_tile.dart';
 
 void main() {
   testWidgets(
@@ -120,18 +122,27 @@ void main() {
       expect(panel, findsOneWidget);
       expect(find.byKey(const Key('rooms-tag-filter')), findsNothing);
       final branch = find
-          .descendant(of: panel, matching: find.byType(ExpansionTile))
+          .descendant(of: panel, matching: find.byType(StarBridgeExpansionTile))
           .first;
       await tester.tap(branch);
       await tester.pumpAndSettle();
       final choice = find
-          .descendant(of: panel, matching: find.byType(CheckboxListTile))
+          .descendant(of: panel, matching: find.byType(StarBridgeCheckboxTile))
           .first;
-      final choiceKey = tester.widget<CheckboxListTile>(choice).key!;
+      final choiceKey = tester
+          .widget<StarBridgeCheckboxTile>(choice)
+          .controlKey!;
       await tester.tap(choice);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<CheckboxListTile>(find.byKey(choiceKey)).value,
+        tester
+            .widget<StarBridgeCheckboxTile>(
+              find.ancestor(
+                of: find.byKey(choiceKey),
+                matching: find.byType(StarBridgeCheckboxTile),
+              ),
+            )
+            .value,
         isTrue,
       );
       tester.view.physicalSize = const Size(1000, 900);
@@ -143,11 +154,23 @@ void main() {
       await tester.pumpAndSettle();
       expect(panel, findsOneWidget);
       await tester.tap(
-        find.descendant(of: panel, matching: find.byType(ExpansionTile)).first,
+        find
+            .descendant(
+              of: panel,
+              matching: find.byType(StarBridgeExpansionTile),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       expect(
-        tester.widget<CheckboxListTile>(find.byKey(choiceKey)).value,
+        tester
+            .widget<StarBridgeCheckboxTile>(
+              find.ancestor(
+                of: find.byKey(choiceKey),
+                matching: find.byType(StarBridgeCheckboxTile),
+              ),
+            )
+            .value,
         isTrue,
       );
       expect(tester.takeException(), isNull);
@@ -258,6 +281,8 @@ void main() {
     if (!render) return;
     for (final font in {
       'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+      'Saira': 'assets/fonts/Saira-VF.ttf',
+      'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',

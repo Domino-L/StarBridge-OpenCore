@@ -1,4 +1,5 @@
-import '../../design_system/icons/standard_icon.dart';
+import '../../shared/guide/guide_empty_state.dart';
+import '../../shared/guide/guide_scope.dart';
 
 import 'dart:async';
 
@@ -10,14 +11,28 @@ import '../direct_messages/chat_avatar.dart';
 
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_native_icon_action.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../platform/window/native_viewport_visibility.dart';
-import '../../app/shell/widgets/attention_badge.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'friends_module.dart';
+import 'friends_sync_notice.dart';
+import 'friends_scroll_controller.dart';
+import 'friends_loading_content.dart';
+import 'friends_operation_motion.dart';
+import 'friends_waiting_indicator.dart';
 import 'friend_action_controls.dart';
+import 'friend_message_action.dart';
+import 'friends_search_sections.dart';
+import 'friends_section_navigation.dart';
 import 'example_friends_adapter.dart';
 import '../direct_messages/direct_messages_module.dart';
 import '../direct_messages/direct_messages_page.dart';
@@ -48,6 +63,8 @@ class FriendsPage extends StatefulWidget {
 
 class _FriendsPageState extends State<FriendsPage> {
   late final FriendsModule _module;
+  late final FriendsOperationMotion _operationMotion;
+  late final FriendsScrollController _scroll;
   final _search = TextEditingController();
   int _accountRevision = 0;
   late final bool _example;
@@ -77,6 +94,8 @@ class _FriendsPageState extends State<FriendsPage> {
     _example =
         port is ExampleFriendsAdapter || widget.module?.isExample == true;
     _module = widget.module ?? FriendsModule(port!);
+    _operationMotion = FriendsOperationMotion.retain(_module);
+    _scroll = FriendsScrollController(_module);
     if (widget.messagesOnly) {
       _chat = true;
       _notificationInbox = false;
@@ -91,7 +110,15 @@ class _FriendsPageState extends State<FriendsPage> {
     _accountRevision = _module.accountRevision;
     _search.text = _module.query;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !widget.messagesOnly) unawaited(_module.enter());
+      if (mounted && !widget.messagesOnly) {
+        runStarBridgeSynchronousActivation(
+          resolveStarBridgeInitialReadSource(
+            context,
+            InteractionSource.programmatic,
+          ),
+          () => unawaited(_module.enter()),
+        );
+      }
     });
     _sharingRefresh = Timer.periodic(const Duration(seconds: 10), (_) {
       if (_visible && !_chat && !_module.busy && !_module.searching) {
@@ -143,8 +170,10 @@ class _FriendsPageState extends State<FriendsPage> {
         !_module.reading &&
         !_module.searching) {
       _activityPending = false;
-      unawaited(_module.refresh(silent: true));
-      unawaited(_messages?.receive(directoryOnly: true));
+      runStarBridgeSynchronousActivation(InteractionSource.programmatic, () {
+        unawaited(_module.refresh(silent: true));
+        unawaited(_messages?.receive(directoryOnly: true));
+      });
     }
   }
 
@@ -175,6 +204,8 @@ class _FriendsPageState extends State<FriendsPage> {
     unawaited(_activity?.cancel());
     _sharingRefresh?.cancel();
     _module.removeListener(_syncAccount);
+    _scroll.dispose();
+    _operationMotion.release(ownerDisposing: widget.module == null);
     if (widget.module == null) _module.dispose();
     _search.dispose();
     super.dispose();
@@ -272,240 +303,219 @@ class _FriendsPageState extends State<FriendsPage> {
         )
       : ListenableBuilder(
           listenable: Listenable.merge([_module, ?_messages]),
-          builder: (context, _) => Padding(
-            padding: EdgeInsets.all(context.tokens.space.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: _panelDecoration(),
-                  child: LayoutBuilder(
-                    builder: (context, bounds) {
-                      final title = Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t('title'),
-                            style: Theme.of(context).textTheme.headlineSmall,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            t(
-                              _example
-                                  ? 'exampleActions'
-                                  : _module.commandsAvailable
-                                  ? 'manageHint'
-                                  : 'readOnly',
+          builder: (context, _) => FriendsLoadingContent(
+            _module,
+            child: Padding(
+              padding: EdgeInsets.all(context.tokens.space.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: _panelDecoration(),
+                    child: LayoutBuilder(
+                      builder: (context, bounds) {
+                        final title = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              t('title'),
+                              style: Theme.of(context).textTheme.headlineSmall,
                             ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      );
-                      final search = Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              enabled: !_module.busy,
-                              controller: _search,
-                              maxLength: 128,
-                              decoration: InputDecoration(
-                                labelText: t('search'),
-                                hintText: t('searchHint'),
-                                counterText: '',
-                                suffixIcon: _module.searching
-                                    ? IconButton(
-                                        tooltip: t('clear'),
-                                        icon: const StarBridgeIcon(
-                                          StarBridgeIconSemantic.windowClose,
-                                        ),
-                                        onPressed: () {
-                                          _search.clear();
-                                          _module.editQuery('');
-                                        },
-                                      )
-                                    : null,
+                            const SizedBox(height: 4),
+                            Text(
+                              t(
+                                _example
+                                    ? 'exampleActions'
+                                    : _module.commandsAvailable
+                                    ? 'manageHint'
+                                    : 'readOnly',
                               ),
-                              onChanged: _module.editQuery,
-                              onSubmitted: (_) {
-                                if (_module.validQuery) {
-                                  unawaited(_module.refresh());
-                                }
-                              },
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        );
+                        final search = Row(
+                          children: [
+                            Expanded(
+                              child: StarBridgeFieldFrame(
+                                enabled: !_module.busy,
+                                builder: (_, focus) => TextField(
+                                  focusNode: focus,
+                                  enabled: !_module.busy,
+                                  controller: _search,
+                                  maxLength: 128,
+                                  decoration: InputDecoration(
+                                    labelText: t('search'),
+                                    hintText: t('searchHint'),
+                                    counterText: '',
+                                    suffixIcon: _module.searching
+                                        ? StarBridgeNativeIconAction(
+                                            controlKey: const Key(
+                                              'friends-clear-query',
+                                            ),
+                                            label: t('clear'),
+                                            icon: const StarBridgeIcon(
+                                              StarBridgeIconSemantic
+                                                  .windowClose,
+                                            ),
+                                            onActivate: (_) {
+                                              _search.clear();
+                                              _module.editQuery('');
+                                            },
+                                          )
+                                        : null,
+                                  ),
+                                  onChanged: _module.editQuery,
+                                  onSubmitted: (_) {
+                                    if (_module.validQuery) {
+                                      runStarBridgeSynchronousActivation(
+                                        InteractionSource.keyboard,
+                                        () => unawaited(_module.refresh()),
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            StarBridgeActionButton(
+                              controlKey: const Key('friends-search'),
+                              onActivate:
+                                  !_module.busy &&
+                                      _module.validQuery &&
+                                      !_module.reading
+                                  ? (_) => _module.refresh()
+                                  : null,
+                              child: Text(t('searchButton')),
+                            ),
+                            const SizedBox(width: 8),
+                            StarBridgeActionButton(
+                              controlKey: const Key('friends-refresh'),
+                              kind: StarBridgeActionKind.quiet,
+                              onActivate: _module.busy || _module.reading
+                                  ? null
+                                  : (_) => _module.refresh(),
+                              child: Text(t('refresh')),
+                            ),
+                          ],
+                        );
+                        return bounds.maxWidth >= 1000
+                            ? Row(
+                                children: [
+                                  Expanded(child: title),
+                                  const SizedBox(width: 24),
+                                  SizedBox(width: 490, child: search),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  title,
+                                  const SizedBox(height: 12),
+                                  search,
+                                ],
+                              );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, bounds) => Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: bounds.maxWidth < 640 ? 124 : 190,
+                            child: Container(
+                              decoration: _panelDecoration(),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: FriendsSectionNavigation(
+                                  module: _module,
+                                  label: t,
+                                  showRecent: widget.createChatPort != null,
+                                  recentUnread:
+                                      _messages?.rows.fold<int>(
+                                        0,
+                                        (n, c) => n + c.unread,
+                                      ) ??
+                                      0,
+                                  onRecent: _openRecent,
+                                  onSection: (section) {
+                                    _search.clear();
+                                    _module.select(section);
+                                  },
+                                ),
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          OutlinedButton(
-                            onPressed:
-                                !_module.busy &&
-                                    _module.validQuery &&
-                                    _module.state != FriendsReadState.loading
-                                ? _module.refresh
-                                : null,
-                            child: Text(t('searchButton')),
-                          ),
-                          const SizedBox(width: 8),
-                          TextButton(
-                            onPressed:
-                                _module.busy ||
-                                    _module.state == FriendsReadState.loading
-                                ? null
-                                : _module.refresh,
-                            child: Text(t('refresh')),
-                          ),
-                        ],
-                      );
-                      return bounds.maxWidth >= 1000
-                          ? Row(
-                              children: [
-                                Expanded(child: title),
-                                const SizedBox(width: 24),
-                                SizedBox(width: 490, child: search),
-                              ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                title,
-                                const SizedBox(height: 12),
-                                search,
-                              ],
-                            );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, bounds) => Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          width: bounds.maxWidth < 640 ? 124 : 190,
-                          child: Container(
-                            decoration: _panelDecoration(),
-                            child: Material(
-                              color: Colors.transparent,
-                              child: ListView(
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: _panelDecoration(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  if (widget.createChatPort != null) ...[
-                                    ListTile(
-                                      key: const Key('friends-recent'),
-                                      title: Text(
-                                        t('recent'),
+                                  Text(
+                                    t(
+                                      _module.searching
+                                          ? 'search'
+                                          : _module.section.name,
+                                    ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  if (_module.busy)
+                                    FriendsWaitingIndicator(
+                                      controlKey: const Key(
+                                        'friends-command-wait',
+                                      ),
+                                      label: t('operationPending'),
+                                      source: _operationMotion.commandSource,
+                                    ),
+                                  FriendsSyncNotice(
+                                    _module,
+                                    source: _operationMotion.readSource,
+                                  ),
+                                  if (_module.feedback != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 12,
+                                      ),
+                                      child: Text(
+                                        t(_module.feedback!),
+                                        style: TextStyle(
+                                          color: _module.feedbackSuccess
+                                              ? context.tokens.colors.success
+                                              : context.tokens.colors.warning,
+                                        ),
+                                      ),
+                                    ),
+                                  if (_module.searching)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        t('searchLimit'),
                                         style: Theme.of(context)
                                             .textTheme
-                                            .bodyMedium,
+                                            .bodySmall,
                                       ),
-                                      trailing: AttentionCount(
-                                        count:
-                                            _messages?.rows.fold<int>(
-                                              0,
-                                              (n, c) => n + c.unread,
-                                            ) ??
-                                            0,
-                                      ),
-                                      onTap: _module.busy ? null : _openRecent,
                                     ),
-                                    const Divider(),
-                                  ],
-                                  for (final section in FriendsSection.values)
-                                    ListTile(
-                                      key: ValueKey(
-                                        'friends-nav-${section.name}',
-                                      ),
-                                      title: Text(
-                                        t(section.name),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium,
-                                      ),
-                                      trailing:
-                                          !_module.searching &&
-                                              _module.snapshot != null
-                                          ? section == FriendsSection.incoming
-                                                ? AttentionCount(
-                                                    count:
-                                                        _module
-                                                            .snapshot!
-                                                            .groups[section]
-                                                            ?.length ??
-                                                        0,
-                                                  )
-                                                : Text(
-                                                    '${_module.snapshot!.groups[section]?.length ?? 0}',
-                                                  )
-                                          : null,
-                                      selected:
-                                          !_module.searching &&
-                                          _module.section == section,
-                                      selectedTileColor:
-                                          context.tokens.surfaces.selected.fill,
-                                      selectedColor:
-                                          context.tokens.colors.accent,
-                                      onTap: _module.busy
-                                          ? null
-                                          : () {
-                                              _search.clear();
-                                              _module.select(section);
-                                            },
-                                    ),
+                                  Expanded(child: _content()),
                                 ],
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: _panelDecoration(),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  t(
-                                    _module.searching
-                                        ? 'search'
-                                        : _module.section.name,
-                                  ),
-                                  style: Theme.of(context).textTheme.titleLarge,
-                                ),
-                                const SizedBox(height: 12),
-                                if (_module.busy)
-                                  const LinearProgressIndicator(),
-                                if (_module.feedback != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 12),
-                                    child: Text(
-                                      t(_module.feedback!),
-                                      style: TextStyle(
-                                        color: _module.feedbackSuccess
-                                            ? context.tokens.colors.success
-                                            : context.tokens.colors.warning,
-                                      ),
-                                    ),
-                                  ),
-                                if (_module.searching)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Text(
-                                      t('searchLimit'),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall,
-                                    ),
-                                  ),
-                                Expanded(child: _content()),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -516,6 +526,8 @@ class _FriendsPageState extends State<FriendsPage> {
   );
   void _openFriend(FriendRow row) {
     if (_module.busy ||
+        _module.reading ||
+        _module.refreshFailed ||
         row.chatTargetRef == null ||
         widget.createChatPort == null) {
       return;
@@ -547,7 +559,10 @@ class _FriendsPageState extends State<FriendsPage> {
     if (row.relationship == 'friend' && widget.createChatPort != null)
       AvatarMenuAction(
         AppStrings.of(context).text('avatar.sendMessage'),
-        !_module.busy && row.chatTargetRef != null
+        !_module.busy &&
+                !_module.reading &&
+                !_module.refreshFailed &&
+                row.chatTargetRef != null
             ? () => _openFriend(row)
             : null,
       ),
@@ -576,26 +591,34 @@ class _FriendsPageState extends State<FriendsPage> {
     crossAxisAlignment: WrapCrossAlignment.center,
     children: [
       if (row.relationship == 'friend' && widget.createChatPort != null)
-        OutlinedButton.icon(
-          key: ValueKey('friend-message-$index'),
-          onPressed: _module.busy || row.chatTargetRef == null
+        FriendMessageAction(
+          controlKey: ValueKey('friend-message-$index'),
+          onPressed:
+              _module.busy ||
+                  _module.reading ||
+                  _module.refreshFailed ||
+                  row.chatTargetRef == null
               ? null
               : () => _openFriend(row),
-          icon: const StandardIcon(StandardIconSemantic.chatBubble, size: 16),
-          label: AttentionBadge(
-            count: unread(row),
-            child: Text(AppStrings.of(context).text('direct.title')),
-          ),
+          unread: unread(row),
+          label: AppStrings.of(context).text('direct.title'),
         ),
       FriendActionControls(module: _module, row: row, compact: true),
+      if (row.notAddableHere)
+        Text(t('notAddableHere'), style: Theme.of(context).textTheme.bodySmall),
     ],
   );
   Widget _content() {
     if (_module.state == FriendsReadState.loading) {
       return Center(
-        child: Semantics(
-          label: t('loading'),
-          child: const CircularProgressIndicator(),
+        child: SizedBox(
+          width: 240,
+          child: FriendsWaitingIndicator(
+            controlKey: const Key('friends-initial-wait'),
+            label: t('loading'),
+            source: _operationMotion.readSource,
+            showLabel: true,
+          ),
         ),
       );
     }
@@ -603,24 +626,40 @@ class _FriendsPageState extends State<FriendsPage> {
       return _message(t(_module.validQuery ? 'submitSearch' : 'queryLength'));
     }
     if (_module.state == FriendsReadState.signedOut) {
-      return _message(t('signedOut'));
+      return guideOnlineRequired(
+            context,
+            AppStrings.of(context).text('navigation.friends'),
+          ) ??
+          _message(t('signedOut'));
     }
     if (_module.state == FriendsReadState.unavailable) {
       return _message(t(_module.failure), retry: true);
     }
     final rows = _module.rows;
+    if (rows.isEmpty &&
+        !_module.searching &&
+        _module.section == FriendsSection.friends &&
+        GuideEmptyState.active(context)) {
+      return const GuideEmptyState('friends');
+    }
     if (rows.isEmpty) {
       return _message(
-        t(_module.searching ? 'noResults' : 'empty.${_module.section.name}'),
+        _module.searching
+            ? friendsSearchEmptyMessage(
+                AppStrings.of(context),
+                _module.query.trim(),
+              )
+            : t('empty.${_module.section.name}'),
       );
     }
-    return ListView.separated(
+    final list = ListView.separated(
+      controller: _scroll,
       key: ValueKey('${_module.section.name}:${_module.snapshot?.query}'),
       itemCount: rows.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final row = rows[index];
-        return Container(
+        final card = Container(
           key: ValueKey('friend-card-$index'),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -705,7 +744,23 @@ class _FriendsPageState extends State<FriendsPage> {
             },
           ),
         );
+        return _module.searching
+            ? FriendsSearchEntry(
+                index: index,
+                matched: _module.matchedFriends.length,
+                total: rows.length,
+                child: card,
+              )
+            : card;
       },
+    );
+    // A friend, or a request sent, completes "加个好友".
+    return GuideSignal(
+      id: 'friend',
+      when:
+          _module.section == FriendsSection.friends ||
+          _module.section == FriendsSection.outgoing,
+      child: list,
     );
   }
 
@@ -716,7 +771,12 @@ class _FriendsPageState extends State<FriendsPage> {
         children: [
           Text(message, textAlign: TextAlign.center),
           if (retry)
-            TextButton(onPressed: _module.refresh, child: Text(t('retry'))),
+            StarBridgeActionButton(
+              controlKey: const Key('friends-retry'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: (_) => _module.refresh(),
+              child: Text(t('retry')),
+            ),
         ],
       ),
     ),

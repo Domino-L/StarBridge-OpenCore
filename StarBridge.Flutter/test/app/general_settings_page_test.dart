@@ -3,6 +3,8 @@ import 'package:starbridge_flutter/app/routing/exit_application_intent.dart';
 import 'package:starbridge_flutter/app/routing/open_destination_intent.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show SuitePressable;
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences_module.dart';
@@ -109,12 +111,25 @@ void main() {
       AppearanceMode.light,
     );
 
-    await tester.tap(find.byKey(const Key('general-reduce-motion')));
+    final reduceMotion = find.byKey(const Key('general-reduce-motion'));
+    await tester.ensureVisible(reduceMotion);
+    await tester.pumpAndSettle();
+    await tester.tap(reduceMotion);
     await tester.pump();
     expect(
       preferences.projection.value.effective.motionPreference,
       MotionPreference.reduce,
     );
+
+    // 节日外观默认开，关掉后立刻生效。
+    expect(preferences.projection.value.effective.holidayAppearance, isTrue);
+    expect(find.text('节日外观'), findsOneWidget);
+    final holiday = find.byKey(const Key('general-holiday-appearance'));
+    await tester.ensureVisible(holiday);
+    await tester.pumpAndSettle();
+    await tester.tap(holiday);
+    await tester.pump();
+    expect(preferences.projection.value.effective.holidayAppearance, isFalse);
 
     final launch = find.byKey(const Key('general-launch-at-startup'));
     await tester.ensureVisible(launch);
@@ -256,10 +271,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('设置文件已损坏'), findsOneWidget);
-    final light = tester.widget<InkWell>(
+    final light = tester.widget<SuitePressable>(
       find.byKey(const Key('general-appearance-light')),
     );
-    expect(light.onTap, isNotNull);
+    expect(light.onActivate, isNotNull);
   });
 
   testWidgets('a retained preference read failure offers an explicit retry', (
@@ -278,19 +293,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('general-settings-retry')), findsOneWidget);
-    final lightBeforeRetry = tester.widget<InkWell>(
+    final lightBeforeRetry = tester.widget<SuitePressable>(
       find.byKey(const Key('general-appearance-light')),
     );
-    expect(lightBeforeRetry.onTap, isNull);
+    expect(lightBeforeRetry.onActivate, isNull);
 
     await tester.tap(find.byKey(const Key('general-settings-retry')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('general-settings-retry')), findsNothing);
-    final lightAfterRetry = tester.widget<InkWell>(
+    final lightAfterRetry = tester.widget<SuitePressable>(
       find.byKey(const Key('general-appearance-light')),
     );
-    expect(lightAfterRetry.onTap, isNotNull);
+    expect(lightAfterRetry.onActivate, isNotNull);
   });
 }
 

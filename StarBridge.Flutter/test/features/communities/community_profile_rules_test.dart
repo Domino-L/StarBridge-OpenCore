@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_select_form_field.dart';
 import 'package:starbridge_flutter/features/communities/community_profile_rules.dart';
 import 'package:starbridge_flutter/features/communities/community_profile_controller.dart';
 import 'package:starbridge_flutter/features/communities/community_profile_dialog.dart';
@@ -16,6 +17,8 @@ import 'community_workspace_view_test.dart' show host;
 import 'community_workspace_test.dart' show WorkspaceTestPort;
 import '../friends/social_layout_test.dart' show loadFonts;
 import 'community_image_test_support.dart';
+
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 
 import 'package:starbridge_flutter/features/communities/community_activity_time.dart';
 
@@ -95,34 +98,45 @@ void main() {
           },
         ]);
         await settleCommunityImages(tester);
-        final periods = find.byWidgetPredicate(
+        // A time is always two lists; 12-hour locales name the period in
+        // the hour list ("12 PM") and storage stays HH:mm.
+        final hours = find.byWidgetPredicate(
           (w) =>
-              w is DropdownButtonFormField<String> &&
-              w.key.toString().contains('-period'),
+              w is DropdownButtonFormField<int> &&
+              w.key.toString().contains('-hour'),
         );
+        expect(hours, findsNWidgets(2));
         expect(
-          periods,
-          locale.languageCode == 'en' ? findsNWidgets(2) : findsNothing,
+          find.byWidgetPredicate(
+            (w) => w is DropdownButtonFormField && '${w.key}'.contains('-period'),
+          ),
+          findsNothing,
         );
-        if (locale.languageCode == 'en') {
-          await tester.ensureVisible(periods.first);
-          await tester.tap(periods.first);
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('PM').last);
-          await settleCommunityImages(tester);
-          final picker = find.byWidgetPredicate(
-            (w) =>
-                w is DropdownButtonFormField<String> &&
-                w.key.toString().contains('-startTime-0'),
-          );
-          expect(
-            tester.widget<DropdownButtonFormField<String>>(picker).initialValue,
-            '12',
-          );
-          expect(state.rows('activityWindows').single['startTime'], '12:00');
-          expect(state.rows('activityWindows').single['endsNextDay'], true);
-        }
-        await tester.ensureVisible(find.byType(CheckboxListTile).first);
+        await tester.ensureVisible(hours.first);
+        await tester.tap(hours.first);
+        await tester.pumpAndSettle();
+        final selector = tester.widget<StarBridgeSelectFormField<int>>(
+          hours.first,
+        );
+        final noon = find.byKey(ValueKey<Object>((selector.identity, 12)));
+        expect(noon, findsOneWidget);
+        expect(
+          find.descendant(
+            of: noon,
+            matching: find.text(locale.languageCode == 'en' ? '12 PM' : '12'),
+          ),
+          findsOneWidget,
+        );
+        await tester.ensureVisible(noon);
+        await tester.tap(noon);
+        await settleCommunityImages(tester);
+        expect(
+          tester.widget<DropdownButtonFormField<int>>(hours.first).initialValue,
+          12,
+        );
+        expect(state.rows('activityWindows').single['startTime'], '12:00');
+        expect(state.rows('activityWindows').single['endsNextDay'], true);
+        await tester.ensureVisible(find.byType(StarBridgeCheckboxTile).first);
         await settleCommunityImages(tester);
         final capture = tester.renderObject<RenderRepaintBoundary>(
           find.byKey(const ValueKey('settings-capture')),
@@ -198,8 +212,8 @@ void main() {
       await settleCommunityImages(tester);
       final startHour = find.byWidgetPredicate(
         (w) =>
-            w is DropdownButtonFormField<String> &&
-            w.key.toString().contains('-startTime-0'),
+            w is DropdownButtonFormField<int> &&
+            w.key.toString().contains('-0-start-hour'),
       );
       await tester.ensureVisible(startHour);
       await settleCommunityImages(tester);
@@ -315,8 +329,8 @@ void main() {
     expect(
       find.byWidgetPredicate(
         (w) =>
-            w is DropdownButtonFormField<String> &&
-            w.key.toString().contains('-startTime-'),
+            w is DropdownButtonFormField<int> &&
+            w.key.toString().contains('-start-'),
       ),
       findsNWidgets(2),
     );

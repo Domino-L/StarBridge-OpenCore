@@ -1,8 +1,12 @@
+import 'menu_overlay_strings.dart';
+import 'room_tag_strings.dart';
+import 'community_tag_strings.dart';
 import 'general_settings_strings.dart';
 import 'notification_settings_strings.dart';
 import 'notification_audio_strings.dart';
 import 'profile_settings_strings.dart';
 import 'official_fleet_strings.dart';
+import 'official_fleet_rally_strings.dart';
 import 'party_rooms_strings.dart';
 import 'friends_strings.dart';
 import 'communities_strings.dart';
@@ -19,9 +23,18 @@ import 'help_support_strings.dart';
 import 'overlay_settings_strings.dart';
 import 'home_strings.dart';
 import 'handle_mismatch_strings.dart';
+import 'game_identity_strings.dart';
+import 'achievements_strings.dart';
+import 'exec_hangar_strings.dart';
 
 const traditionalAppStrings = <String, String>{
+  ...menuOverlayZhTw,
+  'account.error.compatibilityProofRejected': '關聯證明無效或已過期，請重新發起帳號關聯。',
+  'account.legacyLogin.retired': '此舊帳號已遷入 SCM，請使用 SCM 帳號登入。',
+  ...execHangarZhTw,
+  ...achievementsZhTw,
   ...handleMismatchZhTw,
+  ...gameIdentityZhTw,
   'app.name': '星海艦橋',
   'navigation.home': '首頁',
   'navigation.home.description': '目前態勢與下一步',
@@ -32,7 +45,7 @@ const traditionalAppStrings = <String, String>{
   'navigation.officialFleet': '主艦隊',
   'navigation.officialFleet.description': 'RSI 官網主艦隊工作區',
   'navigation.marketplace': '交易大廳',
-  'navigation.marketplace.description': '交易與服務（即將推出）',
+  'navigation.marketplace.description': '物品與公開行情',
   'navigation.communities': '社區組織',
   'navigation.communities.description': '跨艦隊長期協作組織',
   'navigation.hangar': '個人機庫',
@@ -40,7 +53,7 @@ const traditionalAppStrings = <String, String>{
   'navigation.overlay': '浮層',
   'navigation.overlay.description': '遊戲內資訊來源與佈局',
   'navigation.tools': '工具',
-  'navigation.tools.description': '個人輔助工具（即將推出）',
+  'navigation.tools.description': '倒計時、計算與查詢工具',
   'navigation.settings': '設定',
   'navigation.settings.description': '明暗、語言與客戶端偏好',
   'navigation.friends': '好友',
@@ -53,6 +66,8 @@ const traditionalAppStrings = <String, String>{
   'navigation.account.description': '身分與個人資料',
   'navigation.profile': '個人頁面',
   'navigation.profile.description': '公開資料與主頁展示',
+  'navigation.achievements': '成就中心',
+  'navigation.achievements.description': '收藏成就與星海旅程',
   'navigation.personal': '個人空間',
   'deferredFeature.title': '即將推出',
   'comingSoon.body': '{feature}正在開發中，上線後會在這裡提供。',
@@ -77,7 +92,10 @@ const traditionalAppStrings = <String, String>{
   ...traditionalLocalPrivacyStrings,
   ...traditionalPrivacyScopeSettingsStrings,
   ...traditionalOfficialFleetStrings,
+  ...traditionalOfficialFleetRallyStrings,
   ...traditionalPartyRoomsStrings,
+  ...traditionalRoomTagStrings,
+  ...traditionalCommunityTagStrings,
   ...friendsZhTw,
   ...communitiesZhTw,
   ...traditionalLegacyMigrationStrings,
@@ -89,6 +107,8 @@ const traditionalAppStrings = <String, String>{
   ...overlaySettingsZhTw,
   ...homeZhTw,
   'account.notSignedIn': '未登入',
+  'account.connectionPending': '帳號待確認',
+  'account.offlineMode': '離線模式',
   'account.loading': '正在讀取帳號狀態…',
   'account.signedOut.title': '使用 SCM 帳號繼續',
   'account.signedOut.body': '授權會在系統瀏覽器中完成。登入憑證由本機帳號服務安全保管，不會進入介面頁面。',
@@ -108,15 +128,19 @@ const traditionalAppStrings = <String, String>{
   'account.login.cancelling': '正在取消登入…',
   'account.login.cancelled': '登入已取消，可以隨時重試。',
   'account.login.success': 'SCM 帳號已連線。',
+  'account.login.loading': '授權成功，正在載入帳號資料…',
+  'account.login.stage.authorize': '等待授權',
+  'account.login.stage.loading': '載入資料',
+  'account.login.stage.done': '完成登入',
   'account.action.refresh': '重新整理帳號資料',
   'account.action.retry': '重試',
   'account.value.notSet': '未設定',
   'account.email.notShared': 'SCM 未提供電子郵件',
-  'account.source.live': 'SCM 最新',
+  'account.source.live': '資料已同步',
   'account.source.cached': '離線快取',
   'account.source.unavailable': '資料無法使用',
   'account.preferences.title': '資料偏好',
-  'account.preferences.body': '僅同步 SCM 目前支援的語言偏好與標準時區；客戶端介面語言仍可單獨選擇。',
+  'account.preferences.body': '設定 SCM 帳號的語言與時區。用戶端顯示語言可在「一般與資料」中單獨設定。',
   'account.preferences.locale': 'SCM 語言偏好',
   'account.preferences.timeZone': 'SCM 時區',
   'account.preferences.save': '儲存變更',
@@ -166,6 +190,7 @@ const traditionalAppStrings = <String, String>{
   'account.legacyLogin.retry': '稍後重試',
   'account.legacyLogin.verified': '舊帳號已驗證，登入憑證已加密儲存。',
   'account.legacyLogin.rejected': '信箱或密碼不正確，請檢查後重試。',
+  'account.legacyLogin.scmRequired': '此舊帳號已綁定，請使用 SCM 帳號登入。原有資料會繼續沿用。',
   'account.legacyLogin.invalidInput': '請輸入舊帳號信箱和密碼。',
   'account.legacyLogin.throttled': '嘗試次數過多，請等倒數結束後再試。',
   'account.legacyLogin.unavailable': '暫時無法確認登入結果，請稍後重試。',
@@ -235,7 +260,9 @@ const traditionalAppStrings = <String, String>{
   'account.error.sessionChanged': '帳號工作階段已變更，舊操作結果已捨棄。',
   'account.error.environmentNotEnabled': '目前客戶端僅開放本機聯調環境，尚不能連線正式 SCM 網頁。',
   'account.error.reauthorizationRequired': 'SCM 工作階段需要重新授權。',
+  'account.error.logoutIncomplete': '登出未完成：本機儲存的登入尚未清除，請重試。',
   'account.error.writeForbidden': '目前帳號沒有資料修改權限。',
+  'account.error.profileReadForbidden': '目前帳號資料讀取遭到拒絕，請檢查帳號授權。',
   'account.error.writeConflict': '資料已在其他位置更新，請重新載入後再儲存。',
   'account.error.directoryUnavailable': '暫時無法讀取 SCM 時區目錄，資料沒有被修改。',
   'account.error.invalidResponse': '本機帳號服務傳回不相容的資料，已安全停止處理。',
@@ -243,7 +270,8 @@ const traditionalAppStrings = <String, String>{
   'account.error.unavailable': '帳號資料暫時無法使用，請稍後重試。',
   'account.error.compatibilityUnavailable': '暫時無法讀取舊資料相容狀態。',
   'account.error.compatibilityWriteUnavailable': '暫時無法完成舊資料相容操作，未知結果沒有被當成成功。',
-  'account.error.compatibilityConflict': '該舊帳號或相容檔案已與其他 SCM 帳號關聯，未作任何變更。',
+  'account.error.legacyProofUnavailable': '舊帳號驗證服務暫時無法使用（503），本次未提交關聯。SCM 登入保持不變；請稍後重試，若持續出現請聯絡支援。',
+  'account.error.compatibilityConflict': '該 SCM 帳號或舊帳號已存在其他關聯，無法關聯。請使用原已關聯帳號登入。',
   'account.error.compatibilityExistingLinkMismatch':
       '目前 SCM 帳號已有不同的舊帳號關聯，請先核對帳號。',
   'account.error.legacyCredentialsRequired': '沒有可用的遷移憑證，請輸入舊帳號名稱或電子郵件和密碼。',
@@ -291,9 +319,19 @@ const traditionalAppStrings = <String, String>{
   'connection.relay.unavailable.detail':
       'SCM 帳號及已遷移功能仍可使用；依賴舊服務的資料與線上協作暫時無法使用。',
   'connection.action.retryNow': '立即重試',
+  'connection.account.restorePending.title': '恢復連線尚未完成',
+  'connection.account.restorePending.detail': '上次恢復連線尚未完成，帳號讀取仍暫停。請繼續恢復。',
+  'connection.action.restoreOnline': '繼續恢復連線',
+  'startup.onlineRecoveryRequired': '需要恢復連線',
+  'startup.onlineRecovery.detail': '先進入應用程式，再點選「繼續恢復連線」。現有帳號資料未被清除。',
   'connection.action.retrying': '正在重試…',
   'window.minimize': '最小化',
   'window.maximize': '最大化',
   'window.restore': '還原',
   'window.close': '關閉',
+  'window.closeNamed': '關閉{title}視窗',
+  'socialWindow.chatTitle': '聊天',
+  'socialWindow.actionUnconfirmed': '操作未確認，請重新整理列表核對後再試。',
+  'socialWindow.actionFailed': '暫時無法完成操作，請重新開啟視窗核對。',
+  'friendsWindow.openRecentChat': '開啟最近聊天',
 };

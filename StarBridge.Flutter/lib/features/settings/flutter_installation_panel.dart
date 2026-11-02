@@ -1,4 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import 'help_support_waiting.dart';
+import 'maintenance_action.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -20,10 +26,16 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
   bool _busy = false;
   bool _confirming = false;
   String? _message;
+  InteractionSource _waitSource = InteractionSource.programmatic;
+  int _waitPhase = 0;
+  String _waitLabel = 'checking';
 
   Future<void> _scan() async {
     if (_busy) return;
     setState(() {
+      _waitSource = captureStarBridgeActivationSource()();
+      _waitPhase++;
+      _waitLabel = 'checking';
       _busy = true;
       _plan = null;
       _message = null;
@@ -60,7 +72,9 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
     }
   }
 
-  Future<void> _execute(String action) async {
+  Future<void> _execute(
+    String action,
+  ) => runStarBridgeActivation<void>(captureStarBridgeActivationSource()(), () async {
     if (_busy || _plan == null) return;
     final plan = _plan!;
     final session = widget.session;
@@ -69,27 +83,44 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
       _confirming = true;
     });
     try {
-      final confirmed = await showDialog<bool>(
-        context: context,
+      final confirmed = await showStarBridgeDialog<bool>(
+        context,
         builder: (context) => AlertDialog(
           title: Text(flutterInstallationText(context, action)),
           content: Text(
             '${flutterInstallationText(context, '${action}Confirm')}\n\n${plan['directory']}',
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(flutterInstallationText(context, 'cancel')),
+            MaintenanceAction(
+              TextButton(
+                key: const Key('installation-confirm-cancel'),
+                onPressed: () => dismissStarBridgeDialog<bool>(
+                  context,
+                  source: captureStarBridgeActivationSource()(),
+                  result: false,
+                ),
+                child: Text(flutterInstallationText(context, 'cancel')),
+              ),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(flutterInstallationText(context, action)),
+            MaintenanceAction(
+              FilledButton(
+                key: const Key('installation-confirm-execute'),
+                onPressed: () => dismissStarBridgeDialog<bool>(
+                  context,
+                  source: captureStarBridgeActivationSource()(),
+                  result: true,
+                ),
+                child: Text(flutterInstallationText(context, action)),
+              ),
             ),
           ],
         ),
       );
       if (confirmed != true || !mounted || session != widget.session) return;
       setState(() {
+        _waitSource = captureStarBridgeActivationSource()();
+        _waitPhase++;
+        _waitLabel = action == 'clean' ? 'cleaning' : 'uninstalling';
         _confirming = false;
         _plan = null;
         _message = null;
@@ -124,7 +155,7 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
         });
       }
     }
-  }
+  });
 
   @override
   void didUpdateWidget(FlutterInstallationPanel oldWidget) {
@@ -151,9 +182,29 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
         children: [
           Text(t('title'), style: Theme.of(context).textTheme.titleMedium),
           SizedBox(height: tokens.space.sm),
+          if (_message != null)
+            Padding(
+              padding: EdgeInsets.only(top: tokens.space.sm),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  t(_message!),
+                  style: TextStyle(
+                    color: _message == 'failed'
+                        ? tokens.colors.warning
+                        : tokens.colors.success,
+                  ),
+                ),
+              ),
+            ),
           Text(t('scope')),
           if (!available) Text(t('unavailable')),
-          if (_busy && !_confirming) const LinearProgressIndicator(),
+          if (_busy && !_confirming)
+            HelpSupportWaiting(
+              key: ValueKey(('installation', _waitPhase)),
+              label: t(_waitLabel),
+              source: _waitSource,
+            ),
           if (_plan case final plan?) ...[
             SizedBox(height: tokens.space.md),
             Text(
@@ -179,41 +230,35 @@ class _FlutterInstallationPanelState extends State<FlutterInstallationPanel> {
             spacing: tokens.space.sm,
             runSpacing: tokens.space.sm,
             children: [
-              OutlinedButton(
-                key: const Key('flutter-installation-scan'),
-                onPressed: available && !_busy ? _scan : null,
-                child: Text(t('scan')),
+              MaintenanceAction(
+                OutlinedButton(
+                  key: const Key('flutter-installation-scan'),
+                  onPressed: available && !_busy ? _scan : null,
+                  child: Text(t('scan')),
+                ),
               ),
               if (_plan?['canUninstall'] == true)
-                OutlinedButton(
-                  key: const Key('flutter-installation-uninstall'),
-                  onPressed: !_busy && _plan?['canUninstall'] == true
-                      ? () => _execute('uninstall')
-                      : null,
-                  child: Text(t('uninstall')),
+                MaintenanceAction(
+                  OutlinedButton(
+                    key: const Key('flutter-installation-uninstall'),
+                    onPressed: !_busy && _plan?['canUninstall'] == true
+                        ? () => _execute('uninstall')
+                        : null,
+                    child: Text(t('uninstall')),
+                  ),
                 ),
               if (_plan?['canClean'] == true)
-                OutlinedButton(
-                  key: const Key('flutter-installation-clean'),
-                  onPressed: !_busy && _plan?['canClean'] == true
-                      ? () => _execute('clean')
-                      : null,
-                  child: Text(t('clean')),
+                MaintenanceAction(
+                  OutlinedButton(
+                    key: const Key('flutter-installation-clean'),
+                    onPressed: !_busy && _plan?['canClean'] == true
+                        ? () => _execute('clean')
+                        : null,
+                    child: Text(t('clean')),
+                  ),
                 ),
             ],
           ),
-          if (_message != null)
-            Padding(
-              padding: EdgeInsets.only(top: tokens.space.sm),
-              child: Text(
-                t(_message!),
-                style: TextStyle(
-                  color: _message == 'failed'
-                      ? tokens.colors.warning
-                      : tokens.colors.success,
-                ),
-              ),
-            ),
         ],
       ),
     );

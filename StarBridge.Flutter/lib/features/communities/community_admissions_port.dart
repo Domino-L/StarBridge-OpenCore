@@ -233,7 +233,6 @@ final class CommunityAdmissionsPage {
       invalid();
     }
     final available = value['currentInviteAvailable'] == true;
-    if (available && !value.containsKey('currentInvite')) invalid();
     Map<String, Object?>? currentInvite;
     final rawCurrent = value['currentInvite'];
     if (rawCurrent != null) {

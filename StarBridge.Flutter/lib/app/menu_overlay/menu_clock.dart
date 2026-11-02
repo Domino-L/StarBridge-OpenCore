@@ -41,10 +41,12 @@ class MenuClock extends StatefulWidget {
     this.preferences = const MenuDisplayPreferences(),
     this.presenceKey = 'presence.unknown',
     this.system24Hour,
+    this.desktopWidget,
   });
   final MenuDisplayPreferences preferences;
   final String presenceKey;
   final bool? system24Hour;
+  final Widget? desktopWidget;
   @override
   State<MenuClock> createState() => _MenuClockState();
 }
@@ -76,11 +78,13 @@ class _MenuClockState extends State<MenuClock> {
 
   @override
   Widget build(BuildContext context) => Container(
+    key: const Key('menu-information-rail'),
     padding: const EdgeInsets.fromLTRB(16, 8, 20, 8),
     decoration: const BoxDecoration(
       border: Border(left: BorderSide(color: BridgeInk.blue, width: 1)),
     ),
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.preferences.showClock)
@@ -132,6 +136,13 @@ class _MenuClockState extends State<MenuClock> {
               ),
             ],
           ),
+        ],
+        if (widget.desktopWidget case final item?) ...[
+          if (widget.preferences.showClock ||
+              widget.preferences.showDate ||
+              widget.preferences.showPresence)
+            const SizedBox(height: 12),
+          item,
         ],
       ],
     ),

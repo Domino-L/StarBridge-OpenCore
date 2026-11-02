@@ -68,6 +68,21 @@ internal static class OverlayLocalSelfTests
             eventModel.Refresh(new(moved.Scene.Players), eventSettings, OverlayRosterSelectionSettings.Default,
                 "zh", true, moved.Command, PlayerPresenceKind.InGame, local.Server.Shard!, moved.Scene.Context);
             Check(eventModel.EventNotifications.Count == count, "Repeated identical refresh never repeats the location event.");
+            // Same place, evidence ageing and recovering: the row and the event
+            // cards must not change at all.
+            var selfRow = eventModel.Members.Single().Location;
+            foreach (var state in new[] { "likely", "possible", "confirmed", "likely", "confirmed" })
+            {
+                var drift = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, "zh",
+                    localSession: local with { Location = new(state, "Next fixture", "新地点") },
+                    localPresence: PlayerPresenceKind.InGame);
+                eventModel.Refresh(new(drift.Scene.Players), eventSettings, OverlayRosterSelectionSettings.Default,
+                    "zh", true, drift.Command, PlayerPresenceKind.InGame, local.Server.Shard!, drift.Scene.Context);
+                Check(eventModel.Members.Single().Location == selfRow,
+                    $"Same place at trust {state} keeps the row unchanged; actual: {eventModel.Members.Single().Location}");
+                Check(eventModel.EventNotifications.Count == count,
+                    $"Same place at trust {state} must not queue a location event.");
+            }
             var disabled = eventSettings with { ShowEventNotifications = false };
             eventModel.Refresh(new(localRoom.Scene.Players), disabled, OverlayRosterSelectionSettings.Default,
                 "zh", true, localRoom.Command, PlayerPresenceKind.InGame, local.Server.Shard!, localRoom.Scene.Context);

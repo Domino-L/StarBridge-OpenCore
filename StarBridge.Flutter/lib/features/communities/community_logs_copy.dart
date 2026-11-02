@@ -3,6 +3,8 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityLogsCopy = <String, (String, String, String)>{
+  'activityReading': ('正在读取组织日志…', '正在讀取組織日誌…', 'Loading organization logs…'),
+  'activityDeleting': ('正在删除日志…', '正在刪除日誌…', 'Deleting log entry…'),
   'title': ('组织日志', '組織日誌', 'Organization log'),
   'All': ('全部', '全部', 'All'),
   '成员': ('成员', '成員', 'Members'),

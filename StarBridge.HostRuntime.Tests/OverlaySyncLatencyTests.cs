@@ -25,7 +25,8 @@ internal static class OverlaySyncLatencyTests
             RoomReadCancelsOldScope, NativeCompositionHonorsVisibleDemand, ModuleRoomDemandWithoutFirstFrame,
             ModuleRoomDemandCancelsOldScope, ModuleCommunityDemandWithoutFirstFrame, ModuleAutomaticDiscoveryIsBounded, RoomDiscoverySchedule,
             RoomRefreshRecoversFromScopeFailure, LegacyPasswordLoginTests.OverlayLiveChangeAdapter,
-            SlowRecoveryStillExpiresAuthority, AnonymousModulesStayLocal })
+            SlowRecoveryStillExpiresAuthority, AnonymousModulesStayLocal, StandbyKeepsModuleSourcesRenewed,
+            RosterEditorFollowsMemberModuleSource })
         {
             try { await test(); Console.WriteLine("PASS sync latency " + test.Method.Name); }
             catch (Exception error) { failures.Add(test.Method.Name + ": " + error.Message); }
@@ -54,16 +55,78 @@ internal static class OverlaySyncLatencyTests
         return Task.CompletedTask;
     }
 
+    // The HUD closed while the game runs: module sources keep renewing with the
+    // same reads (rooms at the 15-second background cadence), and stop with it.
+    private static async Task StandbyKeepsModuleSourcesRenewed()
+    {
+        var host = new CompositionHost { HasRoom = true, ServeCommunities = true };
+        var key = OverlaySceneChoiceStore.Hash(Owner);
+        var sources = new OverlayPresetSources(new(OverlaySourceMode.Room), modules:
+            new Dictionary<OverlaySourceModule, OverlaySourceBinding> { [OverlaySourceModule.Overview] = new(OverlaySourceMode.Community, "A", key) });
+        var sink = new LiveSink { Standby = true, Demand = new(sources, [OverlaySourceModule.Members, OverlaySourceModule.Overview]) };
+        using var runtime = new AccountBridgeRuntime(host);
+        runtime.ConfigureOverlayCommunitySource(Path.Combine(Path.GetTempPath(), "starbridge-standby-" + Guid.NewGuid().ToString("N")));
+        runtime.ConfigureLiveOverlayUpdates(sink);
+        await host.RoomRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var until = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < until && !host.CommunityReads.ContainsKey("A")) await Task.Delay(20);
+        Check(host.CommunityReads.ContainsKey("A"), "Standby renews the HUD's organization source without a visible window.");
+        var rooms = host.RoomReads;
+        await Task.Delay(2200);
+        Check(host.RoomReads == rooms, "Standby renews the room at the background cadence, not every second.");
+        sink.Visible = true;
+        sink.Standby = false;
+        until = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < until && host.RoomReads == rooms) await Task.Delay(20);
+        Check(host.RoomReads > rooms, "Showing the HUD returns the room to its live cadence at once.");
+        sink.Visible = false;
+        await Task.Delay(400);
+        var reads = host.RoomReads + host.CommunityReads.Values.Sum();
+        await Task.Delay(2200);
+        Check(host.RoomReads + host.CommunityReads.Values.Sum() == reads, "Without display or standby demand nothing is read.");
+    }
+
+    // Field report 2026-10-18: the HUD showed a preset-bound organization's members
+    // while "choose visible members" offered none, because candidates came from the
+    // legacy account-level selection. They must follow the member module's source,
+    // and a lapsed roster is read once for the editor (names only, no lease).
+    private static async Task RosterEditorFollowsMemberModuleSource()
+    {
+        var keyA = OverlayMemberIdentity.FromAccountId("roster-editor-a")!;
+        var key = OverlayMemberIdentity.FromAccountId("roster-editor-b")!;
+        var host = new CompositionHost { HasRoom = false, ServeCommunities = true, CommunityMembers = new()
+        {
+            ["A"] = [new("member-a", "Member A", "Member", "InGame", "", "", "US", false) { PreferenceKey = keyA }],
+            ["B"] = [new("member-b", "Member B", "Member", "InGame", "", "", "US", false) { PreferenceKey = key }]
+        } };
+        // The legacy account-level choice is "auto"; the member module is bound to B.
+        var sources = new OverlayPresetSources(new(OverlaySourceMode.Community, "B", OverlaySceneChoiceStore.Hash(Owner)));
+        var sink = new LiveSink { Demand = new(sources, [OverlaySourceModule.Members]) };
+        using var runtime = new AccountBridgeRuntime(host);
+        runtime.ConfigureOverlayCommunitySource(Path.Combine(Path.GetTempPath(), "starbridge-roster-editor-" + Guid.NewGuid().ToString("N")));
+        runtime.ConfigureLiveOverlayUpdates(sink);
+        async Task<BridgeEnvelope> Send(string name, object payload) => (await runtime.DispatchAsync(
+            BridgeEnvelope.Request(name, Guid.NewGuid().ToString(), host.CurrentGeneration, payload, Owner), default)).Response;
+        var read = await Send("overlayRoster.read", new { schemaVersion = 1 });
+        Check(read.Error is null, "the roster editor reads in module mode: " + read.Error?.Code);
+        var rows = read.Payload.GetProperty("rows");
+        Check(rows.GetArrayLength() == 1 && rows[0].GetProperty("key").GetString() == key &&
+              rows[0].GetProperty("name").GetString() == "Member B",
+            $"candidates come from the member module's bound organization, even with the HUD closed ({rows})");
+        var pinned = await Send("overlayRoster.update", new { schemaVersion = 1, revision = read.Payload.GetProperty("revision").GetInt64(), key, mode = "pin" });
+        Check(pinned.Error is null, "a module-source member can be pinned: " + pinned.Error?.Code);
+    }
+
     private sealed class Clock : TimeProvider
     {
         internal TimeSpan Period;
         internal DateTimeOffset Now = DateTimeOffset.UnixEpoch;
         public override DateTimeOffset GetUtcNow() => Now;
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        { Period = period; return new Timer(); }
-        private sealed class Timer : ITimer
+        { Period = period; return new Timer(this); }
+        private sealed class Timer(Clock clock) : ITimer
         {
-            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+            public bool Change(TimeSpan dueTime, TimeSpan period) { clock.Period = period; return true; }
             public void Dispose() { }
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
@@ -456,10 +519,12 @@ internal static class OverlaySyncLatencyTests
     {
         internal bool Visible;
         internal bool TemporarilyHidden;
+        internal bool Standby;
         internal int Refreshes;
         internal InformationOverlayModuleDemand? Demand;
         public bool IsVisible => Volatile.Read(ref Visible);
         public bool HasDisplayDemand => IsVisible || Volatile.Read(ref TemporarilyHidden);
+        public bool HasStandbyDemand => Volatile.Read(ref Standby);
         public InformationOverlayModuleDemand? ModuleDemand => Volatile.Read(ref Demand);
         public void RequestContentRefresh() => Interlocked.Increment(ref Refreshes);
         public ValueTask<bool> TryPresentActivityAsync(SharedActivityNotice notice, CancellationToken token) => ValueTask.FromResult(true);
@@ -490,6 +555,7 @@ internal static class OverlaySyncLatencyTests
         }
         internal readonly TaskCompletionSource RoomRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Func<CancellationToken, Task>? PendingRoomRead;
+        internal Dictionary<string, IReadOnlyList<InformationOverlayCommunityMember>> CommunityMembers = [];
         public async Task<StarBridge.HostRuntime.PartyRooms.RoomDirectoryView> GetPartyRoomsAsync(BridgeAccountContext context, CancellationToken token)
         { Interlocked.Increment(ref RoomReads); RoomRead.TrySetResult(); if (PendingRoomRead is { } pending) await pending(token); return new("fixture-room", DateTimeOffset.UtcNow, []); }
         public Task<SharedActivityRead> ReadActivityAsync(BridgeAccountContext owner, long generation, string scope, string id, CancellationToken token)
@@ -502,7 +568,7 @@ internal static class OverlaySyncLatencyTests
             if (!ServeCommunities) throw new Exception("room display must not read unrelated organizations");
             CommunityReads.AddOrUpdate(target.Code, 1, (_, count) => count + 1);
             if (PendingCommunityRead is { } pending) await pending(target.Code, token);
-            return new InformationOverlayCommunityContent(target.Code, target.Name, [])
+            return new InformationOverlayCommunityContent(target.Code, target.Name, CommunityMembers.GetValueOrDefault(target.Code, []))
                 { AnnouncementText = "Notice " + target.Code + (NoticeVersion == 0 ? "" : "-" + NoticeVersion) };
         }
         private static Task<T> Unexpected<T>() => throw new Exception("Unexpected account operation");

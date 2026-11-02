@@ -1,14 +1,27 @@
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+
 import 'package:flutter/services.dart';
 
 import '../../app/localization/app_strings.dart';
 import 'direct_messages_module.dart';
 import 'chat_send_shortcuts.dart';
+import 'chat_connection_notice.dart';
 
 class DirectMessageComposer extends StatefulWidget {
-  const DirectMessageComposer(this.module, {this.onSend, super.key});
+  const DirectMessageComposer(
+    this.module, {
+    this.onSend,
+    this.connection,
+    super.key,
+  });
   final DirectMessagesModule module;
   final VoidCallback? onSend;
+
+  /// B1 status line owner; null keeps the previous composer.
+  final ChatConnectionNotice? connection;
   @override
   State<DirectMessageComposer> createState() => _DirectMessageComposerState();
 }
@@ -41,6 +54,8 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.connection case final connection?)
+            ChatConnectionStatus(connection),
           if (module.sendStatus != null)
             Semantics(
               liveRegion: true,
@@ -48,9 +63,11 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
             ),
           if (!module.canSend && !module.busy && module.error == null)
             Text(
-              t(module.state == 'request_outgoing'
-                  ? 'send.request_pending'
-                  : 'send.notAllowed'),
+              t(
+                module.state == 'request_outgoing'
+                    ? 'send.request_pending'
+                    : 'send.notAllowed',
+              ),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           const SizedBox(height: 6),
@@ -59,25 +76,32 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
             onSend: () {
               if (module.readyToSend) (onSend ?? module.send)();
             },
-            child: TextFormField(
-              key: ValueKey('${module.selected?.ref}:${module.draftRevision}'),
-              controller: _controller,
-              enabled: !module.sending && !module.awaitingConfirmation,
-              minLines: 3,
-              maxLines: 4,
-              maxLength: 1000,
-              // Count UTF-16 code units, matching the existing .NET contract.
-              maxLengthEnforcement: MaxLengthEnforcement.none,
-              onChanged: module.editDraft,
-              decoration: InputDecoration(
-                hintText: t('send.input'),
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                counterText: '${module.draft.length}/1000',
-                errorText: module.draft.trim().length > 1000
-                    ? t('send.tooLong')
-                    : null,
+            child: StarBridgeFieldFrame(
+              // A2: typing continues while earlier messages are sending.
+              enabled: true,
+              error: module.draft.trim().length > 1000,
+              builder: (_, focus) => TextFormField(
+                focusNode: focus,
+                key: ValueKey(
+                  '${module.selected?.ref}:${module.draftRevision}',
+                ),
+                controller: _controller,
+                minLines: 3,
+                maxLines: 4,
+                maxLength: 1000,
+                // Count UTF-16 code units, matching the existing .NET contract.
+                maxLengthEnforcement: MaxLengthEnforcement.none,
+                onChanged: module.editDraft,
+                decoration: InputDecoration(
+                  hintText: t('send.input'),
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  counterText: '${module.draft.length}/1000',
+                  errorText: module.draft.trim().length > 1000
+                      ? t('send.tooLong')
+                      : null,
+                ),
               ),
             ),
           ),
@@ -89,9 +113,12 @@ class _DirectMessageComposerState extends State<DirectMessageComposer> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-              FilledButton(
-                onPressed: module.readyToSend ? onSend ?? module.send : null,
-                child: Text(t(module.sending ? 'send.sending' : 'send.action')),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.primary,
+                onActivate: module.readyToSend
+                    ? (_) => (onSend ?? module.send)()
+                    : null,
+                child: Text(t('send.action')),
               ),
             ],
           ),

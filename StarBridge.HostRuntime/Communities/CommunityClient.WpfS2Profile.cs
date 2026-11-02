@@ -13,7 +13,7 @@ namespace StarBridge.HostRuntime.Communities;
 internal sealed partial class CommunityClient
 {
     private sealed record WpfS2ProfileEdit(string Code, string Scope, string TargetRef, string ViewerId,
-        long Revision, DateTimeOffset Expires);
+        long Revision, bool WideImagesSupported, DateTimeOffset Expires);
     private readonly ConcurrentDictionary<string, WpfS2ProfileEdit> _wpfS2ProfileEdits = new();
 
     internal Task<object> ReadWpfS2ProfileAsync(string bearer, JsonElement body, string scope, string viewerId,
@@ -41,15 +41,16 @@ internal sealed partial class CommunityClient
             Text(row, "code", 256).Equals(target.Code, StringComparison.OrdinalIgnoreCase));
         if (fleet.ValueKind == JsonValueKind.Undefined) throw new AccountBridgeHostException("communities.notAllowed");
         var ownership = await ReadWpfS2Ownership(bearer, fleet, viewerId, token);
-        var canEdit = ownership == WpfS2Ownership.Self || WpfS2HasPermission(fleet, viewerId, "canManageFleetInfo");
+        var canEdit = new[] { "fleet.profile.edit", "fleet.avatar.edit", "fleet.banner.edit" }.Any(id => WpfS2HasPermissionId(fleet, viewerId, id, ownership));
         if (!canEdit) throw new AccountBridgeHostException("communities.notAllowed");
-        return CaptureWpfS2Profile(fleet, target.Code, scope, reference!, viewerId, epoch);
+        return CaptureWpfS2Profile(fleet, target.Code, scope, reference!, viewerId, ownership, epoch);
     });
 
     private object CaptureWpfS2Profile(JsonElement fleet, string code, string scope, string targetRef,
-        string viewerId, long epoch)
+        string viewerId, WpfS2Ownership ownership, long epoch)
     {
         var revision = WpfS2ProfileRevision(fleet);
+        var wideImagesSupported = SupportsWideImages(fleet);
         var fields = new Dictionary<string, object?>();
         foreach (var (key, max) in ProfileTexts)
             fields[key] = WpfS2ProfileText(fleet, key, max, key == "description");
@@ -68,7 +69,7 @@ internal sealed partial class CommunityClient
             _targets[targetRef] = new(code, scope, _targetClock.GetUtcNow().AddMinutes(5),
                 Text(fleet, "name", 512), viewerId);
             var editRef = Guid.NewGuid().ToString("N");
-            _wpfS2ProfileEdits[editRef] = new(code, scope, targetRef, viewerId, revision,
+            _wpfS2ProfileEdits[editRef] = new(code, scope, targetRef, viewerId, revision, wideImagesSupported,
                 _targetClock.GetUtcNow().AddMinutes(30));
             return new
             {
@@ -78,9 +79,14 @@ internal sealed partial class CommunityClient
                 code,
                 name = Text(fleet, "name", 512),
                 profileRevision = revision,
-                hasLogo = !string.IsNullOrEmpty(Optional(fleet, "logoImageData", 1024 * 1024)),
-                hasBanner = !string.IsNullOrEmpty(Optional(fleet, "bannerImageData", 3 * 1024 * 1024)),
-                access = new { canEditProfile = true, canEditLogo = true, canEditBanner = true },
+            hasLogo = WpfS2HasMedia(fleet, "logo"),
+            hasBanner = WpfS2HasMedia(fleet, "banner"),
+            hasBackground = WpfS2HasMedia(fleet, "background"),
+                wideImagesSupported,
+                access = new {
+                    canEditProfile = WpfS2HasPermissionId(fleet, viewerId, "fleet.profile.edit", ownership),
+                    canEditLogo = WpfS2HasPermissionId(fleet, viewerId, "fleet.avatar.edit", ownership),
+                    canEditBanner = WpfS2HasPermissionId(fleet, viewerId, "fleet.banner.edit", ownership) },
                 profile
             };
         }
@@ -103,16 +109,27 @@ internal sealed partial class CommunityClient
                 return previous.Hash == hash ? previous.Result : new("rejected", "requestChanged");
             if (_profileAttempts.Count >= 256) return new("rejected", "refreshRequired");
             var edit = ResolveWpfS2ProfileEdit(editRef, scope, viewerId);
+            var changes = body.GetProperty("changes");
+            if (!edit.WideImagesSupported && RequiresWideImages(changes))
+                return new("rejected", "wideImagesUnsupported");
             var fleet = (await WpfS2Membership(bearer, token)).SingleOrDefault(row =>
                 Text(row, "code", 256).Equals(edit.Code, StringComparison.OrdinalIgnoreCase));
             current();
             if (fleet.ValueKind == JsonValueKind.Undefined) return new("rejected", "notAllowed");
+            if (!SupportsWideImages(fleet) && RequiresWideImages(changes))
+                return new("rejected", "wideImagesUnsupported");
             var ownership = await ReadWpfS2Ownership(bearer, fleet, viewerId, token);
             current();
-            if (ownership != WpfS2Ownership.Self && !WpfS2HasPermission(fleet, viewerId, "canManageFleetInfo"))
-                return new("rejected", "notAllowed");
+            foreach (var change in body.GetProperty("changes").EnumerateObject())
+            {
+                var permission = change.Name switch {
+                    "logoText" or "logoImageData" or "clearLogoImage" => "fleet.avatar.edit",
+                    "bannerImageData" or "clearBannerImage" or "backgroundImageData" or "clearBackgroundImage" => "fleet.banner.edit",
+                    _ => "fleet.profile.edit"
+                };
+                if (!WpfS2HasPermissionId(fleet, viewerId, permission, ownership)) return new("rejected", "notAllowed");
+            }
             if (WpfS2ProfileRevision(fleet) != edit.Revision) return new("rejected", "conflict");
-            var changes = body.GetProperty("changes");
             var outgoing = BuildWpfS2ProfileUpdate(fleet, edit.Code, edit.Revision, changes);
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, "/api/fleets/info"))
                 { Content = JsonContent.Create(outgoing) };
@@ -223,8 +240,8 @@ internal sealed partial class CommunityClient
             ["activeTime"] = Value("activeTime", ""),
             ["joinPolicy"] = Value("joinPolicy", "Open"),
             ["logoText"] = Value("logoText", code),
-            ["logoImageData"] = Value("logoImageData"),
-            ["bannerImageData"] = Value("bannerImageData"),
+            // Media bodies are sent only when explicitly changed.
+
             ["eventLog"] = null,
             ["emailNotificationsEnabled"] = Value("emailNotificationsEnabled", true),
             ["activityWindows"] = Value("activityWindows", Array.Empty<object>()),
@@ -246,6 +263,7 @@ internal sealed partial class CommunityClient
             ["publicShowExternalContacts"] = Value("publicShowExternalContacts", false),
             ["clearLogoImage"] = false,
             ["clearBannerImage"] = false,
+            ["clearBackgroundImage"] = false,
             ["activeSystemIds"] = Value("activeSystemIds", Array.Empty<string>()),
             ["language"] = Value("language", "zh-CN"),
             ["websiteUrl"] = Value("websiteUrl", ""),
@@ -262,7 +280,7 @@ internal sealed partial class CommunityClient
             {
                 "name" => "name",
                 "logoText" or "logoImageData" or "clearLogoImage" => "logo",
-                "clearBannerImage" => "banner",
+                "bannerImageData" or "clearBannerImage" => "banner", "backgroundImageData" or "clearBackgroundImage" => "background",
                 "description" => "description",
                 "emailNotificationsEnabled" => "email-notifications",
                 _ => "profile"

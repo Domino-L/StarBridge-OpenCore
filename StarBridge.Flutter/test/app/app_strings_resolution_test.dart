@@ -6,6 +6,34 @@ import 'package:starbridge_flutter/app/localization/app_strings_zh_cn.dart';
 import 'package:starbridge_flutter/app/localization/app_strings_zh_tw.dart';
 
 void main() {
+  test('identity-link conflict and new-challenge retry are localized in every supported language', () {
+    for (final locale in AppStrings.supportedLocales) {
+      final strings = AppStrings.resolve(locale);
+      for (final key in [
+        'account.error.compatibilityConflict',
+        'account.error.compatibilityProofRejected',
+      ]) {
+        expect(strings.text(key), isNot(key));
+        expect(strings.text(key), isNotEmpty);
+      }
+    }
+    expect(
+      AppStrings.resolve(const Locale('zh', 'CN'))
+          .text('account.error.compatibilityConflict'),
+      contains('请使用原已关联账号登录'),
+    );
+    expect(
+      AppStrings.resolve(const Locale('en', 'US'))
+          .text('account.error.compatibilityConflict'),
+      contains('originally linked account'),
+    );
+    expect(
+      AppStrings.resolve(const Locale('zh', 'TW'))
+          .text('account.error.compatibilityProofRejected'),
+      contains('重新發起'),
+    );
+  });
+
   for (final scenario in [
     (const Locale('zh', 'CN'), simplifiedAppStrings),
     (const Locale('zh', 'TW'), traditionalAppStrings),

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_field.dart';
+
 import '../../app/localization/app_strings.dart';
 import 'overlay_settings_help.dart';
 import '../../platform/window/menu_restore_preferences.dart';
@@ -10,10 +13,12 @@ class MenuRestoreEditor extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
     this.showTitle = true,
   });
   final MenuRestorePreferences value;
   final bool showTitle;
+  final bool enabled;
   final ValueChanged<MenuRestorePreferences> onChanged;
   @override
   Widget build(BuildContext context) {
@@ -25,53 +30,63 @@ class MenuRestoreEditor extends StatelessWidget {
         children: [
           if (showTitle)
             Text(text('title'), style: Theme.of(context).textTheme.titleLarge),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-restore-session'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('session')),
-            subtitle: OverlaySettingsHelp(text('sessionHint')),
+            label: text('session'),
+            subtitle: text('sessionHint'),
+            subtitleWidget: OverlaySettingsHelp(text('sessionHint')),
             value: value.inSession,
-            onChanged: (v) => onChanged(value.change(inSession: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change(inSession: v)),
           ),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-restore-restart'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('restart')),
-            subtitle: OverlaySettingsHelp(text('restartHint')),
+            label: text('restart'),
+            subtitle: text('restartHint'),
+            subtitleWidget: OverlaySettingsHelp(text('restartHint')),
             value: value.afterRestart,
-            onChanged: (v) => onChanged(value.change(afterRestart: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change(afterRestart: v)),
           ),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-restore-last-focus'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('focus')),
-            subtitle: OverlaySettingsHelp(text('focusHint')),
+            label: text('focus'),
+            subtitle: text('focusHint'),
+            subtitleWidget: OverlaySettingsHelp(text('focusHint')),
             value: value.lastFocus,
-            onChanged: (v) => onChanged(value.change(lastFocus: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change(lastFocus: v)),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: ValueKey('menu-restore-crash-${value.crashRecovery}'),
-            initialValue: value.crashRecovery,
-            isExpanded: true,
+          StarBridgeSelectField<String>(
+            key: ValueKey('menu-restore-crash'),
+            identity: 'menu-restore-crash',
+            value: value.crashRecovery,
             decoration: InputDecoration(labelText: text('crash')),
-            items: [
+            options: [
               for (final id in MenuRestorePreferences.recoveryModes)
-                DropdownMenuItem(value: id, child: Text(text(id))),
+                StarBridgeSelectOption(value: id, label: text(id)),
             ],
-            onChanged: (v) {
-              if (v != null) onChanged(value.change(crashRecovery: v));
-            },
+            onSelected: !enabled
+                ? null
+                : (v, _) {
+                    onChanged(value.change(crashRecovery: v));
+                  },
           ),
           const SizedBox(height: 8),
           OverlaySettingsHelp(text('crashHint')),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-safe-next-launch'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('safeNext')),
-            subtitle: OverlaySettingsHelp(text('safeHint')),
+            label: text('safeNext'),
+            subtitle: text('safeHint'),
+            subtitleWidget: OverlaySettingsHelp(text('safeHint')),
             value: value.safeModeNextLaunch,
-            onChanged: (v) => onChanged(value.change(safeModeNextLaunch: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change(safeModeNextLaunch: v)),
           ),
           const SizedBox(height: 12),
           OverlaySettingsHelp(text('privacy')),

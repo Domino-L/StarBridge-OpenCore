@@ -9,6 +9,7 @@ Color presenceColor(ColorTokens colors, String presenceKey) =>
       'presence.online' => colors.info,
       'presence.inGame' => colors.success,
       'presence.away' => colors.warning,
+      'presence.manualOffline' => colors.danger,
       'presence.offline' || 'presence.notInGame' => colors.offline,
       _ => colors.warning,
     };

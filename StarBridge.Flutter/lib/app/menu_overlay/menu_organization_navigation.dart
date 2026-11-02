@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../features/communities/community_section_navigation.dart';
 import '../../features/communities/community_workspace_copy.dart';
 import 'menu_feature_view.dart';
@@ -40,8 +41,10 @@ class MenuOrganizationNavigation extends StatelessWidget {
             },
           ),
         ),
-        TextButton(
-          onPressed: view.busy ? null : () => onAction('refresh', ''),
+        StarBridgeActionButton(
+          controlKey: const ValueKey('menu-organization-tab-refresh'),
+          kind: StarBridgeActionKind.quiet,
+          onActivate: view.busy ? null : (_) => onAction('refresh', ''),
           child: Text(workspaceText(context, 'refresh')),
         ),
       ],

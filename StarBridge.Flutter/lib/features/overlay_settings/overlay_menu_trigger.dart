@@ -40,7 +40,8 @@ class OverlayMenuTrigger extends StatelessWidget {
                 child: Text(
                   label,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: Theme.of(context).textTheme.labelLarge
                       ?.copyWith(color: foreground),
                 ),

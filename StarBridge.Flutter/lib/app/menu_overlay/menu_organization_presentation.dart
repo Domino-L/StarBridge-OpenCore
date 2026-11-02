@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:async';
 
 import '../../features/communities/communities_module.dart';
@@ -16,7 +18,10 @@ List<Map<String, Object?>> organizationChannelRows(
     {
       'title': item.name,
       'avatar': logos[item.targetRef],
-      'detail': selected == item.targetRef ? '当前组织频道' : '组织频道',
+      'selected': selected == item.targetRef,
+      'detail': selected == item.targetRef
+          ? MenuOverlayText('menu.overlay.organizations.currentChannel')
+          : MenuOverlayText('menu.overlay.comms.organizationChannel'),
       'buttons': [action(item)],
     },
 ];
@@ -46,18 +51,24 @@ bool organizationTransientRead(Object error) =>
 
 Map<String, Object?> organizationReadFailure(Object error, String stage) {
   final label = switch (stage) {
-    'workspace' => '组织资料',
-    'chat' => '组织聊天',
-    _ => '已加入组织列表',
+    'workspace' => MenuOverlayText('menu.overlay.organizations.profile'),
+    'chat' => MenuOverlayText('menu.overlay.organizations.chat'),
+    _ => MenuOverlayText('menu.overlay.organizations.joinedList'),
   };
   final reason = error is TimeoutException
-      ? '读取超时'
+      ? MenuOverlayText('menu.overlay.errors.timeout')
       : error is CommunityFailure && error.code == 'dataInvalid'
-      ? '返回的数据格式不正确'
+      ? MenuOverlayText('menu.overlay.errors.invalidData')
       : error is CommunityFailure && error.code == 'refreshRequired'
-      ? '访问引用已过期'
-      : '暂时无法读取';
-  return {'state': 'unavailable', 'notice': '$label$reason，请刷新重试。'};
+      ? MenuOverlayText('menu.overlay.errors.expiredAccess')
+      : MenuOverlayText('menu.overlay.errors.unavailable');
+  return {
+    'state': 'unavailable',
+    'notice': MenuOverlayText('menu.overlay.errors.readReason', {
+      'label': label,
+      'reason': reason,
+    }),
+  };
 }
 
 Map<String, Object?>? organizationRetainedRead(
@@ -68,7 +79,7 @@ Map<String, Object?>? organizationRetainedRead(
     : {
         ...cached,
         'refreshing': false,
-        'notice': quiet ? '' : '暂时无法连接，已保留聊天记录和草稿。',
+        'notice': quiet ? '' : MenuOverlayText('menu.overlay.comms.retained'),
       };
 
 Map<String, Object?> organizationNavigationProjection(
@@ -161,7 +172,9 @@ Map<String, Object?> organizationPortraits(
 Map<String, Object?> organizationShipPresentation(CommunitySharedShip ship) => {
   'owner': ship.ownerCallsign.isEmpty ? ship.ownerGameName : ship.ownerCallsign,
   'presence': organizationPresence(ship.ownerOnline, ship.ownerLiveStatus),
-  'price': ShipCatalogDisplay.usdText(ship.catalogPriceUsd) ?? '未公布',
+  'price':
+      ShipCatalogDisplay.usdText(ship.catalogPriceUsd) ??
+      MenuOverlayText('menu.overlay.organizations.priceUnpublished'),
   'spec': ship.displaySpec,
   'role': ship.displayRole,
   'status': ship.catalogStatus,

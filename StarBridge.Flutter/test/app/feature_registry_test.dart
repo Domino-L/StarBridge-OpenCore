@@ -110,7 +110,7 @@ void main() {
     );
   });
 
-  test('account menu contains profile and account settings but not hangar', () {
+  test('account menu contains profile, achievements and account settings', () {
     final production = AppComposition.forShellReview(
       windowChrome: InMemoryWindowChrome(),
     );
@@ -119,7 +119,7 @@ void main() {
       production.features
           .inRegion(NavigationRegion.accountMenu)
           .map((item) => item.id),
-      ['personal-profile', 'account-and-identity'],
+      ['personal-profile', 'achievements', 'account-and-identity'],
     );
     expect(
       production.features

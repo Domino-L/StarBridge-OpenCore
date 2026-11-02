@@ -1,6 +1,7 @@
 // Approved Claude IconSystemV2 artwork; geometry retained without redesign.
 // Split by responsibility to meet the application architecture gates.
 import 'starbridge_icons_v2_navigation.dart';
+import 'starbridge_icons_v2_achievements.dart';
 import 'starbridge_icons_v2_social.dart';
 import 'starbridge_icons_v2_permissions.dart';
 import 'starbridge_icons_v2_game.dart';
@@ -14,6 +15,7 @@ export 'starbridge_icons_v2_pen.dart';
 
 final List<IconSpec> catalog = List.unmodifiable([
   ...navigationIconsV2,
+  ...achievementIconsV2,
   ...socialIconsV2,
   ...permissionsIconsV2,
   ...gameIconsV2,

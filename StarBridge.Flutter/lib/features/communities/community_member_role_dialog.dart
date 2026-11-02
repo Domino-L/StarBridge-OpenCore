@@ -1,9 +1,21 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../common/social_read_activity.dart';
+
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import 'community_member_role_port.dart';
 import 'community_member_role_controller.dart';
 import 'community_member_role_copy.dart';
@@ -30,13 +42,24 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
     widget.targetRef,
     widget.memberRef,
   );
-  final confirmations = <Route<bool>>[];
+  final confirmations = <StarBridgeDialogRoute<bool>>[];
   bool confirming = false;
   StreamSubscription<void>? _contextSubscription;
+  late final SocialReadActivityBinding _reading, _sending;
   String t(String key) => memberRoleText(context, key);
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _sending = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(_changed);
     _contextSubscription = widget.contextInvalidations?.listen(
       (_) => model.invalidate(),
@@ -48,7 +71,7 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
     if (!mounted) return;
     if (model.invalidated) {
       for (final route in confirmations.toList()) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        retireStarBridgeDialog(route);
       }
     }
     setState(() {});
@@ -56,6 +79,11 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
 
   @override
   void dispose() {
+    _reading.dispose();
+    _sending.dispose();
+    for (final route in confirmations.toList()) {
+      retireStarBridgeDialog(route);
+    }
     unawaited(_contextSubscription?.cancel());
     model.removeListener(_changed);
     model.dispose();
@@ -65,26 +93,43 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
   Future<bool> _confirm(String title, String text, String action) async {
     if (confirming || model.invalidated) return false;
     setState(() => confirming = true);
-    final route = DialogRoute<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(child: Text(text)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    confirmations.add(route);
+    StarBridgeDialogRoute<bool>? route;
     try {
-      return await Navigator.of(context).push(route) == true &&
+      return await showStarBridgeDialog<bool>(
+                context,
+                useRootNavigator: false,
+                builder: (context) => AlertDialog(
+                  title: Text(title),
+                  content: SingleChildScrollView(child: Text(text)),
+                  actions: [
+                    StarBridgeActionButton(
+                      controlKey: const Key('member-role-confirm-cancel'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: false,
+                      ),
+                      child: Text(memberRoleText(context, 'cancel')),
+                    ),
+                    StarBridgeActionButton(
+                      controlKey: const Key('member-role-confirm-accept'),
+                      kind: StarBridgeActionKind.primary,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: true,
+                      ),
+                      child: Text(action),
+                    ),
+                  ],
+                ),
+                onRouteCreated: (opened) {
+                  route = opened;
+                  confirmations.add(opened);
+                },
+              ) ==
+              true &&
           mounted &&
           !model.invalidated;
     } finally {
@@ -93,7 +138,7 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
     }
   }
 
-  Future<void> _close() async {
+  Future<void> _close({InteractionSource? source}) async {
     if (model.submitting || confirming) return;
     if (!model.invalidated &&
         (model.dirty || model.requiresRetryConfirmation) &&
@@ -104,7 +149,12 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
         )) {
       return;
     }
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      dismissStarBridgeDialog(
+        context,
+        source: source ?? currentStarBridgeActivationSource,
+      );
+    }
   }
 
   Future<void> _reload() async {
@@ -136,40 +186,54 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
     }
     if (model.snapshot != snapshot || model.selectedKey != chosen) return;
     await model.save(confirmUncertainRetry: retry);
-    if (mounted && model.saved) Navigator.pop(context, true);
+    if (mounted && model.saved) {
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: true,
+      );
+    }
   }
 
   Widget _option(String key, String name, Color color) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: ListTile(
-      key: ValueKey('assign-option-$key'),
-      enabled: !model.locked && !confirming && model.snapshot!.canAssign,
-      selected: model.selectedKey == key,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: BorderSide(color: context.tokens.surfaces.panel.border),
-      ),
-      leading: StandardIcon(StandardIconSemantic.badge, color: color),
-      title: Tooltip(
-        message: name,
-        child: Text(
-          name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium,
+    child: StarBridgeActionRow(
+      controlKey: ValueKey('assign-option-$key'),
+      semanticLabel: name,
+      semanticSelected: model.selectedKey == key,
+      onActivate: !model.locked && !confirming && model.snapshot!.canAssign
+          ? (_, _) => model.select(key)
+          : null,
+      child: ListTile(
+        enabled: !model.locked && !confirming && model.snapshot!.canAssign,
+        selected: model.selectedKey == key,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(color: context.tokens.surfaces.panel.border),
+        ),
+        leading: StandardIcon(StandardIconSemantic.badge, color: color),
+        title: StarBridgeTooltip(
+          message: name,
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.fade,
+            softWrap: false,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        trailing: StandardIcon(
+          model.selectedKey == key
+              ? StandardIconSemantic.radioButtonChecked
+              : StandardIconSemantic.radioButtonUnchecked,
+          size: 20,
         ),
       ),
-      trailing: StandardIcon(
-        model.selectedKey == key
-            ? StandardIconSemantic.radioButtonChecked
-            : StandardIconSemantic.radioButtonUnchecked,
-        size: 20,
-      ),
-      onTap: () => model.select(key),
     ),
   );
   @override
   Widget build(BuildContext context) {
+    final activity = model.loading ? _reading : _sending;
     final snapshot = model.snapshot;
     return PopScope(
       canPop:
@@ -178,7 +242,7 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
           !confirming &&
           !model.requiresRetryConfirmation,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_close());
+        if (!didPop) unawaited(_close(source: InteractionSource.keyboard));
       },
       child: Dialog(
         insetPadding: const EdgeInsets.all(16),
@@ -205,9 +269,12 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    IconButton(
-                      onPressed: model.submitting || confirming ? null : _close,
-                      tooltip: t('close'),
+                    StarBridgeIconAction(
+                      controlKey: const Key('member-role-close'),
+                      onActivate: model.submitting || confirming
+                          ? null
+                          : (source) => _close(source: source),
+                      label: t('close'),
                       icon: const StandardIcon(StandardIconSemantic.close),
                     ),
                   ],
@@ -215,7 +282,23 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
                 const Divider(),
                 Expanded(
                   child: model.loading || model.submitting
-                      ? const Center(child: CircularProgressIndicator())
+                      ? Center(
+                          child: KeyedSubtree(
+                            key: ValueKey((model.loading, activity.revision)),
+                            child: SocialReadActivity(
+                              key: const ValueKey('role-activity'),
+                              source: activity.source,
+                              opening: activity.opening,
+                              label: t(
+                                model.loading
+                                    ? 'activityLoading'
+                                    : 'activitySending',
+                              ),
+                              height: 4,
+                              circularStandard: true,
+                            ),
+                          ),
+                        )
                       : snapshot == null
                       ? Center(
                           child: Text(
@@ -280,18 +363,24 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
                   runSpacing: 8,
                   alignment: WrapAlignment.end,
                   children: [
-                    TextButton(
-                      onPressed:
+                    StarBridgeActionButton(
+                      controlKey: const Key('member-role-reload'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate:
                           model.loading ||
                               model.submitting ||
                               confirming ||
                               model.invalidated
                           ? null
-                          : _reload,
+                          : (_) => _reload(),
                       child: Text(t('reloadAssignment')),
                     ),
-                    FilledButton(
-                      onPressed: model.canSave && !confirming ? _save : null,
+                    StarBridgeActionButton(
+                      controlKey: const Key('member-role-save'),
+                      kind: StarBridgeActionKind.primary,
+                      onActivate: model.canSave && !confirming
+                          ? (_) => _save()
+                          : null,
                       child: Text(t('assignRole')),
                     ),
                   ],

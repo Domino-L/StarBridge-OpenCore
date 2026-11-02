@@ -51,6 +51,21 @@ internal static class OverlayTemporarySourceBridgeTests
                 "Metadata save preserves temporary selection on the same preset.");
             Check((await Select(OverlaySourceBinding.Follow)).Status == "ok" && runtime.Last.TemporarySource is null,
                 "Explicit restore clears the temporary choice only.");
+            // Releasing the plan's fixed source on the same plan must not leave a
+            // session choice overriding the shared account choice.
+            await Select(OverlaySourceBinding.Automatic);
+            Check(runtime.Last.TemporarySource is not null, "Temporary choice set on a fixed-source plan.");
+            state = store.Load();
+            Check((await Send("overlay.updateWorkspace", new { schemaVersion = 1, action = "configurePresetSources",
+                expectedRevision = state.Revision, presetId = state.ActivePresetId, sources = Wire(OverlaySourceBinding.Follow) })).Status == "ok",
+                "The plan follows the shared choice again.");
+            await Send("overlay.runtime.getState", new { schemaVersion = 1 });
+            Check(runtime.Last.TemporarySource is null, "Following the shared choice drops a leftover temporary choice.");
+            state = store.Load();
+            store.Apply(new(state.Revision, OverlayWorkspaceMutationKind.ConfigurePresetSources,
+                PresetId: state.ActivePresetId, Sources: new(new(OverlaySourceMode.Room))));
+            await Send("overlay.runtime.getState", new { schemaVersion = 1 });
+            Check(runtime.Last.TemporarySource is null, "Fixing the source again does not resurrect the old choice.");
             await Select(OverlaySourceBinding.Automatic);
             state = store.Load();
             Check((await Send("overlay.updateWorkspace", new { schemaVersion = 1, action = "activatePreset", expectedRevision = state.Revision,

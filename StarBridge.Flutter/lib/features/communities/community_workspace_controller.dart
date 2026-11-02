@@ -10,6 +10,7 @@ import 'community_announcements_port.dart';
 import 'community_chat_controller.dart';
 import 'community_chat_port.dart';
 import 'community_chat_attention.dart';
+import 'community_ship_statistics.dart';
 import 'community_ships_controller.dart';
 import 'community_ships_port.dart';
 
@@ -27,6 +28,65 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   final CommunityChatAttention? attention;
   int get chatUnreadCount =>
       attention?.count(targetRef) ?? _chat?.unreadCount ?? 0;
+
+  /// The newest messages already read for this community, oldest first.
+  List<CommunityChatMessage> get chatRecent {
+    final recent = attention?.recent(targetRef) ?? const [];
+    if (recent.isNotEmpty) return recent;
+    final local = _chat?.messages.toList() ?? const [];
+    return local.length <= CommunityChatAttention.recentLimit
+        ? local
+        : local.sublist(local.length - CommunityChatAttention.recentLimit);
+  }
+
+  /// The whole shared fleet for the rail's ships tile, read once per page
+  /// visit with the existing statistics read (user request 2026-10-29). The
+  /// ships page holds the newer answer, and starts from this one.
+  CommunityShipStatistics? get shipSummary =>
+      _ships?.statistics ?? _shipSummary;
+  CommunityShipStatistics? _shipSummary;
+  bool shipSummaryFailed = false;
+  Future<void>? _shipSummaryRead;
+  int _shipSummaryEpoch = 0;
+  void loadShipSummary(String culture) {
+    final source = port;
+    if (_closed ||
+        _shipSummaryRead != null ||
+        shipSummary != null ||
+        source is! CommunityShipsPort ||
+        !(source as CommunityShipsPort).shipsAvailable) {
+      return;
+    }
+    final epoch = ++_shipSummaryEpoch;
+    final target = targetRef;
+    void current() {
+      if (_closed || epoch != _shipSummaryEpoch || target != targetRef) {
+        throw StateError('Stale ship summary');
+      }
+    }
+
+    _shipSummaryRead = () async {
+      try {
+        final result = await readCommunityShipStatistics(
+          source as CommunityShipsPort,
+          target,
+          culture,
+          checkCurrent: current,
+        );
+        current();
+        _shipSummary = result;
+        ships?.holdStatistics(result, culture);
+        shipSummaryFailed = false;
+      } catch (_) {
+        if (_closed || epoch != _shipSummaryEpoch) return;
+        shipSummaryFailed = true;
+      } finally {
+        if (epoch == _shipSummaryEpoch) _shipSummaryRead = null;
+      }
+      if (!_closed) notifyListeners();
+    }();
+  }
+
   void _attentionChanged() {
     if (!_closed) notifyListeners();
   }
@@ -185,6 +245,17 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   late final StreamSubscription<void> _subscription;
   CommunityWorkspace? workspace;
   List<CommunityWorkspaceMember> displayMembers = const [];
+  String memberFilter = 'all';
+  void setMemberFilter(String value) {
+    if (_closed ||
+        !const {'all', 'online', 'inGame'}.contains(value) ||
+        memberFilter == value) {
+      return;
+    }
+    memberFilter = value;
+    notifyListeners();
+  }
+
   bool _deferMemberOrder = false;
 
   void setMemberListHovered(bool hovered) {
@@ -198,6 +269,27 @@ final class CommunityWorkspaceController extends ChangeNotifier {
 
   final Map<String, Uint8List> _images = {};
   final Set<String> _pendingImages = {}, _failedImages = {};
+  int _downloadableEpoch = 0;
+  bool _downloadablePaused = false;
+  bool _downloadableReferencesStale = false;
+
+  /// Preserve the mixed avatar pipeline and its physical worker quota. Only
+  /// downloaded organization decorations belong to this maintenance boundary.
+  void setImageMaintenancePaused(bool paused) {
+    if (_closed || paused == _downloadablePaused) return;
+    _downloadablePaused = paused;
+    _downloadableEpoch++;
+    _downloadableReferencesStale = true;
+    for (final key in const ['logo', 'banner', 'background']) {
+      _images.remove(key);
+      _pendingImages.remove(key);
+      _failedImages.remove(key);
+    }
+    mediaFailed = _failedImages.isNotEmpty;
+    _deferredMedia = true;
+    notifyListeners();
+  }
+
   Uint8List? image(String key) => _images[key];
   bool imageLoading(String key) => _pendingImages.contains(key);
   bool imageFailed(String key) => _failedImages.contains(key);
@@ -211,9 +303,35 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   Future<void>? _mediaRead;
   int? _mediaReadEpoch;
   bool get showProgress => busy && !_silentRead;
+  // Existing admitted read identity, exposed only for wait presentation.
+  int? get readEpoch => busy ? _epoch : null;
   int _epoch = 0, _mediaEpoch = 0;
   bool _closed = false;
   bool _activityPending = false;
+
+  // A transient failure (relay restarting, 502) re-reads by itself while this
+  // workspace is open: 3 s, 6 s, 12 s, 24 s, then every 30 s (user request
+  // 2026-10-23). Authority failures never retry here.
+  static const _recoverySeconds = [3, 6, 12, 24, 30];
+  Timer? _recovery;
+  int _recoveryAttempt = 0;
+  void _scheduleRecovery() {
+    _recovery?.cancel();
+    _recovery = null;
+    if (_closed || error != 'unavailable') return;
+    final seconds =
+        _recoverySeconds[_recoveryAttempt.clamp(
+          0,
+          _recoverySeconds.length - 1,
+        )];
+    _recoveryAttempt++;
+    _recovery = Timer(Duration(seconds: seconds), () {
+      _recovery = null;
+      if (!_closed && !busy && error == 'unavailable') {
+        unawaited(load(silent: true));
+      }
+    });
+  }
 
   Future<void> refreshFromActivity() async {
     if (_closed || error == 'identityUnavailable' || error == 'notAllowed') {
@@ -228,6 +346,10 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   }
 
   void _clear() {
+    _shipSummaryEpoch++;
+    _shipSummaryRead = null;
+    _shipSummary = null;
+    shipSummaryFailed = false;
     _activityPending = false;
     _preparedSections.clear();
     _preparationTarget = null;
@@ -294,6 +416,10 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       return;
     }
     if (busy) return;
+    if (_downloadableReferencesStale && !_downloadablePaused) {
+      await load(silent: workspace != null);
+      return;
+    }
     final age = _lastSuccessfulRead == null
         ? null
         : _now().difference(_lastSuccessfulRead!);
@@ -317,7 +443,12 @@ final class CommunityWorkspaceController extends ChangeNotifier {
   }
 
   bool get needsMediaPreparation =>
-      !_closed && _deferredMedia && workspace != null && error == null;
+      !_closed &&
+      !_downloadablePaused &&
+      !_downloadableReferencesStale &&
+      _deferredMedia &&
+      workspace != null &&
+      error == null;
 
   Future<void> prepareRemainingMedia() async {
     if (!needsMediaPreparation || busy || _pendingImages.isNotEmpty) return;
@@ -333,7 +464,10 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     bool prepareMediaOnly = false,
   }) async {
     if (_closed) return;
+    _recovery?.cancel();
+    _recovery = null;
     final epoch = ++_epoch;
+    final downloadableEpoch = _downloadableEpoch;
     _lastSuccessfulRead = null;
     final requestedTarget = _nextTargetRef ?? targetRef;
     final renewing = renewingReference;
@@ -367,6 +501,7 @@ final class CommunityWorkspaceController extends ChangeNotifier {
         if (renewing) ...[
           'logo',
           'banner',
+          'background',
           for (final member in result.members)
             if (member.avatarVersion == null) member.memberRef,
         ],
@@ -398,6 +533,9 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       _targetRef = requestedTarget;
       _nextTargetRef = null;
       workspace = result;
+      if (downloadableEpoch == _downloadableEpoch && !_downloadablePaused) {
+        _downloadableReferencesStale = false;
+      }
       _lastSuccessfulRead = _now();
       final keys = _imageRequests(result).map((request) => request.$1).toSet();
       _images.removeWhere(
@@ -411,6 +549,7 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       final mediaEpoch = ++_mediaEpoch;
       _pendingImages.clear();
       _deferredMedia = prepareMediaOnly && !_mediaRequestedByView;
+      _recoveryAttempt = 0;
       busy = false;
       notifyListeners();
       await _loadImages(result, mediaEpoch, retryImages);
@@ -424,6 +563,7 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       }
       busy = false;
       notifyListeners();
+      _scheduleRecovery();
     } finally {
       if (_current(epoch) && !busy && _activityPending) {
         _activityPending = false;
@@ -451,6 +591,8 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       for (final member in portraits.where((member) => !member.isSelf))
         (member.memberRef, 'avatar', member.memberRef),
       if (!preparing && result.hasBanner) ('banner', 'banner', null),
+      if (!preparing && result.hasBackground)
+        ('background', 'background', null),
     ];
   }
 
@@ -460,7 +602,8 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     Set<String> retryImages,
   ) async {
     // Entering while warmup is reading images shares that work, then requests
-    // only the remainder. Never run a second set of workers for the same epoch.
+    // only the remainder. New snapshots may progress within the same physical
+    // budget, shared by portraits and uncached decorations in avatars.
     final pending = _mediaRead;
     if (pending != null && _mediaReadEpoch == epoch) {
       await pending;
@@ -485,11 +628,14 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     int epoch,
     Set<String> retryImages,
   ) async {
+    final downloadableEpoch = _downloadableEpoch;
     final requests = _imageRequests(result, preparing: _deferredMedia)
         .where(
           (request) =>
               !_images.containsKey(request.$1) &&
-              !_failedImages.contains(request.$1),
+              !_failedImages.contains(request.$1) &&
+              (request.$3 != null ||
+                  (!_downloadablePaused && !_downloadableReferencesStale)),
         )
         .toList();
     _pendingImages.addAll(requests.map((request) => request.$1));
@@ -497,7 +643,12 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     // Avatar reads also share a workspace-wide concurrency limit across tabs.
     Future<void> read((String, String, String?) request) async {
       final (key, kind, memberRef) = request;
+      final decoration = memberRef == null;
+      bool currentDecoration() =>
+          !decoration ||
+          (!_downloadablePaused && downloadableEpoch == _downloadableEpoch);
       _checkMedia(epoch);
+      if (!currentDecoration()) return;
       if (_images.containsKey(key)) return;
       try {
         final member = result.members
@@ -510,22 +661,36 @@ final class CommunityWorkspaceController extends ChangeNotifier {
                 member,
                 retry: retryImages.contains(key),
               )
-            : await assembleCommunityMedia(
-                (offset, version) => port.readMedia(
-                  targetRef,
+            : await avatars.readUncachedMedia(
+                () => assembleCommunityMedia(
+                  (offset, version) => port.readMedia(
+                    targetRef,
+                    kind,
+                    memberRef: memberRef,
+                    offset: offset,
+                    version: version,
+                  ),
                   kind,
                   memberRef: memberRef,
-                  offset: offset,
-                  version: version,
+                  checkCurrent: () {
+                    _checkMedia(epoch);
+                    if (!currentDecoration()) {
+                      throw const CommunityFailure('mediaRetired');
+                    }
+                  },
                 ),
-                kind,
-                memberRef: memberRef,
-                checkCurrent: () => _checkMedia(epoch),
               );
         _checkMedia(epoch);
-        if (image != null) _images[key] = image;
+        if (currentDecoration() && image != null) _images[key] = image;
       } catch (e) {
         _checkMedia(epoch);
+        // A real authorization withdrawal still applies after an image purge.
+        // A retired missing/reference or recoverable error cannot clear data.
+        if (!currentDecoration() &&
+            !(e is CommunityFailure &&
+                const {'notAllowed', 'identityUnavailable'}.contains(e.code))) {
+          return;
+        }
         if (e is CommunityFailure &&
             const {
               'notAllowed',
@@ -543,18 +708,8 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     }
 
     var next = 0;
-    Future<void> worker() async {
-      while (next < requests.length) {
-        await read(requests[next++]);
-      }
-    }
-
-    try {
-      await Future.wait(List.generate(3, (_) => worker()), eagerError: true);
-    } catch (e) {
+    void revokeMedia(Object e) {
       if (!_mediaCurrent(epoch)) return;
-      // Current media authorization loss also cancels pending metadata. A late
-      // metadata success must not restore a workspace whose access was revoked.
       _epoch++;
       avatars.clear();
       _clear();
@@ -562,11 +717,30 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       busy = false;
       notifyListeners();
     }
+
+    Future<void> worker() async {
+      try {
+        while (next < requests.length) {
+          await read(requests[next++]);
+        }
+      } catch (e) {
+        // Revoke immediately, but retain the physical batch until peers exit.
+        revokeMedia(e);
+        rethrow;
+      }
+    }
+
+    try {
+      await Future.wait(List.generate(3, (_) => worker()), eagerError: false);
+    } catch (e) {
+      revokeMedia(e);
+    }
   }
 
   @override
   void dispose() {
     attention?.removeListener(_attentionChanged);
+    _recovery?.cancel();
     _closed = true;
     avatars.dispose();
     _epoch++;

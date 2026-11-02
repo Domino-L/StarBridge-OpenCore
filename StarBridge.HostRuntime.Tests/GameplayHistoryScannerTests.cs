@@ -18,14 +18,15 @@ internal static class GameplayHistoryScannerTests
         var cases = new (string Name, Action Test)[]
         {
             ("LIVE import only", LiveOnly),
+            ("WPF mixed-text and interleaved timestamp compatibility", WpfArchiveTextCompatibility),
             ("read-only scope and WPF overlap semantics", ScopeAndOverlap),
             ("canonical local identity and ambiguity", IdentityEvidence),
             ("cutoff and clean exit evidence", CutoffAndExit),
-            ("invalid, future and nonmonotonic sessions", InvalidSessions),
+            ("invalid and future sessions", InvalidSessions),
             ("streaming line and encoding boundaries", StreamingBoundaries),
             ("path, empty and unavailable codes", PathsAndFailures),
-            ("file count and byte limits", ResourceLimits),
-            ("cooperative cancellation and deadline", CancellationAndDeadline),
+            ("WPF large archive parity and real progress", ResourceLimits),
+            ("cooperative cancellation without archive deadline", CancellationAndDeadline),
             ("reparse leaves and ancestors", ReparsePoints)
         };
         foreach (var test in cases)
@@ -154,7 +155,6 @@ internal static class GameplayHistoryScannerTests
             Log(0, 0),
             Line(0, Identity(Handle)),
             Log(0, 86400.001),
-            Line(0, Identity(Handle)) + Line(50, "middle") + Line(40, "backward") + Line(60, "last"),
             Line(0, Identity(Handle)) + "<2020-02-30T00:00:00Z> bad\n" + Line(60, "last"),
             Line(0, Identity(Handle)) + "<2020-01-01T25:00:00Z> bad\n" + Line(60, "last"),
             Line(0, Identity(Handle)) + "<2020-01-01T00:00:30Z bad\n" + Line(60, "last"),
@@ -188,11 +188,11 @@ internal static class GameplayHistoryScannerTests
         fixture.Write("case.log", Line(0, Identity(Handle)) + new string('x', 65536) + "\n" + Line(60, "last"));
         Equal(new(60, 1, 1, 0), fixture.Scan(), "Exactly 64 KiB line accepted across read blocks.");
         fixture.Write("case.log", Line(0, Identity(Handle)) + new string('x', 65537) + "\n" + Line(60, "last"));
-        Code("limit", () => fixture.Scan());
+        Equal(new(60, 1, 1, 0), fixture.Scan(), "WPF accepts long continuation lines.");
         fixture.Write("case.log", Line(0, Identity(Handle)) + new string('x', 65537));
-        Code("limit", () => fixture.Scan());
+        Code("empty", () => fixture.Scan()); // No end timestamp: empty, not a resource-limit error.
         fixture.Write("case.log", Line(0, Identity(Handle)) + new string('\u00e9', 32769) + "\n" + Line(60, "last"));
-        Code("limit", () => fixture.Scan()); // Bound is UTF-8 bytes, not character count.
+        Equal(new(60, 1, 1, 0), fixture.Scan(), "Multibyte continuation lines do not reject a valid session.");
         var prefix = Line(0, Identity(Handle));
         fixture.Write("case.log", prefix + new string('x', 16383 - Encoding.UTF8.GetByteCount(prefix)) +
             "\r\n" + Line(60, "last"));
@@ -201,9 +201,36 @@ internal static class GameplayHistoryScannerTests
         Equal(new(60, 1, 1, 0), fixture.Scan(), "UTF-8 characters spanning read blocks remain intact.");
 
         File.WriteAllBytes(Path.Combine(fixture.Backups, "case.log"), [0xFF, 0xFE, 0xFF]);
-        Code("unavailable", () => fixture.Scan());
+        Code("empty", () => fixture.Scan()); // Replacement decoding cannot manufacture identity or timestamps.
         fixture.Write("good.log", Log(0, 60));
-        Equal(new(60, 1, 1, 1), fixture.Scan(), "Undecodable files are skipped without concealing valid history.");
+        Equal(new(60, 1, 1, 1), fixture.Scan(), "Unattributable bytes are skipped without concealing valid history.");
+    }
+
+    internal static void WpfArchiveTextCompatibility()
+    {
+        using var fixture = new Fixture();
+        fixture.Write("interleaved.log", Line(0, Identity(Handle)) +
+            Line(50, "worker A") + Line(40, "worker B") + Line(60, "<SystemQuit> CSystem::Quit"));
+        Equal(new(60, 1, 0, 0), fixture.Scan(),
+            "Like WPF, interleaved worker timestamps do not discard a valid first/last interval.");
+
+        // Old archives can contain non-UTF-8 bytes in ordinary system/chat text.
+        // WPF replaces those bytes; they are not grounds to discard valid timing/identity evidence.
+        var bytes = Encoding.UTF8.GetBytes(Line(120, Identity(Handle)))
+            .Concat(new byte[] { (byte)'x', 0xFF, (byte)'\n' })
+            .Concat(Encoding.UTF8.GetBytes(Line(180, "last"))).ToArray();
+        File.WriteAllBytes(Path.Combine(fixture.Backups, "mixed.log"), bytes);
+        Equal(new(120, 2, 1, 0), fixture.Scan(),
+            "Malformed ordinary-text bytes preserve independently valid session evidence.");
+
+        // Replacing bytes must not guess a Handle, supply missing timestamps,
+        // accept future dates or weaken rejection of conflicting account evidence.
+        var corruptIdentity = Encoding.UTF8.GetBytes(Line(240, "start") +
+                $"<{Epoch.AddSeconds(241):O}> nickname=\"synthetic-")
+            .Concat(new byte[] { 0xFF })
+            .Concat(Encoding.UTF8.GetBytes("pilot\" playerGEID=123\n" + Line(300, "last"))).ToArray();
+        File.WriteAllBytes(Path.Combine(fixture.Backups, "unknown.log"), corruptIdentity);
+        Equal(new(120, 2, 1, 1), fixture.Scan(), "Corrupt identity evidence remains unimportable.");
     }
 
     private static void PathsAndFailures()
@@ -247,20 +274,15 @@ internal static class GameplayHistoryScannerTests
             for (var i = 1; i < 512; i++) fixture.Write($"{i:D4}.log", "");
             Equal(new(60, 1, 1, 511), fixture.Scan(), "Exactly 512 candidates remains valid.");
             fixture.Write("excess.log", "");
-            Code("limit", () => fixture.Scan());
-        }
-        using (var fixture = new Fixture())
-        {
-            using (var sparse = File.Create(Path.Combine(fixture.Backups, "oversized.log")))
-                sparse.SetLength(64L * 1024 * 1024 + 1);
-            Code("limit", () => fixture.Scan());
-        }
-        using (var fixture = new Fixture())
-        {
-            for (var i = 0; i < 5; i++)
-                using (var sparse = File.Create(Path.Combine(fixture.Backups, $"{i}.log")))
-                    sparse.SetLength(64L * 1024 * 1024);
-            Code("limit", () => fixture.Scan()); // Metadata preflight; never reads 320 MiB.
+            Equal(new(60, 1, 1, 512), fixture.Scan(), "More than 512 backup files remain importable like WPF.");
+            var updates = new List<GameplayHistoryProgress>();
+            GameplayHistoryScanner.Scan(fixture.GameLog, Handle, Epoch.AddDays(30), progress: updates.Add);
+            var last = updates[^1];
+            Require(last.Phase == "complete" && last.ProcessedFiles == 513 && last.TotalFiles == 513 &&
+                last.ReadBytes == last.TotalBytes, "Progress reflects actual files and bytes, including empty backups.");
+            using var stop = new CancellationTokenSource();
+            Cancelled(stop.Token, () => GameplayHistoryScanner.Scan(fixture.GameLog, Handle, Epoch.AddDays(30), stop.Token,
+                value => { if (value.ProcessedFiles > 0) stop.Cancel(); }));
         }
     }
 
@@ -279,7 +301,7 @@ internal static class GameplayHistoryScannerTests
         fixture.Write("valid.log", Line(0, Identity(Handle)) +
             string.Concat(Enumerable.Repeat("synthetic continuation\n", 1000)) + Line(60, "last"));
         var deadline = new TestClock { TriggerAt = baselineClock.Calls + 10 };
-        Code("limit", () => WithClock(fixture, deadline));
+        Equal(new(60, 1, 1, 0), WithClock(fixture, deadline), "A large archive is not rejected after 15 seconds.");
         using var active = new CancellationTokenSource();
         var duringRead = new TestClock { TriggerAt = baselineClock.Calls + 10, Cancel = active };
         Cancelled(active.Token, () => WithClock(fixture, duringRead, active.Token));

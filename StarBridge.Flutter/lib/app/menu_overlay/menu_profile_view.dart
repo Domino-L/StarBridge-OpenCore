@@ -215,7 +215,7 @@ final class MenuProfileView {
               ),
           ],
           timeZoneLabel: _text(d, 'timezone'),
-          gameplayMinutes: _int(d, 'minutes'),
+          gameplayMinutes: d['minutes'] == null ? null : _int(d, 'minutes'),
           activityRhythm: _enum(
             PersonalProfileActivityRhythm.values,
             d['rhythm'],

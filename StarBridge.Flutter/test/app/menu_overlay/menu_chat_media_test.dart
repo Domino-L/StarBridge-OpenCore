@@ -7,6 +7,7 @@ import 'package:starbridge_flutter/app/menu_overlay/menu_channel_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_inline_avatar.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_loading.dart';
+import 'package:starbridge_flutter/platform/window/menu_read_feedback.dart';
 
 import 'menu_comms_channels_test.dart' show channel;
 import '../../features/friends/social_layout_test.dart' show app, size;
@@ -15,34 +16,53 @@ const photo =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==';
 
 void main() {
-  testWidgets('loading animates only when motion is enabled', (tester) async {
-    await tester.pumpWidget(app(const MenuLoading()));
-    await tester.pump();
-    expect(
-      tester
-          .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
-          .value,
-      isNull,
-    );
-    await tester.pump(const Duration(milliseconds: 250));
-    expect(tester.binding.hasScheduledFrame, isTrue);
-    await tester.pumpWidget(
-      app(
-        const MediaQuery(
-          data: MediaQueryData(disableAnimations: true),
-          child: MenuLoading(),
+  testWidgets(
+    'loading animates only for an admitted pointer read with motion enabled',
+    (tester) async {
+      await tester.pumpWidget(app(const MenuLoading()));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator),
+            )
+            .value,
+        .5,
+      );
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      const pointerRead = MenuReadFeedback(1, MenuReadOrigin.pointer);
+      await tester.pumpWidget(app(const MenuLoading(feedback: pointerRead)));
+      await tester.pump();
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator),
+            )
+            .value,
+        isNull,
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(tester.binding.hasScheduledFrame, isTrue);
+      await tester.pumpWidget(
+        app(
+          const MediaQuery(
+            data: MediaQueryData(disableAnimations: true),
+            child: MenuLoading(feedback: pointerRead),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
-          .value,
-      .5,
-    );
-    await tester.pumpWidget(const SizedBox());
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator),
+            )
+            .value,
+        .5,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets('right thumb drags history in a separate avatar gutter', (
     tester,
   ) async {

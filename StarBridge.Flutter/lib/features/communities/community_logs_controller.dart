@@ -21,6 +21,7 @@ final class CommunityLogsController extends ChangeNotifier {
       invalidated = false,
       _closed = false;
   int _epoch = 0;
+  int get readEpoch => _epoch;
   bool _current(int epoch) => !_closed && !invalidated && epoch == _epoch;
   bool get canDelete =>
       !_closed &&

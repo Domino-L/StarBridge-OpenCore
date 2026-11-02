@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_source_binding_field.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_preset_settings_dialog.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_source_limit_notice.dart';
@@ -12,6 +13,7 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_p
 
 import 'overlay_settings_ux_a_test.dart' show settings;
 import '../friends/social_layout_test.dart' show app, size;
+import 'overlay_saved_snapshot.dart';
 
 void main() {
   for (final width in [1056.0, 1216.0]) {
@@ -28,7 +30,7 @@ void main() {
       await tester.tap(find.byKey(const Key('overlay-preset-settings-entry')));
       await tester.pumpAndSettle();
       expect(find.byType(OverlayPresetSettingsDialog), findsOneWidget);
-      expect(find.byType(SwitchListTile), findsOneWidget);
+      expect(find.byType(StarBridgeSwitch), findsOneWidget);
       expect(port.writes, isEmpty);
       expect(tester.takeException(), isNull);
     });
@@ -57,11 +59,12 @@ void main() {
     module.discardChanges();
     expect(module.projection.value.sources!.chatSources, isEmpty);
   });
-  test('temporary selection preserves unsaved edits and undo without storing the choice', () async {
+  test('temporary selection saves pending edits first and never stores the choice', () async {
     final port = _Port();
     final module = OverlayWorkspaceModule(port);
     addTearDown(module.dispose);
     await module.refresh();
+    final original = module.projection.value.settings!['crosshairOpacity'];
     module.updateSetting('crosshairOpacity', 0.37);
     final before = module.projection.value;
     expect(
@@ -71,23 +74,26 @@ void main() {
       ),
       isTrue,
     );
-    final mutation = port.writes.single;
-    expect(mutation.kind, OverlayWorkspaceMutationKind.temporarySource);
+    expect(port.writes.map((w) => w.kind), [
+      OverlayWorkspaceMutationKind.saveActive,
+      OverlayWorkspaceMutationKind.temporarySource,
+    ]);
+    final mutation = port.writes.last;
     expect(mutation.toPayload(1)['ownerKey'], 'owner');
     expect(mutation.runtimeDraft!.settings['crosshairOpacity'], 0.37);
-    expect(module.projection.value.dirty, isTrue);
+    expect(module.projection.value.dirty, isFalse);
     expect(module.projection.value.settings!['crosshairOpacity'], 0.37);
     expect(module.projection.value.sources, before.sources);
+    expect(port.snapshot.presets.single.sources, before.sources);
     expect(port.draft!.settings['crosshairOpacity'], 0.37);
     expect(module.canUndo, isTrue);
     module.undo();
-    expect(
-      module.projection.value.settings!['crosshairOpacity'],
-      port.snapshot.settings!['crosshairOpacity'],
-    );
+    await pumpEventQueue();
+    expect(module.projection.value.settings!['crosshairOpacity'], original);
+    expect(port.writes.last.settings!['crosshairOpacity'], original);
   });
   testWidgets(
-    'source limit adjustment edits only the draft and does not clear Host warning locally',
+    'source limit adjustment saves the edit and leaves the warning to Host',
     (tester) async {
       size(tester, const Size(800, 900));
       final port = _Port();
@@ -100,10 +106,10 @@ void main() {
       await tester.tap(find.text('调整来源'));
       await tester.pumpAndSettle();
       expect(
-        find.byType(DropdownButton<OverlaySourceBinding>),
+        find.byKey(const Key('overlay-source-binding-trigger')),
         findsNWidgets(5),
       );
-      await tester.tap(find.byType(DropdownButton<OverlaySourceBinding>).first);
+      await tester.tap(find.byKey(const Key('overlay-source-binding-trigger')).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('当前房间').last);
       await tester.pumpAndSettle();
@@ -113,12 +119,16 @@ void main() {
             .mode,
         OverlaySourceMode.room,
       );
-      expect(module.projection.value.dirty, isTrue);
-      expect(port.writes, isEmpty);
+      expect(module.projection.value.dirty, isFalse);
+      expect(
+        port.writes.single.sources!.forModule(OverlaySourceModule.notice).mode,
+        OverlaySourceMode.room,
+      );
       await tester.tap(find.text('返回编辑器'));
       await tester.pumpAndSettle();
       expect(find.text('来源超限，请调整来源'), findsOneWidget);
-      module.discardChanges();
+      module.undo();
+      await tester.pumpAndSettle();
       expect(
         module.projection.value.sources!
             .forModule(OverlaySourceModule.notice)
@@ -144,11 +154,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButton<OverlaySourceBinding>));
+    await tester.tap(find.byKey(const Key('overlay-source-binding-trigger')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('当前房间').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(SwitchListTile));
+    await tester.tap(find.byType(StarBridgeSwitch));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('overlay-preset-settings-save')));
     await tester.pumpAndSettle();
@@ -207,7 +217,7 @@ void main() {
     );
   });
   test(
-    'preset metadata save rebases undo history without saving the module draft',
+    'preset settings save pending source edits first and keep their history',
     () async {
       final port = _Port();
       final module = OverlayWorkspaceModule(port);
@@ -223,45 +233,43 @@ void main() {
           'Room preset',
           const OverlaySourceBinding.room(),
           true,
-          expectedRevision: 1,
         ),
         isTrue,
       );
+      expect(port.writes.map((w) => w.kind), [
+        OverlayWorkspaceMutationKind.saveActive,
+        OverlayWorkspaceMutationKind.configurePresetSources,
+      ]);
+      // Built from the saved plan, so the edit just saved is not undone.
       expect(
-        port.writes.single.sources!.forModule(OverlaySourceModule.chat).mode,
-        OverlaySourceMode.none,
-      );
-      expect(
-        module.projection.value.sources!
-            .forModule(OverlaySourceModule.chat)
-            .mode,
+        port.writes.last.sources!.forModule(OverlaySourceModule.chat).mode,
         OverlaySourceMode.room,
       );
-      expect(
-        module.projection.value.sources!.binding.mode,
-        OverlaySourceMode.room,
-      );
-      expect(module.projection.value.dirty, isTrue);
-      module.undo();
-      expect(
-        module.projection.value.sources!.binding.mode,
-        OverlaySourceMode.room,
-      );
-      expect(module.projection.value.sources!.autoSwitch, isTrue);
-      expect(
-        module.projection.value.sources!
-            .forModule(OverlaySourceModule.chat)
-            .mode,
-        OverlaySourceMode.none,
-      );
+      final sources = module.projection.value.sources!;
+      expect(sources.forModule(OverlaySourceModule.chat).mode, OverlaySourceMode.room);
+      expect(sources.binding.mode, OverlaySourceMode.room);
+      expect(sources.autoSwitch, isTrue);
       expect(module.projection.value.dirty, isFalse);
+      module.undo();
+      await pumpEventQueue();
+      final undone = module.projection.value.sources!;
+      expect(undone.binding.mode, OverlaySourceMode.room);
+      expect(undone.autoSwitch, isTrue);
+      expect(undone.forModule(OverlaySourceModule.chat).mode, OverlaySourceMode.none);
+      expect(
+        port.writes.last.sources!.forModule(OverlaySourceModule.chat).mode,
+        OverlaySourceMode.none,
+      );
+      expect(port.writes.last.sources!.autoSwitch, isTrue);
       module.redo();
+      await pumpEventQueue();
       expect(
         module.projection.value.sources!
             .forModule(OverlaySourceModule.chat)
             .mode,
         OverlaySourceMode.room,
       );
+      final count = port.writes.length;
       expect(
         await module.configurePreset(
           'fixture',
@@ -272,7 +280,7 @@ void main() {
         ),
         isFalse,
       );
-      expect(port.writes, hasLength(1));
+      expect(port.writes, hasLength(count));
     },
   );
 
@@ -303,17 +311,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open settings'));
     await tester.pumpAndSettle();
-    expect(find.byType(SwitchListTile), findsOneWidget);
-    final automatic = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
+    expect(find.byType(StarBridgeSwitch), findsOneWidget);
+    final automatic = tester.widget<StarBridgeSwitch>(find.byType(StarBridgeSwitch));
     expect(automatic.value, isFalse);
     expect(automatic.onChanged, isNull);
-    expect(find.textContaining('先将信息来源设为当前房间'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButton<OverlaySourceBinding>));
+    expect(find.textContaining('先选择一个固定来源'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('overlay-source-binding-trigger')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('当前房间').last);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+      tester.widget<StarBridgeSwitch>(find.byType(StarBridgeSwitch)).value,
       isFalse,
     );
     await tester.tap(find.text('取消'));
@@ -355,7 +363,7 @@ void main() {
       expect(find.textContaining('private-code'), findsNothing);
       expect(find.textContaining('different-owner'), findsNothing);
       expect(selected, isNull);
-      await tester.tap(find.byType(DropdownButton<OverlaySourceBinding>));
+      await tester.tap(find.byKey(const Key('overlay-source-binding-trigger')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('当前房间').last);
       await tester.pumpAndSettle();
@@ -423,52 +431,51 @@ void main() {
   });
 
   test(
-    'sources follow undo, redo, discard and explicit save without lost draft',
+    'source edits save on their own; undo, redo and rename keep them',
     () async {
       final port = _Port();
       final module = OverlayWorkspaceModule(port);
       addTearDown(module.dispose);
       await module.refresh();
       final original = module.projection.value.sources;
+      OverlaySourceMode members(OverlayPresetSources? value) =>
+          value!.forModule(OverlaySourceModule.members).mode;
       module.updateModuleSource(
         OverlaySourceModule.members,
         const OverlaySourceBinding.room(),
       );
-      expect(module.projection.value.dirty, isTrue);
-      expect(port.writes, isEmpty);
-      expect(
-        module.projection.value.sources!
-            .forModule(OverlaySourceModule.members)
-            .mode,
-        OverlaySourceMode.room,
-      );
-      module.undo();
-      expect(module.projection.value.sources, original);
+      expect(module.projection.value.dirty, isTrue, reason: 'write pending');
+      await pumpEventQueue();
+      expect(members(port.writes.single.sources), OverlaySourceMode.room);
+      expect(port.writes.single.toPayload(1)['sources'], isA<Map>());
       expect(module.projection.value.dirty, isFalse);
+      module.undo();
+      await pumpEventQueue();
+      expect(module.projection.value.sources, original);
+      expect(members(port.writes.last.sources), OverlaySourceMode.none);
       module.redo();
+      await pumpEventQueue();
       await module.openRuntime('en');
       expect(port.draft?.sources, module.projection.value.sources);
-      expect(port.writes, isEmpty);
       await module.renamePreset('fixture', 'renamed');
-      expect(
-        module.projection.value.sources!
-            .forModule(OverlaySourceModule.members)
-            .mode,
-        OverlaySourceMode.room,
-      );
-      expect(module.projection.value.dirty, isTrue);
-      await module.save();
-      expect(
-        port.writes.last.sources!.forModule(OverlaySourceModule.members).mode,
-        OverlaySourceMode.room,
-      );
-      expect(port.writes.last.toPayload(1)['sources'], isA<Map>());
+      expect(members(module.projection.value.sources), OverlaySourceMode.room);
+      expect(module.projection.value.dirty, isFalse);
+      expect(module.canUndo, isTrue);
+      final count = port.writes.length;
       module.updateModuleSource(
         OverlaySourceModule.chat,
         const OverlaySourceBinding.room(),
       );
       module.discardChanges();
-      expect(module.projection.value.sources, original);
+      await pumpEventQueue();
+      expect(port.writes, hasLength(count), reason: 'discarded before saving');
+      expect(members(module.projection.value.sources), OverlaySourceMode.room);
+      expect(
+        module.projection.value.sources!
+            .forModule(OverlaySourceModule.chat)
+            .mode,
+        OverlaySourceMode.none,
+      );
       expect(module.projection.value.dirty, isFalse);
     },
   );
@@ -544,6 +551,9 @@ final class _Port implements OverlayWorkspacePort {
     required int expectedRevision,
   }) async {
     writes.add(mutation);
+    if (mutation.kind == OverlayWorkspaceMutationKind.saveActive) {
+      snapshot = savedOverlaySnapshot(snapshot, mutation);
+    }
     if (mutation.kind == OverlayWorkspaceMutationKind.configurePresetSources) {
       snapshot = OverlayWorkspaceSnapshot.available(
         revision: snapshot.revision! + 1,

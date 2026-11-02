@@ -55,16 +55,10 @@ internal sealed partial class CommunityClient
             }))).ToLowerInvariant();
             if (!seen.Add(id)) throw Invalid(); // Never silently collapse multiple instances.
             var name = WpfText(ship, "displayName", 512, fallback: code);
-            var catalog = HangarShipNames.Lookup(code);
-            if (catalog.CatalogId is null) catalog = HangarShipNames.Lookup(name);
+            var catalog = _shipCatalog(code, name);
             name = CommunityShipCatalog.DisplayName(catalog, name, query?.Culture ?? "zh-CN");
-            var status = Optional(ship, "catalogStatus", 256);
-            // Same WPF boundary: an authoritative status means its related metadata wins.
-            string? spec = status is not null ? Optional(ship, "catalogSpec", 256) : catalog.SizeClass switch {
-                "capital" => "旗舰级", "large" => "大型", "medium" => "中型", "small" => "小型", _ => catalog.SizeClass };
-            var role = status is not null ? Optional(ship, "catalogRole", 512) : catalog.Category;
-            var price = status is not null ? Optional(ship, "catalogPriceUsd", 128) : catalog.PriceUsd?.ToString(CultureInfo.InvariantCulture);
-            status ??= catalog.DeliveryStatus switch { "flyable" => "可飞", "concept" => "概念", _ => catalog.DeliveryStatus };
+            // Fill each missing fact before filtering, sorting and hashing the authorized snapshot.
+            var metadata = ShipMetadata(ship, catalog);
             var imported = Timestamp(ship, "hangarImportedAt");
             if (imported is not null && DateTimeOffset.Parse(imported).Year == 1) imported = null;
             rows.Add(new(id, code, name, memberId, WpfText(owner, "gameName", 256), WpfText(owner, "callsign", 256),
@@ -72,7 +66,7 @@ internal sealed partial class CommunityClient
                 string.Equals(Optional(owner, "accountId", 512), target.WpfS2ViewerId, StringComparison.Ordinal),
                 !string.IsNullOrEmpty(Optional(owner, "avatarImageData", 1024 * 1024)),
                 AvatarContentVersion(Optional(owner, "avatarImageData", 1024 * 1024)), imported,
-                Optional(ship, "roleCategory", 64) ?? catalog.Category, spec, role, status, price));
+                metadata.RoleCategory, metadata.Spec, metadata.Role, metadata.Status, metadata.PriceUsd));
         }
         var ordered = rows.OrderBy(row => row.Id, StringComparer.Ordinal).ToArray();
         var selected = query is null ? ordered : new CommunityShipQuery("", query.Filter, query.Sort, query.Descending, query.Culture).Apply(ordered);

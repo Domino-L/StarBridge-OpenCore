@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'chat_avatar.dart';
+import '../common/organization_holo.dart';
 import '../common/user_interaction.dart';
 
 /// Shared private/room chat structure. Routing, ownership and permissions are
@@ -20,7 +21,20 @@ class ChatMessageBubble extends StatelessWidget {
     this.compact = false,
     this.onViewProfile,
     this.privateConversation = false,
+    this.timeLabel,
+    this.sideAlert,
+    this.senderExtra,
   });
+
+  /// On organization (holo) surfaces only: shown after the sender's name,
+  /// for example the role tag.
+  final Widget? senderExtra;
+
+  /// Replaces the time text (A2: a clock while sending, a failure and retry).
+  final Widget? timeLabel;
+
+  /// Shown beside an outgoing bubble (A2: the failed-send alert).
+  final Widget? sideAlert;
   final bool incoming, allowProfileUrl;
   final String sender, time;
   final String? avatar;
@@ -50,6 +64,73 @@ class ChatMessageBubble extends StatelessWidget {
             allowProfileUrl: allowProfileUrl,
           ),
     );
+    // Organization work surfaces (holo, 2026-10-23): no bubble; name and
+    // time over the text, your own name in accent. The general chat rule
+    // still holds: others on the left, your own messages on the right.
+    if (OrganizationHolo.of(context)) {
+      final tokens = context.tokens;
+      final text = Theme.of(context).textTheme;
+      final avatarSlot = Padding(
+        padding: EdgeInsets.only(
+          top: 2,
+          right: incoming ? 14 : 0,
+          left: incoming ? 0 : 14,
+        ),
+        child: portrait.child,
+      );
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          mainAxisAlignment: incoming
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (incoming) avatarSlot else const SizedBox(width: 96),
+            Flexible(
+              fit: incoming ? FlexFit.tight : FlexFit.loose,
+              child: Column(
+                crossAxisAlignment: incoming
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.end,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    alignment: incoming
+                        ? WrapAlignment.start
+                        : WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (!incoming) ?sideAlert,
+                      Text(
+                        sender,
+                        style: text.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: incoming ? null : tokens.colors.accent,
+                        ),
+                      ),
+                      ?senderExtra,
+                      timeLabel ??
+                          Text(
+                            time,
+                            style: text.bodySmall?.copyWith(
+                              fontFamily: tokens.typography.monoFamily,
+                              color: tokens.colors.textDisabled,
+                            ),
+                          ),
+                      if (incoming) ?sideAlert,
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  child,
+                ],
+              ),
+            ),
+            if (!incoming) avatarSlot,
+          ],
+        ),
+      );
+    }
     return Align(
       alignment: incoming ? Alignment.centerLeft : Alignment.centerRight,
       child: Row(
@@ -57,6 +138,11 @@ class ChatMessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (incoming && !compact) portrait,
+          if (!incoming && sideAlert != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 14, right: 6),
+              child: sideAlert,
+            ),
           Flexible(
             child: Container(
               constraints: const BoxConstraints(maxWidth: 580),
@@ -77,10 +163,11 @@ class ChatMessageBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    privateConversation ? time : '$sender · $time',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  timeLabel ??
+                      Text(
+                        privateConversation ? time : '$sender · $time',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                   const SizedBox(height: 4),
                   child,
                 ],

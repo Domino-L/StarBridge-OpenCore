@@ -17,6 +17,7 @@ import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart'
 import 'package:starbridge_flutter/app/localization/local_privacy_strings.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
 import 'package:starbridge_flutter/design_system/style_registry.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
@@ -153,6 +154,8 @@ void main() {
   setUpAll(() async {
     for (final entry in const {
       'Source Sans 3': 'SourceSans3VF-Upright.ttf',
+      'Saira': 'Saira-VF.ttf',
+      'Rajdhani': 'Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(
@@ -269,12 +272,12 @@ void main() {
       final fleetShip = find.byKey(
         const Key('privacy-scope-official-fleet-field-ship'),
       );
-      expect(tester.widget<InkWell>(fleetShip).onTap, isNull);
+      expect(tester.widget<StarBridgeSwitch>(fleetShip).onChanged, isNull);
       final publication = find.byKey(const Key('privacy-publication'));
       await tester.ensureVisible(publication);
       await tester.tap(publication);
       await tester.pumpAndSettle();
-      expect(tester.widget<InkWell>(fleetShip).onTap, isNull);
+      expect(tester.widget<StarBridgeSwitch>(fleetShip).onChanged, isNull);
       await tester.tap(publication);
       await tester.pumpAndSettle();
       expect(c.draft!.roomFields & 2, 0);

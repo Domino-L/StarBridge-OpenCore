@@ -108,7 +108,9 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
         _publishedServerShard = null;
     }
 
-    internal void Observe(string line)
+    internal event Action<string, string, string>? CityArrived;
+
+    internal void Observe(string line, bool live = false)
     {
         if (Disconnect.IsMatch(line) ||
             (_serverState == "connected" && ReturnedToFrontend.IsMatch(line)))
@@ -207,6 +209,13 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
         {
             return;
         }
+
+        // Event-time evidence only; never restore an achievement from FleetState/LastKnownLocation.
+        if (live && _serverState == "connected" && gameEvent.Type == FleetEventType.PlayerLocationChanged &&
+            gameEvent.LocationEvidenceScore >= 90 && gameEvent.Location is { } location &&
+            gameEvent.LocationEvidence is "Location inventory context" or "Explicit player location" &&
+            LocationNames.Value.FindCity(location) is { } city)
+            CityArrived?.Invoke(_localHandle, city, gameEvent.LocationEvidenceScore == 95 ? "RequestLocationInventory" : "PLAYER_LOCATION");
 
         var shipName = GameShipNames.FindRuntimeIdentity(gameEvent.Ship);
         _fleet.Apply(gameEvent with { Player = "LocalPlayer",

@@ -1,4 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -25,7 +33,8 @@ class RoomDirectoryCard extends StatelessWidget {
   final PartyRoom room;
   final DateTime serverTime;
   final bool selected, supportsCommands;
-  final VoidCallback? onSelect, onJoin;
+  final VoidCallback? onSelect;
+  final ValueChanged<InteractionSource>? onJoin;
   @override
   Widget build(BuildContext context) {
     String t(String key) => roomText(context, key);
@@ -36,133 +45,162 @@ class RoomDirectoryCard extends StatelessWidget {
     return StarBridgeSurface(
       role: SurfaceRole.panel,
       padding: EdgeInsets.zero,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          key: ValueKey('room-${room.id}'),
-          onTap: onSelect,
-          borderRadius: BorderRadius.circular(6),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: selected
-                      ? colors.accent
-                      : colors.textSecondary.withValues(alpha: .2),
-                  width: 3,
-                ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
+      child: StarBridgeInteractionRegion(
+        child: Material(
+          type: MaterialType.transparency,
+          // This target contains independent Join/avatar actions. A disabled
+          // selection must disable only this row, never its descendants.
+          child: SuitePressable(
+            key: ValueKey('room-${room.id}'),
+            kind: PressableKind.row,
+            baseRadius: 6,
+            semanticLabel: room.title,
+            semanticSelected: selected,
+            onActivate: onSelect == null
+                ? null
+                : (source) => unawaited(
+                    runStarBridgeActivation<void>(source, onSelect!),
+                  ),
+            // Keep the card's existing text/icon treatment. The row supplies
+            // interaction feedback, not a second selected fill or disabled veil.
+            child: IconTheme(
+              data: IconTheme.of(context),
+              child: DefaultTextStyle.merge(
+                style: DefaultTextStyle.of(context).style,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: selected
+                            ? colors.accent
+                            : colors.textSecondary.withValues(alpha: .2),
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            room.title,
-                            style: Theme.of(context).textTheme.titleMedium,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ExcludeSemantics(
+                                  child: Text(
+                                    room.title,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium,
+                                  ),
+                                ),
+                                Text(
+                                  '${t('host')} · ${host?.callsign.trim().isNotEmpty == true ? host!.callsign : t('hostIdentityPrivate')}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: colors.textSecondary),
+                                ),
+                                if (host != null &&
+                                    host.presenceKey != 'presence.inGame')
+                                  Text(
+                                    t(
+                                      host.presenceKey == 'presence.unknown'
+                                          ? 'hostGameStateUnknown'
+                                          : 'hostNotInGame',
+                                    ),
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(color: colors.textSecondary),
+                                  ),
+                              ],
+                            ),
                           ),
+                          const SizedBox(width: 16),
                           Text(
-                            '${t('host')} · ${host?.callsign.trim().isNotEmpty == true ? host!.callsign : t('hostIdentityPrivate')}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: colors.textSecondary),
+                            '${room.members.length} / ${room.capacity}',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontFamily:
+                                      context.tokens.typography.monoFamily,
+                                  color: full && !closed
+                                      ? colors.warning
+                                      : colors.textPrimary,
+                                ),
                           ),
-                          if (host != null &&
-                              host.presenceKey != 'presence.inGame')
+                          const SizedBox(width: 16),
+                          if (closed || full)
                             Text(
-                              t(
-                                host.presenceKey == 'presence.unknown'
-                                    ? 'hostGameStateUnknown'
-                                    : 'hostNotInGame',
+                              t(closed ? 'closed' : 'full'),
+                              style: TextStyle(
+                                color: closed ? colors.offline : colors.warning,
                               ),
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colors.textSecondary),
+                            )
+                          else if (supportsCommands)
+                            StarBridgeActionButton(
+                              controlKey: ValueKey('room-join-${room.id}'),
+                              onActivate: onJoin,
+                              child: Text(
+                                roomActionText(
+                                  context,
+                                  room.admissionMode == 'approval'
+                                      ? 'apply'
+                                      : 'join',
+                                ),
+                              ),
                             ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      '${room.members.length} / ${room.capacity}',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontFamily: context.tokens.typography.monoFamily,
-                        color: full && !closed
-                            ? colors.warning
-                            : colors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    if (closed || full)
-                      Text(
-                        t(closed ? 'closed' : 'full'),
-                        style: TextStyle(
-                          color: closed ? colors.offline : colors.warning,
+                      if (room.goal.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          room.goal,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.textSecondary),
                         ),
-                      )
-                    else if (supportsCommands)
-                      OutlinedButton(
-                        onPressed: onJoin,
-                        child: Text(
-                          roomActionText(
-                            context,
-                            room.admissionMode == 'approval' ? 'apply' : 'join',
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                if (room.goal.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    room.goal,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: colors.textSecondary),
-                  ),
-                ],
-                const SizedBox(height: 14),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final details = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        RoomJoinFacts(room: room),
-                        if (room.tags.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          RoomTags(room: room),
-                        ],
                       ],
-                    );
-                    final avatars = RoomMemberPreview(room: room);
-                    return constraints.maxWidth >= 820
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Expanded(child: details),
-                              const SizedBox(width: 24),
-                              SizedBox(width: 320, child: avatars),
-                            ],
-                          )
-                        : Column(
+                      const SizedBox(height: 14),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final details = Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              details,
-                              const SizedBox(height: 14),
-                              avatars,
+                              RoomJoinFacts(room: room),
+                              if (room.tags.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                RoomTags(room: room),
+                              ],
                             ],
                           );
-                  },
+                          final avatars = RoomMemberPreview(room: room);
+                          return constraints.maxWidth >= 820
+                              ? Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(child: details),
+                                    const SizedBox(width: 24),
+                                    SizedBox(width: 320, child: avatars),
+                                  ],
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    details,
+                                    const SizedBox(height: 14),
+                                    avatars,
+                                  ],
+                                );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -206,7 +244,7 @@ class RoomMemberPreview extends StatelessWidget {
       children: [
         for (final member in room.members)
           if (member.userRef == null)
-            Tooltip(
+            StarBridgeTooltip(
               message: locked,
               child: SizedBox(
                 width: 40,
@@ -221,15 +259,13 @@ class RoomMemberPreview extends StatelessWidget {
               ),
             )
           else
-            Tooltip(
-              message: member.callsign,
-              child: RoomIdentityAvatar(
-                name: member.callsign,
-                avatarData: member.avatarData,
-                userRef: member.userRef,
-                size: 40,
-                includeSocialActions: false,
-              ),
+            RoomIdentityAvatar(
+              name: member.callsign,
+              avatarData: member.avatarData,
+              userRef: member.userRef,
+              size: 40,
+              includeSocialActions: false,
+              includeNameInHint: true,
             ),
       ],
     );

@@ -17,6 +17,8 @@ enum AccountIdentityState {
   match,
   mismatch,
   awaitingGameIdentity,
+  verificationRequired,
+  verificationPending,
   reverifyRequired,
   revoked,
   unknown,
@@ -105,6 +107,8 @@ final class AccountProfile {
   AccountProfile copyWith({
     String? displayName,
     String? avatarUrl,
+    String? avatarImageData,
+    bool clearAvatarImageData = false,
     String? email,
     String? locale,
     String? timeZone,
@@ -114,7 +118,9 @@ final class AccountProfile {
     return AccountProfile(
       displayName: displayName ?? this.displayName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
-      avatarImageData: avatarImageData,
+      avatarImageData: clearAvatarImageData
+          ? null
+          : avatarImageData ?? this.avatarImageData,
       email: email ?? this.email,
       maskedAccount: maskedAccount,
       locale: clearLocale ? null : locale ?? this.locale,
@@ -204,6 +210,8 @@ final class AccountHostSnapshot {
     this.route,
     this.profile,
     this.cachedAt,
+    this.retainedReadId,
+    this.retainedPreviousReadId,
     this.supportsPreferenceWrite = false,
     this.supportsCacheClear = false,
   });
@@ -222,6 +230,8 @@ final class AccountHostSnapshot {
   final int generation;
   final AccountSessionState sessionState;
   final AccountRoute? route;
+  final String? retainedReadId;
+  final String? retainedPreviousReadId;
   final AccountProfile? profile;
   final AccountProfileFreshness profileFreshness;
   final DateTime? cachedAt;
@@ -232,6 +242,36 @@ final class AccountHostSnapshot {
 
   final bool supportsPreferenceWrite;
   final bool supportsCacheClear;
+
+  AccountHostSnapshot copyWith({
+    AccountProfile? profile,
+    bool clearProfile = false,
+    AccountProfileFreshness? profileFreshness,
+    DateTime? cachedAt,
+    bool clearCachedAt = false,
+    AccountIdentityProjection? identity,
+    AccountCompatibilityProjection? compatibility,
+    List<String>? localeOptions,
+    List<AccountTimeZoneOption>? timeZoneOptions,
+    bool? supportsPreferenceWrite,
+    bool? supportsCacheClear,
+  }) => AccountHostSnapshot(
+    generation: generation,
+    sessionState: sessionState,
+    route: route,
+    retainedReadId: retainedReadId,
+    retainedPreviousReadId: retainedPreviousReadId,
+    profile: clearProfile ? null : profile ?? this.profile,
+    profileFreshness: profileFreshness ?? this.profileFreshness,
+    cachedAt: clearCachedAt ? null : cachedAt ?? this.cachedAt,
+    identity: identity ?? this.identity,
+    compatibility: compatibility ?? this.compatibility,
+    localeOptions: localeOptions ?? this.localeOptions,
+    timeZoneOptions: timeZoneOptions ?? this.timeZoneOptions,
+    supportsPreferenceWrite:
+        supportsPreferenceWrite ?? this.supportsPreferenceWrite,
+    supportsCacheClear: supportsCacheClear ?? this.supportsCacheClear,
+  );
 
   String get accountLabel => profile?.displayName?.trim().isNotEmpty == true
       ? profile!.displayName!.trim()
@@ -260,6 +300,28 @@ final class AccountNotice {
 }
 
 @immutable
+final class AccountDisplayHandoff {
+  const AccountDisplayHandoff({
+    required this.displayKey,
+    required this.sourceGeneration,
+    required this.route,
+  });
+  final String displayKey;
+  final int sourceGeneration;
+  final AccountRoute route;
+  int get generation => sourceGeneration + 1;
+  bool matches(AccountHostSnapshot snapshot) =>
+      snapshot.sessionState == AccountSessionState.signedIn &&
+      snapshot.generation == generation &&
+      matchesRoute(snapshot.route);
+  bool matchesRoute(AccountRoute? other) =>
+      other != null &&
+      (route.environment, route.authority, route.subject) ==
+          (other.environment, other.authority, other.subject);
+  bool allows(int value) => value == sourceGeneration || value == generation;
+}
+
+@immutable
 final class AccountProjection {
   const AccountProjection({
     required this.sessionState,
@@ -273,9 +335,13 @@ final class AccountProjection {
     this.profile,
     this.cachedAt,
     this.failure,
+    this.retainedReadId,
+    this.retainedPreviousReadId,
     this.notice,
     this.supportsPreferenceWrite = false,
     this.supportsCacheClear = false,
+    this.preparingDisplay = false,
+    this.displayHandoff,
   });
 
   const AccountProjection.loading()
@@ -301,9 +367,30 @@ final class AccountProjection {
   final List<String> localeOptions;
   final List<AccountTimeZoneOption> timeZoneOptions;
   final AccountFailure? failure;
+  final String? retainedReadId;
+  final String? retainedPreviousReadId;
   final AccountNotice? notice;
   final bool supportsPreferenceWrite;
   final bool supportsCacheClear;
+
+  /// Cached presentation while the original restore is still pending.
+  final bool preparingDisplay;
+
+  /// Identity for already materialized readonly views; never a data read ID.
+  final AccountDisplayHandoff? displayHandoff;
+  bool get hasDisplayHandoff =>
+      displayHandoff?.allows(generation) == true &&
+      (sessionState == AccountSessionState.loading || isSignedIn);
+  bool get isPreparingDisplay =>
+      preparingDisplay &&
+      sessionState == AccountSessionState.loading &&
+      isBusy &&
+      profileFreshness == AccountProfileFreshness.cached &&
+      cachedAt != null;
+  bool get hasRetainedDisplayRead =>
+      retainedReadId != null &&
+      (sessionState == AccountSessionState.credentialTemporarilyUnavailable ||
+          isPreparingDisplay);
 
   bool get isBusy => operation != AccountOperation.none;
   bool get isSignedIn => sessionState == AccountSessionState.signedIn;
@@ -347,6 +434,8 @@ final class AccountProjection {
       operation == AccountOperation.creatingCompatibilityIdentity;
 
   AccountProjection copyWith({
+    AccountDisplayHandoff? displayHandoff,
+    bool clearDisplayHandoff = false,
     AccountSessionState? sessionState,
     AccountOperation? operation,
     int? generation,
@@ -364,6 +453,16 @@ final class AccountProjection {
     AccountNotice? notice,
     bool clearNotice = false,
   }) {
+    final retainDisplay =
+        !clearProfile &&
+        !clearCachedAt &&
+        (generation == null || generation == this.generation) &&
+        ((sessionState ?? this.sessionState) ==
+                AccountSessionState.credentialTemporarilyUnavailable ||
+            isPreparingDisplay &&
+                (sessionState ?? this.sessionState) ==
+                    AccountSessionState.loading &&
+                (operation ?? this.operation) != AccountOperation.none);
     return AccountProjection(
       sessionState: sessionState ?? this.sessionState,
       operation: operation ?? this.operation,
@@ -371,6 +470,23 @@ final class AccountProjection {
       profile: clearProfile ? null : profile ?? this.profile,
       profileFreshness: profileFreshness ?? this.profileFreshness,
       cachedAt: clearCachedAt ? null : cachedAt ?? this.cachedAt,
+      retainedReadId: retainDisplay ? retainedReadId : null,
+      retainedPreviousReadId: retainDisplay ? retainedPreviousReadId : null,
+      preparingDisplay: retainDisplay && isPreparingDisplay,
+      displayHandoff:
+          clearDisplayHandoff ||
+              clearProfile ||
+              clearCachedAt ||
+              !const {
+                AccountSessionState.loading,
+                AccountSessionState.signedIn,
+              }.contains(sessionState ?? this.sessionState) ||
+              (displayHandoff ?? this.displayHandoff)?.allows(
+                    generation ?? this.generation,
+                  ) !=
+                  true
+          ? null
+          : displayHandoff ?? this.displayHandoff,
       identity: identity ?? this.identity,
       compatibility: compatibility ?? this.compatibility,
       localeOptions: localeOptions ?? this.localeOptions,
@@ -395,6 +511,8 @@ final class AccountProjection {
       profile: snapshot.profile,
       profileFreshness: snapshot.profileFreshness,
       cachedAt: snapshot.cachedAt,
+      retainedReadId: snapshot.retainedReadId,
+      retainedPreviousReadId: snapshot.retainedPreviousReadId,
       identity: snapshot.identity,
       compatibility: snapshot.compatibility,
       localeOptions: List.unmodifiable(snapshot.localeOptions),

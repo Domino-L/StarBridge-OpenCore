@@ -15,14 +15,18 @@ internal sealed class OverlayRoomRefreshDriver : IDisposable
     private readonly TimeProvider _clock;
     private readonly object _invalidIdentity = new();
     private readonly CancellationTokenSource _stop = new();
-    internal Task Completion { get; }
+    private readonly Lifecycle.DeferredAsyncDriver _driver;
+    internal Task Completion => _driver.Completion;
+    internal bool StartDeferredWork() => _driver.Start();
     internal OverlayRoomRefreshDriver(Func<(BridgeAccountContext? Owner, long Generation, bool Enabled)> current,
         Func<BridgeAccountContext, CancellationToken, Task> read, Func<TimeSpan, CancellationToken, Task>? wait = null,
-        Func<TimeSpan>? successInterval = null, Func<object?>? demandIdentity = null, TimeProvider? clock = null)
+        Func<TimeSpan>? successInterval = null, Func<object?>? demandIdentity = null, TimeProvider? clock = null,
+        bool startDriver = true)
     {
         _current = current; _read = read; _wait = wait ?? Task.Delay;
         _successInterval = successInterval; _demandIdentity = demandIdentity; _clock = clock ?? TimeProvider.System;
-        Completion = RunAsync();
+        _driver = new(RunAsync, _stop.Cancel);
+        if (startDriver) _driver.Start();
     }
     private async Task RunAsync()
     {
@@ -90,5 +94,6 @@ internal sealed class OverlayRoomRefreshDriver : IDisposable
         try { return _current(); }
         catch { return (null, 0, false); }
     }
-    public void Dispose() => _stop.Cancel();
+    internal Task RetireAsync() => _driver.RetireAsync();
+    public void Dispose() => _ = RetireAsync();
 }

@@ -1,32 +1,47 @@
+import '../../shared/guide/guide_scope.dart';
+import '../../shared/guide/guide_tours.dart';
+
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+
 import '../../app/localization/app_strings.dart';
-import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import 'party_rooms_module.dart';
 import 'room_commands.dart';
 import 'room_feedback.dart';
 import 'room_tag_catalog.dart';
 import 'room_tag_picker.dart';
-import 'room_tag_colors.dart';
+import 'room_selected_tags.dart';
 
 String roomActionText(BuildContext context, String key) =>
     AppStrings.of(context).text('rooms.action.$key');
 
-Future<void> createRoomDialog(BuildContext context, PartyRoomsModule module) =>
-    showDialog<void>(
-      context: context,
-      useRootNavigator: false,
-      barrierDismissible: false,
-      builder: (_) => _CreateRoomDialog(module: module),
-    );
+Future<void> createRoomDialog(
+  BuildContext context,
+  PartyRoomsModule module, {
+  InteractionSource? source,
+}) => showStarBridgeDialog<void>(
+  context,
+  source: source,
+  useRootNavigator: false,
+  barrierDismissible: false,
+  builder: (_) => _CreateRoomDialog(module: module),
+);
 
 Future<void> editRoomDialog(
   BuildContext context,
-  PartyRoomsModule module,
-) async {
+  PartyRoomsModule module, {
+  InteractionSource? source,
+}) async {
   if (!module.canManage) return;
-  await showDialog<void>(
-    context: context,
+  await showStarBridgeDialog<void>(
+    context,
+    source: source,
     useRootNavigator: false,
     barrierDismissible: false,
     builder: (_) =>
@@ -38,8 +53,10 @@ Future<void> joinRoomDialog(
   BuildContext context,
   PartyRoomsModule module, {
   PartyRoom? room,
-}) => showDialog<void>(
-  context: context,
+  InteractionSource? source,
+}) => showStarBridgeDialog<void>(
+  context,
+  source: source,
   useRootNavigator: false,
   barrierDismissible: false,
   builder: (_) => _JoinRoomDialog(module: module, initialRoom: room),
@@ -47,13 +64,15 @@ Future<void> joinRoomDialog(
 
 Future<void> leaveRoomDialog(
   BuildContext context,
-  PartyRoomsModule module,
-) async {
+  PartyRoomsModule module, {
+  InteractionSource? source,
+}) async {
   final room = module.selectedRoom;
   final revision = module.contextRevision;
   if (room == null) return;
-  final confirmed = await showDialog<bool>(
-    context: context,
+  final confirmed = await showStarBridgeDialog<bool>(
+    context,
+    source: source,
     builder: (context) => AlertDialog(
       title: Text(roomActionText(context, 'leave')),
       content: Text(
@@ -63,17 +82,17 @@ Future<void> leaveRoomDialog(
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: false),
           child: Text(roomActionText(context, 'cancel')),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: semanticActionStyle(
-            context,
-            roomLeaveTone(room),
-            emphasis: ActionEmphasis.filled,
-          ),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          tone: roomLeaveTone(room),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: true),
           child: Text(roomActionText(context, 'leave')),
         ),
       ],
@@ -97,12 +116,23 @@ class _CreateRoomDialog extends StatefulWidget {
 
 class _CreateRoomDialogState extends State<_CreateRoomDialog> {
   final _form = GlobalKey<FormState>();
+  GuideHub? _guide;
+  bool _created = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _guide = GuideScope.maybeOf(context);
+  }
+
   final _title = TextEditingController(),
       _goal = TextEditingController(),
       _password = TextEditingController();
   late final int _revision = widget.module.contextRevision;
   late final List<RoomTag> _options = widget.module.directory?.tagOptions ?? [];
   final _tags = <String>{};
+  final _tagsFocus = FocusNode(debugLabel: 'room-choose-tags');
+  InteractionSource _tagSource = InteractionSource.programmatic;
   int _capacity = 6, _hours = 6, _minutes = 0;
   bool _public = true, _passwordEnabled = false, _submitting = false;
   String _eligibility = 'everyone',
@@ -115,7 +145,13 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
   void initState() {
     super.initState();
     final room = widget.initialRoom;
-    if (room == null) return;
+    if (room == null) {
+      // The create form is open: a do-it tour may start or move on.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) guideReport(context, 'rooms.formOpened');
+      });
+      return;
+    }
     _title.text = room.title;
     _goal.text = room.goal;
     _capacity = room.capacity;
@@ -153,10 +189,13 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
     _title.dispose();
     _goal.dispose();
     _password.dispose();
+    _tagsFocus.dispose();
+    // Cancelled or closed without creating: a tour step on this form ends.
+    if (!_editing && !_created) guideFlowClosed(_guide, guideFlowRoomForm);
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit(InteractionSource source) async {
     if (!_form.currentState!.validate()) return;
     final gameplay = _options
         .where((tag) => tag.isGameplay && _tags.contains(tag.id))
@@ -212,7 +251,11 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
     );
     if (!mounted) return;
     if (result.accepted) {
-      Navigator.pop(context);
+      if (!_editing) {
+        _created = true;
+        guideReport(context, 'rooms.created');
+      }
+      dismissStarBridgeDialog(context, source: source);
       return;
     }
     setState(() {
@@ -230,7 +273,9 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
       String value,
       List<String> values,
       void Function(String) update,
-    ) => DropdownButtonFormField<String>(
+    ) => StarBridgeSelectFormField<String>(
+      identity: 'room-$label',
+      controlKey: Key('room-$label'),
       initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(labelText: field(label)),
@@ -242,208 +287,253 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
             ),
           )
           .toList(),
-      onChanged: (value) {
-        if (value != null) setState(() => update(value));
-      },
+      onChanged: _submitting
+          ? null
+          : (value) {
+              if (value != null) setState(() => update(value));
+            },
     );
     return PopScope(
       canPop: !_submitting,
       child: AlertDialog(
         title: Text(t(_editing ? 'edit' : 'create')),
-        content: SizedBox(
-          width: 560,
-          child: SingleChildScrollView(
-            child: Form(
-              key: _form,
-              child: AbsorbPointer(
-                absorbing: _submitting,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      key: const Key('room-create-title'),
-                      controller: _title,
-                      maxLength: 32,
-                      decoration: InputDecoration(labelText: t('title')),
-                      validator: (value) => (value?.trim().length ?? 0) < 2
-                          ? t('titleInvalid')
-                          : null,
-                    ),
-                    TextFormField(
-                      key: const Key('room-create-goal'),
-                      controller: _goal,
-                      maxLength: 120,
-                      maxLines: 2,
-                      decoration: InputDecoration(labelText: t('goal')),
-                    ),
-                    DropdownButtonFormField<int>(
-                      initialValue: _capacity,
-                      decoration: InputDecoration(labelText: t('capacity')),
-                      items: [
-                        for (var n = 2; n <= 16; n++)
-                          DropdownMenuItem(value: n, child: Text('$n')),
-                      ],
-                      onChanged: (n) => setState(() => _capacity = n!),
-                    ),
-                    const SizedBox(height: 12),
-                    choice('admission', _admission, [
-                      'direct',
-                      'approval',
-                    ], (v) => _admission = v),
-                    const SizedBox(height: 12),
-                    choice('eligibility', _eligibility, [
-                      'everyone',
-                      'friends',
-                      'fleet',
-                      'invite',
-                    ], (v) => _eligibility = v),
-                    const SizedBox(height: 12),
-                    choice('voice', _voice, [
-                      'none',
-                      'recommended',
-                      'required',
-                    ], (v) => _voice = v),
-                    const SizedBox(height: 12),
-                    choice('language', _language, [
-                      'zh',
-                      'en',
-                      'bilingual',
-                    ], (v) => _language = v),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(field('public')),
-                      value: _public,
-                      onChanged: (v) => setState(() => _public = v),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(t('passwordEnabled')),
-                      value: _passwordEnabled,
-                      onChanged: (v) => setState(() => _passwordEnabled = v),
-                    ),
-                    if (_passwordEnabled)
-                      TextFormField(
-                        controller: _password,
-                        obscureText: true,
-                        maxLength: 32,
-                        decoration: InputDecoration(
-                          labelText: field('password'),
+        content: GuideAnchor(
+          id: 'rooms.form',
+          child: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Form(
+                key: _form,
+                child: AbsorbPointer(
+                  absorbing: _submitting,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GuideAnchor(
+                        id: 'rooms.form.basic',
+                        child: StarBridgeFieldFrame(
+                          enabled: !_submitting,
+                          followNativeError: true,
+                          builder: (_, focus) => TextFormField(
+                            focusNode: focus,
+                            key: const Key('room-create-title'),
+                            controller: _title,
+                            maxLength: 32,
+                            decoration: InputDecoration(labelText: t('title')),
+                            validator: (value) =>
+                                (value?.trim().length ?? 0) < 2
+                                ? t('titleInvalid')
+                                : null,
+                          ),
                         ),
-                        validator: (value) =>
-                            _editing &&
-                                widget.initialRoom!.passwordRequired &&
-                                (value?.trim().isEmpty ?? true)
+                      ),
+                      StarBridgeFieldFrame(
+                        enabled: !_submitting,
+                        followNativeError: true,
+                        builder: (_, focus) => TextFormField(
+                          focusNode: focus,
+                          key: const Key('room-create-goal'),
+                          controller: _goal,
+                          maxLength: 120,
+                          maxLines: 2,
+                          decoration: InputDecoration(labelText: t('goal')),
+                        ),
+                      ),
+                      StarBridgeSelectFormField<int>(
+                        identity: 'room-capacity',
+                        controlKey: const Key('room-capacity'),
+                        initialValue: _capacity,
+                        decoration: InputDecoration(labelText: t('capacity')),
+                        items: [
+                          for (var n = 2; n <= 16; n++)
+                            DropdownMenuItem(value: n, child: Text('$n')),
+                        ],
+                        onChanged: _submitting
                             ? null
-                            : (value?.trim().length ?? 0) < 4
-                            ? t('passwordInvalid')
-                            : null,
+                            : (n) => setState(() => _capacity = n!),
                       ),
-                    if (_editing &&
-                        widget.initialRoom!.passwordRequired &&
-                        _passwordEnabled)
-                      Text(t('keepPasswordHint')),
-                    if (_editing) Text(t('resetDurationHint')),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<int>(
-                      initialValue: _hours,
-                      decoration: InputDecoration(labelText: t('disband')),
-                      items: [
-                        for (final n in [1, 2, 4, 6, 12, 24])
-                          DropdownMenuItem(
-                            value: n,
-                            child: Text('$n ${t('hours')}'),
-                          ),
-                      ],
-                      onChanged: (n) => setState(() => _hours = n!),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<int>(
-                      initialValue: _minutes,
-                      decoration: InputDecoration(
-                        labelText: t('recruitmentDuration'),
+                      const SizedBox(height: 12),
+                      GuideAnchor(
+                        id: 'rooms.form.admission',
+                        child: choice('admission', _admission, [
+                          'direct',
+                          'approval',
+                        ], (v) => _admission = v),
                       ),
-                      items: [
-                        for (final n in [0, 30, 60, 120, 240])
-                          DropdownMenuItem(
-                            value: n,
-                            child: Text(
-                              n == 0 ? t('unlimited') : '$n ${t('minutes')}',
+                      const SizedBox(height: 12),
+                      choice('eligibility', _eligibility, [
+                        'everyone',
+                        'friends',
+                        'fleet',
+                        'invite',
+                      ], (v) => _eligibility = v),
+                      const SizedBox(height: 12),
+                      choice('voice', _voice, [
+                        'none',
+                        'recommended',
+                        'required',
+                      ], (v) => _voice = v),
+                      const SizedBox(height: 12),
+                      choice('language', _language, [
+                        'zh',
+                        'en',
+                        'bilingual',
+                      ], (v) => _language = v),
+                      StarBridgeSwitch.tile(
+                        key: const Key('room-public-toggle'),
+                        preserveNativeTile: true,
+                        label: field('public'),
+                        value: _public,
+                        onChanged: (v) => setState(() => _public = v),
+                      ),
+                      StarBridgeSwitch.tile(
+                        key: const Key('room-password-toggle'),
+                        preserveNativeTile: true,
+                        label: t('passwordEnabled'),
+                        value: _passwordEnabled,
+                        onChanged: (v) => setState(() => _passwordEnabled = v),
+                      ),
+                      if (_passwordEnabled)
+                        StarBridgeFieldFrame(
+                          enabled: !_submitting,
+                          followNativeError: true,
+                          builder: (_, focus) => TextFormField(
+                            focusNode: focus,
+                            controller: _password,
+                            obscureText: true,
+                            maxLength: 32,
+                            decoration: InputDecoration(
+                              labelText: field('password'),
                             ),
+                            validator: (value) =>
+                                _editing &&
+                                    widget.initialRoom!.passwordRequired &&
+                                    (value?.trim().isEmpty ?? true)
+                                ? null
+                                : (value?.trim().length ?? 0) < 4
+                                ? t('passwordInvalid')
+                                : null,
                           ),
-                      ],
-                      onChanged: (n) => setState(() => _minutes = n!),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(child: Text(t('tagsRequired'))),
-                        OutlinedButton(
-                          key: const Key('room-choose-tags'),
-                          onPressed: () async {
-                            final result = await showRoomTagPicker(
-                              context,
-                              options: _options,
-                              selected: _tags,
-                            );
-                            if (!mounted || result == null) return;
-                            setState(() {
-                              _tags
-                                ..clear()
-                                ..addAll(result);
-                            });
-                          },
-                          child: Text(tagCopy(context, 'choose')),
                         ),
-                      ],
-                    ),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        for (final tag in RoomTagCatalog.ordered(
-                          _options.where((tag) => _tags.contains(tag.id)),
-                        ))
-                          InputChip(
-                            label: Text(RoomTagCatalog.fullText(tag)),
-                            backgroundColor: roomTagColors(
-                              context,
-                              tag.id,
-                            ).soft,
-                            labelStyle: TextStyle(
-                              color: roomTagColors(context, tag.id).foreground,
+                      if (_editing &&
+                          widget.initialRoom!.passwordRequired &&
+                          _passwordEnabled)
+                        Text(t('keepPasswordHint')),
+                      if (_editing) Text(t('resetDurationHint')),
+                      const SizedBox(height: 12),
+                      StarBridgeSelectFormField<int>(
+                        identity: 'room-disband',
+                        controlKey: const Key('room-disband'),
+                        initialValue: _hours,
+                        decoration: InputDecoration(labelText: t('disband')),
+                        items: [
+                          for (final n in [1, 2, 4, 6, 12, 24])
+                            DropdownMenuItem(
+                              value: n,
+                              child: Text('$n ${t('hours')}'),
                             ),
-                            onDeleted: () =>
-                                setState(() => _tags.remove(tag.id)),
-                          ),
-                      ],
-                    ),
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: RoomFeedback(_error!),
+                        ],
+                        onChanged: _submitting
+                            ? null
+                            : (n) => setState(() => _hours = n!),
                       ),
-                  ],
+                      const SizedBox(height: 12),
+                      StarBridgeSelectFormField<int>(
+                        identity: 'room-recruitment-duration',
+                        controlKey: const Key('room-recruitment-duration'),
+                        initialValue: _minutes,
+                        decoration: InputDecoration(
+                          labelText: t('recruitmentDuration'),
+                        ),
+                        items: [
+                          for (final n in [0, 30, 60, 120, 240])
+                            DropdownMenuItem(
+                              value: n,
+                              child: Text(
+                                n == 0 ? t('unlimited') : '$n ${t('minutes')}',
+                              ),
+                            ),
+                        ],
+                        onChanged: _submitting
+                            ? null
+                            : (n) => setState(() => _minutes = n!),
+                      ),
+                      const SizedBox(height: 16),
+                      GuideAnchor(
+                        id: 'rooms.form.tags',
+                        child: Row(
+                          children: [
+                            Expanded(child: Text(t('tagsRequired'))),
+                            StarBridgeActionButton(
+                              controlKey: const Key('room-choose-tags'),
+                              focusNode: _tagsFocus,
+                              onActivate: (source) async {
+                                var confirmedSource = source;
+                                final result = await showRoomTagPicker(
+                                  context,
+                                  options: _options,
+                                  selected: _tags,
+                                  source: source,
+                                  onConfirmed: (source) =>
+                                      confirmedSource = source,
+                                );
+                                if (!mounted || result == null) return;
+                                setState(() {
+                                  _tagSource = confirmedSource;
+                                  _tags
+                                    ..clear()
+                                    ..addAll(result);
+                                });
+                              },
+                              child: Text(tagCopy(context, 'choose')),
+                            ),
+                          ],
+                        ),
+                      ),
+                      RoomSelectedTags(
+                        tags: _options.where((tag) => _tags.contains(tag.id)),
+                        changeSource: _tagSource,
+                        fallbackFocus: _tagsFocus,
+                        onRemove: (id, source) => setState(() {
+                          _tagSource = source;
+                          _tags.remove(id);
+                        }),
+                      ),
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: RoomFeedback(_error!),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _submitting ? null : () => Navigator.pop(context),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: _submitting
+                ? null
+                : (source) => dismissStarBridgeDialog(context, source: source),
             child: Text(t('cancel')),
           ),
-          FilledButton(
-            onPressed: _submitting || !widget.module.canCommand
-                ? null
-                : _submit,
-            child: Text(
-              t(
-                _submitting
-                    ? 'working'
-                    : _editing
-                    ? 'save'
-                    : 'create',
+          GuideAnchor(
+            id: _editing ? 'rooms.form.save' : 'rooms.form.create',
+            child: StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              onActivate: _submitting || !widget.module.canCommand
+                  ? null
+                  : _submit,
+              child: Text(
+                t(
+                  _submitting
+                      ? 'working'
+                      : _editing
+                      ? 'save'
+                      : 'create',
+                ),
               ),
             ),
           ),
@@ -474,7 +564,7 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  Future<void> _submit(InteractionSource source) async {
     if (_room == null && _code.text.trim().isEmpty) {
       setState(() => _error = 'codeRequired');
       return;
@@ -501,7 +591,7 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
       return;
     }
     if (result.accepted) {
-      Navigator.pop(context);
+      dismissStarBridgeDialog(context, source: source);
       return;
     }
     setState(() {
@@ -524,11 +614,15 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (_room == null)
-                TextField(
-                  controller: _code,
-                  maxLength: 32,
+                StarBridgeFieldFrame(
                   enabled: !_working,
-                  decoration: InputDecoration(labelText: t('code')),
+                  builder: (_, focus) => TextField(
+                    focusNode: focus,
+                    controller: _code,
+                    maxLength: 32,
+                    enabled: !_working,
+                    decoration: InputDecoration(labelText: t('code')),
+                  ),
                 )
               else ...[
                 Text(_room!.title),
@@ -541,14 +635,19 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
                   ),
                 ),
                 if (_room!.passwordRequired)
-                  TextField(
-                    controller: _password,
-                    obscureText: true,
-                    maxLength: 32,
-                    decoration: InputDecoration(
-                      labelText: AppStrings.of(context).text('rooms.password'),
-                    ),
+                  StarBridgeFieldFrame(
                     enabled: !_working,
+                    builder: (_, focus) => TextField(
+                      focusNode: focus,
+                      controller: _password,
+                      obscureText: true,
+                      maxLength: 32,
+                      decoration: InputDecoration(
+                        labelText: AppStrings.of(context)
+                            .text('rooms.password'),
+                      ),
+                      enabled: !_working,
+                    ),
                   ),
               ],
               if (_error != null) RoomFeedback(_error!),
@@ -556,12 +655,16 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _working ? null : () => Navigator.pop(context),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: _working
+                ? null
+                : (source) => dismissStarBridgeDialog(context, source: source),
             child: Text(t('cancel')),
           ),
-          FilledButton(
-            onPressed: _working || !widget.module.canCommand ? null : _submit,
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            onActivate: _working || !widget.module.canCommand ? null : _submit,
             child: Text(
               t(
                 _working

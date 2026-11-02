@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:starbridge_flutter/app/legal/starbridge_third_party_licenses.dart';
+import 'package:starbridge_flutter/app/legal/third_party_license_browser.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,11 +22,46 @@ import 'dart:convert';
 import 'dart:io';
 
 void main() {
+  testWidgets('spiritual support never opens payment or claims an unissued trial', (tester) async {
+    final port = _ScmLinkFake();
+    await tester.pumpWidget(_app(HelpSupportSettingsPage(port: port)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('help-spiritual-support')));
+    await tester.pumpAndSettle();
+    expect(find.text('我们已经收到你的精神赞助，谢谢你！'), findsOneWidget);
+    expect(find.textContaining('当前尚未发放体验'), findsNothing);
+    expect(find.text('无需付款，也不会打开支付页面。'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(port.calls, 0);
+    expect(tester.takeException(), isNull);
+  });
   for (final locale in [
     const Locale('zh', 'CN'),
     const Locale('zh', 'TW'),
     const Locale('en'),
   ]) {
+    testWidgets('spiritual support opens and dismisses locally in $locale', (tester) async {
+      final port = _ScmLinkFake();
+      await tester.pumpWidget(_app(HelpSupportSettingsPage(port: port), locale: locale));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('help-spiritual-support')));
+      await tester.pumpAndSettle();
+      final text = locale.languageCode == 'en'
+          ? 'Your moral support means a lot. Thank you!'
+          : locale.countryCode == 'TW'
+          ? '我們已經收到你的精神贊助，謝謝你！'
+          : '我们已经收到你的精神赞助，谢谢你！';
+      expect(find.text(text), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(port.calls, 0);
+      expect(tester.takeException(), isNull);
+    });
     testWidgets('full product release history remains readable in $locale', (
       tester,
     ) async {
@@ -279,6 +315,29 @@ void main() {
     expect(find.text('非官方说明'), findsOneWidget);
   });
 
+  testWidgets('says how the in-game menu takes focus', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_app(const HelpSupportSettingsPage()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('help-topic-button-notices')));
+    await tester.pumpAndSettle();
+    final section = find.text('游戏安全与信息准确性');
+    await tester.ensureVisible(section);
+    await tester.tap(section);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('游戏内菜单：按 Alt+M'), findsOneWidget);
+    for (final strings in [helpSupportZhCn, helpSupportZhTw, helpSupportEnUs]) {
+      final body = strings['help.legal.safety.body']!;
+      expect(body, contains('Alt+M'));
+      expect(body, contains('AttachThreadInput'));
+    }
+  });
+
   testWidgets(
     'opens bundled dependency and font licenses without a network action',
     (tester) async {
@@ -300,7 +359,7 @@ void main() {
       await tester.tap(action);
       await tester.pumpAndSettle();
 
-      expect(find.byType(LicensePage), findsOneWidget);
+      expect(find.byType(ThirdPartyLicenseBrowser), findsOneWidget);
       expect(find.text('Source Sans 3'), findsWidgets);
     },
   );

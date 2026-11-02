@@ -112,7 +112,8 @@ class OverlayPreviewContent extends StatelessWidget {
           child: Text(
             moduleTitle(),
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            overflow: TextOverflow.fade,
+            softWrap: false,
           ),
         ),
       );
@@ -281,56 +282,119 @@ class _FleetOverviewPreview extends StatelessWidget {
       ),
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          OverlayPreviewSourceTitle(
-            moduleKey: 'Squads',
-            child: _previewText(
-              context,
-              title,
-              size: 12,
-              color: tokens.colors.accent,
-              weight: FontWeight.w600,
-            ),
+    // Follows the module's size like the in-game overview: the numbers always,
+    // the title once it fits, then the viewer and the rest of the organization.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final height = constraints.maxHeight;
+        final showTitle = height >= 70;
+        final showDetail = height >= 110;
+        final metrics = Row(
+          children: room
+              ? [
+                  metric(
+                    '${copy('online')} 3 / 4',
+                    color: tokens.colors.success,
+                  ),
+                  metric('${copy('inGame')} 2 / 3', align: TextAlign.center),
+                  metric(
+                    '${copy('usServer')} · 2${copy('peopleSuffix')}',
+                    align: TextAlign.right,
+                  ),
+                ]
+              : [
+                  metric('${copy('online')} 3'),
+                  metric('${copy('inGame')} 2', color: tokens.colors.success),
+                  metric(
+                    '${copy('usServer')} #040 2',
+                    color: tokens.colors.accent,
+                  ),
+                ],
+        );
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            18,
+            showTitle ? 14 : 0,
+            18,
+            showTitle ? 10 : 0,
           ),
-          const SizedBox(height: 10),
-          Row(
+          child: Column(
+            mainAxisAlignment: showTitle
+                ? MainAxisAlignment.start
+                : MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              metric('${copy('online')} 3 / 4', color: tokens.colors.success),
-              metric('${copy('inGame')} 2 / 3', align: TextAlign.center),
-              metric(
-                '${copy('usServer')} · 2${copy('peopleSuffix')}',
-                align: TextAlign.right,
-              ),
+              if (showTitle) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: OverlayPreviewSourceTitle(
+                        moduleKey: 'Squads',
+                        child: _previewText(
+                          context,
+                          title,
+                          size: 12,
+                          color: tokens.colors.accent,
+                          weight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (!room)
+                      _previewText(
+                        context,
+                        copy('memberTotal'),
+                        size: 10,
+                        color: tokens.colors.textSecondary,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
+              metrics,
+              if (showDetail && room) ...[
+                const SizedBox(height: 7),
+                _previewText(
+                  context,
+                  copy('roomObjective'),
+                  size: 10,
+                  color: tokens.colors.textSecondary,
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _previewText(context, copy('orison'), size: 10),
+                    ),
+                    _previewText(
+                      context,
+                      '${copy('atLocation')} 2 / 3',
+                      size: 10,
+                      color: tokens.colors.textSecondary,
+                      textAlign: TextAlign.right,
+                    ),
+                  ],
+                ),
+              ],
+              if (showDetail && !room) ...[
+                const SizedBox(height: 7),
+                _previewText(
+                  context,
+                  '${copy('youAt')} ${copy('orison')} · ${copy('usServer')} #040',
+                  size: 10,
+                  color: tokens.colors.accent,
+                ),
+                const SizedBox(height: 7),
+                _previewText(
+                  context,
+                  '${copy('otherShards')} ${copy('usServer')} #112 1',
+                  size: 10,
+                  color: tokens.colors.textSecondary,
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 7),
-          _previewText(
-            context,
-            room
-                ? copy('roomObjective')
-                : '${copy('sameShard')} 2${copy('peopleSuffix')}',
-            size: 10,
-            color: tokens.colors.textSecondary,
-          ),
-          const SizedBox(height: 7),
-          Row(
-            children: [
-              Expanded(child: _previewText(context, copy('orison'), size: 10)),
-              _previewText(
-                context,
-                '${copy('atLocation')} 2 / 3',
-                size: 10,
-                color: tokens.colors.textSecondary,
-                textAlign: TextAlign.right,
-              ),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -410,6 +474,21 @@ class _MembersPreview extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      if (!hideStatus)
+                        Container(
+                          key: const Key('overlay-preview-member-status-dot'),
+                          width: 7,
+                          height: 7,
+                          margin: const EdgeInsetsDirectional.only(end: 7),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: row.status == copy('offline')
+                                ? tokens.colors.textSecondary
+                                : row.status == copy('appOnline')
+                                ? tokens.colors.info
+                                : tokens.colors.success,
+                          ),
+                        ),
                       Expanded(
                         flex: ratio,
                         child: _previewFittedText(
@@ -425,19 +504,6 @@ class _MembersPreview extends StatelessWidget {
                           },
                         ),
                       ),
-                      if (!hideStatus)
-                        SizedBox(
-                          width: 40,
-                          child: _previewText(
-                            context,
-                            row.status,
-                            size: 9.5,
-                            color: row.status == copy('offline')
-                                ? tokens.colors.textSecondary
-                                : tokens.colors.success,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
                       Expanded(
                         flex: 100 - ratio,
                         child: _previewText(
@@ -482,7 +548,16 @@ class _ChatPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final maximumRows = math.max(1, ((referenceSize.height - 46) / 48).floor());
+    final scaler = MediaQuery.textScalerOf(context);
+    final rowHeight = math.max(
+      48.0,
+      scaler.scale(10.5) * 1.12 + scaler.scale(10) * 1.12 * 2 + 4,
+    );
+    final headerHeight = math.max(46.0, scaler.scale(12) * 1.12 + 28);
+    final maximumRows = math.max(
+      1,
+      ((referenceSize.height - headerHeight) / rowHeight).floor(),
+    );
     final samples =
         <({String sender, String message, String time, bool self})>[
               (
@@ -521,7 +596,7 @@ class _ChatPreview extends StatelessWidget {
           const SizedBox(height: 7),
           for (final sample in samples)
             SizedBox(
-              height: 48,
+              height: rowHeight,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -605,7 +680,7 @@ class _EventPreview extends StatelessWidget {
                           context,
                           copy('memberOnline'),
                           size: 11,
-                          color: tokens.colors.accent,
+                          color: tokens.colors.stateAccent,
                           weight: FontWeight.w600,
                         ),
                       ),

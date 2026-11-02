@@ -1,0 +1,17 @@
+Trading category weapon icon
+============================
+
+"Pistol gun" by John Colburn, published on Game-icons.net.
+Source: https://game-icons.net/1x1/john-colburn/pistol-gun.html
+Original vector: https://game-icons.net/icons/ffffff/transparent/1x1/john-colburn/pistol-gun.svg
+License: Creative Commons Attribution 3.0 Unported (CC BY 3.0).
+License terms: https://creativecommons.org/licenses/by/3.0/
+Legal code: https://creativecommons.org/licenses/by/3.0/legalcode
+
+Adaptation in StarBridge: removed small slide grooves, trigger and muzzle details;
+simplified coordinates; converted the monochrome silhouette to native Flutter paths.
+No endorsement by the original author is implied.
+
+This attribution applies to the weapon artwork, not to the entire category set.
+Game reference photographs are not bundled with these icons.
+

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../app/preferences/app_preferences.dart';
 import '../../app/preferences/app_preferences_port.dart';
@@ -15,7 +18,16 @@ import '../gameplay_time/gameplay_time_panel.dart';
 import 'general_settings_appearance.dart';
 import 'general_settings_behavior.dart';
 import 'general_settings_language.dart';
+import 'general_settings_interaction.dart';
 import 'general_settings_sections.dart';
+import '../../shared/guide/guide_settings_section.dart';
+import '../../shared/release/official_client_profile.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import 'general_settings_motion.dart';
+import 'scm_route_port.dart';
+import 'scm_route_settings.dart';
+import '../../design_system/typography/cjk_line_break.dart';
 
 String _messageKey(AppPreferencesFailure? failure) => switch (failure) {
   AppPreferencesFailure.hostUnavailable =>
@@ -41,33 +53,56 @@ class GeneralSettingsPage extends StatelessWidget {
   const GeneralSettingsPage({
     required this.preferences,
     this.gameplayTime,
+    this.scmRoute,
     super.key,
   });
 
   final AppPreferencesPort preferences;
   final GameplayTimeController? gameplayTime;
 
+  /// Present when the Host offers the route preference (domestic route, 0.7.2).
+  final ScmRoutePort? scmRoute;
+
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<AppPreferencesProjection>(
-      valueListenable: preferences.projection,
-      builder: (context, projection, _) {
-        if (projection.isInitialLoading) {
-          return const _SettingsLoading();
-        }
-        if (projection.phase == AppPreferencesPhase.unavailable &&
-            projection.confirmed == null) {
-          return _SettingsUnavailable(
-            messageKey: _messageKey(projection.failure),
-            onRetry: preferences.retry,
-          );
-        }
-        return _GeneralSettingsContent(
-          preferences: preferences,
-          projection: projection,
-          gameplayTime: gameplayTime,
-        );
-      },
+    return GeneralSettingsMotion(
+      preferences: preferences,
+      builder: (context, motion) =>
+          ValueListenableBuilder<AppPreferencesProjection>(
+            valueListenable: preferences.projection,
+            builder: (context, projection, _) {
+              if (projection.isInitialLoading) {
+                return LoadingContentProbe(
+                  route: '/settings',
+                  status: LoadingContentStatus.waiting,
+                  child: _SettingsLoading(motion: motion),
+                );
+              }
+              if (projection.phase == AppPreferencesPhase.unavailable &&
+                  projection.confirmed == null) {
+                return LoadingContentProbe(
+                  route: '/settings',
+                  status: LoadingContentStatus.unavailable,
+                  child: _SettingsUnavailable(
+                    messageKey: _messageKey(projection.failure),
+                    onRetry: () => motion.run(preferences.retry),
+                  ),
+                );
+              }
+              return LoadingContentProbe(
+                route: '/settings',
+                status: LoadingContentStatus.data,
+                items: 1,
+                child: _GeneralSettingsContent(
+                  preferences: preferences,
+                  projection: projection,
+                  motion: motion,
+                  gameplayTime: gameplayTime,
+                  scmRoute: scmRoute,
+                ),
+              );
+            },
+          ),
     );
   }
 }
@@ -76,12 +111,16 @@ class _GeneralSettingsContent extends StatelessWidget {
   const _GeneralSettingsContent({
     required this.preferences,
     required this.projection,
+    required this.motion,
     this.gameplayTime,
+    this.scmRoute,
   });
 
   final AppPreferencesPort preferences;
   final AppPreferencesProjection projection;
+  final GeneralSettingsMotionState motion;
   final GameplayTimeController? gameplayTime;
+  final ScmRoutePort? scmRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -113,10 +152,14 @@ class _GeneralSettingsContent extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(color: tokens.colors.textSecondary),
               ),
-              if (projection.operation == AppPreferencesOperation.saving) ...[
+              if (projection.operation == AppPreferencesOperation.saving ||
+                  projection.phase == AppPreferencesPhase.loading) ...[
                 SizedBox(height: tokens.space.md),
-                const LinearProgressIndicator(
-                  key: Key('general-settings-saving'),
+                GeneralSettingsWaiting(
+                  source: motion.source,
+                  staticWait: motion.staticWait,
+                  saving:
+                      projection.operation == AppPreferencesOperation.saving,
                 ),
               ],
               if (projection.failure case final failure?) ...[
@@ -125,7 +168,7 @@ class _GeneralSettingsContent extends StatelessWidget {
                   failure: failure,
                   messageKey: _messageKey(failure),
                   onRetry: projection.phase == AppPreferencesPhase.unavailable
-                      ? preferences.retry
+                      ? () => motion.run(preferences.retry)
                       : null,
                 ),
               ],
@@ -137,7 +180,8 @@ class _GeneralSettingsContent extends StatelessWidget {
                 child: GeneralSettingsLanguageChoices(
                   value: effective.locale,
                   enabled: enabled,
-                  onChanged: preferences.setLocale,
+                  onChanged: (value) =>
+                      motion.run(() => preferences.setLocale(value)),
                 ),
               ),
               SizedBox(height: tokens.space.md),
@@ -153,17 +197,39 @@ class _GeneralSettingsContent extends StatelessWidget {
                       value: effective.appearanceMode,
                       styleId: effective.designStyleId,
                       enabled: enabled,
-                      onChanged: preferences.setAppearanceMode,
+                      onChanged: (value) => motion.run(
+                        () => preferences.setAppearanceMode(value),
+                      ),
+                    ),
+                    if (OfficialClientProfile.advancedInteractions) ...[
+                      Divider(height: tokens.space.lg),
+                      GeneralSettingsInteraction(
+                        value: effective.interactionStyle,
+                        enabled: enabled,
+                        onChanged: (value) => motion.run(
+                          () => preferences.setInteractionStyle(value),
+                        ),
+                      ),
+                    ],
+                    Divider(height: tokens.space.lg),
+                    _HolidaySetting(
+                      value: effective.holidayAppearance,
+                      enabled: enabled,
+                      onChanged: (value) => motion.run(
+                        () => preferences.setHolidayAppearance(value),
+                      ),
                     ),
                     Divider(height: tokens.space.lg),
                     _MotionSetting(
                       value:
                           effective.motionPreference == MotionPreference.reduce,
                       enabled: enabled,
-                      onChanged: (value) => preferences.setMotionPreference(
-                        value
-                            ? MotionPreference.reduce
-                            : MotionPreference.followSystem,
+                      onChanged: (value) => motion.run(
+                        () => preferences.setMotionPreference(
+                          value
+                              ? MotionPreference.reduce
+                              : MotionPreference.followSystem,
+                        ),
                       ),
                     ),
                   ],
@@ -177,12 +243,34 @@ class _GeneralSettingsContent extends StatelessWidget {
                 child: GeneralSettingsBehavior(
                   value: effective.applicationBehavior,
                   enabled: enabled,
-                  onChanged: preferences.setApplicationBehavior,
+                  onChanged: (value) => motion.run(
+                    () => preferences.setApplicationBehavior(value),
+                  ),
+                ),
+              ),
+              GuideSettingsSection(
+                panel: (title, subtitle, child) => Padding(
+                  padding: EdgeInsets.only(top: tokens.space.md),
+                  child: _SettingsPanel(
+                    icon: StarBridgeIconSemantic.settings,
+                    title: title,
+                    subtitle: subtitle,
+                    child: child,
+                  ),
                 ),
               ),
               SizedBox(height: tokens.space.md),
               if (gameplayTime != null) ...[
                 GameplayTimePanel(controller: gameplayTime!),
+                SizedBox(height: tokens.space.md),
+              ],
+              if (scmRoute != null) ...[
+                _SettingsPanel(
+                  icon: StarBridgeIconSemantic.statusNetwork,
+                  title: scmRouteCopy(context, 'panel'),
+                  subtitle: scmRouteCopy(context, 'panelHint'),
+                  child: ScmRouteSettings(port: scmRoute!),
+                ),
                 SizedBox(height: tokens.space.md),
               ],
               const GeneralSettingsDataSections(),
@@ -236,7 +324,7 @@ class _SettingsPanel extends StatelessWidget {
                     Text(title, style: Theme.of(context).textTheme.titleMedium),
                     SizedBox(height: tokens.space.xxs),
                     Text(
-                      subtitle,
+                      keepLastTwo(subtitle),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -287,8 +375,55 @@ class _MotionSetting extends StatelessWidget {
           ),
         ),
         SizedBox(width: tokens.space.md),
-        Switch(
-          key: const Key('general-reduce-motion'),
+        StarBridgeSwitch(
+          controlKey: const Key('general-reduce-motion'),
+          label: strings.text('settings.general.motion.reduce'),
+          value: value,
+          onChanged: enabled ? onChanged : null,
+        ),
+      ],
+    );
+  }
+}
+
+class _HolidaySetting extends StatelessWidget {
+  const _HolidaySetting({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final bool enabled;
+  final Future<bool> Function(bool value) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                strings.text('settings.general.holiday.title'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              SizedBox(height: tokens.space.xxs),
+              Text(
+                strings.text('settings.general.holiday.description'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        SizedBox(width: tokens.space.md),
+        StarBridgeSwitch(
+          controlKey: const Key('general-holiday-appearance'),
+          label: strings.text('settings.general.holiday.title'),
           value: value,
           onChanged: enabled ? onChanged : null,
         ),
@@ -338,9 +473,9 @@ class _FailureBanner extends StatelessWidget {
           Expanded(child: Text(AppStrings.of(context).text(messageKey))),
           if (onRetry != null) ...[
             SizedBox(width: tokens.space.sm),
-            OutlinedButton(
-              key: const Key('general-settings-retry'),
-              onPressed: () async {
+            StarBridgeActionButton(
+              controlKey: const Key('general-settings-retry'),
+              onActivate: (_) async {
                 await onRetry!();
               },
               child: Text(
@@ -355,7 +490,8 @@ class _FailureBanner extends StatelessWidget {
 }
 
 class _SettingsLoading extends StatelessWidget {
-  const _SettingsLoading();
+  const _SettingsLoading({required this.motion});
+  final GeneralSettingsMotionState motion;
 
   @override
   Widget build(BuildContext context) {
@@ -366,9 +502,13 @@ class _SettingsLoading extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(),
-            SizedBox(height: tokens.space.md),
-            Text(AppStrings.of(context).text('settings.general.loading')),
+            SizedBox(
+              width: 300,
+              child: GeneralSettingsWaiting(
+                source: motion.source,
+                staticWait: motion.staticWait,
+              ),
+            ),
           ],
         ),
       ),
@@ -410,9 +550,9 @@ class _SettingsUnavailable extends StatelessWidget {
                 SizedBox(height: tokens.space.xs),
                 Text(strings.text(messageKey)),
                 SizedBox(height: tokens.space.md),
-                OutlinedButton(
-                  key: const Key('general-settings-retry'),
-                  onPressed: () => onRetry(),
+                StarBridgeActionButton(
+                  controlKey: const Key('general-settings-retry'),
+                  onActivate: (_) => onRetry(),
                   child: Text(strings.text('settings.general.retry')),
                 ),
               ],

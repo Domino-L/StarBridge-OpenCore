@@ -43,7 +43,7 @@ void main() {
         .clearAccessibilityFeaturesTestValue(),
   );
   setUpAll(loadFonts);
-  testWidgets('HUD dock toggles directly without opening a settings window', (
+  testWidgets('HUD dock opens the quick panel; the header switches directly', (
     tester,
   ) async {
     size(tester, const Size(1600, 1100));
@@ -62,8 +62,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('menu-tool-overlay')));
     await tester.pumpAndSettle();
+    expect(actions, isEmpty);
+    expect(find.byKey(const ValueKey('menu-panel-hud')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('menu-toggle-hud')));
+    await tester.pumpAndSettle();
     expect(actions, ['hud:toggle:']);
-    expect(find.byKey(const ValueKey('menu-panel-hud')), findsNothing);
   });
   testWidgets('header hides and restores opened panels with their drafts', (
     tester,

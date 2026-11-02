@@ -11,11 +11,13 @@ String applicationSupportCopy(BuildContext context, String key) {
 }
 
 const _simplified = <String, String>{
+  'checking': '正在检查当前设备…',
   'checkedAt': '最近检查：',
   'item.connection': '服务器连接',
   'detail.connectionHealthy': '当前配置的服务可以连接。',
   'detail.connectionFailed': '服务返回异常状态，请稍后重新检查。',
   'detail.connectionUnavailable': '暂时无法确认连接，本地检查结果仍然有效。',
+  'detail.connectionPaused': '联网检查已暂停，本地检查结果仍然有效。',
   'title': '诊断与维护',
   'description': '检查当前设备的本地数据、游戏日志、开机启动和安装状态。',
   'summary.healthy': '当前检查项目均正常',
@@ -67,11 +69,13 @@ const _simplified = <String, String>{
 };
 
 const _traditional = <String, String>{
+  'checking': '正在檢查目前裝置…',
   'checkedAt': '最近檢查：',
   'item.connection': '伺服器連線',
   'detail.connectionHealthy': '目前設定的服務可以連線。',
   'detail.connectionFailed': '服務回傳異常狀態，請稍後重新檢查。',
   'detail.connectionUnavailable': '暫時無法確認連線，本機檢查結果仍然有效。',
+  'detail.connectionPaused': '連線檢查已暫停，本機檢查結果仍然有效。',
   'title': '診斷與維護',
   'description': '檢查目前裝置的本機資料、遊戲記錄、開機啟動與安裝狀態。',
   'summary.healthy': '目前檢查項目均正常',
@@ -123,11 +127,16 @@ const _traditional = <String, String>{
 };
 
 const _english = <String, String>{
+  'checking': 'Checking this device…',
   'checkedAt': 'Last checked:',
   'item.connection': 'Server connection',
   'detail.connectionHealthy': 'The configured service is reachable.',
-  'detail.connectionFailed': 'The service reported a problem. Check again later.',
-  'detail.connectionUnavailable': 'Connection could not be checked. Local results remain valid.',
+  'detail.connectionFailed':
+      'The service reported a problem. Check again later.',
+  'detail.connectionUnavailable':
+      'Connection could not be checked. Local results remain valid.',
+  'detail.connectionPaused':
+      'Online checks are paused. Local results remain valid.',
   'title': 'Diagnostics & maintenance',
   'description': 'Check local data, Game.log, Windows startup, and installation status on this device.',
   'summary.healthy': 'All checked items look good',

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_source_binding_field.dart';
@@ -32,9 +34,11 @@ class OverlaySourceLimitNotice extends StatelessWidget {
         children: [
           Expanded(child: Text(copy('overlay.source.limit'))),
           const SizedBox(width: 12),
-          OutlinedButton(
-            onPressed: () => showDialog<void>(
-              context: context,
+          StarBridgeActionButton(
+            key: const Key('overlay-source-adjust'),
+            onActivate: (source) => showStarBridgeDialog<void>(
+              context,
+              source: source,
               builder: (_) => ValueListenableBuilder<OverlayWorkspaceProjection>(
                 valueListenable: module.projection,
                 builder: (context, value, _) => AlertDialog(
@@ -85,8 +89,12 @@ class OverlaySourceLimitNotice extends StatelessWidget {
                     ),
                   ),
                   actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
+                    StarBridgeActionButton(
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: (source) => dismissStarBridgeDialog<void>(
+                        context,
+                        source: source,
+                      ),
                       child: Text(copy('overlay.source.done')),
                     ),
                   ],

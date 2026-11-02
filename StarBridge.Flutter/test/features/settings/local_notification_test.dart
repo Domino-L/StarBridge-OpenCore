@@ -60,6 +60,8 @@ class Fixture {
           if (r.payload.containsKey('directMessageWindowsEnabled'))
             'directMessageWindowsEnabled':
                 r.payload['directMessageWindowsEnabled'],
+          if (r.payload.containsKey('tradeWindowsEnabled'))
+            'tradeWindowsEnabled': r.payload['tradeWindowsEnabled'],
           'position': r.payload['position'],
           'preview': r.payload['preview'],
         };
@@ -320,6 +322,40 @@ void main() {
     });
   }
   setUpAll(loadFonts);
+  // 交易提醒 (user 10-28): on by default under the Windows switch; an older
+  // Host without the field keeps it unavailable and never receives it.
+  test('trade reminder switch reads, defaults on and saves', () async {
+    final old = Fixture();
+    await old.start();
+    addTearDown(old.close);
+    final before = old.module.projection.value.settings!;
+    expect(before.tradeDeliveryAvailable, isFalse);
+    expect(before.channels.tradeWindowsEnabled, isTrue);
+    expect(await old.module.save(before), isTrue);
+    expect(old.value.containsKey('tradeWindowsEnabled'), isFalse);
+
+    final f = Fixture()..value['tradeWindowsEnabled'] = true;
+    await f.start();
+    addTearDown(f.close);
+    final current = f.module.projection.value.settings!;
+    expect(current.tradeDeliveryAvailable, isTrue);
+    expect(current.channels.tradeWindowsEnabled, isTrue);
+    expect(
+      await f.module.save(
+        current.copyWith(
+          channels: current.channels.copyWith(tradeWindowsEnabled: false),
+        ),
+      ),
+      isTrue,
+    );
+    expect(f.value['tradeWindowsEnabled'], isFalse);
+    await f.module.refresh();
+    expect(
+      f.module.projection.value.settings!.channels.tradeWindowsEnabled,
+      isFalse,
+    );
+  });
+
   test(
     'private desktop preference is optional and persists only after save',
     () async {

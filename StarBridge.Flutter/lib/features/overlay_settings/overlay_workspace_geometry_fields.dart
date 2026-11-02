@@ -1,4 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import 'overlay_workspace_layout_geometry.dart';
@@ -83,7 +89,15 @@ class _PixelInputState extends State<_PixelInput> {
   late final _text = TextEditingController(
     text: widget.value.toStringAsFixed(1),
   );
-  final _focus = FocusNode();
+  late final _focus = FocusNode(
+    onKeyEvent: (_, event) {
+      if (event is KeyDownEvent || event is KeyRepeatEvent) {
+        _blurSource = InteractionSource.keyboard;
+      }
+      return KeyEventResult.ignored;
+    },
+  );
+  InteractionSource _blurSource = InteractionSource.programmatic;
   bool _invalid = false;
   @override
   void initState() {
@@ -92,7 +106,9 @@ class _PixelInputState extends State<_PixelInput> {
   }
 
   void _onFocus() {
-    if (!_focus.hasFocus) _commit();
+    if (!_focus.hasFocus) {
+      runStarBridgeSynchronousActivation(_blurSource, _commit);
+    }
   }
 
   void _commit() {
@@ -130,18 +146,30 @@ class _PixelInputState extends State<_PixelInput> {
   }
 
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: _text,
+  Widget build(BuildContext context) => StarBridgeFieldFrame(
     focusNode: _focus,
     enabled: widget.enabled,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    decoration: InputDecoration(
-      labelText: widget.label,
-      errorText: _invalid
-          ? AppStrings.of(context).text('overlay.editor.numberInvalid')
-          : null,
+    error: _invalid,
+    builder: (_, focus) => TextField(
+      controller: _text,
+      focusNode: _focus,
+      enabled: widget.enabled,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        labelText: widget.label,
+        errorText: _invalid
+            ? AppStrings.of(context).text('overlay.editor.numberInvalid')
+            : null,
+      ),
+      onSubmitted: (_) => runStarBridgeSynchronousActivation(
+        InteractionSource.keyboard,
+        _commit,
+      ),
+      onChanged: (_) => _blurSource = InteractionSource.keyboard,
+      onTapOutside: (_) {
+        _blurSource = InteractionSource.pointer;
+        _focus.unfocus();
+      },
     ),
-    onSubmitted: (_) => _commit(),
-    onTapOutside: (_) => _focus.unfocus(),
   );
 }

@@ -139,5 +139,5 @@ Expand-Archive ".\release\StarBridge-0.6.6-win-x64-update.zip" ".\payload"
 
 公开仓库可以核验 Release 与 tag 的绑定、资产摘要、Windows 数字签名、随包许可、
 SBOM、provenance、载荷哈希和开放核心代码。正式版本采用 GitHub `immutable Release`
-固定资产集合。完整官方客户端还可能包含未公开的商业外观实现，因此公开源码不能
+固定资产集合。完整官方客户端还可能包含未公开的专有外观实现，因此公开源码不能
 对完整官方二进制做到 `bit-for-bit reproducible`；这不影响上述开放组件和发布证据的独立核验。

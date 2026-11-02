@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../localization/app_strings.dart';
 import '../shell/chrome/presence_color.dart';
 import 'manual_presence.dart';
+import '../../shared/release/official_client_profile.dart';
 
 String manualPresenceText(BuildContext context, String key) {
   final locale = Localizations.localeOf(context);
@@ -14,7 +16,10 @@ String manualPresenceText(BuildContext context, String key) {
   final labels = <String, (String, String, String)>{
     'presence.title': ('对外状态', '對外狀態', 'Visibility'),
     'presence.selectOnline': ('在线', '在線', 'Online'),
+    'presence.resumeOnline': ('恢复在线', '恢復線上', 'Resume online'),
     'presence.invisible': ('隐身', '隱身', 'Invisible'),
+    'presence.selectOffline': ('离线', '離線', 'Offline'),
+    'presence.manualOffline': ('离线', '離線', 'Offline'),
     'presence.inGame': ('游戏中', '遊戲中', 'In game'),
     'presence.away': ('暂离', '暫離', 'Away'),
     'presence.unknown': ('状态待确认', '狀態待確認', 'Status unconfirmed'),
@@ -38,6 +43,9 @@ String manualPresenceText(BuildContext context, String key) {
   return value.$1;
 }
 
+Color manualPresenceColor(ColorTokens colors, String key) =>
+    key == 'presence.invisible' ? colors.offline : presenceColor(colors, key);
+
 class ManualPresenceBadge extends StatelessWidget {
   const ManualPresenceBadge({required this.controller, super.key});
   final ManualPresenceController controller;
@@ -46,10 +54,8 @@ class ManualPresenceBadge extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
     builder: (context, _) {
-      final key = controller.snapshot.selfKey;
-      final color = key == 'presence.invisible'
-          ? context.tokens.colors.offline
-          : presenceColor(context.tokens.colors, key);
+      final key = controller.selfKey;
+      final color = manualPresenceColor(context.tokens.colors, key);
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -116,10 +122,16 @@ class ManualPresenceChoices extends StatelessWidget {
                     : color;
               }),
             ),
-            onPressed: controller.canChange
+            onPressed:
+                mode == PresenceVisibility.online && controller.canRestoreOnline
+                ? () => controller.restoreOnline()
+                : controller.canChange
                 ? () => controller.select(mode)
                 : null,
-            trailingIcon: controller.snapshot.confirmedMode == mode
+            trailingIcon:
+                !controller.isOffline &&
+                    (controller.connectionMode?.allowsOnlineTraffic ?? true) &&
+                    controller.snapshot.confirmedMode == mode
                 ? const StarBridgeIcon(
                     StarBridgeIconSemantic.connected,
                     size: 16,
@@ -129,10 +141,48 @@ class ManualPresenceChoices extends StatelessWidget {
               manualPresenceText(
                 context,
                 mode == PresenceVisibility.online
-                    ? 'presence.selectOnline'
+                    ? OfficialClientProfile.connectionModes &&
+                              (controller.isOffline ||
+                                  controller
+                                          .connectionMode
+                                          ?.snapshot
+                                          .needsOnlineRecovery ==
+                                      true)
+                          ? 'presence.resumeOnline'
+                          : 'presence.selectOnline'
                     : 'presence.invisible',
               ),
             ),
+          ),
+        if (OfficialClientProfile.connectionModes)
+          MenuItemButton(
+            key: const Key('manual-presence-offline'),
+            closeOnActivate: false,
+            leadingIcon: DecoratedBox(
+              key: const ValueKey('manual-presence-dot-offline'),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: context.tokens.colors.danger,
+              ),
+              child: const SizedBox.square(dimension: 8),
+            ),
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.disabled)
+                    ? context.tokens.colors.danger.withValues(alpha: .45)
+                    : context.tokens.colors.danger,
+              ),
+            ),
+            onPressed: controller.canEnterOffline
+                ? () => controller.selectOffline()
+                : null,
+            trailingIcon: controller.isOffline
+                ? const StarBridgeIcon(
+                    StarBridgeIconSemantic.connected,
+                    size: 16,
+                  )
+                : const SizedBox(width: 16),
+            child: Text(manualPresenceText(context, 'presence.selectOffline')),
           ),
         if (controller.busy || controller.failed || !controller.canChange)
           Padding(

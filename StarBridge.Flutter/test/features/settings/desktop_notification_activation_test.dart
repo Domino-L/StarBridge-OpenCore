@@ -18,7 +18,9 @@ import '../friends/social_layout_test.dart' show app, loadFonts;
 import 'package:starbridge_flutter/features/direct_messages/direct_messages_page.dart';
 import 'package:starbridge_flutter/features/communities/communities_page.dart';
 import 'package:starbridge_flutter/app/routing/open_destination_intent.dart';
+import 'package:starbridge_flutter/features/tools/exec_hangar_page.dart';
 import 'package:starbridge_flutter/features/party_rooms/party_rooms_page.dart';
+import 'package:starbridge_flutter/features/official_fleet/official_fleet_page.dart';
 
 class _DirectDesktop extends _Desktop
     implements DesktopNotificationDestinationPort {
@@ -68,6 +70,57 @@ class _Rooms implements PartyRoomsPort {
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'official fleet notification opens its actual fleet route without room reads',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final desktop = _DirectDesktop()..destination = 'officialFleet';
+      final rooms = _Rooms();
+      final composition = AppComposition.forTest(
+        windowChrome: InMemoryWindowChrome(),
+        desktopNotifications: desktop,
+        partyRoomsPort: rooms,
+      );
+      await tester.pumpWidget(StarBridgeApp(composition: composition));
+      await tester.pumpAndSettle();
+      final reads = rooms.reads;
+      desktop.clicks.add(DesktopReminderActivation('f' * 32, 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(OfficialFleetPage), findsOneWidget);
+      expect(find.byType(CommunitiesPage), findsNothing);
+      expect(rooms.reads, reads);
+      await tester.pumpWidget(const SizedBox());
+      await desktop.clicks.close();
+    },
+  );
+  testWidgets(
+    'hangar notification opens tools without reading room reminders',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final desktop = _DirectDesktop()..destination = 'execHangar';
+      final rooms = _Rooms();
+      final composition = AppComposition.forTest(
+        windowChrome: InMemoryWindowChrome(),
+        desktopNotifications: desktop,
+        partyRoomsPort: rooms,
+      );
+      await tester.pumpWidget(StarBridgeApp(composition: composition));
+      await tester.pumpAndSettle();
+      final reads = rooms.reads;
+      desktop.clicks.add(DesktopReminderActivation('e' * 32, 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(ExecHangarPage), findsOneWidget);
+      expect(rooms.reads, reads);
+      await tester.pumpWidget(const SizedBox());
+      await desktop.clicks.close();
+    },
+  );
   testWidgets(
     'inbox destination opens actual room invitations without joining',
     (tester) async {

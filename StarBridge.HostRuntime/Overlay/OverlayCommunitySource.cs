@@ -14,10 +14,10 @@ internal sealed partial class OverlayCommunitySource : IDisposable
     private readonly Func<DateTimeOffset> _now;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _readGate = new(1, 1);
+    private readonly Lifecycle.AsyncWorkRetirement _retirement = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
-    private readonly Task? _driver;
-    private readonly Task? _changeDriver;
+    private readonly Lifecycle.DeferredAsyncDriver _drivers;
     private readonly Func<TimeSpan, CancellationToken, Task> _waitForWake;
     private readonly bool _prepareWhenIdle;
     private readonly Func<(bool Known, string? Room)> _presetRoomTrigger;
@@ -56,7 +56,8 @@ internal sealed partial class OverlayCommunitySource : IDisposable
     private DateTimeOffset? _lastDemand;
     private bool? _supportsPresenceChanges;
     private CancellationTokenSource? _changeReadCancellation;
-    internal Task Completion => Task.WhenAll(_driver ?? Task.CompletedTask, _changeDriver ?? Task.CompletedTask);
+    internal Task Completion => Task.WhenAll(_drivers.Completion, _fleetSource?.Completion ?? Task.CompletedTask);
+    internal bool StartDeferredWork() { _fleetSource?.StartDeferredWork(); return _drivers.Start(); }
 
     internal OverlayCommunitySource(
         Func<(BridgeAccountContext? Owner, long Generation)> owner,
@@ -66,10 +67,11 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         Func<TimeSpan, CancellationToken, Task>? waitForWake = null, bool prepareWhenIdle = false,
         Func<(bool Known, string? Room)>? presetRoomTrigger = null,
         Func<InformationOverlayModuleDemand?>? moduleDemand = null,
-        Func<StarBridge.Core.Overlay.OverlaySourceLease?>? moduleRoomLease = null)
+        Func<StarBridge.Core.Overlay.OverlaySourceLease?>? moduleRoomLease = null, bool isFleetSession = false)
     {
         _owner = owner;
         _reader = reader;
+        _isFleetSession = isFleetSession;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _choiceStore = choiceStore;
         _prepareWhenIdle = prepareWhenIdle;
@@ -79,10 +81,29 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         _moduleRoomLease = moduleRoomLease ?? (() => null);
         _waitForWake = waitForWake ?? (async (delay, token) =>
             { await _wake.WaitAsync(delay, token).ConfigureAwait(false); });
-        if (startDriver)
+        _drivers = new(RunDriversAsync, _stop.Cancel);
+        if (reader is IOverlayFleetReader fleetReader)
         {
-            _driver = DriveAsync();
-            if (reader is IOverlayCommunityChangeReader changes) _changeDriver = FollowChangesAsync(changes);
+            _fleetSource = new(owner, new FleetReader(fleetReader), startDriver, _now, isFleetSession: true);
+            _fleetSource.ContentChanged += NotifyContentChanged;
+        }
+        if (startDriver) _drivers.Start();
+    }
+
+    private Task RunDriversAsync() => Task.WhenAll(RunDriverAsync(DriveAsync),
+        _reader is IOverlayCommunityChangeReader changes
+            ? RunDriverAsync(() => FollowChangesAsync(changes)) : Task.CompletedTask);
+
+    private async Task RunDriverAsync(Func<Task> run)
+    {
+        try { await run().ConfigureAwait(false); }
+        catch
+        {
+            // A dead sibling must immediately seal the group even if another
+            // read ignores cancellation. Never await our own retirement here:
+            // its receipt includes this original loop and all other siblings.
+            _ = _drivers.RetireAsync();
+            throw;
         }
     }
 
@@ -91,6 +112,7 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         lock (_sync)
         {
             CheckScope();
+            if (WantsFleet) return _disposed ? null : _fleetSource?.Read();
             if (_content is null) AdoptWorkspace();
             if (_content is not null && _now() >= _validUntil)
             { TraceRead("expired", "roster-lease"); _content = null; }
@@ -100,6 +122,7 @@ internal sealed partial class OverlayCommunitySource : IDisposable
                 _chatNeedsBaseline = true;
                 _content = _content with { AnnouncementTitle = "", AnnouncementText = "", Messages = [] };
             }
+            if (_content is not null) _content = _content.WithoutExpiredChatAuthors(_now());
             return _disposed ? null : _content;
         }
     }
@@ -112,6 +135,7 @@ internal sealed partial class OverlayCommunitySource : IDisposable
             var now = _now();
             var wake = _lastDemand is null || now - _lastDemand > TimeSpan.FromSeconds(20);
             _lastDemand = now;
+            if (WantsFleet) _fleetSource?.ReadForDisplay();
             if (wake && _wake.CurrentCount == 0) _wake.Release();
             return Read();
         }
@@ -124,6 +148,7 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         {
             CheckScope();
             _lastDemand = null;
+            _fleetSource?.SuspendDisplayDemand();
             pending = KeepSourceReady() ? null : _changeReadCancellation;
             if (!KeepSourceReady()) _transientFailures = 0;
         }
@@ -151,6 +176,16 @@ internal sealed partial class OverlayCommunitySource : IDisposable
 
     internal async Task RefreshAsync(CancellationToken token = default, bool waitForGate = false, bool includeCommunication = true)
     {
+        bool fleet;
+        lock (_sync) { CheckScope(); fleet = WantsFleet; }
+        if (fleet)
+        {
+            if (_fleetSource is not null) await _fleetSource.RefreshAsync(token, waitForGate, includeCommunication).ConfigureAwait(false);
+            return;
+        }
+        using var work = _retirement.Enter(token);
+        if (work is null) return;
+        token = work.Token;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
         if (waitForGate) await _readGate.WaitAsync(deadline.Token).ConfigureAwait(false);
@@ -243,8 +278,10 @@ internal sealed partial class OverlayCommunitySource : IDisposable
                 var resetSource = previous is null || content.LatestChatSequence < previous.LatestChatSequence;
                 var resetChat = resetSource || _chatNeedsBaseline;
                 var messages = resetChat ? Array.Empty<InformationOverlayRoomMessage>() :
-                    previous!.Messages.Concat(content.Messages.Where(message => message.Sequence > previous.LatestChatSequence))
-                        .GroupBy(message => message.Sequence).Select(group => group.First())
+                    previous!.Messages.Concat(content.Messages.Where(message => message.Sequence > previous.LatestChatSequence ||
+                            previous.Messages.Any(known => known.Sequence == message.Sequence)))
+                        // Refresh known author projections too: later anonymous data wins.
+                        .GroupBy(message => message.Sequence).Select(group => group.Last())
                         .OrderBy(message => message.Sequence).TakeLast(50).ToArray();
                 // Communication cannot renew the earlier roster authorization.
                 if (!newerRoster) _validUntil = (rosterAcceptedAt ?? _now()).AddSeconds(40);
@@ -276,9 +313,30 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         {
             // Permission/schema/unclassified failures fail closed. A failure
             // belonging to an old selection must not clear a newer snapshot.
-            lock (_sync) { if (Current(scope, revision)) { _authorityRejectionVersion++; TraceRead("rejected", error.GetType().Name, started); RevokeWorkspace(); _content = null; _catalogAt = default; _transientFailures = 0; } }
+            lock (_sync)
+            {
+                if (Current(scope, revision))
+                {
+                    TraceRead("rejected", error.GetType().Name, started);
+                    RejectReadAuthority();
+                }
+            }
         }
         finally { _readGate.Release(); SignalReadProgress(); }
+    }
+
+    // Called under _sync for both membership probes and ordinary content reads.
+    // Revokes display, editor and in-flight catalog receipts as one operation.
+    private void RejectReadAuthority()
+    {
+        InvalidateRead();
+        _catalogRevision++;
+        _catalog = [];
+        _catalogAt = default;
+        _authorityRejectionVersion++;
+        _content = null;
+        RevokeWorkspace();
+        _transientFailures = 0;
     }
 
     private static bool IsTransientReadFailure(Exception error) => error switch
@@ -308,7 +366,7 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         {
             if (_transientFailures > 0)
                 return TimeSpan.FromSeconds(_transientFailures switch { 1 => 1, 2 => 3, 3 => 5, _ => 15 });
-            var normal = TimeSpan.FromSeconds(HasDisplayDemand() && _supportsPresenceChanges == false ? 2 : 15);
+            var normal = TimeSpan.FromSeconds(!_isFleetSession && HasDisplayDemand() && _supportsPresenceChanges == false ? 2 : 15);
             if (_content is null) return normal;
             // Reserve the 20-second read budget plus a small scheduling margin.
             // Communication may have consumed time after roster acceptance.
@@ -360,6 +418,10 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         _explicitCode = null;
         _automaticCode = null;
         _pageCode = null;
+        _pageFleet = false;
+        _fleetReference = null;
+        _fleetNotMember = false;
+        _authorityRejectionVersion = 0;
         _catalog = [];
         _catalogAt = default;
         _choiceFailed = false;
@@ -515,14 +577,22 @@ internal sealed partial class OverlayCommunitySource : IDisposable
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
     }
 
+    internal Task RetireAsync()
+    {
+        Dispose();
+        return Task.WhenAll(_retirement.Close(), Completion, _fleetSource?.RetireAsync() ?? Task.CompletedTask);
+    }
+
     public void Dispose()
     {
         lock (_sync)
         {
             _disposed = true; _content = null; InvalidateRead();
+            _fleetSource?.Dispose();
             foreach (var code in _moduleSessions.Keys.ToArray()) RemoveModuleSession(code);
         }
-        _stop.Cancel();
+        _ = _drivers.RetireAsync();
+        _ = _retirement.Close();
         // Cancellation may still be observed by an in-flight read. Do not
         // dispose the semaphore/token source underneath its finally block.
     }
@@ -532,5 +602,5 @@ internal sealed partial class OverlayCommunitySource : IDisposable
     private bool HasDisplayDemand() => !UsesModuleSources() && _lastDemand is not null && _now() - _lastDemand <= TimeSpan.FromSeconds(20);
     private bool KeepSourceReady() => !UsesModuleSources() && _prepareWhenIdle && !_disposed && !_choiceFailed && _scope.Owner is not null &&
         (_choice.Mode == "community" || _choice.Mode == "auto" && _room() is null);
-    private bool HasSourceDemand() => HasDisplayDemand() || KeepSourceReady();
+    private bool HasSourceDemand() => !WantsFleet && (HasDisplayDemand() || KeepSourceReady());
 }

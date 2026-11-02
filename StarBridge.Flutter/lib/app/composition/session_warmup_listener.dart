@@ -3,8 +3,14 @@ import 'package:flutter/widgets.dart';
 
 import 'app_composition.dart';
 import 'session_warmup.dart';
+import '../../features/account/account_read_preparation.dart';
 import '../../features/communities/community_ships_copy.dart'
     show communityShipsCulture;
+
+/// Feature prefetches queued after the communities job, in this order. The
+/// marketplace one reads the sidebar attention badge once instead of on a fixed
+/// post-login timer (2026-10-21); a feature without a prefetch is skipped.
+const sessionWarmupFeatureIds = ['marketplace', 'achievements', 'party-rooms'];
 
 class SessionWarmupListener extends StatefulWidget {
   const SessionWarmupListener({
@@ -24,19 +30,46 @@ class _SessionWarmupListenerState extends State<SessionWarmupListener>
 
   void _bind() {
     final app = widget.composition;
+    final preparation =
+        app.account is AccountReadPreparation &&
+            (app.account as AccountReadPreparation).supportsPreparedReads
+        ? app.account as AccountReadPreparation
+        : null;
     final warmup = _warmup = SessionWarmup(
       account: app.account.projection,
       jobs: [
+        if (preparation != null)
+          () async {
+            await preparation.prepareNextRead();
+          },
         ?app.features.all
             .where((feature) => feature.id == 'hangar')
             .firstOrNull
             ?.prefetch,
         app.friends.prefetch,
         app.communities.prefetch,
+        // Frequently opened destinations whose first visit otherwise waits on
+        // a full read (device traces: achievements 7 s median). Same bounded
+        // one-job-at-a-time queue; interaction still defers it.
+        for (final id in sessionWarmupFeatureIds)
+          ?app.features.all
+              .where((feature) => feature.id == id)
+              .firstOrNull
+              ?.prefetch,
       ],
-      workChanges: app.communities,
-      continueWork: () =>
-          app.communities.prepareNextWorkspace(communityShipsCulture(context)),
+      workChanges: preparation == null
+          ? app.communities
+          : Listenable.merge([app.communities, app.account.projection]),
+      cancelWork: preparation?.cancelReadPreparation,
+      continueWork: () async {
+        if (!mounted) return false;
+        final culture = communityShipsCulture(context);
+        if (preparation != null && await preparation.prepareNextRead()) {
+          return true;
+        }
+        if (!mounted) return false;
+        return app.communities.prepareNextWorkspace(culture);
+      },
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(warmup, _warmup)) return;

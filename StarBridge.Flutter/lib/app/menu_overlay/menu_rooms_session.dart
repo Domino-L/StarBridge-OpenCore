@@ -1,3 +1,8 @@
+import '../../features/party_rooms/room_member_transfer.dart';
+
+
+import 'menu_overlay_text.dart';
+
 import 'dart:convert';
 
 import '../../features/party_rooms/party_rooms_module.dart';
@@ -17,6 +22,7 @@ final class MenuRoomsSession extends MenuFeatureSession {
   MenuRoomsSession(
     this.port,
     void Function(Map<String, Object?>) publish, {
+    super.locale,
     this.chatOnly = false,
   }) : super(publish, port.invalidations) {
     if (chatOnly) _tab = 'chat';
@@ -48,7 +54,7 @@ final class MenuRoomsSession extends MenuFeatureSession {
 
   @override
   Map<String, Object?>? get readingView =>
-      currentView['state'] == 'ready' ? {...currentView} : null;
+      templateView['state'] == 'ready' ? {...templateView} : null;
   int _before = 0, _sentRevision = 0;
   String _sendStatus = 'idle';
   final PartyRoomsPort port;
@@ -129,15 +135,15 @@ final class MenuRoomsSession extends MenuFeatureSession {
     if (room == null) {
       if (chatOnly) {
         return {
-          'title': '房间聊天',
-          'notice': '尚未加入房间。请先在房间窗口加入，再回到这里聊天。',
+          'title': MenuOverlayText('menu.overlay.rooms.chat'),
+          'notice': MenuOverlayText('menu.overlay.rooms.joinFirst'),
           'rows': rows,
         };
       }
       final data = await _lobby.directory(directory, _images);
       if (!current(epoch)) throw StateError('retired');
       return {
-        'title': '房间',
+        'title': MenuOverlayText('menu.tools.rooms'),
         'notice': _state.notice,
         'lobby': {
           'directory': data,
@@ -161,46 +167,56 @@ final class MenuRoomsSession extends MenuFeatureSession {
         },
         'buttons': [
           if (_state.uncertain)
-            button('已核对当前结果', (_) async {
-              _state.uncertain = false;
-              _state.notice = '';
-            }, confirm: '请先核对房间状态。继续不会重复执行上次操作。'),
+            button(
+              MenuOverlayText('menu.overlay.rooms.reviewed'),
+              (_) async {
+                _state.uncertain = false;
+                _state.notice = '';
+              },
+              confirm: MenuOverlayText('menu.overlay.rooms.reviewConfirm'),
+              role: 'acknowledgeResult',
+            ),
         ],
       };
     } else {
       if (directory.currentRoomId == null) {
         actions.add(
-          button('返回房间列表', (_) async {
+          button(MenuOverlayText('menu.overlay.rooms.back'), (_) async {
             changeScope();
             _state.selected = null;
-          }),
+          }, role: 'roomsHome'),
         );
       }
       if (!chatOnly) {
         actions.add(
-          button('成员', (_) async {
+          button(MenuOverlayText('menu.overlay.organizations.members'), (
+            _,
+          ) async {
             _tab = 'members';
-          }),
+          }, role: 'members'),
         );
       }
       if (!chatOnly &&
           directory.currentRoomId == room.id &&
           port is RoomChatProvider) {
         actions.add(
-          button('聊天', (_) async {
+          button(MenuOverlayText('socialWindow.chatTitle'), (_) async {
             _tab = 'chat';
-          }),
+          }, role: 'chat'),
         );
       }
       if (!chatOnly && commands && !_state.uncertain) {
         if (directory.currentRoomId == room.id) {
           actions.add(
             button(
-              '退出房间',
+              MenuOverlayText('menu.overlay.rooms.leave'),
               (_) => _command(
                 RoomCommand(RoomOperation.leave, {'roomId': room.id}),
               ),
-              confirm: '退出 ${room.title}？你将不再接收此房间的信息。',
+              confirm: MenuOverlayText('menu.overlay.rooms.leaveConfirm', {
+                'name': room.title,
+              }),
+              role: 'leaveRoom',
             ),
           );
         } else if (!roomRecruitmentClosed(room, directory.serverTime) &&
@@ -208,15 +224,23 @@ final class MenuRoomsSession extends MenuFeatureSession {
             directory.viewerPendingRoomIds?.contains(room.id) != true) {
           actions.add(
             button(
-              room.admissionMode == 'approval' ? '申请加入' : '加入房间',
+              room.admissionMode == 'approval'
+                  ? MenuOverlayText('menu.overlay.rooms.apply')
+                  : MenuOverlayText('menu.overlay.rooms.join'),
               (password) => _command(
                 RoomCommand(RoomOperation.join, {
                   'roomId': room.id,
                   'password': password,
                 }),
               ),
-              input: room.passwordRequired ? '房间密码' : null,
-              confirm: '加入 ${room.title}？需要审核的房间会先提交申请。',
+              input: room.passwordRequired
+                  ? MenuOverlayText('menu.overlay.rooms.password')
+                  : null,
+              confirm: MenuOverlayText('menu.overlay.rooms.joinConfirm', {
+                'name': room.title,
+              }),
+              role: 'joinRoom',
+              secret: true,
             ),
           );
         }
@@ -240,8 +264,11 @@ final class MenuRoomsSession extends MenuFeatureSession {
           rows.add({
             'title': message.sender,
             'avatar': avatar,
-            'detail':
-                '${message.text}${message.attachment != null ? "\n[附件请在客户端查看]" : ""}',
+            'detail': MenuOverlayJoin([
+              message.text,
+              if (message.attachment != null)
+                const MenuOverlayText('menu.overlay.comms.attachmentClient'),
+            ]),
           });
           messagePresentation.add({
             'kind': message.kind == 'player' ? 'player' : 'system',
@@ -251,22 +278,22 @@ final class MenuRoomsSession extends MenuFeatureSession {
         }
         if (page.hasOlder && page.messages.isNotEmpty) {
           actions.add(
-            button('较早消息', (_) async {
+            button(MenuOverlayText('menu.overlay.comms.older'), (_) async {
               _before = page.messages.first.sequence;
-            }),
+            }, role: 'olderMessages'),
           );
         }
         if (_before > 0) {
           actions.add(
-            button('最新消息', (_) async {
+            button(MenuOverlayText('menu.overlay.comms.latest'), (_) async {
               _before = 0;
-            }),
+            }, role: 'latestMessages'),
           );
         }
         if (chat.available && !_state.uncertain) {
           actions.add(
             button(
-              '发送消息',
+              MenuOverlayText('menu.overlay.comms.sendMessage'),
               (text) async {
                 final value = text.trim();
                 final attachment = _roomPreset.attachment;
@@ -303,7 +330,9 @@ final class MenuRoomsSession extends MenuFeatureSession {
                       receipt.sequence <= 0) {
                     throw StateError('unconfirmed');
                   }
-                  _state.notice = '消息已发送。';
+                  _state.notice = MenuOverlayText(
+                    'menu.overlay.rooms.messageSent',
+                  );
                   _sentRevision++;
                   _sendStatus = 'sent';
                   _before = 0;
@@ -312,13 +341,16 @@ final class MenuRoomsSession extends MenuFeatureSession {
                 } on Object {
                   if (currentAccount(active) && current(sendEpoch)) {
                     _state.uncertain = true;
-                    _state.notice = '发送结果未确认，请查看记录后再操作。';
+                    _state.notice = MenuOverlayText(
+                      'menu.overlay.rooms.sendUnknown',
+                    );
                     _sendStatus = 'unknown';
                   }
                 }
               },
-              input: '输入消息',
+              input: MenuOverlayText('menu.overlay.comms.input'),
               limit: 300,
+              role: 'sendMessage',
             ),
           );
         }
@@ -330,13 +362,15 @@ final class MenuRoomsSession extends MenuFeatureSession {
           memberPresentation.add(menuRoomMember(member, avatar));
           final row = <String, Object?>{
             'title': member.displayName,
-            'detail': [
-              member.isHost ? '房主' : '成员',
+            'detail': MenuOverlayJoin([
+              member.isHost
+                  ? MenuOverlayText('menu.overlay.rooms.host')
+                  : MenuOverlayText('menu.overlay.organizations.members'),
               member.presence,
               member.ship,
               member.location,
               member.shard,
-            ].where((v) => v.isNotEmpty).join(' · '),
+            ], ' · '),
             'buttons': [
               if (!chatOnly &&
                   commands &&
@@ -346,14 +380,17 @@ final class MenuRoomsSession extends MenuFeatureSession {
                   (port as RoomManagementPort).supportsManagement &&
                   canRemoveRoomMember(room, member))
                 button(
-                  '移出房间',
+                  MenuOverlayText('menu.overlay.rooms.removeMember'),
                   (_) => _command(
                     RoomCommand(RoomOperation.remove, {
                       'roomId': room.id,
                       'removalToken': member.removalToken,
                     }),
                   ),
-                  confirm: '将 ${member.displayName} 移出房间？移出后，对方将离开当前房间。',
+                  confirm: MenuOverlayText('menu.overlay.rooms.removeConfirm', {
+                    'name': member.displayName,
+                  }),
+                  role: 'removeMember',
                 ),
               if (commands &&
                   !_state.uncertain &&
@@ -363,21 +400,31 @@ final class MenuRoomsSession extends MenuFeatureSession {
                   (port as RoomManagementPort).supportsManagement &&
                   canRemoveRoomMember(room, member))
                 button(
-                  '转移房主',
+                  MenuOverlayComputed(
+                    (strings) =>
+                        roomTransferTextForLocale(strings.locale, 'transfer'),
+                  ),
                   (_) => _command(
                     RoomCommand(RoomOperation.transferHost, {
                       'roomId': room.id,
                       'memberToken': member.removalToken,
                     }),
                   ),
-                  confirm:
-                      '将房主转移给 ${member.displayName}？你将留在房间，但不再拥有房主管理权限；原房主发出的待处理邀请将失效。',
+                  confirm: MenuOverlayJoin([
+                    member.displayName,
+                    '\n\n',
+                    MenuOverlayComputed(
+                      (strings) =>
+                          roomTransferTextForLocale(strings.locale, 'hint'),
+                    ),
+                  ]),
+                  role: 'transferOwner',
                 ),
             ],
           };
           final memberButtons = row['buttons'] as List<Map<String, Object?>>;
           for (final action in memberButtons) {
-            final target = action['label'] == '转移房主'
+            final target = action['role'] == 'transferOwner'
                 ? memberTransferActions
                 : memberActions;
             target['${memberPresentation.length - 1}'] =
@@ -393,25 +440,30 @@ final class MenuRoomsSession extends MenuFeatureSession {
     }
     if (_state.uncertain) {
       actions.add(
-        button('已核对当前结果', (_) async {
-          _state.uncertain = false;
-          _state.notice = '';
-          _sendStatus = 'idle';
-        }, confirm: '请先核对房间与聊天记录。继续只解除操作锁定，不会重复执行上次操作。'),
+        button(
+          MenuOverlayText('menu.overlay.rooms.reviewed'),
+          (_) async {
+            _state.uncertain = false;
+            _state.notice = '';
+            _sendStatus = 'idle';
+          },
+          confirm: MenuOverlayText('menu.overlay.rooms.reviewChatConfirm'),
+          role: 'acknowledgeResult',
+        ),
       );
     }
     return {
       'title': room.title,
-      'notice': _state.notice.isNotEmpty
+      'notice': _state.notice != ''
           ? _state.notice
           : directory.currentRoomId == room.id
           ? ''
           : roomRecruitmentClosed(room, directory.serverTime)
-          ? '该房间已停止招募。'
+          ? MenuOverlayText('menu.overlay.rooms.closed')
           : room.members.length >= room.capacity
-          ? '房间已满。'
+          ? MenuOverlayText('menu.overlay.rooms.full')
           : directory.viewerPendingRoomIds?.contains(room.id) == true
-          ? '申请已提交，等待房主审核。'
+          ? MenuOverlayText('menu.overlay.rooms.pending')
           : '',
       'buttons': actions,
       'rows': rows,
@@ -428,7 +480,7 @@ final class MenuRoomsSession extends MenuFeatureSession {
                 port is RoomManagementPort &&
                 (port as RoomManagementPort).supportsManagement)
               'action': button(
-                '房间设置',
+                MenuOverlayText('menu.overlay.rooms.settings'),
                 (value) => _updateSettings(room.id, value),
                 limit: 2048,
               )['key'],
@@ -510,10 +562,10 @@ final class MenuRoomsSession extends MenuFeatureSession {
       'error': result.error,
       'preview': ?preview,
     };
-    final lobby = currentView['lobby'];
+    final lobby = templateView['lobby'];
     if (lobby is Map) {
       emit({
-        ...currentView,
+        ...templateView,
         'lobby': {...lobby, 'reply': _lobbyReply},
       });
     }
@@ -608,8 +660,8 @@ final class MenuRoomsSession extends MenuFeatureSession {
     }
     _state.uncertain = result.status == 'unknown';
     _state.notice = switch (result.status) {
-      'updated' => '房间设置已保存。',
-      'unknown' => '房间设置的保存结果未确认，请刷新核对，不要重复提交。',
+      'updated' => MenuOverlayText('menu.overlay.rooms.saved'),
+      'unknown' => MenuOverlayText('menu.overlay.rooms.saveUnknown'),
       _ => '',
     };
     _settingsReply = {
@@ -617,10 +669,10 @@ final class MenuRoomsSession extends MenuFeatureSession {
       'status': result.status,
       'error': result.error,
     };
-    final presentation = currentView['room'];
+    final presentation = templateView['room'];
     if (presentation is Map) {
       emit({
-        ...currentView,
+        ...templateView,
         'room': {
           ...presentation,
           'settings': {
@@ -642,13 +694,13 @@ final class MenuRoomsSession extends MenuFeatureSession {
       if (!currentAccount(epoch)) return;
       _state.uncertain = result.status == 'unknown';
       _state.notice = switch (result.status) {
-        'joined' => '已加入房间。',
-        'pending' => '申请已提交，等待房主审核。',
-        'left' => '已退出房间。',
-        'removed' => '已将成员移出房间。',
-        'hostTransferred' => '房主已转移，你仍在房间中。',
-        'unknown' => '结果未确认，请刷新核对。',
-        _ => '操作未完成，请刷新核对当前状态。',
+        'joined' => MenuOverlayText('menu.overlay.rooms.joined'),
+        'pending' => MenuOverlayText('menu.overlay.rooms.pending'),
+        'left' => MenuOverlayText('menu.overlay.rooms.left'),
+        'removed' => MenuOverlayText('menu.overlay.rooms.removed'),
+        'hostTransferred' => MenuOverlayText('menu.overlay.rooms.transferred'),
+        'unknown' => MenuOverlayText('menu.overlay.rooms.unknown'),
+        _ => MenuOverlayText('menu.overlay.rooms.failed'),
       };
       if (result.accepted) {
         changeScope();
@@ -657,7 +709,7 @@ final class MenuRoomsSession extends MenuFeatureSession {
     } on Object {
       if (currentAccount(epoch)) {
         _state.uncertain = true;
-        _state.notice = '结果未确认，请刷新核对。';
+        _state.notice = MenuOverlayText('menu.overlay.rooms.unknown');
       }
     }
   }

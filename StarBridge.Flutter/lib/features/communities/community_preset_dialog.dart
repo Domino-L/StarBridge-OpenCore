@@ -3,12 +3,31 @@ import '../../design_system/icons/standard_icon.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../common/social_read_activity.dart';
 
 import 'communities_module.dart';
 import 'community_chat_copy.dart';
 import 'community_preset_port.dart';
 import '../overlay_settings/overlay_preset_inspection_port.dart';
 import '../overlay_settings/overlay_preset_import_preview.dart';
+
+Future<Map<String, Object?>?> showCommunityPresetDialog(
+  BuildContext context, {
+  required CommunityPresetPort port,
+  Map<String, Object?>? attachment,
+  InteractionSource? source,
+}) => showStarBridgeDialog<Map<String, Object?>>(
+  context,
+  source: source,
+  barrierDismissible: false,
+  builder: (_) => CommunityPresetDialog(port: port, attachment: attachment),
+);
 
 /// Selecting a share only attaches to the draft; importing requires a separate
 /// explicit action and never retries an uncertain device write.
@@ -26,6 +45,24 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
   String? _error, _imported;
   bool _busy = false, _invalidated = false, _uncertain = false;
   int _epoch = 0;
+  ModalRoute<dynamic>? _inspectionRoute;
+  InteractionSource _activitySource = InteractionSource.programmatic;
+  String _activityStage = 'preset-read';
+  int _activityRevision = 0;
+  bool _activityOpening = false, _firstRead = true, _activityCovered = false;
+
+  void _beginActivity(
+    String stage, {
+    InteractionSource? source,
+    bool opening = false,
+  }) {
+    _activityStage = stage;
+    _activitySource = source ?? captureStarBridgeActivationSource()();
+    _activityRevision++;
+    _activityOpening = opening;
+    _activityCovered = false;
+  }
+
   bool get _import => widget.attachment != null;
   String t(String key) => communityChatText(context, key);
   @override
@@ -33,6 +70,14 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
     super.initState();
     _changes = widget.port.invalidations.listen((_) {
       _epoch++;
+      final inspection = _inspectionRoute;
+      if (inspection != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && inspection.isActive) {
+            inspection.navigator?.removeRoute(inspection);
+          }
+        });
+      }
       if (mounted) {
         setState(() {
           _invalidated = true;
@@ -50,6 +95,8 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
     if (_busy || _invalidated || _uncertain || _imported != null) return;
     final epoch = _epoch;
     setState(() {
+      _beginActivity('preset-read', opening: _firstRead);
+      _firstRead = false;
       _busy = true;
       _error = null;
       _catalog = null;
@@ -64,7 +111,10 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
     }
   }
 
-  Future<void> _apply([CommunityPresetChoice? choice]) async {
+  Future<void> _apply(
+    InteractionSource source, [
+    CommunityPresetChoice? choice,
+  ]) async {
     final catalog = _catalog;
     if (_busy ||
         _invalidated ||
@@ -75,6 +125,14 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
     }
     final epoch = _epoch;
     setState(() {
+      _beginActivity(
+        _import
+            ? widget.port is OverlayPresetInspectionPort
+                  ? 'preset-inspect'
+                  : 'preset-import'
+            : 'preset-export',
+        source: source,
+      );
       _busy = true;
       _error = null;
     });
@@ -83,23 +141,37 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
       if (_import) {
         final inspector = widget.port;
         if (inspector is OverlayPresetInspectionPort) {
-          final preview = await (inspector as OverlayPresetInspectionPort).inspectPreset(
-            widget.attachment!['overlayPresetPackage'] as String,
-            catalog.revision,
-          );
+          final preview = await (inspector as OverlayPresetInspectionPort)
+              .inspectPreset(
+                widget.attachment!['overlayPresetPackage'] as String,
+                catalog.revision,
+              );
           if (!mounted || !_current(epoch)) return;
-          final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (_) => OverlayPresetImportPreview(
-              name: preview.name,
-              settings: preview.settings,
-              layout: preview.layout,
-              currentSettings: null,
-              sources: preview.sources,
-              removedOrganizationBindings: preview.removedOrganizationBindings,
-            ),
+          setState(() => _activityCovered = true);
+          final confirmed = await showStarBridgeDialog<bool>(
+            context,
+            source: source,
+            builder: (previewContext) {
+              _inspectionRoute = ModalRoute.of(previewContext);
+              return OverlayPresetImportPreview(
+                onConfirmSource: (source) {
+                  if (_current(epoch)) _activitySource = source;
+                },
+                name: preview.name,
+                settings: preview.settings,
+                layout: preview.layout,
+                currentSettings: null,
+                sources: preview.sources,
+                removedOrganizationBindings:
+                    preview.removedOrganizationBindings,
+              );
+            },
           );
+          _inspectionRoute = null;
           if (!_current(epoch) || confirmed != true) return;
+          setState(
+            () => _beginActivity('preset-import', source: _activitySource),
+          );
         }
         writeStarted = true;
         final result = await widget.port.importCommunityPreset(
@@ -112,7 +184,9 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
           choice.id,
           catalog.revision,
         );
-        if (mounted && _current(epoch)) Navigator.pop(context, result);
+        if (mounted && _current(epoch)) {
+          dismissStarBridgeDialog(context, source: source, result: result);
+        }
       }
     } catch (error) {
       if (_current(epoch)) {
@@ -123,7 +197,9 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
               ? 'presetImportUnknown'
               : 'presetReadFailed';
           _uncertain =
-              _import && writeStarted && !{'presetChanged', 'presetInvalid'}.contains(_error);
+              _import &&
+              writeStarted &&
+              !{'presetChanged', 'presetInvalid'}.contains(_error);
           _catalog = null;
         });
       }
@@ -163,10 +239,24 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                if (_busy)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: LinearProgressIndicator(),
+                if (_busy && !_activityCovered)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: KeyedSubtree(
+                      key: ValueKey(_activityRevision),
+                      child: SocialReadActivity(
+                        key: ValueKey('$_activityStage-activity'),
+                        source: _activitySource,
+                        opening: _activityOpening,
+                        label: t(switch (_activityStage) {
+                          'preset-inspect' => 'presetActivityInspect',
+                          'preset-export' => 'presetActivityExport',
+                          'preset-import' => 'presetActivityImport',
+                          _ => 'presetActivityRead',
+                        }),
+                        height: 4,
+                      ),
+                    ),
                   ),
                 if (_error != null)
                   Padding(
@@ -181,16 +271,26 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
                 if (!_import && _catalog != null && !_busy) ...[
                   if (_catalog!.presets.isEmpty) Text(t('noPresets')),
                   for (final choice in _catalog!.presets)
-                    ListTile(
-                      title: Text(
-                        choice.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    StarBridgeActionRow(
+                      controlKey: ValueKey(
+                        'community-preset-choice-${choice.id}',
                       ),
-                      trailing: const StandardIcon(
-                        StandardIconSemantic.attachFile,
+                      semanticLabel: choice.name,
+                      onActivate: (_, source) => _apply(source, choice),
+                      child: ExcludeFocus(
+                        child: ExcludeSemantics(
+                          child: ListTile(
+                            title: Text(
+                              choice.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: const StandardIcon(
+                              StandardIconSemantic.attachFile,
+                            ),
+                          ),
+                        ),
                       ),
-                      onTap: () => _apply(choice),
                     ),
                 ],
               ],
@@ -199,18 +299,26 @@ class _CommunityPresetDialogState extends State<CommunityPresetDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: _busy
+              ? null
+              : (source) => dismissStarBridgeDialog(context, source: source),
           child: Text(t('close')),
         ),
         if (_catalog == null &&
             !_invalidated &&
             !_uncertain &&
             _imported == null)
-          TextButton(onPressed: _busy ? null : _load, child: Text(t('retry'))),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: _busy ? null : (_) => _load(),
+            child: Text(t('retry')),
+          ),
         if (_import && _catalog != null && _imported == null)
-          FilledButton(
-            onPressed: _busy || _invalidated || _uncertain ? null : _apply,
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            onActivate: _busy || _invalidated || _uncertain ? null : _apply,
             child: Text(t('importPreset')),
           ),
       ],

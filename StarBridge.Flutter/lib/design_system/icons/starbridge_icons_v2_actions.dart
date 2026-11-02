@@ -2,6 +2,13 @@ import 'starbridge_icons_v2_pen.dart';
 import 'starbridge_icons_v2_spec.dart';
 
 final List<IconSpec> actionsIconsV2 = [
+  // Private ship bookmarks: the existing cut-line grammar, not profile favorites.
+  IconSpec('bookmark', '收藏', iconGroups[5], ['Std.bookmark'], (g) {
+    g.p([7, 3.5, 17, 3.5, 17, 21, 12, 17, 7, 21], close: true);
+  }),
+  IconSpec('bookmarked', '已收藏', iconGroups[5], ['Std.bookmarked'], (g) {
+    g.fp([7, 3.5, 17, 3.5, 17, 21, 12, 17, 7, 21]);
+  }),
   // 操作 -------------------------------------------------------------------
   IconSpec('edit', '编辑', iconGroups[5], ['SB.edit', 'Std.edit'], (g) {
     g.rot(135, () {

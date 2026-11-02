@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_port.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_copy.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 
 import 'community_workspace_test.dart';
 import 'community_workspace_view_test.dart' show host;
@@ -13,6 +14,139 @@ import '../friends/social_layout_test.dart' show loadFonts;
 
 void main() {
   setUpAll(loadFonts);
+  for (final size in [const Size(1280, 720), const Size(1600, 1000)]) {
+    for (final rawOnline in [false, true]) {
+      testWidgets(
+        'header counts only public presence for Unknown online=$rawOnline at $size',
+        (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          final port = WorkspaceTestPort();
+          addTearDown(port.changes.close);
+          port.reader = (target, query, offset) async {
+            final payload = workspacePayload(target: target, query: query);
+            final original = Map<String, Object?>.from(
+              (payload['members'] as List).single as Map,
+            );
+            final members = [
+              for (final (index, status) in [
+                'Online',
+                'Away',
+                'InGame',
+                'Unknown',
+              ].indexed)
+                {
+                  ...original,
+                  'memberRef': '${index + 1}' * 32,
+                  'isSelf': false,
+                  'online': status == 'Unknown' ? rawOnline : true,
+                  'liveStatus': status,
+                },
+            ];
+            final workspace = CommunityWorkspace.parse({
+              ...payload,
+              'members': members,
+              'totalCount': members.length,
+              'matchedCount': members.length,
+            });
+            expect(workspace.members.last.publicPresence, 'offline');
+            expect(workspace.members.last.publicOnline, isFalse);
+            expect(workspace.members.last.publicInGame, isFalse);
+            expect(workspace.members.last.ship, isNull);
+            expect(workspace.members.last.location, isNull);
+            expect(workspace.members.last.arrivalPendingConfirmation, isFalse);
+            return workspace;
+          };
+          await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
+          await tester.pumpAndSettle();
+          for (final (metric, expected) in [
+            ('online', '3'),
+            ('gaming', '1'),
+            ('member', '4'),
+          ]) {
+            expect(
+              tester
+                  .widget<Text>(
+                    find.byKey(ValueKey('community-presence-value-$metric')),
+                  )
+                  .data,
+              expected,
+              reason: 'Unknown online=$rawOnline must not add a public count.',
+            );
+          }
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+    testWidgets(
+      'header treats four parsed private/offline forms alike at $size',
+      (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final port = WorkspaceTestPort();
+        addTearDown(port.changes.close);
+        port.reader = (target, query, offset) async {
+          final payload = workspacePayload(target: target, query: query);
+          final original = Map<String, Object?>.from(
+            (payload['members'] as List).single as Map,
+          );
+          final members = [
+            for (final (index, status) in [
+              'Offline',
+              'ManualOffline',
+              'Invisible',
+              'Paused',
+            ].indexed)
+              {
+                ...original,
+                'memberRef': '${index + 1}' * 32,
+                'isSelf': false,
+                'online': status != 'Offline',
+                'liveStatus': status,
+              },
+          ];
+          final workspace = CommunityWorkspace.parse({
+            ...payload,
+            'members': members,
+            'totalCount': members.length,
+            'matchedCount': members.length,
+          });
+          for (final member in workspace.members) {
+            expect(member.publicPresence, 'offline');
+            expect(member.publicOnline, isFalse);
+            expect(member.publicInGame, isFalse);
+            expect(member.ship, isNull);
+            expect(member.location, isNull);
+            expect(member.arrivalPendingConfirmation, isFalse);
+          }
+          return workspace;
+        };
+        await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
+        await tester.pumpAndSettle();
+        for (final (metric, expected) in [
+          ('online', '0'),
+          ('gaming', '0'),
+          ('member', '4'),
+        ]) {
+          expect(
+            tester
+                .widget<Text>(
+                  find.byKey(ValueKey('community-presence-value-$metric')),
+                )
+                .data,
+            expected,
+          );
+        }
+        expect(find.text('隐身'), findsNothing);
+        expect(find.text('共享已暂停'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
   for (final locale in [
     const Locale('zh', 'CN'),
     const Locale('zh', 'TW'),
@@ -309,8 +443,11 @@ void main() {
           find.byKey(const Key('community-header-information')),
         );
         expect(
-          find.byTooltip(
-            '${workspaceText(context, 'onlinePage')} 1\n${workspaceText(context, 'presencePageScope')}',
+          find.byWidgetPredicate(
+            (w) =>
+                w is StarBridgeTooltip &&
+                w.message ==
+                    '${workspaceText(context, 'onlinePage')} 1\n${workspaceText(context, 'presencePageScope')}',
           ),
           findsOneWidget,
         );

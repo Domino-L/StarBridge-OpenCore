@@ -4,6 +4,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
 
 class GeneralSettingsLanguageChoices extends StatelessWidget {
   const GeneralSettingsLanguageChoices({
@@ -41,6 +42,9 @@ class GeneralSettingsLanguageChoices extends StatelessWidget {
       children: [
         for (final choice in choices)
           _LanguageChoice(
+            controlKey: Key(
+              'general-language-control-${choice.$1.languageCode}-${choice.$1.countryCode}',
+            ),
             key: Key(
               'general-language-${choice.$1.languageCode}-${choice.$1.countryCode}',
             ),
@@ -60,6 +64,7 @@ class GeneralSettingsLanguageChoices extends StatelessWidget {
 
 class _LanguageChoice extends StatelessWidget {
   const _LanguageChoice({
+    required this.controlKey,
     required this.label,
     required this.selected,
     required this.enabled,
@@ -68,6 +73,7 @@ class _LanguageChoice extends StatelessWidget {
   });
 
   final String label;
+  final Key controlKey;
   final bool selected;
   final bool enabled;
   final VoidCallback onTap;
@@ -81,44 +87,49 @@ class _LanguageChoice extends StatelessWidget {
     return Material(
       color: surface.fill,
       borderRadius: tokens.shape.small,
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        borderRadius: tokens.shape.small,
-        child: Container(
-          constraints: BoxConstraints(
-            minWidth: tokens.density.controlHeight * 3,
-          ),
-          padding: EdgeInsets.symmetric(
-            horizontal: tokens.space.md,
-            vertical: tokens.space.sm,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: tokens.shape.small,
-            border: Border.all(
-              color: selected ? tokens.colors.accent : surface.border,
-              width: selected ? tokens.stroke.strong : tokens.stroke.regular,
+      child: StarBridgeActionRow(
+        controlKey: controlKey,
+        semanticLabel: label,
+        semanticSelected: selected,
+        onActivate: enabled ? (_, _) => onTap() : null,
+        baseRadius: tokens.shape.radiusSmall,
+        child: ExcludeSemantics(
+          child: Container(
+            constraints: BoxConstraints(
+              minWidth: tokens.density.controlHeight * 3,
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (selected) ...[
-                StarBridgeIcon(
-                  StarBridgeIconSemantic.connected,
-                  size: tokens.icons.small,
-                  color: tokens.colors.accent,
-                ),
-                SizedBox(width: tokens.space.xs),
-              ],
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: enabled
-                      ? tokens.colors.textPrimary
-                      : tokens.colors.textDisabled,
-                ),
+            padding: EdgeInsets.symmetric(
+              horizontal: tokens.space.md,
+              vertical: tokens.space.sm,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: tokens.shape.small,
+              border: Border.all(
+                color: selected ? tokens.colors.accent : surface.border,
+                width: selected ? tokens.stroke.strong : tokens.stroke.regular,
               ),
-            ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (selected) ...[
+                  StarBridgeIcon(
+                    StarBridgeIconSemantic.connected,
+                    size: tokens.icons.small,
+                    color: tokens.colors.accent,
+                  ),
+                  SizedBox(width: tokens.space.xs),
+                ],
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: enabled
+                        ? tokens.colors.textPrimary
+                        : tokens.colors.textDisabled,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

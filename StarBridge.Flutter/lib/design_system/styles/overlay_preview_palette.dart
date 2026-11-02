@@ -36,7 +36,6 @@ Color overlayPreviewAccent(String theme) => Color(switch (theme) {
   'Esperia' => 0xffff5c70,
   'Gatac' => 0xffffcde6,
   'NightShadow' => 0xffd61f35,
-  'LagrangeWeave' => 0xfff0a76b,
   _ => 0xff53beff,
 });
 

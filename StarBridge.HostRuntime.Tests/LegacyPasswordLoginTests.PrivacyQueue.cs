@@ -16,7 +16,7 @@ internal static partial class LegacyPasswordLoginTests
             using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
             using var host = CreateHost(login);
             await host.LoginLegacyAsync(BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "synthetic" }), 0, default);
-            var gate = (SemaphoreSlim)typeof(ScmAccountBridgeHost).GetField("_mutationGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+            var gate = (AccountMutationGate)typeof(ScmAccountBridgeHost).GetField("_mutationGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
             var input = new PrivacyPublicationInput(host.CurrentContext!, host.Generation, "Commander_One", true, null, GameLogSessionSnapshot.Empty);
             var store = new LocalPrivacyStore(root);
             store.Save(input.Owner, 0, Guid.NewGuid().ToString("N"), new(true,

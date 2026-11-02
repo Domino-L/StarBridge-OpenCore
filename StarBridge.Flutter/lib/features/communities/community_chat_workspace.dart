@@ -1,11 +1,20 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../common/organization_holo.dart';
+import '../common/organization_holo_online.dart';
 import '../common/user_avatar_menu.dart';
+import '../common/social_read_activity.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import 'community_online_members_controller.dart';
 import 'community_workspace_port.dart';
 import 'community_workspace_image.dart';
@@ -33,7 +42,7 @@ class CommunityChatWorkspace extends StatefulWidget {
 
 class _CommunityChatWorkspaceState extends State<CommunityChatWorkspace> {
   bool _collapsed = false;
-  DialogRoute<void>? _route;
+  StarBridgeDialogRoute<void>? _route;
   void _dismiss() {
     final route = _route;
     _route = null;
@@ -68,27 +77,50 @@ class _CommunityChatWorkspaceState extends State<CommunityChatWorkspace> {
       widget.onAllMembers();
     },
   );
-  Future<void> _openNarrow() async {
+  Future<void> _openNarrow(InteractionSource source) async {
     if (_route != null) return;
-    final route = DialogRoute<void>(
-      context: context,
+    StarBridgeDialogRoute<void>? opened;
+    await showStarBridgeDialog<void>(
+      context,
+      source: source,
+      onRouteCreated: (route) => _route = opened = route,
       builder: (context) => AlertDialog(
         content: SizedBox(width: 280, height: 480, child: _members()),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+          StarBridgeActionButton(
+            key: const Key('community-online-close'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) =>
+                dismissStarBridgeDialog<void>(context, source: source),
             child: Text(MaterialLocalizations.of(context).closeButtonLabel),
           ),
         ],
       ),
     );
-    _route = route;
-    await Navigator.of(context).push(route);
-    if (_route == route) _route = null;
+    if (_route == opened) _route = null;
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) {
+    if (!OrganizationHolo.of(context)) return _standard(context);
+    // Holo chat shares the main fleet's left online column (option B).
+    return OrganizationHoloChatDock(
+      key: const Key('community-chat-dock'),
+      resetKey: (widget.port, widget.targetRef),
+      closeKey: const Key('community-online-close'),
+      online: (_, {required collapsed, onToggle}) => CommunityOnlineMembersPane(
+        avatars: widget.avatars,
+        port: widget.port,
+        targetRef: widget.targetRef,
+        holoCollapsed: collapsed,
+        onCollapse: onToggle,
+        onAllMembers: widget.onAllMembers,
+      ),
+      chat: widget.chat,
+    );
+  }
+
+  Widget _standard(BuildContext context) => LayoutBuilder(
     builder: (context, size) {
       final narrow = size.maxWidth < 900;
       final expanded = !narrow && !_collapsed;
@@ -101,13 +133,16 @@ class _CommunityChatWorkspaceState extends State<CommunityChatWorkspace> {
                 ? _members(onCollapse: () => setState(() => _collapsed = true))
                 : Align(
                     alignment: Alignment.topCenter,
-                    child: IconButton(
-                      key: const Key('community-online-toggle'),
-                      tooltip: workspaceText(context, 'onlineMembers'),
-                      onPressed: narrow
+                    child: StarBridgeIconAction(
+                      controlKey: const Key('community-online-toggle'),
+                      label: workspaceText(context, 'onlineMembers'),
+                      onActivate: narrow
                           ? _openNarrow
-                          : () => setState(() => _collapsed = false),
-                      icon: const StandardIcon(StandardIconSemantic.people, size: 20),
+                          : (_) => setState(() => _collapsed = false),
+                      icon: const StandardIcon(
+                        StandardIconSemantic.people,
+                        size: 20,
+                      ),
                     ),
                   ),
           ),
@@ -126,12 +161,16 @@ class CommunityOnlineMembersPane extends StatefulWidget {
     required this.onAllMembers,
     this.onCollapse,
     this.avatars,
+    this.holoCollapsed = false,
     super.key,
   });
   final CommunityWorkspacePort port;
   final String targetRef;
   final VoidCallback onAllMembers;
   final VoidCallback? onCollapse;
+
+  /// On holo surfaces: the rail instead of the column; [onCollapse] toggles.
+  final bool holoCollapsed;
   final CommunityAvatarCache? avatars;
   @override
   State<CommunityOnlineMembersPane> createState() => _OnlineMembersState();
@@ -140,6 +179,7 @@ class CommunityOnlineMembersPane extends StatefulWidget {
 class _OnlineMembersState extends State<CommunityOnlineMembersPane>
     with CommunityVisibleRefresh<CommunityOnlineMembersPane> {
   late CommunityOnlineMembersController model;
+  late SocialReadActivityBinding _readActivity;
   @override
   void initState() {
     super.initState();
@@ -148,16 +188,24 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
 
   void _start() {
     model = CommunityOnlineMembersController(widget.port, widget.targetRef);
+    _readActivity = SocialReadActivityBinding(
+      model,
+      () => model.showProgress,
+      initialRead: true,
+    );
     unawaited(model.refresh());
   }
 
   @override
   void didUpdateWidget(covariant CommunityOnlineMembersPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.port != widget.port ||
-        oldWidget.targetRef != widget.targetRef) {
+    if (oldWidget.port != widget.port) {
+      _readActivity.dispose();
       model.dispose();
       _start();
+    } else if (oldWidget.targetRef != widget.targetRef) {
+      // Same port, renewed reference: keep the list and its avatars.
+      model.renewTarget(widget.targetRef);
     }
   }
 
@@ -165,6 +213,7 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
   Future<void> refreshVisibleCommunity() => model.refresh(silent: true);
   @override
   void dispose() {
+    _readActivity.dispose();
     model.dispose();
     super.dispose();
   }
@@ -174,6 +223,7 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
     animation: model,
     builder: (context, _) {
       String t(String key) => workspaceText(context, key);
+      if (OrganizationHolo.of(context)) return _holo(context, t);
       return Container(
         key: const Key('community-online-members'),
         padding: const EdgeInsets.all(10),
@@ -193,19 +243,26 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-                IconButton(
-                  tooltip: t('refresh'),
-                  onPressed: model.loading || model.invalidated
+                StarBridgeIconAction(
+                  controlKey: const Key('community-online-refresh'),
+                  label: t('refresh'),
+                  onActivate: model.loading || model.invalidated
                       ? null
-                      : model.refresh,
-                  icon: const StandardIcon(StandardIconSemantic.refresh, size: 18),
+                      : (_) => model.refresh(),
+                  icon: const StandardIcon(
+                    StandardIconSemantic.refresh,
+                    size: 18,
+                  ),
                 ),
                 if (widget.onCollapse != null)
-                  IconButton(
-                    key: const Key('community-online-toggle'),
-                    tooltip: t('hideOnlineMembers'),
-                    onPressed: widget.onCollapse,
-                    icon: const StandardIcon(StandardIconSemantic.chevronLeft, size: 18),
+                  StarBridgeIconAction(
+                    controlKey: const Key('community-online-toggle'),
+                    label: t('hideOnlineMembers'),
+                    onActivate: (_) => widget.onCollapse!(),
+                    icon: const StandardIcon(
+                      StandardIconSemantic.chevronLeft,
+                      size: 18,
+                    ),
                   ),
               ],
             ),
@@ -214,7 +271,14 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                 '${t('membersRead')} ${model.scanned}/${model.total}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-            if (model.showProgress) const LinearProgressIndicator(),
+            if (model.showProgress)
+              SocialReadActivity(
+                key: ValueKey((model, _readActivity.revision)),
+                source: _readActivity.source,
+                opening: _readActivity.opening,
+                label: t('onlineMembers'),
+                height: 4,
+              ),
             if (model.error != null && model.members.isNotEmpty)
               Text(t(model.error!)),
             const SizedBox(height: 6),
@@ -236,7 +300,7 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                             ? context.tokens.colors.success
                             : state == 'away'
                             ? context.tokens.colors.warning
-                            : context.tokens.colors.accent;
+                            : context.tokens.colors.stateAccent;
                         return Container(
                           key: ValueKey('online-member-${member.memberRef}'),
                           padding: const EdgeInsets.symmetric(
@@ -253,23 +317,24 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                           child: Row(
                             children: [
                               _OnlineAvatar(
-                                  avatars: widget.avatars,
-                                  key: ValueKey(member.memberRef),
-                                  port: widget.port,
-                                  targetRef: widget.targetRef,
-                                  member: member,
+                                avatars: widget.avatars,
+                                key: ValueKey(member.memberRef),
+                                port: widget.port,
+                                targetRef: widget.targetRef,
+                                member: member,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Tooltip(
+                                    StarBridgeTooltip(
                                       message: member.displayName,
                                       child: Text(
                                         member.displayName,
                                         maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        overflow: TextOverflow.fade,
+                                        softWrap: false,
                                       ),
                                     ),
                                     const SizedBox(height: 3),
@@ -296,14 +361,16 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                     ),
             ),
             if (model.next != null && !model.loading)
-              TextButton(
-                onPressed: model.loadMore,
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate: (_) => model.loadMore(),
                 child: Text(t('loadMoreMembers')),
               ),
             const Divider(),
-            TextButton(
+            StarBridgeActionButton(
               key: const Key('community-all-members'),
-              onPressed: widget.onAllMembers,
+              kind: StarBridgeActionKind.quiet,
+              onActivate: (_) => widget.onAllMembers(),
               child: Text(t('allMembers')),
             ),
           ],
@@ -311,6 +378,117 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
       );
     },
   );
+}
+
+extension on _OnlineMembersState {
+  Widget _holo(BuildContext context, String Function(String) t) {
+    final colors = context.tokens.colors;
+    final groups = <String, List<OrganizationHoloOnlineMember>>{
+      'gaming': [],
+      'online': [],
+      'away': [],
+    };
+    for (final member in model.members) {
+      final state = member.liveStatus.toLowerCase();
+      final kind = state == 'ingame'
+          ? 'gaming'
+          : state == 'away'
+          ? 'away'
+          : 'online';
+      groups[kind]!.add(
+        OrganizationHoloOnlineMember(
+          key: ValueKey('online-member-${member.memberRef}'),
+          name: member.displayName,
+          // State only, as before: location has its own privacy rules.
+          detail: t(kind),
+          dot: kind == 'gaming'
+              ? colors.success
+              : kind == 'away'
+              ? colors.warning
+              : colors.stateAccent,
+          avatar: _OnlineAvatar(
+            avatars: widget.avatars,
+            key: ValueKey(member.memberRef),
+            port: widget.port,
+            targetRef: widget.targetRef,
+            member: member,
+          ),
+        ),
+      );
+    }
+    final count = model.error != null || model.showProgress
+        ? '…'
+        : '${model.members.length}${model.partial ? '+' : ''}';
+    const keys = OrganizationHoloOnlineKeys(
+      pane: Key('community-online-members'),
+      list: Key('community-online-list'),
+      toggle: Key('community-online-toggle'),
+      allMembers: Key('community-all-members'),
+    );
+    if (widget.holoCollapsed) {
+      return OrganizationHoloOnlineRail(
+        keys: keys,
+        label: t('onlineMembers'),
+        count: count,
+        members: [for (final list in groups.values) ...list],
+        onExpand: widget.onCollapse ?? () {},
+      );
+    }
+    final empty = model.members.isEmpty && !model.loading;
+    return OrganizationHoloOnlineColumn(
+      keys: keys,
+      title: t('onlineMembers'),
+      count: count,
+      status: model.error != null && model.members.isEmpty
+          ? t(model.error!)
+          : empty
+          ? t(model.partial ? 'noOnlineLoaded' : 'noOnlineMembers')
+          : null,
+      progress: model.showProgress
+          ? SocialReadActivity(
+              key: ValueKey((model, _readActivity.revision)),
+              source: _readActivity.source,
+              opening: _readActivity.opening,
+              label: t('onlineMembers'),
+              height: 4,
+            )
+          : null,
+      groups: [
+        for (final MapEntry(:key, :value) in groups.entries)
+          if (value.isNotEmpty)
+            OrganizationHoloOnlineGroup('${t(key)} · ${value.length}', value),
+      ],
+      trailing: [
+        StarBridgeIconAction(
+          controlKey: const Key('community-online-refresh'),
+          label: t('refresh'),
+          onActivate: model.loading || model.invalidated
+              ? null
+              : (_) => model.refresh(),
+          icon: const StandardIcon(StandardIconSemantic.refresh, size: 18),
+        ),
+      ],
+      toggleLabel: t('hideOnlineMembers'),
+      onToggle: widget.onCollapse,
+      footer: [
+        if (model.partial)
+          Text(
+            '${t('membersRead')} ${model.scanned}/${model.total}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (model.error != null && model.members.isNotEmpty)
+          Text(t(model.error!)),
+        if (model.next != null && !model.loading)
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (_) => model.loadMore(),
+            child: Text(t('loadMoreMembers')),
+          ),
+      ],
+      allMembersLabel: t('allMembers'),
+      onAllMembers: widget.onAllMembers,
+    );
+  }
 }
 
 class _OnlineAvatar extends StatefulWidget {
@@ -332,11 +510,21 @@ class _OnlineAvatar extends StatefulWidget {
 class _OnlineAvatarState extends State<_OnlineAvatar> {
   late CommunityAvatarCache avatars;
   late Future<Uint8List?> image;
+
+  /// The bound read delivered a portrait; only such a read survives a
+  /// renewed reference (review 2026-10-29: a pending or failed read would
+  /// otherwise stay failed under the retired generation).
+  bool _delivered = false;
   void _bind() {
     avatars = widget.avatars ?? CommunityAvatarCache();
-    image = widget.member.hasAvatar
+    _delivered = false;
+    final read = widget.member.hasAvatar
         ? avatars.member(widget.port, widget.targetRef, widget.member)
-        : Future.value(null);
+        : Future<Uint8List?>.value(null);
+    image = read;
+    read.then((bytes) {
+      if (identical(image, read) && bytes != null) _delivered = true;
+    }, onError: (_) {});
   }
 
   @override
@@ -348,12 +536,15 @@ class _OnlineAvatarState extends State<_OnlineAvatar> {
   @override
   void didUpdateWidget(covariant _OnlineAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // A renewed reference alone keeps a portrait that already arrived (the
+    // cache entry is the member's version); one still pending or failed is
+    // read again on the new reference.
     if (oldWidget.port != widget.port ||
-        oldWidget.targetRef != widget.targetRef ||
         oldWidget.avatars != widget.avatars ||
         oldWidget.member.memberRef != widget.member.memberRef ||
         oldWidget.member.avatarVersion != widget.member.avatarVersion ||
-        oldWidget.member.hasAvatar != widget.member.hasAvatar) {
+        oldWidget.member.hasAvatar != widget.member.hasAvatar ||
+        oldWidget.targetRef != widget.targetRef && !_delivered) {
       if (oldWidget.avatars == null) avatars.dispose();
       _bind();
     }
@@ -372,19 +563,26 @@ class _OnlineAvatarState extends State<_OnlineAvatar> {
     child: FutureBuilder<Uint8List?>(
       future: image,
       builder: (_, snapshot) => UserAvatarMenu(
-        name: widget.member.displayName, isSelf: widget.member.isSelf,
-        target: UserTarget.community(widget.targetRef, widget.member.memberRef, query: widget.member.gameName),
+        name: widget.member.displayName,
+        isSelf: widget.member.isSelf,
+        target: UserTarget.community(
+          widget.targetRef,
+          widget.member.memberRef,
+          query: widget.member.gameName,
+        ),
         avatarBytes: snapshot.data,
         child: CommunityWorkspaceImage(
-        decoder: avatars.images.decode,
-        bytes: snapshot.data,
-        loading:
-            snapshot.connectionState != ConnectionState.done &&
-            widget.member.hasAvatar,
-        loadFailed: snapshot.hasError,
-        icon: StandardIconSemantic.person,
-        maxWidth: 96,
-      )),
+          decoder: avatars.images.decode,
+          peek: avatars.images.peek,
+          bytes: snapshot.data,
+          loading:
+              snapshot.connectionState != ConnectionState.done &&
+              widget.member.hasAvatar,
+          loadFailed: snapshot.hasError,
+          icon: StandardIconSemantic.person,
+          maxWidth: 96,
+        ),
+      ),
     ),
   );
 }

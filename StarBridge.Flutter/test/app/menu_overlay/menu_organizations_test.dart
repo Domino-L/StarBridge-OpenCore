@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/communities/community_announcement_card.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_banner.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_board.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_panel.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
@@ -21,7 +21,13 @@ Map<String, Object?> fixture({String tab = 'members'}) => {
   'buttons': [
     for (final (i, title) in ['返回组织列表', '成员', '舰船', '公告', '聊天'].indexed)
       {'key': 'a${i + 1}', 'label': title, 'limit': 128},
-    {'key': 'a6', 'label': '搜索成员', 'input': '搜索成员、呼号或职务', 'limit': 128},
+    {
+      'key': 'a6',
+      'label': '搜索成员',
+      'role': 'searchMembers',
+      'input': '搜索成员、呼号或职务',
+      'limit': 128,
+    },
   ],
   'rows': [
     for (final name in ['远航者', '北辰', '回声', '白鸦']) {'title': name, 'detail': ''},
@@ -54,6 +60,9 @@ Map<String, Object?> fixture({String tab = 'members'}) => {
           'ship': i == 0 ? 'C2 大力神' : '未进入游戏',
           'location': i == 0 ? '奥里森' : '未进入游戏',
           'server': i == 0 ? '美服' : '未进入游戏',
+          'serverKind': i == 0 ? 'value' : 'placeholder',
+          'shipKind': i == 0 ? 'value' : 'placeholder',
+          'locationKind': i == 0 ? 'value' : 'placeholder',
           'profileKey': 'om${i + 1}',
           'isSelf': i == 0,
         },
@@ -126,8 +135,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(CommunityMemberBanner), findsNWidgets(4));
-    expect(find.byType(CommunityMemberHeader), findsOneWidget);
+    expect(find.byType(OrganizationMemberRow), findsNWidgets(4));
+    expect(find.byType(OrganizationMemberHeader), findsOneWidget);
   });
   Map<String, Object?> directory({bool busy = false}) => {
     'state': 'ready',
@@ -135,7 +144,13 @@ void main() {
     'title': '我的组织',
     'busy': busy,
     'buttons': [
-      {'key': 'a1', 'label': '搜索组织', 'input': '搜索已加入的组织', 'limit': 128},
+      {
+        'key': 'a1',
+        'label': '搜索组织',
+        'role': 'searchOrganizations',
+        'input': '搜索已加入的组织',
+        'limit': 128,
+      },
     ],
     'rows': [
       for (var i = 0; i < 2; i++)
@@ -143,7 +158,12 @@ void main() {
           'title': i == 0 ? '远航者组织' : '深空探索协会',
           'detail': '一起探索、护航与远征。',
           'buttons': [
-            {'key': 'a${i + 2}', 'label': '打开组织', 'limit': 128},
+            {
+              'key': 'a${i + 2}',
+              'label': '打开组织',
+              'role': 'openOrganization',
+              'limit': 128,
+            },
           ],
         },
     ],
@@ -241,18 +261,25 @@ void main() {
     ((source['organization'] as Map)['rows'] as List).first['memberCount'] = -1;
     expect(MenuFeatureView.parse(source).state, 'unavailable');
   });
-  test(
-    'presence uses WPF semantics without inventing offline or same-server',
-    () {
-      expect(organizationPresence(true, 'AppOnline'), 'online');
-      expect(organizationPresence(true, 'InGame'), 'inGame');
-      expect(organizationPresence(true, 'Away'), 'away');
-      for (final status in ['Paused', 'Hidden', 'Unknown', '']) {
-        expect(organizationPresence(false, status), 'unknown');
+  test('unknown and private presence share public offline without inventing online or same-server', () {
+    expect(organizationPresence(true, 'AppOnline'), 'online');
+    expect(organizationPresence(true, 'InGame'), 'inGame');
+    expect(organizationPresence(true, 'Away'), 'away');
+    for (final online in [false, true]) {
+      for (final status in ['Hidden', 'Unknown', '']) {
+        expect(organizationPresence(online, status), 'offline');
       }
-      expect(organizationPresence(false, 'Offline'), 'offline');
-    },
-  );
+      for (final status in [
+        'Paused',
+        'Invisible',
+        'ManualOffline',
+        'Offline',
+      ]) {
+        expect(organizationPresence(online, status), 'offline');
+      }
+    }
+    expect(organizationPresence(false, 'Offline'), 'offline');
+  });
   test(
     'projection rejects malformed rows and never accepts arbitrary image paths',
     () {
@@ -284,13 +311,13 @@ void main() {
       expect(view.rows, isNotEmpty);
       expect(view.organization!.navigation, isNotEmpty);
       expect(view.organization!.navigation.first.selected, isTrue);
-      session.act(view.buttons.singleWhere((a) => a.label == '成员').key, '');
+      session.act(view.buttons.singleWhere((a) => a.role == 'members').key, '');
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
       expect(view.state, 'ready');
       expect(view.organization!.tab, 'members');
       expect(view.organization!.rows[1].presence, 'online');
-      expect(view.organization!.rows[3].presence, 'unknown');
+      expect(view.organization!.rows[3].presence, 'offline');
       final key = view.organization!.rows.first.profileKey!;
       final target = session.profileTarget(key)!;
       expect(target.source, 'community');
@@ -298,14 +325,14 @@ void main() {
       expect(jsonEncode(views.last), isNot(contains('memberRef')));
       expect(jsonEncode(views.last), isNot(contains('targetRef')));
       session.act(
-        view.buttons.singleWhere((a) => a.label == '搜索成员').key,
+        view.buttons.singleWhere((a) => a.role == 'searchMembers').key,
         'Example_Member_1',
       );
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
       expect(view.organization!.query, 'Example_Member_1');
       expect(session.profileTarget(key), isNull);
-      session.act(view.buttons.singleWhere((a) => a.label == '成员').key, '');
+      session.act(view.buttons.singleWhere((a) => a.role == 'members').key, '');
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
       expect(
@@ -339,14 +366,14 @@ void main() {
   testWidgets('member columns avatar menu search and page status filters', (
     tester,
   ) async {
-    size(tester, const Size(1000, 800));
+    size(tester, const Size(1400, 1000));
     final boundary = GlobalKey(), actions = <String>[], profiles = <String>[];
     await tester.pumpWidget(
       app(
         RepaintBoundary(
           key: boundary,
           child: SizedBox(
-            width: 900,
+            width: 1250,
             child: MenuOrganizationsPanel(
               view: MenuFeatureView.parse(fixture()),
               onAction: (key, value) => actions.add('$key:$value'),
@@ -357,17 +384,23 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('本页在线 2\n在线与游戏人数仅统计当前页'), findsOneWidget);
-    expect(find.text('本页在线'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
+    expect(find.byKey(const Key('menu-org-summary')), findsOneWidget);
+    expect(find.text('共 24 人 · 本页在线 2 · 本页游戏中 1'), findsOneWidget);
+    expect(find.text('在线与游戏人数仅统计当前页'), findsNothing);
+    final first = tester
+        .widgetList<OrganizationMemberRow>(find.byType(OrganizationMemberRow))
+        .first;
+    expect(first.entry.runtime.server.isPlaceholder, isFalse);
+    expect(first.entry.runtime.ship.isPlaceholder, isFalse);
+    expect(first.entry.runtime.location.isPlaceholder, isFalse);
     expect(
       tester.getCenter(find.text('美服')).dy,
-      tester.getCenter(find.bySemanticsLabel('远航者 · 头像菜单').first).dy,
+      tester.getCenter(find.byType(OrganizationMemberIdentity).first).dy,
     );
     expect(find.text('服务器'), findsOneWidget);
     expect(find.text('位置'), findsOneWidget);
     await capture(tester, boundary, 'menu-organizations-wpf-structure');
-    await tester.tap(find.bySemanticsLabel('远航者 · 头像菜单').first);
+    await tester.tap(find.text('远航者 · 你'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('查看个人页面'));
     await tester.pumpAndSettle();

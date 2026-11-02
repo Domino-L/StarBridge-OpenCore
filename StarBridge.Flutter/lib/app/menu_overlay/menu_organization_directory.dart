@@ -1,5 +1,15 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show InteractionSource;
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../features/communities/community_logo.dart';
@@ -45,7 +55,9 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
   Widget build(BuildContext context) {
     final view = widget.view, org = view.organization!, tokens = context.tokens;
     final colors = tokens.colors, text = Theme.of(context).textTheme;
-    final search = view.buttons.where((a) => a.label == '搜索组织').firstOrNull;
+    final search = view.buttons
+        .where((a) => a.role == 'searchOrganizations')
+        .firstOrNull;
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -54,18 +66,24 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
           children: [
             Row(
               children: [
-                Expanded(child: Text('我的组织', style: text.titleLarge)),
-                OutlinedButton(
-                  onPressed: view.busy
+                Expanded(
+                  child: Text(
+                    menuText(context, 'menu.overlay.organizations.mine'),
+                    style: text.titleLarge,
+                  ),
+                ),
+                StarBridgeActionButton(
+                  controlKey: const ValueKey('menu-organization-refresh'),
+                  onActivate: view.busy
                       ? null
-                      : () => widget.onAction('refresh', ''),
-                  child: const Text('刷新'),
+                      : (_) => widget.onAction('refresh', ''),
+                  child: Text(menuText(context, 'friends.refresh')),
                 ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
-              '选择组织，查看成员、舰船、公告与聊天。',
+              menuText(context, 'menu.overlay.organizations.select'),
               style: text.bodySmall?.copyWith(color: colors.textSecondary),
             ),
             const SizedBox(height: 16),
@@ -73,27 +91,39 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _query,
+                    child: StarBridgeFieldFrame(
                       enabled: !view.busy,
-                      inputFormatters: [
-                        LengthLimitingTextInputFormatter(search.limit),
-                      ],
-                      decoration: InputDecoration(
-                        hintText: search.input,
-                        isDense: true,
+                      builder: (context, focus) => TextField(
+                        focusNode: focus,
+                        controller: _query,
+                        enabled: !view.busy,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(search.limit),
+                        ],
+                        decoration: InputDecoration(
+                          hintText: search.input,
+                          isDense: true,
+                        ),
+                        onSubmitted: view.busy
+                            ? null
+                            : (value) => runStarBridgeSynchronousActivation(
+                                InteractionSource.keyboard,
+                                () => widget.onAction(search.key, value),
+                              ),
                       ),
-                      onSubmitted: view.busy
-                          ? null
-                          : (value) => widget.onAction(search.key, value),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: view.busy
+                  StarBridgeActionButton(
+                    controlKey: const ValueKey(
+                      'menu-organization-submit-search',
+                    ),
+                    onActivate: view.busy
                         ? null
-                        : () => widget.onAction(search.key, _query.text),
-                    child: const Text('搜索'),
+                        : (_) => widget.onAction(search.key, _query.text),
+                    child: Text(
+                      menuText(context, 'menu.overlay.organizations.search'),
+                    ),
                   ),
                 ],
               ),
@@ -111,8 +141,11 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
                 padding: const EdgeInsets.all(20),
                 child: Text(
                   org.query.isEmpty
-                      ? '尚未加入组织，可在客户端的社区组织页面查找。'
-                      : '没有匹配的已加入组织，请调整搜索条件。',
+                      ? menuText(context, 'menu.overlay.organizations.empty')
+                      : menuText(
+                          context,
+                          'menu.overlay.organizations.noResults',
+                        ),
                 ),
               ),
             LayoutBuilder(
@@ -139,12 +172,15 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
               spacing: 8,
               children: [
                 for (final action in view.buttons.where(
-                  (a) => a.label != '搜索组织',
+                  (a) => a.role != 'searchOrganizations',
                 ))
-                  OutlinedButton(
-                    onPressed: view.busy
+                  StarBridgeActionButton(
+                    controlKey: ValueKey(
+                      'menu-organization-action-${action.key}',
+                    ),
+                    onActivate: view.busy
                         ? null
-                        : () => widget.onAction(action.key, ''),
+                        : (_) => widget.onAction(action.key, ''),
                     child: Text(action.label),
                   ),
               ],
@@ -160,19 +196,26 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
         row = view.rows[index],
         data = view.organization!.rows[index];
     final tokens = context.tokens, text = Theme.of(context).textTheme;
-    final open = row.buttons.where((a) => a.label == '打开组织').firstOrNull;
+    final open = row.buttons
+        .where((a) => a.role == 'openOrganization')
+        .firstOrNull;
     void Function()? onOpen = view.busy || open == null
         ? null
         : () => widget.onAction(open.key, '');
     final relation = switch (data.relationship) {
-      'owner' => '组织负责人',
-      'member' => '已加入',
-      _ => '组织成员',
+      'owner' => menuText(context, 'menu.overlay.organizations.owner'),
+      'member' => menuText(context, 'menu.overlay.organizations.joined'),
+      _ => menuText(context, 'menu.overlay.organizations.member'),
     };
     final identity = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CommunityLogo(data: data.logo, size: 48, framed: false),
+        CommunityLogo(
+          data: data.logo,
+          size: 48,
+          framed: false,
+          downloadedBy: data,
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -202,10 +245,11 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(color: tokens.surfaces.panel.border),
       ),
-      child: InkWell(
-        key: ValueKey('menu-organization-choice-$index'),
-        borderRadius: BorderRadius.circular(8),
-        onTap: onOpen,
+      child: StarBridgeActionRow(
+        controlKey: ValueKey('menu-organization-choice-$index'),
+        baseRadius: 8,
+        semanticLabel: row.title,
+        onActivate: onOpen == null ? null : (_, _) => onOpen(),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -218,7 +262,11 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
                 runSpacing: 8,
                 children: [
                   Text(
-                    '${data.memberCount ?? '—'} 位成员',
+                    menuText(
+                      context,
+                      'menu.overlay.organizations.memberCount',
+                      {'count': data.memberCount ?? '—'},
+                    ),
                     style: text.titleMedium?.copyWith(
                       color: tokens.colors.info,
                     ),
@@ -234,7 +282,9 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '活动时间 · ${data.activeTime}',
+                    menuText(context, 'menu.overlay.organizations.activeTime', {
+                      'time': data.activeTime,
+                    }),
                     style: text.bodySmall?.copyWith(
                       color: tokens.colors.textSecondary,
                     ),
@@ -260,9 +310,13 @@ class _MenuOrganizationDirectoryState extends State<MenuOrganizationDirectory> {
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
-                child: FilledButton(
-                  onPressed: onOpen,
-                  child: const Text('进入组织'),
+                child: StarBridgeActionButton(
+                  controlKey: ValueKey('menu-organization-enter-$index'),
+                  kind: StarBridgeActionKind.primary,
+                  onActivate: onOpen == null ? null : (_) => onOpen(),
+                  child: Text(
+                    menuText(context, 'menu.overlay.organizations.open'),
+                  ),
                 ),
               ),
             ],

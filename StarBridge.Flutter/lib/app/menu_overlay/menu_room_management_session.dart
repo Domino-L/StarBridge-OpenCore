@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:convert';
 
 import '../../features/party_rooms/party_rooms_module.dart';
@@ -10,7 +12,7 @@ import 'menu_feature_session.dart';
 final class MenuRoomCommandState {
   String? selected;
   bool uncertain = false;
-  String notice = '';
+  Object notice = '';
 }
 
 final class _RoomManagementState {
@@ -110,7 +112,7 @@ final class MenuRoomManagementSession {
     action = _session.button(op.name, (value) async {
       if (_management.scopeEpoch != scopeEpoch) {
         _session.emit({
-          ..._session.currentView,
+          ..._session.templateView,
           'rejectedAction': action['key'],
         });
         return;
@@ -258,7 +260,9 @@ final class MenuRoomManagementSession {
       result = const RoomCommandResult('unknown', error: 'outcomeUnknown');
     }
     _state.uncertain = result.status == 'unknown';
-    _state.notice = _state.uncertain ? '操作结果未确认，请刷新核对，不要重复提交。' : '';
+    _state.notice = _state.uncertain
+        ? MenuOverlayText('menu.overlay.errors.unconfirmed')
+        : '';
     _management.reply = {
       'request': raw['request'],
       'status': result.status,
@@ -272,10 +276,10 @@ final class MenuRoomManagementSession {
           },
       ],
     };
-    final room = _session.currentView['room'];
+    final room = _session.templateView['room'];
     if (room is Map && room['management'] is Map) {
       _session.emit({
-        ..._session.currentView,
+        ..._session.templateView,
         'room': {
           ...room,
           'management': {

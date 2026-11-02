@@ -16,9 +16,10 @@ inline UINT ResolveSmallIconDpi(LPARAM requested, UINT shell, UINT monitor,
   return 96;
 }
 
-// Borrowed HICONs remain alive across subsequent DPI/theme requests. No eviction
-// while a Shell consumer or WM_SETICON may still reference one. Bounded to two
-// themes x 241 physical sizes, allocated lazily; all released with the window.
+// Borrowed HICONs remain alive across subsequent DPI/theme/variant requests. No
+// eviction while a Shell consumer or WM_SETICON may still reference one. Bounded
+// to two variants x two themes x 241 physical sizes, allocated lazily; all
+// released with the window.
 class SmallApplicationIconCache {
  public:
   SmallApplicationIconCache() = default;
@@ -27,23 +28,34 @@ class SmallApplicationIconCache {
   ~SmallApplicationIconCache() { Clear(); }
 
   HICON Get(UINT dpi, bool dark_foreground) noexcept {
+    return Get(dpi, dark_foreground, CurrentSmallIconVariant());
+  }
+
+  HICON Get(UINT dpi, bool dark_foreground, SmallIconVariant variant) noexcept {
     int pixels = MulDiv(24, static_cast<int>(ResolveSmallIconDpi(dpi, 0, 0, 0)), 96);
     if (pixels < 16) pixels = 16;
     if (pixels > 256) pixels = 256;
-    HICON& icon = icons_[(pixels - 16) * 2 + (dark_foreground ? 1 : 0)];
-    if (!icon) icon = LoadSmallApplicationIcon(pixels, dark_foreground);
+    auto& icons = variant == SmallIconVariant::kXmas        ? xmas_
+                  : variant == SmallIconVariant::kHalloween ? halloween_
+                                                            : default_;
+    HICON& icon = icons[(pixels - 16) * 2 + (dark_foreground ? 1 : 0)];
+    if (!icon) icon = LoadSmallApplicationIcon(pixels, dark_foreground, variant);
     return icon;
   }
 
   void Clear() noexcept {
-    for (auto& icon : icons_) {
-      if (icon) DestroyIcon(icon);
-      icon = nullptr;
+    for (auto* icons : {&default_, &xmas_, &halloween_}) {
+      for (auto& icon : *icons) {
+        if (icon) DestroyIcon(icon);
+        icon = nullptr;
+      }
     }
   }
 
  private:
-  std::array<HICON, 482> icons_{};
+  std::array<HICON, 482> default_{};
+  std::array<HICON, 482> xmas_{};
+  std::array<HICON, 482> halloween_{};
 };
 
 #endif

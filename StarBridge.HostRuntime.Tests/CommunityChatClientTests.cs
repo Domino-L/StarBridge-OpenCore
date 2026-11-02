@@ -87,6 +87,8 @@ internal static class CommunityChatClientTests
             });
         });
         using var client=new CommunityClient(new Uri("https://community.invalid"),handler);
+        var diagnostics = new List<(string Stage, string Code, int? Status)>();
+        client.ReadDiagnostic = (stage, code, status, _) => diagnostics.Add((stage, code, status));
         var directory=await client.ReadAsync("test-bearer",new("mine","",null,null),"scope",default);
         var a=directory.Items[0].TargetRef; var b=directory.Items[1].TargetRef;
         JsonElement Body(long after=0,long before=0)=>JsonSerializer.SerializeToElement(new{schemaVersion=1,targetRef=a,after,before});
@@ -148,6 +150,7 @@ internal static class CommunityChatClientTests
         var marked = await Mark(ReadBody(a));
         Check(marked.GetProperty("status").GetString() == "accepted" && marked.GetProperty("readThroughSequence").GetInt64() == 25,
             "another device's farther cursor remains authoritative");
+        Check(diagnostics.Last() == ("chat-read-receipt", "accepted", 200), "confirmed receipt diagnostic is content-free");
         Check(receipts.Single().GetProperty("throughSequence").GetInt64() == 12 &&
             receipts[0].GetProperty("fleetCode").GetString() == "A" && receipts[0].GetProperty("channelId").GetString() == "fleet:A",
             "posts fetched message sequence not page latest or UI supplied channel");
@@ -170,6 +173,11 @@ internal static class CommunityChatClientTests
             Check(result.GetProperty("status").GetString() == "unknown" && result.GetProperty("readThroughSequence").ValueKind == JsonValueKind.Null,
                 "uncertain receipt never confirms read: " + failure);
             Check(receipts.Count == before + 1, "no automatic POST retry");
+            var expectedDiagnostic = failure switch {
+                "receipt-lost" => "network", "receipt-big" => "body-too-large",
+                "receipt-cross" or "receipt-backward" or "receipt-error" => "cursor-mismatch",
+                "receipt-status-500" or "receipt-status-302" => "http-error", _ => "invalid-response" };
+            Check(diagnostics.Last().Code == expectedDiagnostic, "specific bounded receipt failure evidence: " + failure);
         }
         foreach (var (status, error) in new[] { (400,"dataInvalid"), (401,"identityUnavailable"), (403,"notAllowed"), (404,"refreshRequired"), (429,"rateLimited") })
         {
@@ -183,6 +191,8 @@ internal static class CommunityChatClientTests
         var staleReceipt = await Mark(ReadBody(a), current: () => { if (++checks == 3) throw new AccountBridgeHostException("communities.identityUnavailable"); });
         Check(staleReceipt.GetProperty("status").GetString() == "unknown", "late response after account change does not acknowledge read");
         Check((await Mark(ReadBody(a))).GetProperty("status").GetString() == "accepted", "explicit monotonic retry remains possible");
+        client.ReadDiagnostic = (_, _, _, _) => throw new IOException("synthetic diagnostic failure");
+        Check((await Mark(ReadBody(a))).GetProperty("status").GetString() == "accepted", "failed local journal cannot fail a confirmed receipt");
         client.Dispose();
         await Error(()=>Detail(DetailBody(a)),"communities.refreshRequired");
         receiptCount = receipts.Count;

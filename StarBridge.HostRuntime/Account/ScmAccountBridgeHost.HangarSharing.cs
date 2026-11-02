@@ -9,7 +9,9 @@ namespace StarBridge.HostRuntime.Account;
 internal sealed partial class ScmAccountBridgeHost
 {
     private Func<BridgeAccountContext, LocalHangarSnapshot>? _sharingHangarSource;
+    private Func<BridgeAccountContext, long, string, string?>? _sharingHangarImages;
     public void ConfigureHangarSharingSource(Func<BridgeAccountContext, LocalHangarSnapshot> read) => _sharingHangarSource = read;
+    public void ConfigureHangarSharingImages(Func<BridgeAccountContext, long, string, string?> read) => _sharingHangarImages = read;
     public async Task<HangarPublicationOutcome> UpdateSharedHangarAfterSaveAsync(BridgeAccountContext context, long generation, long revision, CancellationToken token)
     {
         if (_disposed || generation != Generation || _communities is null || _sharingHangarSource is null)
@@ -58,10 +60,28 @@ internal sealed partial class ScmAccountBridgeHost
             if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
             RequireSameRelaySession(RequireRelaySession(context), session);
         }
+        LocalHangarSnapshot? publication = null;
         var result = await SendRelayRequestAsync<object>(session, async (active, ct) => save
             ? await client.SaveHangarSharingAsync(active.AccessToken, payload, FriendScope(context, generation), Current, ct,
                 () => { Current(); var source = _sharingHangarSource ?? throw new LocalHangarStoreException("hangar.unavailable", "Local hangar unavailable.");
-                    var ships = CommunityHangarPublication.Build(source(context)); Current(); return ships; })
+                    publication = source(context);
+                    var ships = CommunityHangarPublication.Build(publication); Current(); return ships; },
+                async (_, imageToken) =>
+                {
+                    var snapshot = publication ?? throw new LocalHangarStoreException("hangar.unavailable", "Local hangar unavailable.");
+                    var read = _sharingHangarImages ?? throw new LocalHangarStoreException("hangar.unavailable", "Local images unavailable.");
+                    void ImageCurrent()
+                    {
+                        Current();
+                        if (_sharingHangarSource!(context).Revision != snapshot.Revision)
+                            throw new LocalHangarStoreException("hangar.revision_conflict", "Local hangar changed.");
+                    }
+                    return await ExecuteHangarMediaAsync(context, async (bearer, owner, mediaCurrent, mediaToken) =>
+                        await HangarImagePublication.PrepareAsync(snapshot, owner,
+                            id => read(context, snapshot.Revision, id),
+                            (image, uploadToken) => _hangarMedia!.UploadAsync(bearer, owner, image, mediaCurrent, uploadToken),
+                            () => { mediaCurrent(); ImageCurrent(); }, mediaToken), imageToken);
+                })
             : await client.ReadHangarSharingAsync(active.AccessToken, payload, FriendScope(context, generation), Current, ct,
                 legacyViewerId: active.Legacy?.AccountId), token);
         Current();

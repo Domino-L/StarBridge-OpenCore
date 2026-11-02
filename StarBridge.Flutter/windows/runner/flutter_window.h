@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 
+#include "small_application_icon.h"
 #include "win32_window.h"
 
 class NativeHostBridge;
@@ -40,6 +41,9 @@ class FlutterWindow : public Win32Window {
 
   std::optional<LRESULT> GetResizeHitTest(LPARAM const lparam) noexcept;
   void NotifyWindowStateChanged();
+  // Swaps the large (Alt+Tab) icon with the variant; default restores the
+  // window-class icon. The small icon follows via the variant-changed message.
+  void ApplyBigIconVariant(SmallIconVariant variant) noexcept;
 
   // The project to run.
   flutter::DartProject project_;
@@ -65,6 +69,7 @@ class FlutterWindow : public Win32Window {
   std::optional<bool> last_is_maximized_;
   HWND flutter_view_handle_ = nullptr;
   WNDPROC flutter_view_window_proc_ = nullptr;
+  HICON big_variant_icon_ = nullptr;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

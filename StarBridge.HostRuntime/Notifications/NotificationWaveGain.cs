@@ -5,13 +5,14 @@ using System.Buffers.Binary;
 // Gain is applied to a private playback copy, never to a device's global volume.
 internal static class NotificationWaveGain
 {
-    internal static byte[] Apply(byte[] source, double gain)
+    internal static byte[] Apply(byte[] source, double gain, double fadeInMilliseconds = 0)
     {
-        if (!double.IsFinite(gain) || gain is < 0 or > 1 || source.Length < 44 || source.Length > 8 * 1024 * 1024 ||
+        if (!double.IsFinite(gain) || gain is < 0 or > 1 || !double.IsFinite(fadeInMilliseconds) || fadeInMilliseconds is < 0 or > 1000 ||
+            source.Length < 44 || source.Length > 8 * 1024 * 1024 ||
             !source.AsSpan(0, 4).SequenceEqual("RIFF"u8) || !source.AsSpan(8, 4).SequenceEqual("WAVE"u8) ||
             BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(4)) != source.Length - 8) throw new InvalidDataException();
         var copy = (byte[])source.Clone();
-        int bits = 0, channels = 0, dataOffset = 0, dataLength = 0;
+        int bits = 0, channels = 0, sampleRate = 0, dataOffset = 0, dataLength = 0;
         for (var offset = 12; offset < copy.Length;) {
             if (copy.Length - offset < 8) throw new InvalidDataException();
             var length = BinaryPrimitives.ReadUInt32LittleEndian(copy.AsSpan(offset + 4));
@@ -21,6 +22,7 @@ internal static class NotificationWaveGain
                 if (bits != 0 || length < 16) throw new InvalidDataException();
                 var format = BinaryPrimitives.ReadUInt16LittleEndian(payload);
                 channels = BinaryPrimitives.ReadUInt16LittleEndian(payload[2..]);
+                sampleRate = BinaryPrimitives.ReadInt32LittleEndian(payload[4..]);
                 bits = BinaryPrimitives.ReadUInt16LittleEndian(payload[14..]);
                 if (channels is not (1 or 2) || bits is not (16 or 24) ||
                     BinaryPrimitives.ReadUInt16LittleEndian(payload[12..]) != channels * bits / 8) throw new InvalidDataException();
@@ -39,15 +41,21 @@ internal static class NotificationWaveGain
             }
             offset = checked(offset + 8 + (int)length + ((int)length & 1));
         }
-        if (bits == 0 || dataOffset == 0 || dataLength == 0 || dataLength % (channels * bits / 8) != 0) throw new InvalidDataException();
+        if (bits == 0 || sampleRate <= 0 || dataOffset == 0 || dataLength == 0 || dataLength % (channels * bits / 8) != 0) throw new InvalidDataException();
+        var fadeFrames = sampleRate * fadeInMilliseconds / 1000;
         for (int offset = dataOffset; offset < dataOffset + dataLength; offset += bits / 8) {
+            var frame = (offset - dataOffset) / (channels * bits / 8);
+            // A short half-cosine ramp has no hard step at either end. Both
+            // channels share one frame envelope; later samples retain exact gain.
+            var envelope = fadeFrames > 0 && frame < fadeFrames ? (1 - Math.Cos(Math.PI * frame / fadeFrames)) / 2 : 1;
+            var playbackGain = gain * envelope;
             if (bits == 16) {
                 var sample = BinaryPrimitives.ReadInt16LittleEndian(copy.AsSpan(offset));
-                BinaryPrimitives.WriteInt16LittleEndian(copy.AsSpan(offset), (short)Math.Round(sample * gain));
+                BinaryPrimitives.WriteInt16LittleEndian(copy.AsSpan(offset), (short)Math.Round(sample * playbackGain));
             } else {
                 var sample = copy[offset] | copy[offset + 1] << 8 | copy[offset + 2] << 16;
                 if ((sample & 0x800000) != 0) sample |= unchecked((int)0xff000000);
-                var scaled = (int)Math.Round(sample * gain);
+                var scaled = (int)Math.Round(sample * playbackGain);
                 copy[offset] = (byte)scaled; copy[offset + 1] = (byte)(scaled >> 8); copy[offset + 2] = (byte)(scaled >> 16);
             }
         }

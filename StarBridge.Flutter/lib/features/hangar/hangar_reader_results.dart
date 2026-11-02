@@ -167,7 +167,8 @@ class _HangarReaderResultsState extends State<HangarReaderResults> {
                           key: Key('hangar-reader-ship-name-$index'),
                           style: Theme.of(context).textTheme.bodyMedium,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -181,7 +182,8 @@ class _HangarReaderResultsState extends State<HangarReaderResults> {
                                     ].join(' · '),
                               style: Theme.of(context).textTheme.bodySmall,
                               maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              overflow: TextOverflow.fade,
+                              softWrap: false,
                             ),
                             if (display != null)
                               Wrap(

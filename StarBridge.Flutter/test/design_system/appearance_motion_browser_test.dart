@@ -180,36 +180,44 @@ void main() {
   testWidgets(
     'repeating player wraps the final frame and can pause at the boundary',
     (tester) async {
+      final picture = ui.PictureRecorder();
+      Canvas(picture).drawColor(Colors.white, BlendMode.src);
+      final recording = picture.endRecording();
+      final image = recording.toImageSync(1, 1);
+      recording.dispose();
+      addTearDown(image.dispose);
+      Future<ui.Codec> decoder(Uint8List bytes, {int? targetWidth}) async =>
+          _RepeatingCodec(image);
+
       await tester.pumpWidget(
-        const MaterialApp(
+        MaterialApp(
           home: Scaffold(
             body: NativeAppearancePlayer(
               asset: 'assets/overlay-appearances/Default-event-cycle.webp',
               repeat: true,
+              decoder: decoder,
+              assetBundle: _RepeatingBundle(),
             ),
           ),
         ),
       );
-      Future<void> decode() async {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 200)),
-        );
-        await tester.pump();
-      }
-
-      await decode();
+      // The fixture resolves in the test zone; pump drains decoding microtasks.
+      await tester.pump();
       final slider = tester.widget<Slider>(find.byType(Slider));
       slider.onChanged!(slider.max);
       slider.onChangeEnd!(slider.max);
-      await decode();
+      await tester.pump();
       expect(tester.widget<Slider>(find.byType(Slider)).value, slider.max);
       await tester.tap(find.text('Play'));
-      await tester.pump(const Duration(seconds: 7));
-      await decode();
+      // Advance exactly one frame, checking both sides of the wrap boundary.
+      await tester.pump(const Duration(milliseconds: 39));
+      expect(tester.widget<Slider>(find.byType(Slider)).value, slider.max);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump();
       expect(tester.widget<Slider>(find.byType(Slider)).value, 0);
       await tester.tap(find.text('Pause'));
       await tester.pump(const Duration(seconds: 7));
-      await decode();
+      await tester.pump();
       expect(tester.widget<Slider>(find.byType(Slider)).value, 0);
       await tester.pumpWidget(const SizedBox());
       expect(tester.takeException(), isNull);
@@ -284,4 +292,37 @@ class _PreviewWindow implements OverlayEditorWindowPort {
   Future<void> exit() async {
     exits++;
   }
+}
+
+// Small synchronous fixture: playback timing stays on WidgetTester's fake clock.
+class _RepeatingBundle extends CachingAssetBundle {
+  @override
+  Future<ByteData> load(String key) async => ByteData(1);
+}
+
+class _RepeatingCodec implements ui.Codec {
+  _RepeatingCodec(this.image);
+  final ui.Image image;
+
+  @override
+  int get frameCount => 3;
+
+  @override
+  int get repetitionCount => -1;
+
+  @override
+  Future<ui.FrameInfo> getNextFrame() async => _RepeatingFrame(image.clone());
+
+  @override
+  void dispose() {}
+}
+
+class _RepeatingFrame implements ui.FrameInfo {
+  _RepeatingFrame(this.image);
+
+  @override
+  final ui.Image image;
+
+  @override
+  Duration get duration => const Duration(milliseconds: 40);
 }

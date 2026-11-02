@@ -3,6 +3,7 @@ import '../../design_system/icons/standard_icon.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -109,53 +110,47 @@ class _CapabilityRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        key: Key('settings-capability-${capability.id}'),
-        borderRadius: tokens.shape.small,
-        onTap: () => showSettingsCapabilityEntry(context, capability),
-        child: Padding(
-          padding: EdgeInsets.all(tokens.space.sm),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          strings.text(capability.titleKey),
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        if (SettingsEntryOverrides.availabilityFor(
-                              context,
-                              capability.id,
-                            ) ==
-                            FeatureAvailability.comingSoon)
-                          const ComingSoonBadge(),
-                      ],
-                    ),
-                    SizedBox(height: tokens.space.xxs),
-                    Text(
-                      settingsEntryText(
-                        strings,
-                        'description.${capability.id}',
+    return StarBridgeActionRow(
+      controlKey: Key('settings-capability-${capability.id}'),
+      onActivate: (entryContext, source) =>
+          showSettingsCapabilityEntry(entryContext, capability, source: source),
+      child: Padding(
+        padding: EdgeInsets.all(tokens.space.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        strings.text(capability.titleKey),
+                        style: Theme.of(context).textTheme.labelLarge,
                       ),
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: tokens.colors.textSecondary),
-                    ),
-                  ],
-                ),
+                      if (SettingsEntryOverrides.availabilityFor(
+                            context,
+                            capability.id,
+                          ) ==
+                          FeatureAvailability.comingSoon)
+                        const ComingSoonBadge(),
+                    ],
+                  ),
+                  SizedBox(height: tokens.space.xxs),
+                  Text(
+                    settingsEntryText(strings, 'description.${capability.id}'),
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: tokens.colors.textSecondary),
+                  ),
+                ],
               ),
-              SizedBox(width: tokens.space.sm),
-              const StandardIcon(StandardIconSemantic.chevronRight, size: 20),
-            ],
-          ),
+            ),
+            SizedBox(width: tokens.space.sm),
+            const StandardIcon(StandardIconSemantic.chevronRight, size: 20),
+          ],
         ),
       ),
     );

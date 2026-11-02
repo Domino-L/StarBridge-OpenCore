@@ -4,6 +4,47 @@ internal static class NotificationEnvironmentPolicyTests
 {
     internal static void RunAll()
     {
+        foreach (var state in new[] { 2, 3, 5, 6, 7 })
+        foreach (var game in new[] { "running", "notRunning" }) {
+            if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(state, game, () => "",
+                () => "do-not-disturb", () => "foreground-fullscreen") != "")
+                throw new Exception("Hangar game/DND exception must permit compact cards and audio on active desktops");
+            if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(state, game, () => "inactive-desktop",
+                () => "do-not-disturb", () => "") != "inactive-desktop")
+                throw new Exception("Hangar exception must retain locked-desktop safety");
+            foreach (var mode in new[] { "notification-mode-unavailable", "notification-mode-unsupported" })
+                if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(state, game, () => "", () => mode, () => "") != mode)
+                    throw new Exception("Unknown notification environment cannot grant hangar delivery");
+            if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(state, game, () => "",
+                () => "do-not-disturb", () => "foreground-unavailable") != "foreground-unavailable")
+                throw new Exception("Compact hangar still requires a known foreground desktop");
+        }
+        foreach (var state in new[] { 0, 1, 4, 8, -1 })
+            if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(state, "running", () => "",
+                () => "do-not-disturb", () => "") == "")
+                throw new Exception("Hangar does not bypass presentation, inactive or unknown shell states");
+        foreach (var game in new[] { "unknown", "", "future-state" })
+            if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(5, game, () => "", () => "do-not-disturb", () => "") == "")
+                throw new Exception("Unknown game observations cannot grant hangar delivery");
+        foreach (var mode in new[] { "", "do-not-disturb" }) {
+            if (!DesktopNotificationEnvironment.CompactExecHangar("running", mode) ||
+                DesktopNotificationEnvironment.CompactExecHangar("notRunning", mode) != (mode == "do-not-disturb"))
+                throw new Exception("Only game/DND uses compact hangar; ordinary desktop keeps full detail");
+        }
+        if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(5, "notRunning", () => "", () => "", () => "foreground-fullscreen") != "foreground-fullscreen")
+            throw new Exception("Hangar exception must not allow full cards over unrelated immersive apps");
+        if (DesktopNotificationEnvironment.EvaluateExecHangarSuppression(3, "running", () => "", () => "", () => "foreground-fullscreen") != "")
+            throw new Exception("Known running game must receive the compact hangar reminder");
+        foreach (var state in new[] { 2, 3, 5, 6, 7 })
+        {
+            if (!DesktopNotificationEnvironment.AchievementDesktopAllowed(state, () => ""))
+                throw new Exception("Achievement celebration must survive DND/fullscreen/quiet mode on an active desktop");
+            if (DesktopNotificationEnvironment.AchievementDesktopAllowed(state, () => "secure-or-inactive-desktop"))
+                throw new Exception("Achievement celebration cannot bypass a locked/secure desktop");
+        }
+        foreach (var state in new[] { 0, 1, 4, 8, -1 })
+            if (DesktopNotificationEnvironment.AchievementDesktopAllowed(state, () => ""))
+                throw new Exception("Unknown, unavailable and presentation desktops defer achievement celebration");
         foreach (var state in new[] { 2, 3, 5, 7 })
             if (DesktopNotificationEnvironment.EvaluateActivitySuppression(state, true, () => "", () => "", () => "foreground-fullscreen") != "")
                 throw new Exception("An authorized player activity must not be blocked again solely because the game is foreground/fullscreen");

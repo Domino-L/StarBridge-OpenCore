@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import 'privacy_page_drafts.dart';
 import 'continuous_play_controller.dart';
 import 'notification_settings_models.dart';
 import 'notification_settings_play_reminders.dart';
@@ -22,6 +27,11 @@ class _ContinuousPlayConnectedPanelState
   int _formGeneration = 0;
   bool _wasBusy = false;
   bool _lastWasSave = false;
+  int _binding = 0, _completed = 0, _phase = 0;
+  InteractionSource _source = InteractionSource.programmatic;
+  InteractionSource? _phaseSource;
+  PrivacyPageDrafts? _drafts;
+  int? _draftEpoch;
 
   @override
   void initState() {
@@ -40,9 +50,17 @@ class _ContinuousPlayConnectedPanelState
   void _changed() {
     final busy = widget.controller.value.busy;
     setState(() {
+      if (busy && !_wasBusy) {
+        _source = captureStarBridgeActivationSource()();
+        _phaseSource = null;
+        _phase++;
+      }
       // The reused dropdown owns FormField state. Reset even after failed writes,
       // when its initialValue is unchanged but the user picked a different value.
-      if (_wasBusy && !busy) _formGeneration++;
+      if (_wasBusy && !busy) {
+        _formGeneration++;
+        _completed++;
+      }
       _wasBusy = busy;
     });
   }
@@ -52,6 +70,11 @@ class _ContinuousPlayConnectedPanelState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_changed);
+      _binding++;
+      _completed = 0;
+      _phase = 0;
+      _source = InteractionSource.programmatic;
+      _phaseSource = null;
       _formGeneration++;
       _lastWasSave = false;
       _attach();
@@ -59,16 +82,50 @@ class _ContinuousPlayConnectedPanelState
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = NotificationDraftScope.of(context);
+    if (!identical(next, _drafts) || next?.epoch != _draftEpoch) {
+      _binding++;
+      _drafts = next;
+      _draftEpoch = next?.epoch;
+    }
+  }
+
+  bool _current(
+    ContinuousPlayController owner,
+    int binding,
+    PrivacyPageDrafts? drafts,
+    int? epoch,
+  ) =>
+      mounted &&
+      identical(owner, widget.controller) &&
+      binding == _binding &&
+      identical(drafts, _drafts) &&
+      epoch == drafts?.epoch;
+
+  @override
   void dispose() {
     widget.controller.removeListener(_changed);
     super.dispose();
   }
 
-  Future<bool> _save(NotificationSettingsValue value) {
+  Future<bool> _save(
+    NotificationSettingsValue value,
+    ContinuousPlayController owner,
+    int binding,
+    PrivacyPageDrafts? drafts,
+    int? epoch,
+  ) {
+    if (!_current(owner, binding, drafts, epoch) ||
+        owner.value.busy ||
+        (drafts?.saving ?? false)) {
+      return Future.value(false);
+    }
     _lastWasSave = true;
+    _source = currentStarBridgeActivationSource;
     final reminder = value.continuousPlay;
-    final drafts = NotificationDraftScope.of(context);
-    final current = widget.controller.value.settings;
+    final current = owner.value.settings;
     if (drafts != null && current != null) {
       drafts.edit(
         'notification-play',
@@ -79,19 +136,21 @@ class _ContinuousPlayConnectedPanelState
           reminder.repeatReminderMinutes,
         ),
         (next) async {
-          if (widget.controller.value.settings?.revision != current.revision) {
+          if (!_current(owner, binding, drafts, epoch) ||
+              owner.value.settings?.revision != current.revision) {
             return false;
           }
-          return widget.controller.save(
+          final ok = await owner.save(
             enabled: next.$1,
             firstMinutes: next.$2,
             repeatMinutes: next.$3,
           );
+          return _current(owner, binding, drafts, epoch) && ok;
         },
       );
       return Future.value(true);
     }
-    return widget.controller.save(
+    return owner.save(
       enabled: reminder.enabled,
       firstMinutes: reminder.firstReminderMinutes,
       repeatMinutes: reminder.repeatReminderMinutes,
@@ -105,9 +164,11 @@ class _ContinuousPlayConnectedPanelState
 
   @override
   Widget build(BuildContext context) {
-    final view = widget.controller.value;
+    final owner = widget.controller, binding = _binding;
+    final view = owner.value;
     final current = view.settings;
     final drafts = NotificationDraftScope.of(context);
+    final epoch = drafts?.epoch;
     final desired = current == null
         ? null
         : drafts?.value('notification-play', (
@@ -117,74 +178,125 @@ class _ContinuousPlayConnectedPanelState
           ));
     final copy = _Copy(Localizations.localeOf(context));
     final tokens = context.tokens;
-    return SizedBox(
-      width: 760,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (current == null && !view.failed)
-              Padding(
-                key: const Key('continuous-play-loading'),
-                padding: EdgeInsets.all(tokens.space.lg),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(semanticsLabel: copy.loading),
-                    SizedBox(height: tokens.space.sm),
-                    Text(copy.loading),
-                  ],
-                ),
-              ),
-            if (view.failed) ...[
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  current != null && _lastWasSave
-                      ? copy.saveFailed
-                      : copy.readFailed,
-                  key: const Key('continuous-play-failure'),
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: tokens.colors.warning),
-                ),
-              ),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: OutlinedButton(
-                  key: const Key('continuous-play-reload'),
-                  onPressed: view.busy ? null : _reload,
-                  child: Text(copy.reload),
-                ),
-              ),
-              SizedBox(height: tokens.space.sm),
-            ],
-            if (current != null) ...[
-              if (view.busy) ...[
-                LinearProgressIndicator(
-                  key: const Key('continuous-play-busy'),
-                  semanticsLabel: _lastWasSave ? copy.saving : copy.loading,
-                ),
-                SizedBox(height: tokens.space.sm),
-              ],
-              ContinuousPlayReminderPanel(
-                key: ValueKey((_formGeneration, drafts?.epoch)),
-                settings: _panelValue(
-                  desired == null
-                      ? current
-                      : ContinuousPlayValue(
-                          enabled: desired.$1,
-                          firstMinutes: desired.$2,
-                          repeatMinutes: desired.$3,
-                          revision: current.revision,
+    return StarBridgeInteractionRegion(
+      child: Builder(
+        builder: (context) {
+          final data = InteractionScope.of(context);
+          final phaseSource = _phaseSource ??=
+              resolveStarBridgeInitialReadSource(context, _source);
+          final effective = data.copyWith(
+            reduceMotion:
+                data.reduceMotion || phaseSource == InteractionSource.keyboard,
+          );
+          return SizedBox(
+            width: 760,
+            child: SingleChildScrollView(
+              child: Stack(
+                children: [
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (current == null && !view.failed)
+                        Padding(
+                          key: const Key('continuous-play-loading'),
+                          padding: EdgeInsets.all(tokens.space.lg),
+                          child: InteractionScope(
+                            data: effective,
+                            child: SuiteBusyLabel(copy.loading),
+                          ),
                         ),
-                ),
-                enabled: !view.busy && !(drafts?.saving ?? false),
-                onSave: _save,
+                      if (view.failed) ...[
+                        Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            current != null && _lastWasSave
+                                ? copy.saveFailed
+                                : copy.readFailed,
+                            key: const Key('continuous-play-failure'),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: tokens.colors.warning),
+                          ),
+                        ),
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: StarBridgeActionButton(
+                            controlKey: const Key('continuous-play-reload'),
+                            onActivate: view.busy
+                                ? null
+                                : (source) {
+                                    if (!_current(
+                                      owner,
+                                      binding,
+                                      drafts,
+                                      epoch,
+                                    )) {
+                                      return;
+                                    }
+                                    _source = source;
+                                    runStarBridgeSynchronousActivation(
+                                      source,
+                                      _reload,
+                                    );
+                                  },
+                            child: Text(copy.reload),
+                          ),
+                        ),
+                        SizedBox(height: tokens.space.sm),
+                      ],
+                      if (current != null) ...[
+                        if (view.busy) ...[
+                          InteractionScope(
+                            key: const Key('continuous-play-busy'),
+                            data: effective,
+                            child: SuiteBusyLabel(
+                              _lastWasSave ? copy.saving : copy.loading,
+                            ),
+                          ),
+                          SizedBox(height: tokens.space.sm),
+                        ],
+                        ContinuousPlayReminderPanel(
+                          key: ValueKey((_formGeneration, drafts?.epoch)),
+                          settings: _panelValue(
+                            desired == null
+                                ? current
+                                : ContinuousPlayValue(
+                                    enabled: desired.$1,
+                                    firstMinutes: desired.$2,
+                                    repeatMinutes: desired.$3,
+                                    revision: current.revision,
+                                  ),
+                          ),
+                          enabled: !view.busy && !(drafts?.saving ?? false),
+                          onSave: (value) =>
+                              _save(value, owner, binding, drafts, epoch),
+                        ),
+                      ],
+                    ],
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ExcludeSemantics(
+                        child: InteractionScope(
+                          data: effective,
+                          child: SuiteBusyFrame(
+                            key: ValueKey((binding, _phase)),
+                            busy: view.busy,
+                            doneToken: _completed,
+                            doneOutcome: view.failed
+                                ? TaskOutcome.failure
+                                : TaskOutcome.success,
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
   }

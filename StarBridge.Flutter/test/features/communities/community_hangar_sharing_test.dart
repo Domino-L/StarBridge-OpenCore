@@ -25,6 +25,43 @@ const capabilities = [
 ];
 
 void main() {
+  for (final withdraw in [false, true]) {
+    test(
+      'image opt-in crosses Bridge only for nonempty audience $withdraw',
+      () async {
+        final host = CommunityHarness(
+          capabilities: capabilities,
+          responses: {
+            'communities.saveHangarSharing': {
+              'schemaVersion': 1,
+              'status': 'accepted',
+            },
+          },
+        );
+        addTearDown(host.close);
+        final refs = withdraw ? <String>[] : ['b' * 32];
+        expect(
+          (await host.adapter.saveHangarSharing(
+            'a' * 32,
+            refs,
+            includeImages: true,
+          )).status,
+          'accepted',
+        );
+        final request = host.requests.singleWhere(
+          (row) => row.name == 'communities.saveHangarSharing',
+        );
+        expect(request.payload, {
+          'schemaVersion': 1,
+          'editRef': 'a' * 32,
+          'selectedRefs': refs,
+          'inventoryMode': 'local',
+          if (!withdraw) 'includeImages': true,
+        });
+        expect(request.accountContext?.subject, 'test-subject');
+      },
+    );
+  }
   test('join choice uses the real Bridge and sends only opaque current selection references', () async {
     final source = snapshot();
     source['options'] = [
@@ -120,6 +157,36 @@ void main() {
     await read;
     expect(outcome, isA<CommunityHangarSharing>());
   });
+  testWidgets(
+    'explicit image upload has a bounded deadline and never retries',
+    (tester) async {
+      final host = CommunityHarness(
+        capabilities: capabilities,
+        holdNames: {'communities.saveHangarSharing'},
+        responses: {
+          'communities.saveHangarSharing': {
+            'schemaVersion': 1,
+            'status': 'accepted',
+          },
+        },
+      );
+      addTearDown(host.close);
+      CommunityHangarSharingOutcome? outcome;
+      final saving = host.adapter
+          .saveHangarSharing('a' * 32, ['b' * 32], includeImages: true)
+          .then((value) => outcome = value);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 60));
+      expect(outcome, isNull);
+      await tester.pump(const Duration(minutes: 5));
+      await saving;
+      expect(outcome?.status, 'unknown');
+      expect(
+        host.requests.where((r) => r.name == 'communities.saveHangarSharing'),
+        hasLength(1),
+      );
+    },
+  );
   test('selection is explicit and snapshots cannot be modified', () {
     final value = CommunityHangarSharing.parse(snapshot());
     expect(value.options.map((row) => row.selected), [true, false]);

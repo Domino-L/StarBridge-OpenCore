@@ -11,6 +11,8 @@ internal static partial class LegacyPasswordLoginTests
 {
     internal static async Task VisitorProfile()
     {
+        await VisitorProfileFieldProjection();
+        await ScmVisitorProfileRead();
         using var transport = new Transport();
         using var client = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), transport);
         using var directory = new VisitorDirectory();

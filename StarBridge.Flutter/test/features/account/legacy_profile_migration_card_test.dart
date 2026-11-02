@@ -13,6 +13,134 @@ import 'package:starbridge_flutter/features/account/account_port.dart';
 
 void main() {
   testWidgets(
+    'full display mode stays manual and both consents gate overwrite',
+    (tester) async {
+      final port = _Port();
+      await _pump(tester, port);
+      await tester.tap(find.byKey(const Key('migration-preview')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('account-legacy-name')),
+        'synthetic-old',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-legacy-password')),
+        'synthetic-only',
+      );
+      await tester.tap(find.byKey(const Key('account-legacy-submit')));
+      await tester.pumpAndSettle();
+      final full = find.byKey(const Key('import-select-full'));
+      expect(tester.widget<CheckboxListTile>(full).value, isFalse);
+      await tester.tap(full);
+      await tester.pump();
+      expect(
+        tester
+            .widget<CheckboxListTile>(
+              find.byKey(const Key('import-select-callsign')),
+            )
+            .onChanged,
+        isNull,
+      );
+      await tester.tap(find.byKey(const Key('import-select-preview')));
+      await tester.pumpAndSettle();
+      expect(port.previews, 1);
+      expect(port.confirmations, isEmpty);
+      expect(find.text('旧简介'), findsOneWidget);
+      final confirm = find.byKey(const Key('migration-confirm'));
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+      await tester.ensureVisible(find.byKey(const Key('migration-owner')));
+      await tester.tap(find.byKey(const Key('migration-owner')));
+      await tester.pump();
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+      await tester.ensureVisible(find.byKey(const Key('migration-replace')));
+      await tester.tap(find.byKey(const Key('migration-replace')));
+      await tester.pump();
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      await tester.pump();
+      expect(port.confirmations, ['synthetic-full:true']);
+      port.pending.complete(const LegacyProfileMigrationView('completed'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'completed selected import permits an explicit new preview only',
+    (tester) async {
+      final port = _Port()
+        ..initialView = LegacyProfileMigrationView(
+          'completed',
+          previewId: 'completed-ticket',
+          choices: LegacyProfileImportChoices(
+            LegacyProfileImportSelection(modules: [], useLegacyCallSign: true),
+            const [],
+          ),
+        );
+      await _pump(tester, port);
+      expect(port.previews, 0);
+      await tester.tap(find.byKey(const Key('migration-preview')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('account-legacy-name')),
+        'synthetic-old',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-legacy-password')),
+        'synthetic-only',
+      );
+      await tester.tap(find.byKey(const Key('account-legacy-submit')));
+      await _chooseCallSign(tester);
+      await tester.pumpAndSettle();
+      expect(port.previousReceipt, 'completed-ticket');
+      expect(port.previews, 1);
+      expect(port.confirmations, isEmpty);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('migration-confirm')))
+            .onPressed,
+        isNull,
+      );
+    },
+  );
+  testWidgets(
+    'local recovery keeps explicit consent and uses the existing ticket',
+    (tester) async {
+      final port = _Port()
+        ..initialView = LegacyProfileMigrationView(
+          'localApplyRequired',
+          previewId: 'recovery-ticket',
+          expiresAt: DateTime.now().add(const Duration(minutes: 15)),
+          choices: LegacyProfileImportChoices(
+            LegacyProfileImportSelection(modules: [], useLegacyCallSign: true),
+            const [],
+          ),
+          selectedContent: LegacyProfileSelectedContent(
+            callSign: 'Recovered name',
+            modules: const {},
+          ),
+        );
+      await _pump(tester, port);
+      expect(find.text('继续应用到本机'), findsOneWidget);
+      expect(port.confirmations, isEmpty);
+      final confirm = find.byKey(const Key('migration-confirm'));
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+      await tester.ensureVisible(find.byKey(const Key('migration-owner')));
+      await tester.tap(find.byKey(const Key('migration-owner')));
+      await tester.pump();
+      await tester.ensureVisible(confirm);
+      await tester.tap(confirm);
+      await tester.pump();
+      expect(port.confirmations, ['recovery-ticket:false']);
+      port.pending.complete(
+        const LegacyProfileMigrationView('localSaveUnavailable'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('本机应用结果尚未确认'), findsOneWidget);
+      expect(find.byKey(const Key('migration-confirm')), findsOneWidget);
+      expect(find.textContaining('所选资料已导入'), findsNothing);
+    },
+  );
+  testWidgets(
     'preview is manual, both consents gate replacement, retry keeps the same ticket',
     (tester) async {
       final port = _Port();
@@ -31,8 +159,13 @@ void main() {
         'synthetic-only',
       );
       await tester.tap(find.byKey(const Key('account-legacy-submit')));
+      await _chooseCallSign(tester);
       await tester.pumpAndSettle();
       final confirm = find.byKey(const Key('migration-confirm'));
+      expect(find.textContaining('旧呼号'), findsOneWidget);
+      expect(find.text('旧简介'), findsNothing);
+      expect(find.text('新简介'), findsNothing);
+      expect(find.textContaining('游戏时长'), findsNothing);
       expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
       await tester.ensureVisible(find.byKey(const Key('migration-owner')));
       await tester.tap(find.byKey(const Key('migration-owner')));
@@ -61,7 +194,7 @@ void main() {
       port.pending.complete(const LegacyProfileMigrationView('completed'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('migration-confirm')), findsNothing);
-      expect(find.textContaining('个人主页和游戏统计已迁移'), findsOneWidget);
+      expect(find.textContaining('所选资料已导入'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -71,8 +204,8 @@ void main() {
   ) async {
     final port = _Port()..initialState = 'completed';
     await _pump(tester, port);
-    expect(find.text('个人资料已迁入当前账号，之后直接使用当前账号即可。'), findsOneWidget);
-    expect(find.textContaining('旧组织将迁为社区组织'), findsOneWidget);
+    expect(find.text('所选内容已导入当前主页，未选择的资料保持不变。'), findsOneWidget);
+    expect(find.textContaining('资料导入不会改变组织'), findsOneWidget);
     expect(find.byKey(const Key('migration-preview')), findsNothing);
     expect(find.byKey(const Key('migration-confirm')), findsNothing);
     expect(find.byKey(const Key('account-legacy-password')), findsNothing);
@@ -104,6 +237,7 @@ void main() {
         'synthetic-only',
       );
       await tester.tap(find.byKey(const Key('account-legacy-submit')));
+      await _chooseCallSign(tester);
       await tester.pumpAndSettle();
       expect(port.previews, 1);
       expect(find.byKey(const Key('account-legacy-password')), findsNothing);
@@ -135,6 +269,7 @@ void main() {
           'synthetic-only',
         );
         await tester.tap(find.byKey(const Key('account-legacy-submit')));
+        await _chooseCallSign(tester);
         await tester.pump();
         await tester.pump(const Duration(seconds: 1));
         expect(port.previews, 1);
@@ -202,6 +337,19 @@ void main() {
   });
 }
 
+Future<void> _chooseCallSign(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  expect(
+    tester
+        .widget<FilledButton>(find.byKey(const Key('import-select-preview')))
+        .onPressed,
+    isNull,
+  );
+  await tester.tap(find.byKey(const Key('import-select-callsign')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('import-select-preview')));
+}
+
 Future<void> _pump(WidgetTester tester, _Port port) async {
   tester.view.physicalSize = const Size(1000, 1000);
   tester.view.devicePixelRatio = 1;
@@ -232,6 +380,8 @@ Future<void> _pump(WidgetTester tester, _Port port) async {
 }
 
 class _Port implements LegacyProfileMigrationPort {
+  String? previousReceipt;
+  LegacyProfileMigrationView? initialView;
   String initialState = 'notStarted';
   int previews = 0;
   final confirmations = <String>[];
@@ -239,18 +389,42 @@ class _Port implements LegacyProfileMigrationPort {
   Completer<LegacyProfileMigrationView>? pendingPreview;
   @override
   Future<LegacyProfileMigrationView> migrationStatus() async =>
-      LegacyProfileMigrationView(initialState);
+      initialView ?? LegacyProfileMigrationView(initialState);
   @override
   Future<LegacyProfileMigrationView> previewMigration({
     LegacyAccountCredential? credential,
+    LegacyProfileImportSelection? selection,
   }) async {
     expect(credential?.accountName, 'synthetic-old');
     expect(credential?.password, 'synthetic-only');
+    previousReceipt = selection?.previousCompletedPreviewId;
+    if (selection?.replaceAllDisplayContent == true) {
+      previews++;
+      return LegacyProfileMigrationView(
+        'previewed',
+        previewId: 'synthetic-full',
+        conflict: true,
+        choices: LegacyProfileImportChoices(selection!, const [], version: 2),
+        presentation: const {
+          'callSign': '旧呼号',
+          'avatarStyle': 1,
+          'wallpaperId': 'none',
+          'content': <String, Object?>{'introduction': '旧简介'},
+        },
+      );
+    }
+    expect(selection?.useLegacyCallSign, isTrue);
+    expect(selection?.modules, isEmpty);
     previews++;
     if (pendingPreview != null) return pendingPreview!.future;
     return LegacyProfileMigrationView(
       'previewed',
       previewId: 'synthetic-preview',
+      choices: LegacyProfileImportChoices(selection!, const []),
+      selectedContent: LegacyProfileSelectedContent(
+        callSign: '旧呼号',
+        modules: const {},
+      ),
       sourceGameId: 'Synthetic-Handle',
       conflict: true,
       expiresAt: DateTime.now().add(const Duration(minutes: 15)),

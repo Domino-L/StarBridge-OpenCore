@@ -12,7 +12,7 @@ void main() {
       var sends = 0;
       await tester.pumpWidget(app(RoomChatComposer(
         controller: text, onChanged: (_) {}, onSend: () => sends++,
-        leadingAction: TextButton(onPressed: () {}, child: const Text('分享浮层预设')),
+        leadingAction: TextButton(onPressed: () {}, child: const Text('分享浮层方案')),
         attachment: const Text('预设附件草稿'),
       )));
       await tester.pumpAndSettle();
@@ -24,7 +24,7 @@ void main() {
       await tester.tap(find.byType(TextField));
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       expect(sends, 1);
-      expect(find.text('分享浮层预设'), findsOneWidget);
+      expect(find.text('分享浮层方案'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       text.dispose();

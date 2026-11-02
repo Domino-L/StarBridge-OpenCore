@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_chat_sources_field.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_preset_sources.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_scene_controller.dart';
@@ -124,7 +126,7 @@ void main() {
         await tester.tap(find.byKey(const Key('overlay-chat-select-sources')));
         await tester.pumpAndSettle();
         for (var i = 0; i < 8; i++) {
-          final row = find.byType(CheckboxListTile).at(i);
+          final row = find.byType(StarBridgeCheckboxTile).at(i);
           await tester.ensureVisible(row);
           await tester.tap(row);
           await tester.pumpAndSettle();
@@ -132,7 +134,7 @@ void main() {
         expect(find.text('已选 8 / 8 个聊天来源'), findsOneWidget);
         expect(
           tester
-              .widget<CheckboxListTile>(find.byType(CheckboxListTile).last)
+              .widget<StarBridgeCheckboxTile>(find.byType(StarBridgeCheckboxTile).last)
               .onChanged,
           isNull,
         );
@@ -179,8 +181,8 @@ void main() {
     expect(find.text('账号已更改，请关闭后重新选择。'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, '应用选择'))
-          .onPressed,
+          .widget<StarBridgeActionButton>(find.widgetWithText(StarBridgeActionButton, '应用选择'))
+          .onActivate,
       isNull,
     );
     await tester.tap(find.text('取消'));
@@ -209,6 +211,8 @@ class _ScenePort implements OverlayScenePort {
       read();
   @override
   Future<OverlaySceneState> focusCommunity(String code) => read();
+  @override
+  Future<OverlaySceneState> focusFleet() => focusCommunity('');
   @override
   void close() {}
 }

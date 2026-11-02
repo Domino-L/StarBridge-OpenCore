@@ -6,16 +6,36 @@ public sealed record DesktopNotification(Guid Id, bool Test, int Invitations, in
     Action? Activated = null, PlayerActivityNotificationContent? Activity = null,
     bool BackgroundOnly = true, DirectMessageNotificationContent? DirectMessage = null,
     CommunityNotificationContent? Community = null, int FriendRequests = 0,
-    bool GameIdentityMismatch = false)
+    bool GameIdentityMismatch = false, ExecHangarNotificationContent? ExecHangar = null,
+    GameStartupHintContent? GameStartupHint = null, TradeNotificationContent? Trade = null)
 {
     public Action<string>? Diagnostic { get; init; }
+    public DateTimeOffset? PresentUntil { get; init; }
     public void ReportDiagnostic(string outcome)
     {
         try { Diagnostic?.Invoke(outcome); } catch { /* Diagnostics cannot affect delivery. */ }
     }
 }
 
-public sealed record CommunityNotificationContent(string Name, string Callsign, string Text, bool Management);
+/// <summary>Kind is a closed status word (request/approved/shipped/receipt/completed/cancelled/review/message/update).
+/// Item, peer and text are already redacted by the Host; quantity and amount are parsed digits only.</summary>
+public sealed record TradeNotificationContent(string Title, string Body, string Kind = "", string Item = "",
+    int Quantity = 0, string Amount = "", string Peer = "", string Text = "")
+{
+    // Set by the native runtime while the game runs: activity-sized, click-through card.
+    public bool Compact { get; init; }
+}
+
+public enum OrganizationNotificationSourceKind { Community, OfficialFleet }
+public sealed record CommunityNotificationContent(string Name, string Callsign, string Text, bool Management,
+    OrganizationNotificationSourceKind SourceKind = OrganizationNotificationSourceKind.Community);
+public sealed record GameStartupHintContent(string Binding, int ProcessId);
+public sealed record ExecHangarNotificationContent(bool Opening, bool AtOpen, DateTimeOffset Boundary,
+    StarBridge.Core.Tools.ExecHangarConfig? Config = null, DateTimeOffset? MonitoringEndsAt = null, Action? Mute = null,
+    bool LeaveWarning = false, bool Test = false)
+{
+    public bool Compact { get; init; }
+}
 
 public sealed record DirectMessageNotificationContent(string Callsign, string Text, int Conversations,
     string? AvatarImageData = null);

@@ -38,7 +38,8 @@ public sealed class ScmHttpClient
         HttpRequestMessage request,
         string? accessToken = null,
         CancellationToken cancellationToken = default,
-        TimeSpan? requestTimeout = null)
+        TimeSpan? requestTimeout = null,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
         if (!string.IsNullOrWhiteSpace(accessToken))
         {
@@ -47,24 +48,63 @@ public sealed class ScmHttpClient
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(requestTimeout ?? TimeSpan.FromSeconds(15));
-        return await _httpClient.SendAsync(request, deadline.Token);
+        var traceVisitor = request.Options.TryGetValue(VisitorReadDiagnostics.VisitorRequest, out var marked) && marked;
+        if (traceVisitor) VisitorReadDiagnostics.Write(VisitorReadDiagnostics.Phase.Sending);
+        try
+        {
+            Privacy.OfficialMemberReadObservation.Sending();
+            var response = await _httpClient.SendAsync(request, completionOption, deadline.Token);
+            Privacy.OfficialMemberReadObservation.Response(response.StatusCode);
+            if (traceVisitor) VisitorReadDiagnostics.Write(VisitorReadDiagnostics.Phase.Response, (int)response.StatusCode);
+            return response;
+        }
+        catch (Exception failure)
+        {
+            if (traceVisitor) VisitorReadDiagnostics.Write(VisitorReadDiagnostics.Phase.Failed,
+                code: failure is OperationCanceledException ? "cancelled" : "transport");
+            throw;
+        }
     }
 
     public async Task<T> ReadJsonAsync<T>(
         HttpResponseMessage response,
         string operation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool checkBusinessCode = false)
     {
         await EnsureSuccessAsync(response, operation, cancellationToken);
         try
         {
-            var result = await response.Content.ReadFromJsonAsync<T>(cancellationToken);
+            T? result;
+            if (checkBusinessCode)
+            {
+                using var document = await response.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken);
+                if (document is null) throw new ScmApiProtocolException($"SCM {operation} 返回了空响应。");
+                EnsureBusinessSuccess(document.RootElement);
+                result = document.RootElement.Deserialize<T>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            }
+            else result = await response.Content.ReadFromJsonAsync<T>(cancellationToken);
             return result ?? throw new ScmApiProtocolException($"SCM {operation} 返回了空响应。");
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
             throw new ScmApiProtocolException($"SCM {operation} 返回了无效响应。");
         }
+    }
+
+    // Direct DTOs remain direct DTOs. SCM security middleware may return a business error instead.
+    internal static void EnsureBusinessSuccess(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("code", out var value) ||
+            value.ValueKind != JsonValueKind.Number) return;
+        var code = value.TryGetDecimal(out var number) ? number : -1;
+        if (code == 0) return;
+        throw code switch
+        {
+            401 => new ScmApiAuthenticationException("account.reauthorization_required"),
+            403 => new ScmApiForbiddenException("profile.read_forbidden"),
+            _ => new ScmApiUnavailableException("profile.read_unavailable")
+        };
     }
 
     public static async Task EnsureSuccessAsync(
@@ -86,7 +126,7 @@ public sealed class ScmHttpClient
             HttpStatusCode.Unauthorized => new ScmApiAuthenticationException(detail),
             HttpStatusCode.Forbidden => new ScmApiForbiddenException(detail),
             HttpStatusCode.TooManyRequests => new ScmApiRateLimitException(detail, response.Headers.RetryAfter?.Delta),
-            >= HttpStatusCode.InternalServerError => new ScmApiUnavailableException(detail),
+            >= HttpStatusCode.InternalServerError and <= (HttpStatusCode)599 => new ScmApiUnavailableException(detail, response.StatusCode),
             _ => new HttpRequestException(detail, null, response.StatusCode)
         };
     }
@@ -158,7 +198,7 @@ public class ScmApiAuthenticationException(string message) : HttpRequestExceptio
 
 public class ScmApiForbiddenException(string message) : HttpRequestException(message, null, HttpStatusCode.Forbidden);
 
-public class ScmApiUnavailableException(string message) : HttpRequestException(message);
+public class ScmApiUnavailableException(string message, HttpStatusCode? statusCode = null) : HttpRequestException(message, null, statusCode);
 
 public sealed class ScmApiRateLimitException(string message, TimeSpan? retryAfter) : HttpRequestException(message)
 {

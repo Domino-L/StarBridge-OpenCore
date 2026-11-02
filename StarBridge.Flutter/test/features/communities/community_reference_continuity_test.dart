@@ -31,6 +31,11 @@ void main() {
       final refresh = state.refreshVisibleCommunity();
       await tester.pump();
       expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(state.model.showProgress, isFalse);
+      expect(
+        find.byKey(const ValueKey('community-refresh-progress')),
+        findsNothing,
+      );
       expect(state.model.workspace, isNotNull);
       pending.complete(CommunityWorkspace.parse(workspacePayload()));
       await refresh;
@@ -38,7 +43,16 @@ void main() {
       port.reader = (_, _, _) => manual.future;
       final manualRead = state.model.load();
       await tester.pump();
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(state.model.showProgress, isTrue);
+      // The member area has its own excluded-semantics read activity. Check
+      // this workspace's refresh indicator without counting unrelated bars.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('community-refresh-progress')),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+        findsOneWidget,
+      );
       manual.complete(CommunityWorkspace.parse(workspacePayload()));
       await manualRead;
       await tester.pumpWidget(const SizedBox());

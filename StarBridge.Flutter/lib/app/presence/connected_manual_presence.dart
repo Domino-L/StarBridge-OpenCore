@@ -5,16 +5,31 @@ import 'package:flutter/foundation.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../shell/chrome/shell_chrome_projection.dart';
+import '../../features/onboarding/bridge_connection_mode_adapter.dart';
+import '../../features/onboarding/connection_mode_controller.dart';
 import 'bridge_manual_presence.dart';
 
 /// Binds to the existing authenticated Host; no independent login or poller.
 class ConnectedManualPresence {
   ConnectedManualPresence(this.session, this.chrome, {this.appAway}) {
-    source = BridgeManualPresence(session, _account);
+    connectionMode = ConnectionModeController(
+      BridgeConnectionModeAdapter(session),
+    );
+    source = BridgeManualPresence(
+      session,
+      _account,
+      connectionMode: connectionMode,
+    );
+    connectionMode.addListener(_modeChanged);
     chrome.addListener(_chromeChanged);
     _account.addListener(_reportActivity);
     appAway?.addListener(_reportActivity);
     _events = session.events.listen((event) {
+      if (event.name == 'presence.changed' &&
+          event.sessionGeneration == session.activeGeneration) {
+        source.invalidateRealtime();
+        return;
+      }
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
         _epoch++;
@@ -36,14 +51,39 @@ class ConnectedManualPresence {
     const PresenceAccountScope(generation: 0, account: null, available: false),
   );
   late final BridgeManualPresence source;
+  late final ConnectionModeController connectionMode;
   late final StreamSubscription<BridgeEnvelope> _events;
   bool _disposed = false;
   int _epoch = 0;
   bool _reportingActivity = false, _activityDirty = false;
   (Object, bool)? _reportedActivity;
+  Future<void>? _accountRead;
+  int _accountReadEpoch = -1;
+  bool _accountRefreshQueued = false;
+  bool _modeAllowed = false;
+
+  void _modeChanged() {
+    if (_disposed) return;
+    final allowed = connectionMode.allowsOnlineTraffic;
+    final previous = _modeAllowed;
+    _modeAllowed = allowed;
+    if (!allowed) {
+      _epoch++;
+      final old = _account.value;
+      _account.value = PresenceAccountScope(
+        generation: session.activeGeneration,
+        account: old.account,
+        available: false,
+        automaticKey: chrome.value.displayPresenceKey,
+      );
+    } else if (!previous) {
+      unawaited(_refreshAccount());
+    }
+  }
 
   void _reportActivity() {
     if (_disposed ||
+        !connectionMode.allowsOnlineTraffic ||
         appAway == null ||
         !session.hostCapabilities.contains('presence.activity')) {
       return;
@@ -94,26 +134,60 @@ class ConnectedManualPresence {
 
   void _chromeChanged() {
     final current = _account.value;
+    final key = chrome.value.displayPresenceKey;
+    if (current.automaticKey == key) return;
     _account.value = PresenceAccountScope(
       generation: current.generation,
       account: current.account,
       available: current.available,
-      automaticKey: chrome.value.displayPresenceKey,
+      automaticKey: key,
     );
   }
 
   Future<void> refresh() async {
+    if (_disposed) return;
+    await connectionMode.refresh();
+    if (!_disposed && connectionMode.allowsOnlineTraffic) {
+      await _refreshAccount();
+    }
+  }
+
+  Future<void> _refreshAccount() {
+    if (_accountRead != null && _accountReadEpoch != _epoch) {
+      _accountRefreshQueued = true;
+    }
+    return _accountRead ??= _readAccount();
+  }
+
+  Future<void> _readAccount() async {
+    final epoch = _accountReadEpoch = ++_epoch;
+    await Future<void>.delayed(Duration.zero);
+    try {
+      await _readAccountCore(epoch);
+    } finally {
+      _accountRead = null;
+      if (_accountRefreshQueued) {
+        _accountRefreshQueued = false;
+        if (!_disposed && connectionMode.allowsOnlineTraffic) {
+          unawaited(_refreshAccount());
+        }
+      }
+    }
+  }
+
+  Future<void> _readAccountCore(int epoch) async {
     if (_disposed ||
+        !connectionMode.allowsOnlineTraffic ||
         !session.hostCapabilities.contains('presence.visibility')) {
       return;
     }
-    final epoch = ++_epoch;
     try {
       final result = await session.request(
         'account.getCurrent',
         payload: const {'schemaVersion': 1},
       );
       if (_disposed ||
+          !connectionMode.allowsOnlineTraffic ||
           epoch != _epoch ||
           result.sessionGeneration != session.activeGeneration) {
         return;
@@ -154,6 +228,8 @@ class ConnectedManualPresence {
     _account.removeListener(_reportActivity);
     appAway?.removeListener(_reportActivity);
     source.dispose();
+    connectionMode.removeListener(_modeChanged);
+    connectionMode.dispose();
     _account.dispose();
   }
 }

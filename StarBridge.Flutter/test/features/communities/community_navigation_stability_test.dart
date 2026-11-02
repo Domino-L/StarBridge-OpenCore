@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/features/common/organization_holo_choice.dart';
 import 'package:starbridge_flutter/features/communities/example_communities.dart';
 
 import 'community_workspace_view_test.dart' show host;
@@ -93,10 +94,16 @@ void main() {
                 await tester.pumpAndSettle();
                 expect(rectangles(), expected);
                 expect(labels(), expectedLabels);
-                expect(tester.widget<ChoiceChip>(tab(id)).selected, isTrue);
                 expect(
-                  tester.widget<ChoiceChip>(tab(id)).showCheckmark,
-                  isFalse,
+                  tester
+                      .widget<OrganizationHoloChoice>(
+                        find.ancestor(
+                          of: tab(id),
+                          matching: find.byType(OrganizationHoloChoice),
+                        ),
+                      )
+                      .selected,
+                  isTrue,
                 );
                 expect(
                   find.byKey(const Key('community-header-information')),

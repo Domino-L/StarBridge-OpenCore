@@ -1,18 +1,25 @@
+import 'menu_overlay_locale.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../design_system/icons/standard_icon.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../features/common/social_read_activity.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../../platform/window/menu_browser_preferences.dart';
 import '../../platform/window/native_viewport_visibility.dart';
 import '../../features/overlay_settings/menu_browser_resume_controller.dart';
 import '../localization/app_strings.dart';
-
 import 'menu_bridge_style.dart';
 import 'menu_browser_address.dart';
 import 'menu_browser_state.dart';
+import 'menu_browser_tabs.dart';
 import 'menu_local_call.dart';
 import 'menu_workspace_controller.dart';
 import 'menu_workspace_viewport.dart';
@@ -44,19 +51,24 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
   final toolbarScroll = ScrollController();
   final viewport = GlobalKey();
   final _drafts = <String, TextEditingValue>{};
+  final _draftRevisions = <String, int>{};
   final _tabKeys = <String, GlobalKey>{};
   Timer? statusTimer;
   MenuBrowserState? state;
   bool ready = false, busy = false, opening = false;
+  InteractionSource _openingSource = InteractionSource.programmatic;
+  InteractionSource _commandSource = InteractionSource.programmatic;
   int _epoch = 0;
   int? _statusRequest;
   String? error;
+  String? _errorKind;
   Rect? lastBounds;
   bool? lastVisible;
   bool? lastNativeVisible;
   List<Rect> lastOcclusions = const [];
   Size? workspaceSize;
   bool routeActive = true;
+  bool _elementActive = true;
   MenuPanelIdleScope? idleScope;
   double? lastOpacity;
   MenuBrowserPreferences? _applied;
@@ -111,14 +123,19 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     try {
       await _configure();
       if (!mounted) return;
-      final failure = AppStrings.of(context).text('menu.browser.applyFailed');
-      if (error == failure) setState(() => error = null);
+      if (_errorKind == 'configuration') {
+        setState(() {
+          error = null;
+          _errorKind = null;
+        });
+      }
       await _status(force: true);
     } on Object {
       if (mounted) {
-        setState(
-          () => error = AppStrings.of(context).text('menu.browser.applyFailed'),
-        );
+        setState(() {
+          _errorKind = 'configuration';
+          error = AppStrings.of(context).text('menu.browser.applyFailed');
+        });
       }
     }
   }
@@ -127,7 +144,6 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       state?.active.url == 'about:blank' &&
       state?.active.loading == false &&
       state?.active.failed == false;
-
   @override
   void initState() {
     super.initState();
@@ -140,8 +156,10 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
   Future<void> _open() async {
     if (opening) return;
     setState(() {
+      _openingSource = captureStarBridgeActivationSource()();
       opening = true;
       error = null;
+      _errorKind = null;
     });
     final epoch = ++_epoch;
     try {
@@ -205,7 +223,10 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
           await _openHomeIfBlank(epoch, singleTab: true);
         } on Object {
           if (mounted && epoch == _epoch) {
-            setState(() => error = '搜索引擎首页未能打开，请输入网址或搜索词重试。');
+            setState(
+              () =>
+                  error = menuText(context, 'menu.overlay.browser.homeFailed'),
+            );
           }
         }
       }
@@ -214,11 +235,14 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       await _status(force: true);
     } on Object {
       if (mounted && epoch == _epoch) {
-        setState(
-          () => error = _applied != effectivePreferences
+        setState(() {
+          _errorKind = _applied != effectivePreferences
+              ? 'configuration'
+              : 'startup';
+          error = _errorKind == 'configuration'
               ? AppStrings.of(context).text('menu.browser.applyFailed')
-              : '浏览器无法启动。请确认已安装 WebView2，或稍后重试。',
-        );
+              : menuText(context, 'menu.overlay.browser.startFailed');
+        });
       }
     } finally {
       if (mounted && epoch == _epoch) setState(() => opening = false);
@@ -258,8 +282,23 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  @override
+  void deactivate() {
+    _elementActive = false;
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _elementActive = true;
+    _changed();
+  }
+
   void _sync() {
-    if (!mounted || !ready) return;
+    // Child hints release their lease while unmounting. mounted is still true
+    // after deactivation, but their viewport Element cannot be inspected then.
+    if (!mounted || !_elementActive || !ready) return;
     final render = viewport.currentContext?.findRenderObject();
     if (render is! RenderBox || !render.hasSize) return;
     final ratio = MediaQuery.devicePixelRatioOf(context);
@@ -328,7 +367,14 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
             ],
           })
           .catchError((Object _) {
-            if (mounted) setState(() => error = '浏览器显示中断，请重新打开窗口。');
+            if (mounted) {
+              setState(
+                () => error = menuText(
+                  context,
+                  'menu.overlay.browser.interrupted',
+                ),
+              );
+            }
             return null;
           }),
     );
@@ -358,8 +404,14 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       final changed = state?.activeId != next.activeId;
       setState(() {
         state = next;
-        if (error == '暂时无法更新标签页，请点击刷新重试。') error = null;
+        if (_errorKind == 'status') {
+          error = null;
+          _errorKind = null;
+        }
         _drafts.removeWhere((id, _) => !next.tabs.any((tab) => tab.id == id));
+        _draftRevisions.removeWhere(
+          (id, _) => !next.tabs.any((tab) => tab.id == id),
+        );
         _tabKeys.removeWhere((id, _) => !next.tabs.any((tab) => tab.id == id));
         if (changed || !addressFocus.hasFocus) {
           address.value =
@@ -383,7 +435,10 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       }
     } on Object {
       if (mounted && epoch == _epoch && (force || lastVisible == true)) {
-        setState(() => error = '暂时无法更新标签页，请点击刷新重试。');
+        setState(() {
+          _errorKind = 'status';
+          error = menuText(context, 'menu.overlay.browser.statusFailed');
+        });
       }
     } finally {
       if (_statusRequest == epoch) _statusRequest = null;
@@ -392,10 +447,14 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
 
   Future<void> _action(String action, {String? tabId, String? url}) async {
     if (!ready || busy) return;
+    final submittedDraftRevision = _draftRevisions[tabId] ?? 0;
+    final submittedEditingValue = address.value;
     final epoch = ++_epoch; // Retire any state poll started before this action.
     setState(() {
+      _commandSource = captureStarBridgeActivationSource()();
       busy = true;
       error = null;
+      _errorKind = null;
     });
     try {
       await _configure();
@@ -412,8 +471,20 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       if (!mounted || epoch != _epoch) return;
       if (action == 'browserNavigate') {
         _resumeRestoreFailed = false;
-        _drafts.remove(tabId);
-        addressFocus.unfocus();
+        // Editing stays available during a native request. A late success only
+        // acknowledges the submitted generation, never a later draft (even if
+        // the user edits back to the same text with new selection/composition).
+        final stillActive = state?.activeId == tabId;
+        final sameEditingValue =
+            !stillActive || address.value == submittedEditingValue;
+        if ((_draftRevisions[tabId] ?? 0) == submittedDraftRevision &&
+            sameEditingValue) {
+          _drafts.remove(tabId);
+          if (stillActive) addressFocus.unfocus();
+        } else if (stillActive && tabId != null) {
+          // Selection/composition changes do not fire TextField.onChanged.
+          _drafts[tabId] = address.value;
+        }
       }
     } on Object catch (failure) {
       if (mounted && epoch == _epoch) {
@@ -421,11 +492,11 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
           () => error =
               failure is PlatformException &&
                   failure.code == 'menu.browser_tab_limit'
-              ? '标签页已达上限，请先关闭不需要的页面。'
+              ? menuText(context, 'menu.overlay.browser.tabLimit')
               : failure is PlatformException &&
                     failure.code == 'menu.browser_tab_stale'
-              ? '标签页已变化，请在当前页面重新操作。'
-              : '操作未完成，请检查当前标签页后重试。',
+              ? menuText(context, 'menu.overlay.browser.staleTab')
+              : menuText(context, 'menu.overlay.browser.actionFailed'),
         );
       }
     } finally {
@@ -445,111 +516,29 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
       provider: widget.preferences.provider,
     );
     if (uri == null) {
-      setState(() => error = '请输入 HTTP/HTTPS 地址或搜索词。');
+      setState(
+        () => error = menuText(context, 'menu.overlay.browser.invalidAddress'),
+      );
       return;
     }
     unawaited(_action('browserNavigate', tabId: tab.id, url: uri.toString()));
   }
 
-  Widget _tabs() {
-    final current = state;
-    final ink = MenuBridgeColors.of(context);
-    return Row(
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final tab in current?.tabs ?? <MenuBrowserTab>[])
-                  Container(
-                    key: _tabKeys.putIfAbsent(tab.id, GlobalKey.new),
-                    constraints: const BoxConstraints(maxWidth: 216),
-                    margin: const EdgeInsets.only(right: 4),
-                    decoration: BoxDecoration(
-                      color: tab.id == current?.activeId
-                          ? ink.selected
-                          : ink.panel,
-                      border: Border(
-                        bottom: BorderSide(
-                          color: tab.id == current?.activeId
-                              ? ink.blue
-                              : ink.line,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Tooltip(
-                            message: tab.url == 'about:blank'
-                                ? '新标签页'
-                                : tab.url,
-                            child: BridgeMenuAction(
-                              key: ValueKey('browser-tab-${tab.id}'),
-                              label: tab.title.isEmpty ? '新标签页' : tab.title,
-                              selected: tab.id == current?.activeId,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              onPressed: busy
-                                  ? null
-                                  : () => _action(
-                                      'browserSelectTab',
-                                      tabId: tab.id,
-                                    ),
-                              child: Text(
-                                tab.title.isEmpty ? '新标签页' : tab.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          key: ValueKey('browser-close-${tab.id}'),
-                          tooltip: '关闭标签页',
-                          onPressed: busy
-                              ? null
-                              : () => _action('browserCloseTab', tabId: tab.id),
-                          icon: const StandardIcon(
-                            StandardIconSemantic.close,
-                            size: 16,
-                          ),
-                          constraints: const BoxConstraints(
-                            minWidth: 36,
-                            minHeight: 36,
-                          ),
-                          padding: const EdgeInsets.all(8),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
+  Widget _waiting(String phase, InteractionSource source, String label) =>
+      KeyedSubtree(
+        key: ValueKey(('browser-wait', phase, _epoch, state?.activeId)),
+        // Keep the existing caption as the single reader status. This track
+        // is not numeric progress and does not own the native page's loading.
+        child: ExcludeSemantics(
+          child: SocialReadActivity(
+            key: ValueKey('menu-browser-$phase-activity'),
+            source: source,
+            opening: false,
+            label: label,
+            height: 2,
           ),
         ),
-        IconButton(
-          key: const ValueKey('browser-new-tab'),
-          tooltip: current != null && current.tabs.length >= current.limit
-              ? '最多 ${current.limit} 个标签页'
-              : '新建标签页',
-          onPressed:
-              ready &&
-                  !busy &&
-                  current != null &&
-                  current.tabs.length < current.limit
-              ? () => _action('browserNewTab')
-              : null,
-          icon: const StandardIcon(StandardIconSemantic.add),
-        ),
-      ],
-    );
-  }
-
+      );
   @override
   void dispose() {
     _epoch++;
@@ -591,18 +580,38 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _tabs(),
+                    MenuBrowserTabs(
+                      state: state,
+                      ready: ready,
+                      busy: busy,
+                      routeActive: routeActive,
+                      workspace: widget.workspace,
+                      keyForTab: (id) =>
+                          _tabKeys.putIfAbsent(id, GlobalKey.new),
+                      onSelect: (id) => _action('browserSelectTab', tabId: id),
+                      onClose: (id) => _action('browserCloseTab', tabId: id),
+                      onNew: () => _action('browserNewTab'),
+                    ),
                     if (state != null && state!.tabs.length >= state!.limit)
                       BridgeCaption(
-                        '已打开 ${state!.tabs.length} 个标签页，上限为 ${state!.limit} 个。请先关闭不需要的页面再打开新页面。',
+                        menuText(context, 'menu.overlay.browser.tabCount', {
+                          'count': state!.tabs.length,
+                          'limit': state!.limit,
+                        }),
                       ),
                     Wrap(
                       spacing: 4,
                       children: [
-                        for (final item in const {
-                          'browserBack': '后退',
-                          'browserForward': '前进',
-                          'browserReload': '刷新',
+                        for (final item in {
+                          'browserBack': menuText(
+                            context,
+                            'menu.overlay.browser.back',
+                          ),
+                          'browserForward': menuText(
+                            context,
+                            'menu.overlay.browser.forward',
+                          ),
+                          'browserReload': menuText(context, 'friends.refresh'),
                         }.entries)
                           BridgeMenuAction(
                             label: item.value,
@@ -623,21 +632,26 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                           ),
                         if (tab?.loading == true)
                           BridgeMenuAction(
-                            label: '停止加载',
+                            label: menuText(
+                              context,
+                              'menu.overlay.browser.stop',
+                            ),
                             onPressed: busy
                                 ? null
                                 : () => _action('browserStop', tabId: tab!.id),
-                            child: const Text('停止加载'),
+                            child: Text(
+                              menuText(context, 'menu.overlay.browser.stop'),
+                            ),
                           ),
                         if (error != null)
                           BridgeMenuAction(
-                            label: '重试',
+                            label: menuText(context, 'friends.retry'),
                             onPressed: opening || busy
                                 ? null
                                 : ready
                                 ? _refreshConfiguration
                                 : _open,
-                            child: const Text('重试'),
+                            child: Text(menuText(context, 'friends.retry')),
                           ),
                       ],
                     ),
@@ -646,29 +660,43 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: TextField(
-                              key: const ValueKey('browser-address'),
-                              controller: address,
+                            child: StarBridgeFieldFrame(
                               focusNode: addressFocus,
-                              maxLength: 2048,
-                              onChanged: (_) {
-                                if (tab != null) {
-                                  _drafts[tab.id] = address.value;
-                                }
-                              },
-                              onSubmitted: (_) => _navigate(),
-                              decoration: const InputDecoration(
-                                hintText: '输入网址或搜索词',
-                                counterText: '',
+                              builder: (context, focus) => TextField(
+                                key: const ValueKey('browser-address'),
+                                controller: address,
+                                focusNode: focus,
+                                maxLength: 2048,
+                                onChanged: (_) {
+                                  if (tab != null) {
+                                    _drafts[tab.id] = address.value;
+                                    _draftRevisions[tab.id] =
+                                        (_draftRevisions[tab.id] ?? 0) + 1;
+                                  }
+                                },
+                                onSubmitted: (_) =>
+                                    runStarBridgeSynchronousActivation(
+                                      InteractionSource.keyboard,
+                                      _navigate,
+                                    ),
+                                decoration: InputDecoration(
+                                  hintText: menuText(
+                                    context,
+                                    'menu.overlay.browser.address',
+                                  ),
+                                  counterText: '',
+                                ),
                               ),
                             ),
                           ),
                           BridgeMenuAction(
-                            label: '访问',
+                            label: menuText(context, 'menu.overlay.browser.go'),
                             onPressed: ready && !busy && tab != null
                                 ? _navigate
                                 : null,
-                            child: const Text('访问'),
+                            child: Text(
+                              menuText(context, 'menu.overlay.browser.go'),
+                            ),
                           ),
                         ],
                       ),
@@ -680,14 +708,43 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                             .text('menu.browser.resume.runtimeFailed'),
                       ),
                     if (tab?.unavailable == true)
-                      const BridgeCaption(
-                        '浏览器暂时不可用，请点击刷新重新启动此标签页。若仍无法启动，请检查 WebView2 是否已安装。',
+                      BridgeCaption(
+                        menuText(context, 'menu.overlay.browser.unavailable'),
                       )
                     else if (tab?.failed == true)
-                      const BridgeCaption('网页未能打开，请检查地址或刷新重试。'),
-                    if (tab?.loading == true) const BridgeCaption('正在加载网页…'),
+                      BridgeCaption(
+                        menuText(context, 'menu.overlay.browser.pageFailed'),
+                      ),
+                    if (busy)
+                      _waiting(
+                        'command',
+                        _commandSource,
+                        menuText(context, 'menu.overlay.browser.busy'),
+                      )
+                    else if (tab?.loading == true)
+                      _waiting(
+                        'page',
+                        InteractionSource.programmatic,
+                        menuText(context, 'menu.overlay.browser.loading'),
+                      )
+                    else if (!ready && error == null)
+                      _waiting(
+                        'starting',
+                        _openingSource,
+                        menuText(context, 'menu.overlay.browser.starting'),
+                      ),
+                    if (busy && tab?.loading != true)
+                      BridgeCaption(
+                        menuText(context, 'menu.overlay.browser.busy'),
+                      ),
+                    if (tab?.loading == true)
+                      BridgeCaption(
+                        menuText(context, 'menu.overlay.browser.loading'),
+                      ),
                     if (!ready && error == null)
-                      const BridgeCaption('正在启动浏览器…'),
+                      BridgeCaption(
+                        menuText(context, 'menu.overlay.browser.starting'),
+                      ),
                   ],
                 ),
               ),
@@ -703,10 +760,15 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text('输入网址或搜索词，开始浏览'),
+                            Text(
+                              menuText(context, 'menu.overlay.browser.empty'),
+                            ),
                             const SizedBox(height: 12),
                             BridgeMenuAction(
-                              label: '输入网址或搜索词',
+                              label: menuText(
+                                context,
+                                'menu.overlay.browser.address',
+                              ),
                               onPressed: () {
                                 addressFocus.requestFocus();
                                 final inputContext = addressFocus.context;
@@ -716,7 +778,12 @@ class _MenuBrowserToolState extends State<MenuBrowserTool> {
                                   );
                                 }
                               },
-                              child: const Text('输入网址或搜索词'),
+                              child: Text(
+                                menuText(
+                                  context,
+                                  'menu.overlay.browser.address',
+                                ),
+                              ),
                             ),
                           ],
                         ),

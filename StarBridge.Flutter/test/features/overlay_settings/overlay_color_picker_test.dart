@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_color_picker.dart';
@@ -59,8 +60,10 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<FilledButton>(find.byKey(const Key('overlay-color-apply')))
-          .onPressed,
+          .widget<StarBridgeActionButton>(
+            find.byKey(const Key('overlay-color-apply')),
+          )
+          .onActivate,
       isNull,
     );
     expect(find.text('请输入 #RRGGBB 格式的颜色值。'), findsOneWidget);
@@ -219,9 +222,9 @@ void main() {
         } else {
           value.value = '#FF0000';
         }
-        await tester.pump();
-        await tester.tap(find.byKey(const Key('overlay-color-apply')));
         await tester.pumpAndSettle();
+        expect(find.byKey(const Key('overlay-color-apply')), findsNothing);
+        expect(find.byType(OverlayColorPickerDialog), findsNothing);
         expect(changed, isEmpty);
       }
     },

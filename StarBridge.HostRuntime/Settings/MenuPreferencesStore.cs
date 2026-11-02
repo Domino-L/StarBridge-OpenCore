@@ -11,13 +11,14 @@ internal sealed class MenuPreferencesStore(string dataRoot) : IMenuHotkeyPrefere
     private string? _startupToken;
     private bool? _startupSafe;
     private readonly string _path = Path.Combine(Path.GetFullPath(dataRoot), "menu-preferences.v1.json");
-    private static readonly HashSet<string> Panels = ["friends", "comms", "organizations", "rooms", "hud", "screenshot", "image", "browser", "settings"];
+    private static readonly HashSet<string> Panels = ["friends", "comms", "organizations", "rooms", "hud", "screenshot", "image", "browser", "settings", "execHangar"];
     // Random UI-process receipt only, never an account or Windows process id.
     internal sealed record StartupReceipt(string Token, bool Safe);
     internal sealed record Snapshot(long Revision, JsonElement Layout, JsonElement Settings, MenuHotkeyOptions? Hotkey = null, StartupReceipt? Startup = null);
     internal static Snapshot Default => new(0,
         JsonSerializer.SerializeToElement(new { version = 1, panels = Array.Empty<object>(), open = Array.Empty<string>() }),
-        JsonSerializer.SerializeToElement(new { showClock = true, showContext = true, dimming = 133d / 255, restoreDesktop = false, snapWindows = false }));
+        JsonSerializer.SerializeToElement(new { showClock = true, showContext = true, dimming = 133d / 255, restoreDesktop = false, snapWindows = false,
+            widgets = new { hangar = true, position = new[] { .04, .18 } } }));
 
     internal Snapshot Read()
     {
@@ -155,14 +156,28 @@ internal sealed class MenuPreferencesStore(string dataRoot) : IMenuHotkeyPrefere
                 toolbarKeys.Add("showUnreadBadges");
             }
             Keys(toolbar, toolbarKeys.ToArray());
-            string[] tools = ["hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "browser"];
+            string[] tools = ["hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "browser", "execHangar"];
             var order = toolbar.GetProperty("order");
             var hidden = toolbar.GetProperty("hidden");
-            ValidateTools(order, tools, tools.Length, true);
+            var legacyOrder = order.ValueKind == JsonValueKind.Array && order.GetArrayLength() == tools.Length - 1;
+            ValidateTools(order, legacyOrder ? tools.Where(id => id != "execHangar").ToArray() : tools,
+                legacyOrder ? tools.Length - 1 : tools.Length, true);
             ValidateTools(hidden, tools.Where(id => id != "hud").ToArray(), tools.Length - 1, false);
             if (toolbar.GetProperty("density").GetString() is not ("compact" or "standard" or "comfortable") ||
                 toolbar.GetProperty("labels").GetString() is not ("auto" or "iconsOnly")) throw new ArgumentException("Invalid toolbar presentation");
             keys.Add("toolbar");
+        }
+        if (settings.TryGetProperty("widgets", out var widgets))
+        {
+            Keys(widgets, "hangar", "position");
+            if (widgets.GetProperty("hangar").ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new ArgumentException("Invalid menu widget visibility");
+            var position = widgets.GetProperty("position");
+            if (position.ValueKind != JsonValueKind.Array || position.GetArrayLength() != 2 ||
+                position.EnumerateArray().Any(v => v.ValueKind != JsonValueKind.Number ||
+                    !v.TryGetDouble(out var n) || !double.IsFinite(n) || n < 0 || n > 1))
+                throw new ArgumentException("Invalid menu widget position");
+            keys.Add("widgets");
         }
         if (settings.TryGetProperty("display", out var display))
         {

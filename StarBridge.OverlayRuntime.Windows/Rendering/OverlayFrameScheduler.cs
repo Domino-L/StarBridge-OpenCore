@@ -19,7 +19,7 @@ internal sealed class OverlayFrameScheduler : IDisposable
     private readonly IntPtr[] _waitHandles;
     private readonly Thread _thread;
     private int _active;
-    private int _framesPerSecond = 120;
+    private long _intervalTicks = Math.Max(1, Stopwatch.Frequency / 120);
     private int _dispatchPending;
     private int _disposed;
 
@@ -67,10 +67,10 @@ internal sealed class OverlayFrameScheduler : IDisposable
         SetEvent(_wakeEvent);
     }
 
-    public void UpdateFrameRate(int framesPerSecond)
+    public void UpdateFrameRate(int framesPerSecond, int sampleDelayMs = 0)
     {
-        var normalized = Math.Clamp(framesPerSecond, 1, 240);
-        if (Interlocked.Exchange(ref _framesPerSecond, normalized) != normalized)
+        var interval = OverlayAppearanceSamplingDeadline.IntervalTicks(framesPerSecond, sampleDelayMs, Stopwatch.Frequency);
+        if (Interlocked.Exchange(ref _intervalTicks, interval) != interval)
         {
             SetEvent(_wakeEvent);
         }
@@ -107,8 +107,7 @@ internal sealed class OverlayFrameScheduler : IDisposable
                 continue;
             }
 
-            var framesPerSecond = Math.Max(1, Volatile.Read(ref _framesPerSecond));
-            var intervalTicks = Math.Max(1, Stopwatch.Frequency / framesPerSecond);
+            var intervalTicks = Math.Max(1, Volatile.Read(ref _intervalTicks));
             nextDeadline = AdvanceDeadline(nextDeadline, Stopwatch.GetTimestamp(), intervalTicks);
             if (!WaitUntil(nextDeadline))
             {
@@ -153,7 +152,7 @@ internal sealed class OverlayFrameScheduler : IDisposable
             {
                 try
                 {
-                    if (Volatile.Read(ref _disposed) == 0)
+                    if (Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _active) != 0)
                     {
                         _renderFrame();
                     }

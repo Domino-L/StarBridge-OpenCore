@@ -60,6 +60,7 @@ internal sealed class PlayerActivityNotificationCard : Border
         lines.Children.Add(Line("PlayerSources", string.Join(" · ", labels), 11, secondary));
         Grid.SetColumn(lines, 2); layout.Children.Add(lines);
         var frame = new Grid();
+        frame.Children.Add(new NotificationBrandWatermark(light));
         frame.Children.Add(new Border { Name = "EventStripe", Width = 3, Background = eventColor,
             HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 6, 0, 6), CornerRadius = new(1.5) });
         frame.Children.Add(layout); Child = frame;

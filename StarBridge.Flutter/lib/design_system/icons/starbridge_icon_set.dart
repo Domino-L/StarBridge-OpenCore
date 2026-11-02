@@ -87,6 +87,10 @@ abstract final class StarBridgeIconSet {
           semantic: StarBridgeIconSemantic.profile,
           family: StarBridgeIconFamily.identity,
         ),
+        StarBridgeIconSemantic.achievement => const StarBridgeIconGlyph(
+          semantic: StarBridgeIconSemantic.achievement,
+          family: StarBridgeIconFamily.identity,
+        ),
         StarBridgeIconSemantic.edit => const StarBridgeIconGlyph(
           semantic: StarBridgeIconSemantic.edit,
           family: StarBridgeIconFamily.profile,

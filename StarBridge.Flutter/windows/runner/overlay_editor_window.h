@@ -19,8 +19,10 @@ class OverlayEditorWindow {
   struct Snapshot {
     WINDOWPLACEMENT placement{};
     LONG_PTR style = 0;
+    bool topmost = false;
   };
-  void MarkFullscreen(bool enabled);
+  void KeepAboveTaskbar(bool enabled);
+  void RestoreZOrder(bool topmost);
   HWND window_;
   std::optional<Snapshot> snapshot_;
 };

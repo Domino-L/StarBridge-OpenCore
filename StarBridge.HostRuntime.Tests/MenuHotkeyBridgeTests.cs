@@ -10,8 +10,11 @@ internal static class MenuHotkeyBridgeTests
         var runtime = new Runtime();
         Require(!BridgeRequestPolicy.RequiresAccountContext("menuHotkey.attach"), "shared protocol policy");
         long sequence = 80;
+        var rejectNativeEvent = false;
+        var menuShown = true;
         using var dispatcher = new MenuHotkeyBridgeDispatcher(runtime, () => scope,
-            (generation, payload) => BridgeEnvelope.Event("menuHotkey.intent", generation, ++sequence, payload), 42);
+            (generation, payload) => rejectNativeEvent ? throw new OperationCanceledException("Synthetic native retirement") :
+                BridgeEnvelope.Event("menuHotkey.intent", generation, ++sequence, payload), 42, menuWindowShown: _ => menuShown);
         var events = new List<BridgeEnvelope>();
         dispatcher.EventReady += events.Add;
         BridgeEnvelope Request(string name, object body, long generation = 2) =>
@@ -22,6 +25,10 @@ internal static class MenuHotkeyBridgeTests
         Require(await Send("menuHotkey.attach", Attach(1)) == "ok", "attach");
         var old = runtime.Registration!;
         Require(old.ClientProcessId == 42 && old.IsCurrent(), "scope and parent PID are Host-owned");
+        rejectNativeEvent = true;
+        old.Trigger(new("open", 0, 44, 66));
+        Require(events.Count == 0 && sequence == 80, "retired event factory must not escape the native callback or publish");
+        rejectNativeEvent = false;
         old.Trigger(new("open", 0, 44, 66));
         Require(events.Count == 1 && events[0].Sequence == 81, "shared event factory");
         Require(await Send("menuHotkey.window", new { schemaVersion = 1, client = 1, request = 5, phase = "opening", window = 0 }) == "ok", "window routing");
@@ -33,6 +40,10 @@ internal static class MenuHotkeyBridgeTests
         Require(!dispatcher.IsMenuVisible, "zero window is not visible");
         await Window(5, "visible");
         Require(dispatcher.IsMenuVisible, "current visible menu observed");
+        menuShown = false;
+        Require(!dispatcher.IsMenuVisible, "lost close acknowledgement cannot keep a hidden HWND visible");
+        menuShown = true;
+        Require(dispatcher.IsMenuVisible, "visibility follows the real menu HWND");
         await Window(4, "closed");
         Require(dispatcher.IsMenuVisible, "late old close cannot hide current menu");
         await Window(5, "closed");

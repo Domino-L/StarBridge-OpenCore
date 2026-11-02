@@ -2,13 +2,18 @@ import '../../app/feature_registry.dart';
 import 'communities_module.dart';
 import 'communities_page.dart';
 import 'community_shortcuts.dart';
+import '../settings/bridge_notification_sources.dart';
+import '../settings/local_privacy_controller.dart';
 import '../settings/local_privacy_port.dart';
+import '../settings/organization_personal_settings.dart';
 
 final communitiesFeature = createCommunitiesFeature();
 FeatureDescriptor createCommunitiesFeature({
   CommunitiesPort Function()? createPort,
   CommunitiesModule? module,
   LocalPrivacyPort Function()? createAdmissionPrivacy,
+  LocalPrivacyController? privacy,
+  NotificationSourcesPort Function()? notificationSources,
 }) => FeatureDescriptor(
   id: 'communities',
   route: '/communities',
@@ -29,9 +34,13 @@ FeatureDescriptor createCommunitiesFeature({
           selected: selected,
           activate: activate,
         ),
-  buildDestination: (_) => CommunitiesPage(
-    createPort: createPort ?? UnavailableCommunities.new,
-    module: module,
-    createAdmissionPrivacy: createAdmissionPrivacy,
+  buildDestination: (_) => OrganizationPersonalSettings(
+    privacy: privacy,
+    notificationSources: notificationSources,
+    child: CommunitiesPage(
+      createPort: createPort ?? UnavailableCommunities.new,
+      module: module,
+      createAdmissionPrivacy: createAdmissionPrivacy,
+    ),
   ),
 );

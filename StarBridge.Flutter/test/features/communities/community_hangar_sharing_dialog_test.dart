@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
@@ -20,6 +21,7 @@ class _Port implements CommunityHangarSharingPort {
   @override
   bool get hangarSharingAvailable => true;
   int reads = 0, writes = 0;
+  bool images = false;
   List<String> selected = ['a' * 32];
   List<String> organizations = ['a', 'b'];
   bool explicitTargets = true;
@@ -48,9 +50,11 @@ class _Port implements CommunityHangarSharingPort {
   @override
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> selectedRefs,
-  ) async {
+    List<String> selectedRefs, {
+    bool includeImages = false,
+  }) async {
     writes++;
+    images = includeImages;
     selected = List.of(selectedRefs);
     return CommunityHangarSharingOutcome(result);
   }
@@ -82,6 +86,38 @@ Widget _host(_Port port, Locale locale) => MaterialApp(
 
 void main() {
   setUpAll(loadFonts);
+  for (final withdraw in [false, true]) {
+    testWidgets(
+      'image choice is explicit and suppressed on withdrawal $withdraw',
+      (tester) async {
+        final port = _Port();
+        addTearDown(port.changes.close);
+        await tester.pumpWidget(_host(port, const Locale('en')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        final option = find.byKey(const ValueKey('hangar-share-images'));
+        expect(tester.widget<Checkbox>(option).value, isFalse);
+        await tester.tap(
+          find.byWidgetPredicate(
+            (w) =>
+                w is StarBridgeCheckboxTile &&
+                w.controlKey == const ValueKey('hangar-share-images'),
+          ),
+        );
+        await tester.pump();
+        if (withdraw) {
+          await tester.tap(find.text('Org a'));
+          await tester.pump();
+        }
+        await tester.tap(find.byType(FilledButton));
+        await tester.pumpAndSettle();
+        expect(port.writes, 1);
+        expect(port.images, !withdraw);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   testWidgets('empty confirmed audience does not offer a fictitious revoke', (
     tester,
   ) async {
@@ -181,7 +217,7 @@ void main() {
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(port.writes, 0);
-      expect(find.byType(CheckboxListTile), findsNWidgets(2));
+      expect(find.byType(StarBridgeCheckboxTile), findsNWidgets(3));
       await tester.ensureVisible(find.text('Org b'));
       await tester.tap(find.text('Org b'));
       await tester.pump();
@@ -189,6 +225,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(port.selected.toSet(), {'a' * 32, 'b' * 32});
       expect(port.writes, 1);
+      expect(port.images, isFalse);
       expect(tester.takeException(), isNull);
     });
   }
@@ -214,7 +251,7 @@ void main() {
       expect(port.reads, 2);
       port.changes.add(null);
       await tester.pumpAndSettle();
-      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(find.byType(StarBridgeCheckboxTile), findsNothing);
       expect(find.byType(FilledButton), findsNothing);
     },
   );

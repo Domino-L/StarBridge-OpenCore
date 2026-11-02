@@ -33,6 +33,39 @@ internal static class OverlayRosterPreferencesTests
             Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 1, key, mode = "exclude" })).Error is null,
                 "Visible member may change from pinned to excluded.");
             Check(source.RosterPreferences.Pinned.Length == 0 && source.RosterPreferences.Excluded.Contains(key), "Exclude and pin stay exclusive.");
+
+            // Member-module overflow display rides the same account-local preferences.
+            var defaults = (await Send("overlayRoster.read", new { schemaVersion = 1 })).Payload.GetProperty("display");
+            Check(defaults.GetProperty("overflow").GetString() == "summary" && defaults.GetProperty("rowLimit").GetInt32() == 0 &&
+                  defaults.GetProperty("rotationIntervalSeconds").GetInt32() == 10, "Unset display reads as the defaults.");
+            Check(!File.ReadAllText(Directory.GetFiles(Path.Combine(root, "overlay-source-v1"), "*.json").Single()).Contains("rowLimit"),
+                "Default display values are not written, so older hosts still read the file.");
+            var display = new { overflow = "rotate", rowLimit = 4, rotationIntervalSeconds = 20 };
+            Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 1, display })).Error is not null,
+                "A stale revision cannot change the display.");
+            Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
+                display = new { overflow = "scroll", rowLimit = 4, rotationIntervalSeconds = 20 } })).Error is not null &&
+                  (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
+                display = new { overflow = "rotate", rowLimit = 13, rotationIntervalSeconds = 20 } })).Error is not null &&
+                  (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
+                display = new { overflow = "rotate", rowLimit = 4, rotationIntervalSeconds = 3 } })).Error is not null &&
+                  (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2, key, mode = "pin", display })).Error is not null,
+                "Unknown modes, out-of-range values and mixed updates are rejected.");
+            var shown = await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2, display });
+            Check(shown.Error is null && shown.Payload.GetProperty("display").GetProperty("overflow").GetString() == "rotate",
+                "The display update answers with the saved options.");
+            var stored = new OverlaySceneChoiceStore(root).Read(owner).Roster;
+            Check(stored.Overflow == "rotate" && stored.RowLimit == 4 && stored.RotationIntervalSeconds == 20 &&
+                  stored.Excluded.Contains(key), "Display options persist next to pins and exclusions.");
+            Check(source.RosterPreferences.EffectiveOverflow == "rotate", "The runtime snapshot sees the new display.");
+            // Re-save the member's mode (kept as excluded for the account-switch check below).
+            Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 3, key, mode = "exclude" })).Error is null &&
+                  new OverlaySceneChoiceStore(root).Read(owner).Roster is { Overflow: "rotate", RowLimit: 4 },
+                "Changing a member's mode keeps the display options.");
+            Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 4,
+                display = new { overflow = "rotate", rowLimit = 4, rotationIntervalSeconds = 10 } })).Error is null &&
+                  new OverlaySceneChoiceStore(root).Read(owner).Roster.RotationIntervalSeconds == 0,
+                "The default interval is stored as unset.");
             var previousOwner = owner;
             owner = owner with { Subject = "new-account" };
             Check(source.RosterPreferences.Excluded.Length == 0 && new OverlaySceneChoiceStore(root).Read(previousOwner).Roster.Excluded.Contains(key),

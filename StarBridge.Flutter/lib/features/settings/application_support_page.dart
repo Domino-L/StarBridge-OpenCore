@@ -8,10 +8,18 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import 'application_support_motion.dart';
+import 'application_support_check_action.dart';
 import 'application_support_copy.dart';
 import 'application_support_models.dart';
 import 'application_support_module.dart';
 import 'data_location_copy.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 /// Inline diagnostics use the same results/actions as the existing dialog.
 /// Opening settings does not start a probe or perform a repair.
@@ -29,64 +37,77 @@ class _ApplicationSupportPanelState extends State<ApplicationSupportPanel> {
   DateTime? _checkedAt;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) => ValueListenableBuilder<ApplicationSupportProjection>(
-    valueListenable: widget.module.projection,
-    builder: (context, projection, _) {
-      if (!_requested) {
-        return StarBridgeSurface(
-          role: SurfaceRole.panel,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                applicationSupportCopy(context, 'title'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              SizedBox(height: context.tokens.space.sm),
-              Text(applicationSupportCopy(context, 'description')),
-              SizedBox(height: context.tokens.space.md),
-              FilledButton.icon(
-                key: const Key('diagnostics-run'),
-                onPressed: () {
-                  setState(() => _requested = true);
-                  unawaited(widget.module.refresh());
-                },
-                icon: const StarBridgeIcon(StarBridgeIconSemantic.diagnostics),
-                label: Text(applicationSupportCopy(context, 'action.refresh')),
-              ),
-            ],
-          ),
-        );
-      }
-      if (projection.loading) return const _LoadingView();
-      if (projection.snapshot case final snapshot?) {
-        if (!identical(snapshot, _lastSnapshot)) {
-          _lastSnapshot = snapshot;
-          _checkedAt = DateTime.now();
-        }
-        final at = _checkedAt!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _ReadyView(module: widget.module, snapshot: snapshot),
-            Padding(
-              padding: EdgeInsets.only(top: context.tokens.space.xs),
-              child: Text(
-                '${applicationSupportCopy(context, 'checkedAt')} ${MaterialLocalizations.of(context).formatShortDate(at)} ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(at), alwaysUse24HourFormat: true)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ],
-        );
-      }
-      return _FailureView(
-        module: widget.module,
-        failure:
-            projection.failure ?? ApplicationSupportFailure.inspectionFailed,
-      );
-    },
+  Widget build(BuildContext context) => ApplicationSupportMotion(
+    module: widget.module,
+    builder: (context, motion) =>
+        ValueListenableBuilder<ApplicationSupportProjection>(
+          valueListenable: widget.module.projection,
+          builder: (context, projection, _) {
+            if (!_requested) {
+              return StarBridgeSurface(
+                role: SurfaceRole.panel,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      applicationSupportCopy(context, 'title'),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    SizedBox(height: context.tokens.space.sm),
+                    Text(applicationSupportCopy(context, 'description')),
+                    SizedBox(height: context.tokens.space.md),
+                    ApplicationSupportCheckAction(
+                      controlKey: const Key('diagnostics-run'),
+                      onActivate: (_) {
+                        setState(() => _requested = true);
+                        unawaited(motion.refresh());
+                      },
+                      icon: StarBridgeIconSemantic.diagnostics,
+                      label: applicationSupportCopy(context, 'action.refresh'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            if (projection.loading) {
+              return ApplicationSupportWaiting(
+                source: motion.source,
+                staticWait: motion.staticWait,
+              );
+            }
+            if (projection.snapshot case final snapshot?) {
+              if (!identical(snapshot, _lastSnapshot)) {
+                _lastSnapshot = snapshot;
+                _checkedAt = DateTime.now();
+              }
+              final at = _checkedAt!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ReadyView(
+                    module: widget.module,
+                    snapshot: snapshot,
+                    onRefresh: motion.refresh,
+                  ),
+                  Padding(
+                    padding: EdgeInsets.only(top: context.tokens.space.xs),
+                    child: Text(
+                      '${applicationSupportCopy(context, 'checkedAt')} ${MaterialLocalizations.of(context).formatShortDate(at)} ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(at), alwaysUse24HourFormat: true)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              );
+            }
+            return _FailureView(
+              module: widget.module,
+              onRefresh: motion.refresh,
+              failure:
+                  projection.failure ??
+                  ApplicationSupportFailure.inspectionFailed,
+            );
+          },
+        ),
   );
 }
 
@@ -109,72 +130,78 @@ class _ApplicationSupportPageState extends State<ApplicationSupportPage> {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return ValueListenableBuilder<ApplicationSupportProjection>(
-      valueListenable: widget.module.projection,
-      builder: (context, projection, _) => SingleChildScrollView(
-        key: const Key('application-support-page'),
-        padding: EdgeInsetsDirectional.fromSTEB(
-          tokens.space.xl,
-          tokens.space.lg,
-          tokens.space.xl,
-          tokens.space.xxl,
-        ),
-        child: Align(
-          alignment: AlignmentDirectional.topCenter,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: tokens.density.contentMaxWidth,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  applicationSupportCopy(context, 'title'),
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                SizedBox(height: tokens.space.xs),
-                Text(
-                  applicationSupportCopy(context, 'description'),
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: tokens.colors.textSecondary),
-                ),
-                SizedBox(height: tokens.space.lg),
-                if (projection.loading)
-                  const _LoadingView()
-                else if (projection.snapshot case final snapshot?)
-                  _ReadyView(module: widget.module, snapshot: snapshot)
-                else
-                  _FailureView(
-                    module: widget.module,
-                    failure:
-                        projection.failure ??
-                        ApplicationSupportFailure.inspectionFailed,
+    return ApplicationSupportMotion(
+      module: widget.module,
+      builder: (context, motion) =>
+          ValueListenableBuilder<ApplicationSupportProjection>(
+            valueListenable: widget.module.projection,
+            builder: (context, projection, _) => SingleChildScrollView(
+              key: const Key('application-support-page'),
+              padding: EdgeInsetsDirectional.fromSTEB(
+                tokens.space.xl,
+                tokens.space.lg,
+                tokens.space.xl,
+                tokens.space.xxl,
+              ),
+              child: Align(
+                alignment: AlignmentDirectional.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: tokens.density.contentMaxWidth,
                   ),
-              ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        applicationSupportCopy(context, 'title'),
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      SizedBox(height: tokens.space.xs),
+                      Text(
+                        applicationSupportCopy(context, 'description'),
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: tokens.colors.textSecondary),
+                      ),
+                      SizedBox(height: tokens.space.lg),
+                      if (projection.loading)
+                        ApplicationSupportWaiting(
+                          source: motion.source,
+                          staticWait: motion.staticWait,
+                        )
+                      else if (projection.snapshot case final snapshot?)
+                        _ReadyView(
+                          module: widget.module,
+                          snapshot: snapshot,
+                          onRefresh: motion.refresh,
+                        )
+                      else
+                        _FailureView(
+                          module: widget.module,
+                          onRefresh: motion.refresh,
+                          failure:
+                              projection.failure ??
+                              ApplicationSupportFailure.inspectionFailed,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
-      ),
     );
   }
 }
 
-class _LoadingView extends StatelessWidget {
-  const _LoadingView();
-
-  @override
-  Widget build(BuildContext context) => const StarBridgeSurface(
-    key: Key('application-support-loading'),
-    role: SurfaceRole.panel,
-    child: Center(child: CircularProgressIndicator()),
-  );
-}
-
 class _ReadyView extends StatefulWidget {
-  const _ReadyView({required this.module, required this.snapshot});
+  const _ReadyView({
+    required this.module,
+    required this.snapshot,
+    required this.onRefresh,
+  });
 
   final ApplicationSupportModule module;
   final ApplicationSupportSnapshot snapshot;
+  final Future<void> Function() onRefresh;
 
   @override
   State<_ReadyView> createState() => _ReadyViewState();
@@ -273,28 +300,30 @@ class _ReadyViewState extends State<_ReadyView> {
             runSpacing: tokens.space.sm,
             alignment: WrapAlignment.end,
             children: [
-              OutlinedButton(
-                key: const Key('application-support-open-data-directory'),
-                onPressed:
+              StarBridgeActionButton(
+                controlKey: const Key(
+                  'application-support-open-data-directory',
+                ),
+                onActivate:
                     !_busy &&
                         snapshot.dataDirectory.state ==
                             ApplicationSupportCheckState.healthy
-                    ? () => _openDataDirectory(context)
+                    ? (source) => _openDataDirectory(context, source)
                     : null,
                 child: Text(
                   applicationSupportCopy(context, 'action.openDataDirectory'),
                 ),
               ),
-              OutlinedButton(
-                key: const Key('application-support-copy'),
-                onPressed: _busy ? null : () => _copy(context),
+              StarBridgeActionButton(
+                controlKey: const Key('application-support-copy'),
+                onActivate: _busy ? null : (source) => _copy(context, source),
                 child: Text(applicationSupportCopy(context, 'action.copy')),
               ),
-              FilledButton.icon(
-                key: const Key('application-support-refresh'),
-                onPressed: _busy ? null : module.refresh,
-                icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-                label: Text(applicationSupportCopy(context, 'action.refresh')),
+              ApplicationSupportCheckAction(
+                controlKey: const Key('application-support-refresh'),
+                onActivate: _busy ? null : (_) => widget.onRefresh(),
+                icon: StarBridgeIconSemantic.refresh,
+                label: applicationSupportCopy(context, 'action.refresh'),
               ),
             ],
           ),
@@ -303,7 +332,7 @@ class _ReadyViewState extends State<_ReadyView> {
     );
   }
 
-  Future<void> _copy(BuildContext context) async {
+  Future<void> _copy(BuildContext context, InteractionSource source) async {
     if (_busy) return;
     setState(() => _busy = true);
     final rows = <(String, ApplicationSupportCheck)>[
@@ -332,18 +361,23 @@ class _ReadyViewState extends State<_ReadyView> {
     }
     if (!context.mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    showStarBridgeSnackBar(
+      context,
+      starBridgeTimedSnackBar(
         content: Text(
           copied
               ? applicationSupportCopy(context, 'copied')
               : dataLocationCopy(context, 'copyFailed'),
         ),
       ),
+      source: source,
     );
   }
 
-  Future<void> _openDataDirectory(BuildContext context) async {
+  Future<void> _openDataDirectory(
+    BuildContext context,
+    InteractionSource source,
+  ) async {
     if (_busy) return;
     setState(() => _busy = true);
     final result = await module.openDataDirectory();
@@ -355,8 +389,10 @@ class _ReadyViewState extends State<_ReadyView> {
         'openDataDirectoryHostUnavailable',
       ApplicationSupportActionResult.failed => 'openDataDirectoryFailed',
     };
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(applicationSupportCopy(context, key))),
+    showStarBridgeSnackBar(
+      context,
+      starBridgeTimedSnackBar(content: Text(applicationSupportCopy(context, key))),
+      source: source,
     );
   }
 }
@@ -420,10 +456,15 @@ class _SupportRow extends StatelessWidget {
 }
 
 class _FailureView extends StatelessWidget {
-  const _FailureView({required this.module, required this.failure});
+  const _FailureView({
+    required this.module,
+    required this.failure,
+    required this.onRefresh,
+  });
 
   final ApplicationSupportModule module;
   final ApplicationSupportFailure failure;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -447,10 +488,11 @@ class _FailureView extends StatelessWidget {
           SizedBox(height: tokens.space.xs),
           Text(applicationSupportCopy(context, key)),
           SizedBox(height: tokens.space.md),
-          FilledButton.icon(
-            onPressed: module.refresh,
-            icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-            label: Text(applicationSupportCopy(context, 'action.refresh')),
+          ApplicationSupportCheckAction(
+            controlKey: const Key('application-support-retry'),
+            onActivate: (_) => onRefresh(),
+            icon: StarBridgeIconSemantic.refresh,
+            label: applicationSupportCopy(context, 'action.refresh'),
           ),
         ],
       ),

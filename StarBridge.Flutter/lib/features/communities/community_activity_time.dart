@@ -1,9 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/time_zone_region.dart';
 import 'community_workspace_port.dart';
 import 'community_workspace_copy.dart';
 import 'community_profile_copy.dart';
 
+/// One phrase of a readout: it wraps only between phrases, never inside
+/// (user 2026-10-29: the time zone must not split from its offset). Display
+/// only; the stored and searched texts keep their ordinary spaces.
+String communityNoBreak(String value) =>
+    value.replaceAll(' ', '\u00A0').replaceAll('–', '–\u2060');
+
+/// A readout value whose phrases ("; " and " · " apart) never break inside.
+String communityReadoutPhrases(String value) => value
+    .split('; ')
+    .map((phrase) => phrase.split(' · ').map(communityNoBreak).join(' · '))
+    .join('; ');
+
+/// "UTC−06:00（美国中部）": the offset and, when known, the region people
+/// recognise (user 2026-10-29: "时区后也该跟用户能看懂的位置").
 String communityTimeZoneSummary(
   BuildContext context,
   CommunityWorkspace workspace,
@@ -16,16 +31,23 @@ String communityTimeZoneSummary(
       'UTC${minutes < 0 ? '−' : '+'}'
       '${(absolute ~/ 60).toString().padLeft(2, '0')}:'
       '${(absolute % 60).toString().padLeft(2, '0')}';
-  return workspace.timeZoneUsesDaylightSaving
-      ? '$offset (${workspaceText(context, 'standardTime')})'
-      : offset;
+  final notes = [
+    ?timeZoneRegionLabel(context, workspace.timeZoneId!, minutes),
+    if (workspace.timeZoneUsesDaylightSaving)
+      workspaceText(context, 'standardTime'),
+  ];
+  if (notes.isEmpty) return offset;
+  final zh = Localizations.localeOf(context).languageCode == 'zh';
+  final note = notes.join(zh ? '，' : ', ');
+  return zh ? '$offset（$note）' : '$offset ($note)';
 }
 
 /// Display structured schedules in the current language, never a stale saved label.
 String communityActivitySummary(
   BuildContext context,
-  Iterable<CommunityActivityWindow> windows,
-) {
+  Iterable<CommunityActivityWindow> windows, {
+  int shiftMinutes = 0,
+}) {
   final groups = <(String, String, bool), Set<String>>{};
   for (final window in windows) {
     (groups[(window.startTime, window.endTime, window.endsNextDay)] ??= {})
@@ -33,13 +55,44 @@ String communityActivitySummary(
   }
   return groups.entries
       .map((entry) {
-        final (start, end, nextDay) = entry.key;
+        var (start, end, nextDay) = entry.key;
+        if (shiftMinutes != 0) {
+          final from = communityClockMinutes(start),
+              to = communityClockMinutes(end);
+          if (from >= 0 && to >= 0) {
+            final shiftedFrom = (from + shiftMinutes) % 1440;
+            final shiftedTo = (to + shiftMinutes) % 1440;
+            start = communityClockText((shiftedFrom + 1440) % 1440);
+            end = communityClockText((shiftedTo + 1440) % 1440);
+            // Day names stay the organization's; only a window that now
+            // crosses midnight shows the next-day mark.
+            nextDay =
+                communityClockMinutes(end) <= communityClockMinutes(start);
+          }
+        }
         return '${workspaceDays(context, entry.value)} '
             '${communityDisplayClock(context, start)}–'
             '${nextDay ? '${profileText(context, 'nextDayShort')} ' : ''}'
             '${communityDisplayClock(context, end)}';
       })
       .join('; ');
+}
+
+/// The same windows in the viewer's clock, or empty when the viewer already
+/// lives in the organization's standard offset (user 2026-10-29: "可以加").
+/// Day names stay the organization's; the shift is standard offset to the
+/// viewer's current offset, so a daylight-saving organization is approximate.
+String communityViewerActivitySummary(
+  BuildContext context,
+  Iterable<CommunityActivityWindow> windows,
+  int? organizationOffsetMinutes, {
+  int? viewerOffsetMinutes,
+}) {
+  if (organizationOffsetMinutes == null || windows.isEmpty) return '';
+  final viewer = viewerOffsetMinutes ?? DateTime.now().timeZoneOffset.inMinutes;
+  final shift = viewer - organizationOffsetMinutes;
+  if (shift == 0) return '';
+  return communityActivitySummary(context, windows, shiftMinutes: shift);
 }
 
 int communityClockMinutes(String value) {

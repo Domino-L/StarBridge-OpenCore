@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 import 'community_ship_report_controller.dart';
@@ -28,11 +29,14 @@ class CommunityShipReportEditor extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(shipName, style: Theme.of(context).textTheme.titleLarge),
+          if (shipName.isNotEmpty)
+            Text(shipName, style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Text(t('reportIntro')),
           const SizedBox(height: 20),
-          DropdownButtonFormField<String>(
+          StarBridgeSelectFormField<String>(
+            identity: 'ship-report-reason',
+            controlKey: const ValueKey('ship-report-reason-control'),
             key: const ValueKey('ship-report-reason'),
             initialValue: model.reason,
             isExpanded: true,
@@ -85,6 +89,8 @@ class CommunityShipReportEditor extends StatelessWidget {
                 ),
               ),
             ),
+          if (model.unknown && !model.busy && !model.canCheck)
+            Text(t('reportCheckUnavailable')),
           if (confirmingClose) ...[
             const Divider(height: 24),
             Text(t(model.unknown ? 'reportCloseUnknown' : 'reportDiscardBody')),
@@ -110,11 +116,13 @@ class CommunityShipReportEditor extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: FilledButton(
                 key: const ValueKey('ship-report-submit'),
-                onPressed: model.busy || model.reason == null
-                    ? null
-                    : model.unknown
-                    ? model.check
-                    : model.submit,
+                onPressed: model.unknown
+                    ? model.canCheck
+                          ? model.check
+                          : null
+                    : model.editable && model.reason != null
+                    ? model.submit
+                    : null,
                 child: Text(
                   t(
                     model.busy

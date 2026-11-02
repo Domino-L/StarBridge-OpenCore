@@ -69,7 +69,16 @@ DateTime? _date(Map<String, Object?> map, String key) {
 }
 
 final class CommunityWorkspaceMember {
-  CommunityWorkspaceMember.parse(Map<String, Object?> m)
+  factory CommunityWorkspaceMember.parse(Map<String, Object?> m) {
+    // Validate the original contract before applying a display-only projection.
+    final parsed = CommunityWorkspaceMember._parse(m);
+    final projected = _organizationMemberProjection(m, parsed.publicPresence);
+    return identical(projected, m)
+        ? parsed
+        : CommunityWorkspaceMember._parse(projected);
+  }
+
+  CommunityWorkspaceMember._parse(Map<String, Object?> m)
     : memberRef = _text(m, 'memberRef', 32),
       gameName = _text(m, 'gameName'),
       callsign = _text(m, 'callsign'),
@@ -120,6 +129,72 @@ final class CommunityWorkspaceMember {
   final DateTime? joinedAt, lastUpdated;
   final Map<String, String> shipLabels, locationLabels, arrivalTargetLabels;
   String get displayName => callsign.isEmpty ? gameName : callsign;
+  String get publicPresence =>
+      communityMemberPublicPresence(online, liveStatus);
+  bool get publicOnline =>
+      const {'online', 'inGame', 'away'}.contains(publicPresence);
+  bool get publicInGame => publicPresence == 'inGame';
+}
+
+/// Shared public vocabulary for community rows, counts, filters and menu data.
+/// Unavailable presence is publicly indistinguishable from ordinary offline.
+const _organizationOfflinePresence = {
+  'offline',
+  'manualoffline',
+  'manual-offline',
+  'manual_offline',
+  'invisible',
+  'paused',
+  'stopped',
+  'suspended',
+  'syncstopped',
+  'syncpaused',
+};
+
+String communityMemberPublicPresence(bool online, String liveStatus) {
+  final status = liveStatus.trim().toLowerCase();
+  if (_organizationOfflinePresence.contains(status)) {
+    return 'offline';
+  }
+  if (!const {'ingame', 'apponline', 'online', 'away'}.contains(status)) {
+    return 'offline';
+  }
+  if (!online) return 'offline';
+  return switch (status) {
+    'ingame' => 'inGame',
+    'away' => 'away',
+    _ => 'online',
+  };
+}
+
+/// Organization members never expose why someone appears offline. Keep this
+/// scoped to the organization projection; personal settings and friends retain
+/// their own state. Clear withheld runtime data before any consumer can sort,
+/// filter, count, show a tooltip, or construct a secondary presentation.
+Map<String, Object?> _organizationMemberProjection(
+  Map<String, Object?> input,
+  String publicPresence,
+) {
+  if (publicPresence != 'offline') {
+    return input;
+  }
+  return {
+    ...input,
+    'online': false,
+    'liveStatus': 'Offline',
+    'serverRegion': null,
+    'hasServerSession': null,
+    'ship': null,
+    'shipLabels': const <String, String>{},
+    'location': null,
+    'locationLabels': const <String, String>{},
+    'locationConfidence': null,
+    'locationHiddenReason': null,
+    'arrivalPendingConfirmation': false,
+    'arrivalTargetCode': null,
+    'arrivalTargetLabels': const <String, String>{},
+    'lastUpdated': null,
+  };
 }
 
 final class CommunityActivityWindow {
@@ -157,6 +232,9 @@ final class CommunityWorkspace {
       next = m['next'] == null ? null : _number(m, 'next'),
       hasLogo = _flag(m, 'hasLogo'),
       hasBanner = _flag(m, 'hasBanner'),
+      hasBackground = m.containsKey('hasBackground')
+          ? _flag(m, 'hasBackground')
+          : false,
       fetchedAt = _date(m, 'fetchedAt') ?? (throw const FormatException()),
       activeSystemIds = _strings(m, 'activeSystemIds'),
       activityWindows = List.unmodifiable(
@@ -220,7 +298,7 @@ final class CommunityWorkspace {
   final bool timeZoneUsesDaylightSaving;
   final int offset, totalCount, matchedCount;
   final int? next;
-  final bool hasLogo, hasBanner;
+  final bool hasLogo, hasBanner, hasBackground;
   final DateTime fetchedAt;
   final List<String> activeSystemIds;
   final List<CommunityActivityWindow> activityWindows;
@@ -237,7 +315,13 @@ Future<Uint8List> assembleCommunityMedia(
   String? memberRef,
   required void Function() checkCurrent,
 }) async {
-  if (!const {'logo', 'banner', 'avatar', 'applicant'}.contains(kind) ||
+  if (!const {
+        'logo',
+        'banner',
+        'background',
+        'avatar',
+        'applicant',
+      }.contains(kind) ||
       (kind == 'avatar' || kind == 'applicant') != (memberRef != null)) {
     throw const FormatException();
   }
@@ -254,7 +338,7 @@ Future<Uint8List> assembleCommunityMedia(
     final currentTotal = _number(
       row,
       'totalBytes',
-      kind == 'banner' ? 2 * 1024 * 1024 : 512 * 1024,
+      (kind == 'banner' || kind == 'background') ? 2 * 1024 * 1024 : 512 * 1024,
     );
     if (row['schemaVersion'] != 1 ||
         row['kind'] != kind ||

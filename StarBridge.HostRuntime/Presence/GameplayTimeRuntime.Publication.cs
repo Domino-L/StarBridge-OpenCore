@@ -2,21 +2,24 @@ namespace StarBridge.HostRuntime.Presence;
 
 public sealed partial class GameplayTimeRuntime
 {
-    public async Task PublishCurrentGameplayAsync()
+    public async Task PublishCurrentGameplayAsync(CancellationToken cancellation = default)
     {
-        if (_historyRemote is null || !await _historyGate.WaitAsync(0)) return;
+        using var work = _work.Enter(default);
+        if (work is null || _historyRemote is null || !await _historyGate.WaitAsync(0, cancellation)) return;
         try
         {
             (StarBridge.NativeBridge.BridgeAccountContext? Context, long Generation) owner;
             lock (_sync)
             {
-                var entry = _disposed ? null : Resolve();
+                var entry = !work.IsCurrent ? null : Resolve();
                 if (entry?.Saved is not { Consent: GameplayRecordingConsent.Allowed, PendingReset: null, PendingImport: null } ||
                     entry.Error is not null) return;
                 owner = _active;
             }
-            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            bool Current() => !_disposed && !budget.IsCancellationRequested && _current() == owner;
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellation, work.Token);
+            budget.CancelAfter(TimeSpan.FromSeconds(15));
+            bool Current() => OwnerIsCurrent(owner, budget.Token);
+            if (!Current()) return;
             var state = await _historyRemote.ReadAsync(owner.Context!, budget.Token).ConfigureAwait(false);
             StarBridge.Core.Profiles.PersonalProfileGameplayStatisticsUpdateRequestContract update;
             lock (_sync)

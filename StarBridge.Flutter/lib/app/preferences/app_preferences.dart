@@ -5,6 +5,8 @@ import '../../design_system/tokens/color_tokens.dart';
 
 enum MotionPreference { followSystem, reduce }
 
+enum InteractionStyle { standard, rail, scan, glow }
+
 @immutable
 final class ApplicationBehaviorPreferences {
   const ApplicationBehaviorPreferences({
@@ -65,14 +67,20 @@ final class AppPreferences {
     required this.appearanceMode,
     required this.designStyleId,
     required this.motionPreference,
+    this.interactionStyle = InteractionStyle.standard,
     this.applicationBehavior = ApplicationBehaviorPreferences.defaults,
+    this.holidayAppearance = true,
   });
 
   final Locale locale;
   final AppearanceMode appearanceMode;
   final String designStyleId;
   final MotionPreference motionPreference;
+  final InteractionStyle interactionStyle;
   final ApplicationBehaviorPreferences applicationBehavior;
+
+  /// 节日期间自动换上特别外观；关掉就一直是平时的样子。默认开。
+  final bool holidayAppearance;
 
   static const defaults = AppPreferences(
     locale: Locale('zh', 'CN'),
@@ -87,14 +95,18 @@ final class AppPreferences {
     AppearanceMode? appearanceMode,
     String? designStyleId,
     MotionPreference? motionPreference,
+    InteractionStyle? interactionStyle,
     ApplicationBehaviorPreferences? applicationBehavior,
+    bool? holidayAppearance,
   }) {
     return AppPreferences(
       locale: locale ?? this.locale,
       appearanceMode: appearanceMode ?? this.appearanceMode,
       designStyleId: designStyleId ?? this.designStyleId,
       motionPreference: motionPreference ?? this.motionPreference,
+      interactionStyle: interactionStyle ?? this.interactionStyle,
       applicationBehavior: applicationBehavior ?? this.applicationBehavior,
+      holidayAppearance: holidayAppearance ?? this.holidayAppearance,
     );
   }
 }

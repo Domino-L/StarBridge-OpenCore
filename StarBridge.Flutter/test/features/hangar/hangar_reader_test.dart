@@ -35,6 +35,8 @@ void main() {
     setUpAll(() async {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
         'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
       }.entries) {
@@ -150,8 +152,28 @@ void main() {
       reader.dispose();
     },
   );
-  test('slow page is retried, perpetual loading has finite timeout', () async {
-    final browser = BrowserFake()..loadingCount = 2;
+  test('slow page is retried despite delayed capture completion', () async {
+    final browser = BrowserFake()
+      ..loadingCount = 2
+      ..captureDelay = const Duration(milliseconds: 40);
+    final preview = PreviewFake();
+    final reader = HangarReaderController(
+      browser,
+      preview,
+      pollInterval: const Duration(milliseconds: 1),
+      // Use the production deadline for successful retries. A 30 ms wall-clock
+      // budget measures runner scheduling rather than the retry contract.
+    );
+    await reader.open();
+    await reader.read();
+    expect(reader.phase, 'complete');
+    expect(browser.events.where((event) => event == 'capture'), hasLength(3));
+    expect(preview.observations, 1);
+    expect(browser.locked, false);
+    reader.dispose();
+  });
+  test('perpetual loading has finite timeout and unlocks the browser', () async {
+    final browser = BrowserFake()..loadingCount = 10000;
     final preview = PreviewFake();
     final reader = HangarReaderController(
       browser,
@@ -161,10 +183,8 @@ void main() {
     );
     await reader.open();
     await reader.read();
-    expect(reader.phase, 'complete');
-    browser.loadingCount = 10000;
-    await reader.read();
     expect(reader.phase, 'timedOut');
+    expect(preview.observations, 0);
     expect(browser.locked, false);
     reader.dispose();
   });
@@ -589,6 +609,7 @@ class BrowserFake implements HangarBrowserPort {
   @override
   void setFocusExitHandler(void Function(bool previous)? handler) {}
   int opens = 0, closes = 0, loadingCount = 0;
+  Duration captureDelay = Duration.zero;
   bool failOpen = false, shown = false;
   bool locked = false;
   List<String> events = [];
@@ -628,6 +649,9 @@ class BrowserFake implements HangarBrowserPort {
   Future<Map<String, Object?>> capture() async {
     expect(locked, true);
     events.add('capture');
+    if (captureDelay > Duration.zero) {
+      await Future<void>.delayed(captureDelay);
+    }
     if (loadingCount-- > 0) throw const HangarReaderFailure('loading');
     if (captureQueue.isNotEmpty) return captureQueue.removeAt(0)?.future ?? {};
     return pendingCapture?.future ?? {};

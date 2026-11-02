@@ -1,32 +1,46 @@
-import '../../design_system/icons/standard_icon.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import '../../app/localization/app_strings.dart';
-import '../../app/shell/chrome/presence_color.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
-import '../../shared/ships/ship_catalog_display.dart';
-import '../../shared/ships/ship_classification_tag.dart';
-import '../../shared/ships/ship_category_colors.dart';
-import 'community_ship_vehicle_icon.dart';
-import '../common/user_avatar_menu.dart';
-import 'community_ships_controller.dart';
+import '../common/organization_hangar_sharing.dart';
+import '../common/organization_holo.dart';
+import '../common/organization_ship_owner.dart';
 import 'community_avatar_cache.dart';
-import 'community_ship_detail_dialog.dart';
-import 'community_ships_copy.dart';
-import 'community_ships_port.dart';
-import 'community_workspace_port.dart';
-import 'community_workspace_image.dart';
-import 'community_catalog_ship_image.dart';
-import 'community_ship_banner.dart';
-import 'community_ship_row_surface.dart';
-import 'community_ship_statistics_panel.dart';
-import 'community_ship_loaners.dart';
-import 'community_visible_refresh.dart';
-import 'community_hangar_sharing_port.dart';
+import 'community_fleet_summary.dart';
 import 'community_hangar_sharing_dialog.dart';
+import 'community_hangar_sharing_port.dart';
+import 'community_ship_avatar_access.dart';
+import 'community_ship_banner.dart';
+import 'community_ship_card.dart';
+import 'community_ship_detail_dialog.dart';
+import 'community_ship_statistics.dart';
+import 'community_ship_statistics_panel.dart';
+import 'community_ships_controller.dart';
+import 'community_ships_copy.dart';
+import 'community_ships_selection.dart';
+import 'community_ships_empty_state.dart';
+import 'community_ships_filters.dart';
+import 'community_ships_header.dart';
+import 'community_ships_list_views.dart';
+import 'community_ships_owner_groups.dart';
+import 'community_ships_port.dart';
+import 'community_ships_prefetch.dart';
+import 'community_ships_side_column.dart';
+import 'community_ships_toolbar.dart';
+import 'community_visible_refresh.dart';
+import 'community_workspace_port.dart';
 
+/// The organization ships page, shared by communities and the main fleet.
+/// Redone 2026-10-29 (user decision, option D): a one-line summary, three
+/// views (按舰船 / 按持有人 / 列表) that the organization remembers, pages
+/// that accumulate as the reader scrolls, and on wide windows a persistent
+/// right column with the selected ship's details or the dispatch block.
+/// Nothing here computes availability; that stays with the operation
+/// service once it exists.
 class CommunityShipsPanel extends StatefulWidget {
   const CommunityShipsPanel({
     required this.port,
@@ -34,16 +48,33 @@ class CommunityShipsPanel extends StatefulWidget {
     required this.name,
     required this.onBack,
     this.onRefreshMembership,
+    this.retryInvalidatedScope = false,
     this.avatars,
     this.controller,
+    this.ownerTargetFactory = communityShipOwnerTarget,
+    this.avatarAccess,
+    this.includeSocialActions = true,
+    this.hangarSharingPort,
+    this.hangarSharingSourceRef,
     super.key,
   });
   final CommunityShipsPort port;
   final String targetRef, name;
   final VoidCallback onBack;
   final Future<void> Function()? onRefreshMembership;
+  final bool retryInvalidatedScope;
   final CommunityAvatarCache? avatars;
   final CommunityShipsController? controller;
+  final OrganizationShipOwnerTargetFactory? ownerTargetFactory;
+  final CommunityShipAvatarAccess? avatarAccess;
+  final bool includeSocialActions;
+  final OrganizationHangarSharingPort? hangarSharingPort;
+  final String? hangarSharingSourceRef;
+
+  /// Below this the details open in the dialog and the dispatch block is
+  /// not shown. 1280 keeps three card columns beside the column and leaves
+  /// the 1200-wide dialog regressions as they are.
+  static const sideColumnMinimumWidth = 1280.0;
   @override
   State<CommunityShipsPanel> createState() => _CommunityShipsPanelState();
 }
@@ -52,13 +83,30 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     with CommunityVisibleRefresh<CommunityShipsPanel> {
   late CommunityShipsController model;
   StreamSubscription<void>? _shipRefreshes;
-  DialogRoute<bool>? _detailRoute;
+  StarBridgeDialogRoute<bool>? _detailRoute;
   final _search = TextEditingController();
+  final _scroll = ScrollController();
+  // Takes focus when a ship is selected, so the arrow keys walk the list.
+  final _focus = FocusNode(debugLabel: 'community-ships');
   String _filter = 'all', _sort = 'spec';
   bool _descending = true;
   int _statisticsRefresh = 0;
-  String? _statisticsRevision;
-  double? _statisticsHeight;
+
+  /// Every page read for the current query, held by the controller.
+  List<CommunityShipsPage> get _pages => model.pages;
+  CommunityShipStatistics? _statistics;
+
+  /// The page that holds the selected ship, for the side column.
+  late final _selection = CommunityShipsSelection(
+    model: () => model,
+    port: () => widget.port,
+    targetRef: () => widget.targetRef,
+    pageHolding: _pageHolding,
+    update: setState,
+    alive: () => mounted,
+  );
+  bool _wide = false, _selectionScheduled = false;
+  bool get _onScreen => mounted && TickerMode.valuesOf(context).enabled;
   String t(String key) => communityShipsText(context, key);
   @override
   Future<void> refreshVisibleCommunity() => model.refreshVisible();
@@ -68,7 +116,7 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     _start();
   }
 
-  void _start() {
+  void _start({CommunityShipQuery? initialQuery, bool enter = true}) {
     final port = widget.port;
     unawaited(_shipRefreshes?.cancel());
     _shipRefreshes = port is CommunityShipsRefreshPort
@@ -81,28 +129,87 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
         CommunityShipsController(
           port,
           widget.targetRef,
+          initialQuery: initialQuery,
           avatars: widget.avatars,
+          avatarAccess: widget.avatarAccess,
           mediaPort: port is CommunityWorkspacePort
               ? port as CommunityWorkspacePort
               : null,
         );
+    if (widget.avatarAccess != null &&
+        !identical(model.avatarAccess, widget.avatarAccess)) {
+      throw ArgumentError(
+        'An externally owned ship controller must use the same avatar access.',
+      );
+    }
     model.addListener(_changed);
     _search.text = model.query.text;
     _filter = model.query.filter;
     _sort = model.query.sort;
     _descending = model.query.descending;
-    _statisticsRevision = model.page?.revision;
-    unawaited(model.enter());
+    _selection.page = model.selectedShipRef == null
+        ? null
+        : _pageHolding(model.selectedShipRef!);
+    if (enter) unawaited(model.enter());
+  }
+
+  Future<void> _retryInvalidatedScope() async {
+    final previous = model;
+    final port = widget.port,
+        target = widget.targetRef,
+        source = widget.hangarSharingSourceRef;
+    final scopeRevision = previous.readScopeRevision;
+    final verify = widget.onRefreshMembership;
+    if (!widget.retryInvalidatedScope ||
+        widget.controller != null ||
+        !previous.invalidated ||
+        widget.onRefreshMembership == null) {
+      return;
+    }
+    try {
+      await verify!();
+    } on Object {
+      return; // The former hard failure remains visible; no new authority was established.
+    }
+    if (!mounted ||
+        !identical(model, previous) ||
+        !identical(widget.port, port) ||
+        widget.onRefreshMembership != verify ||
+        widget.targetRef != target ||
+        widget.hangarSharingSourceRef != source ||
+        previous.readScopeRevision != scopeRevision ||
+        !previous.invalidated) {
+      return;
+    }
+    final selection = previous.query;
+    _dismissDetail();
+    previous.removeListener(_changed);
+    previous.avatars.clear();
+    previous.dispose();
+    _start(initialQuery: selection, enter: false);
+    await model.load();
   }
 
   void _changed() {
-    if (model.page != null) _statisticsRevision = model.page!.revision;
+    if (model.invalidated) {
+      _dismissDetail();
+      _selection.clear();
+      _statistics = null;
+    }
+    final page = model.page;
+    if (page != null) _selection.afterPage(page);
+    if (model.selectedShipRef != null &&
+        _selection.page == null &&
+        !_selection.lookingUp) {
+      _selection.page = _pageHolding(model.selectedShipRef!);
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _statistics ??= model.statisticsFor(communityShipsCulture(context));
     if (!model.busy &&
         model.error == null &&
         (model.page == null ||
@@ -117,7 +224,12 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     if (oldWidget.port != widget.port ||
         oldWidget.avatars != widget.avatars ||
         oldWidget.targetRef != widget.targetRef ||
-        oldWidget.controller != widget.controller) {
+        oldWidget.controller != widget.controller ||
+        oldWidget.ownerTargetFactory != widget.ownerTargetFactory ||
+        oldWidget.avatarAccess != widget.avatarAccess ||
+        oldWidget.includeSocialActions != widget.includeSocialActions ||
+        oldWidget.hangarSharingPort != widget.hangarSharingPort ||
+        oldWidget.hangarSharingSourceRef != widget.hangarSharingSourceRef) {
       _dismissDetail();
       model.removeListener(_changed);
       if (oldWidget.controller == null) model.dispose();
@@ -125,9 +237,10 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
       _filter = 'all';
       _sort = 'spec';
       _descending = true;
-      _statisticsRevision = null;
-      _statisticsHeight = null;
+      _statistics = null;
+      _selection.reset();
       _start();
+      _statistics = model.statisticsFor(communityShipsCulture(context));
       unawaited(_apply());
     }
   }
@@ -138,55 +251,137 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     model.removeListener(_changed);
     if (widget.controller == null) model.dispose();
     _search.dispose();
+    _scroll.dispose();
+    _focus.dispose();
     unawaited(_shipRefreshes?.cancel());
     super.dispose();
+  }
+
+  /// Wide: open in the side column.
+  Future<void> _select(CommunitySharedShip ship, {bool focus = true}) async {
+    if (!_wide) return _openDetail(ship);
+    await _selection.pick(
+      ship,
+      communityShipsCulture(context),
+      byUser: focus,
+      onPicked: focus ? _focus.requestFocus : null,
+    );
+  }
+
+  /// The right column always shows a ship: the last one picked, otherwise the
+  /// first of the list. Only when it can show one, never as a narrow dialog.
+  /// A ship kept selected whose page is no longer held is located again.
+  bool get _needsSelection =>
+      _wide &&
+      _onScreen &&
+      (model.selectedShipRef == null || _selection.page == null) &&
+      !_selection.lookingUp &&
+      !model.invalidated &&
+      _ships.isNotEmpty;
+
+  void _selectFirstSoon() {
+    if (_selectionScheduled || !_needsSelection) return;
+    _selectionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _selectionScheduled = false;
+      if (mounted && _needsSelection) {
+        final held = [
+          ..._statistics?.ships ?? const <CommunitySharedShip>[],
+          ..._ships,
+        ].where((s) => s.shipRef == model.selectedShipRef).firstOrNull;
+        unawaited(_select(held ?? _ships.first, focus: false));
+      }
+    });
+  }
+
+  /// Left and right arrows walk the visible order.
+  void _step(int delta) {
+    final selected = model.selectedShipRef;
+    if (!_wide || selected == null) return;
+    final order = model.viewMode == 'owners'
+        ? [
+            for (final group in CommunityShipsOwnerGroups.group(
+              _ownerShips ?? const [],
+            ))
+              ...group,
+          ]
+        : _ships;
+    final at = order.indexWhere((s) => s.shipRef == selected);
+    if (at < 0) return;
+    final next = (at + delta).clamp(0, order.length - 1);
+    if (next != at) unawaited(_select(order[next]));
   }
 
   void _dismissDetail() {
     final route = _detailRoute;
     _detailRoute = null;
-    scheduleMicrotask(() {
-      if (route?.isActive == true) route!.navigator?.removeRoute(route);
-    });
+    retireStarBridgeDialog(route);
   }
 
   Future<void> _openDetail(CommunitySharedShip ship) async {
-    final page = model.page;
+    final page = _pageHolding(ship.shipRef) ?? model.page;
     if (_detailRoute != null || page == null || model.invalidated) return;
     final owner = model;
-    final route = DialogRoute<bool>(
-      context: context,
+    StarBridgeDialogRoute<bool>? opened;
+    final refresh = await showStarBridgeDialog<bool>(
+      context,
+      useRootNavigator: false,
       builder: (_) => CommunityShipDetailDialog(
         port: widget.port,
         page: page,
         shipRef: ship.shipRef,
         avatar: owner.avatar(ship.ownerMemberRef),
+        ownerTargetFactory: widget.ownerTargetFactory,
+        includeSocialActions: widget.includeSocialActions,
+        imageDecoder: owner.avatars.images.decode,
       ),
+      onRouteCreated: (route) => _detailRoute = opened = route,
     );
-    _detailRoute = route;
-    final refresh = await Navigator.of(context).push(route);
-    if (_detailRoute == route) _detailRoute = null;
+    if (_detailRoute == opened) _detailRoute = null;
     if (mounted && model == owner && refresh == true) await model.load();
+  }
+
+  CommunityShipsPage? _pageHolding(String shipRef) {
+    for (final page in _pages) {
+      if (page.ships.any((s) => s.shipRef == shipRef)) return page;
+    }
+    return null;
   }
 
   Future<void> _openSharing() async {
     final port = widget.port;
-    if (port is! CommunityHangarSharingPort || _detailRoute != null) return;
+    final editor = widget.hangarSharingPort;
+    if ((editor == null && port is! CommunityHangarSharingPort) ||
+        _detailRoute != null) {
+      return;
+    }
     final owner = model;
-    final route = DialogRoute<bool>(
-      context: context,
+    StarBridgeDialogRoute<bool>? opened;
+    final saved = await showStarBridgeDialog<bool>(
+      context,
+      useRootNavigator: false,
       barrierDismissible: false,
-      builder: (_) => CommunityHangarSharingDialog(
-        port: port as CommunityHangarSharingPort,
-      ),
+      builder: (_) => editor == null
+          ? CommunityHangarSharingDialog(
+              port: port as CommunityHangarSharingPort,
+            )
+          : CommunityHangarSharingDialog.editor(
+              editor: editor,
+              sourceRef: widget.hangarSharingSourceRef,
+            ),
+      onRouteCreated: (route) => _detailRoute = opened = route,
     );
-    _detailRoute = route;
-    final saved = await Navigator.of(context).push(route);
-    if (_detailRoute == route) _detailRoute = null;
+    if (_detailRoute == opened) _detailRoute = null;
     if (mounted && model == owner && saved == true) {
-      _statisticsRefresh++;
+      _rereadStatistics();
       await model.refreshVisible();
     }
+  }
+
+  /// An explicit refresh or a saved change: the held inventory is not enough.
+  void _rereadStatistics() {
+    model.holdStatistics(null, communityShipsCulture(context));
+    _statisticsRefresh++;
   }
 
   Future<void> _apply() => model.load(
@@ -206,320 +401,352 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     unawaited(_apply());
   }
 
-  Widget _choice(
-    String label,
-    String value,
-    List<String> choices,
-    void Function(String) select,
-    double width,
-  ) => SizedBox(
-    width: width,
-    child: InputDecorator(
-      decoration: InputDecoration(
-        labelText: t(label),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isExpanded: true,
-          isDense: true,
-          onChanged: model.invalidated
-              ? null
-              : (next) {
-                  if (next != null) select(next);
-                },
-          items: choices
-              .map(
-                (key) => DropdownMenuItem(
-                  value: key,
-                  child: Text(
-                    t(key),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+  bool get _hasNext => _pages.isNotEmpty && _pages.last.next != null;
+
+  void _loadMore() {
+    if (_pages.isEmpty ||
+        model.busy ||
+        model.invalidated ||
+        _pages.last.next == null) {
+      return;
+    }
+    unawaited(model.next());
+  }
+
+  List<CommunitySharedShip> get _ships {
+    final seen = <String>{};
+    return [
+      for (final page in _pages)
+        for (final ship in page.ships)
+          if (seen.add(ship.shipRef)) ship,
+    ];
+  }
+
+  /// The owner view filters the full inventory on the client.
+  List<CommunitySharedShip>? get _ownerShips => _statistics == null
+      ? null
+      : communityShipsFiltered(_statistics!, _filter, _search.text);
+
+  Map<String, int>? get _counts =>
+      _statistics == null ? null : communityShipFilterCounts(_statistics!);
+
+  bool get _sharingAvailable =>
+      widget.hangarSharingPort?.available == true ||
+      widget.port is CommunityHangarSharingPort &&
+          (widget.port as CommunityHangarSharingPort).hangarSharingAvailable;
+
+  Widget _ship(CommunitySharedShip ship, {required bool card}) => card
+      ? CommunityShipCard(
+          ship: ship,
+          targetRef: widget.targetRef,
+          avatarBytes: model.avatar(ship.ownerMemberRef),
+          avatarLoading: model.avatarLoading(ship.ownerMemberRef),
+          imageDecoder: model.avatars.images.decode,
+          onDetails: () => unawaited(_select(ship)),
+          ownerTargetFactory: widget.ownerTargetFactory,
+          includeSocialActions: widget.includeSocialActions,
+          selected: _wide && ship.shipRef == model.selectedShipRef,
+        )
+      : CommunitySharedShipRow(
+          card: card,
+          ship: ship,
+          targetRef: widget.targetRef,
+          avatarBytes: model.avatar(ship.ownerMemberRef),
+          avatarLoading: model.avatarLoading(ship.ownerMemberRef),
+          imageDecoder: model.avatars.images.decode,
+          onDetails: () => unawaited(_select(ship)),
+          ownerTargetFactory: widget.ownerTargetFactory,
+          includeSocialActions: widget.includeSocialActions,
+          selected: _wide && ship.shipRef == model.selectedShipRef,
+        );
+
+  Widget _trailing(int shown, int total) => CommunityShipsLoadMoreRow(
+    shown: shown,
+    total: total,
+    // Pages load by themselves; the action only remains to retry a failed one.
+    hasMore: _hasNext && model.error != null,
+    onMore: model.busy ? null : _loadMore,
+  );
+
+  Widget _content() {
+    final ships = _ships;
+    if (model.busy && _pages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            Text(t('loading')),
+          ],
+        ),
+      );
+    }
+    if (model.error != null && _pages.isEmpty) return _state(t(model.error!));
+    if (_pages.isEmpty) return const SizedBox.shrink();
+    if (model.viewMode == 'owners') {
+      final owned = _ownerShips;
+      if (owned == null) {
+        return _state(
+          t(
+            _pages.last.totalCount > CommunityFleetSummary.maximumShips
+                ? 'ownersTooMany'
+                : 'statisticsLoading',
+          ),
+        );
+      }
+      if (owned.isEmpty) {
+        return _state(
+          t(_pages.last.totalCount == 0 ? 'empty' : 'ownersNoMatches'),
+          clear:
+              _pages.last.totalCount > 0 && _filter != 'all' ||
+              _search.text.isNotEmpty,
+        );
+      }
+      return CommunityShipsOwnerGroups(
+        ships: owned,
+        selectedRef: _wide ? model.selectedShipRef : null,
+        onSelect: (ship) => unawaited(_select(ship)),
+        decoder: model.avatars.images.decode,
+        avatarOf: model.avatar,
+        avatarLoading: model.avatarLoading,
+        controller: _scroll,
+      );
+    }
+    if (ships.isEmpty) {
+      return _state(
+        t(_pages.last.totalCount == 0 ? 'empty' : 'noMatches'),
+        clear: _pages.last.totalCount > 0,
+      );
+    }
+    final listKey = ValueKey((
+      widget.targetRef,
+      _pages.first.query,
+      model.viewMode,
+    ));
+    return CommunityShipsPrefetch(
+      key: const Key('community-ships-list'),
+      canLoad: _hasNext && !model.busy && !model.invalidated && model.error == null,
+      load: _loadMore,
+      child: model.viewMode == 'list'
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const CommunityShipColumnHeader(),
+                Expanded(
+                  child: CommunityShipsListRows(
+                    ships: ships,
+                    row: _ship,
+                    listKey: listKey,
+                    controller: _scroll,
                   ),
                 ),
-              )
-              .toList(),
-        ),
-      ),
-    ),
-  );
+              ],
+            )
+          : CommunityShipsCardGrid(
+              ships: ships,
+              row: _ship,
+              listKey: listKey,
+              controller: _scroll,
+              minColumnWidth: 280,
+            ),
+    );
+  }
+
+  Widget _side() {
+    final selected = model.selectedShipRef;
+    final ship = [
+      ..._selection.page?.ships ?? const <CommunitySharedShip>[],
+      ..._statistics?.ships ?? const <CommunitySharedShip>[],
+      ..._ships,
+    ].where((candidate) => candidate.shipRef == selected).firstOrNull;
+    return CommunityShipsSideColumn(
+      port: widget.port,
+      imageDecoder: model.avatars.images.decode,
+      detailPage: _selection.page,
+      selectedRef: selected,
+      lookingUp: _selection.lookingUp,
+      pageIsCurrent: model.selectionIsDefault,
+      reconcile: _selection.page?.query != model.query,
+      avatar: ship == null ? null : model.avatar(ship.ownerMemberRef),
+      ownerTargetFactory: widget.ownerTargetFactory,
+      includeSocialActions: widget.includeSocialActions,
+      onRefreshLibrary: () => unawaited(model.load()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final page = model.page;
-    return LayoutBuilder(
+    final content = LayoutBuilder(
       builder: (context, available) {
+        _wide =
+            available.maxWidth >= CommunityShipsPanel.sideColumnMinimumWidth;
+        _selectFirstSoon();
         final body = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: widget.onBack,
-                  icon: const StandardIcon(StandardIconSemantic.arrowBack, size: 18),
-                  label: Text(t('back')),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${widget.name} · ${t('title')}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                if (widget.port is CommunityHangarSharingPort &&
-                    (widget.port as CommunityHangarSharingPort)
-                        .hangarSharingAvailable)
-                  MediaQuery.sizeOf(context).width >= 800
-                      ? OutlinedButton.icon(
-                          onPressed: model.invalidated ? null : _openSharing,
-                          icon: const StandardIcon(StandardIconSemantic.share, size: 18),
-                          label: Text(t('sharingTitle')),
-                        )
-                      : IconButton(
-                          onPressed: model.invalidated ? null : _openSharing,
-                          tooltip: t('sharingTitle'),
-                          icon: const StandardIcon(StandardIconSemantic.share),
-                        ),
-                IconButton(
-                  onPressed:
-                      model.error == 'refreshRequired' &&
-                          widget.onRefreshMembership != null
-                      ? widget.onRefreshMembership
-                      : model.busy || model.invalidated
-                      ? null
-                      : () {
-                          _statisticsRefresh++;
-                          unawaited(_apply());
-                        },
-                  tooltip: t('refresh'),
-                  icon: const StandardIcon(StandardIconSemantic.refresh),
-                ),
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                t('scope'),
-                style: TextStyle(color: context.tokens.colors.textSecondary),
-              ),
-            ),
-            if (!model.invalidated && (model.error == null || page != null))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: CommunityShipStatisticsPanel(
-                    key: ValueKey(
-                      'ship-statistics:${widget.targetRef}:${communityShipsCulture(context)}:$_statisticsRefresh:$_statisticsRevision',
-                    ),
-                    port: widget.port,
-                    targetRef: widget.targetRef,
-                    culture: communityShipsCulture(context),
-                    firstPage: model.page,
-                    loadingHeight: _statisticsHeight,
-                    onHeightChanged: (height) => _statisticsHeight = height,
-                  ),
-                ),
-              ),
-            LayoutBuilder(
-              builder: (context, constraints) => Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  SizedBox(
-                    width: constraints.maxWidth < 660
-                        ? constraints.maxWidth
-                        : 320,
-                    child: TextField(
-                      controller: _search,
-                      maxLength: 128,
-                      enabled: !model.invalidated,
-                      decoration: InputDecoration(
-                        labelText: t('search'),
-                        counterText: '',
-                        prefixIcon: const StandardIcon(StandardIconSemantic.search),
-                      ),
-                      onSubmitted: (_) => unawaited(_apply()),
-                    ),
-                  ),
-                  OutlinedButton(
-                    onPressed: model.invalidated
-                        ? null
-                        : () => unawaited(_apply()),
-                    child: Text(t('searchButton')),
-                  ),
-                  _choice(
-                    'sort',
-                    _sort,
-                    const ['name', 'spec', 'status', 'price', 'role', 'owner'],
-                    (value) {
-                      _sort = value;
-                      _descending = const {
-                        'spec',
-                        'status',
-                        'price',
-                      }.contains(value);
+            CommunityShipsHeader(
+              name: widget.name,
+              onBack: widget.onBack,
+              // Only a completed read of the whole library can say so.
+              sharingHint:
+                  _sharingAvailable &&
+                      !model.invalidated &&
+                      _statistics?.ships.any((s) => s.ownerIsSelf) == false
+                  ? 'notSharedHint'
+                  : null,
+              sharingLabel: !_sharingAvailable
+                  ? null
+                  : widget.hangarSharingPort == null
+                  ? 'sharingTitle'
+                  : 'ownSharingTitle',
+              onSharing: model.invalidated && widget.hangarSharingPort == null
+                  ? null
+                  : _openSharing,
+              onRefresh:
+                  model.error == 'refreshRequired' &&
+                      widget.onRefreshMembership != null
+                  ? widget.onRefreshMembership
+                  : widget.retryInvalidatedScope &&
+                        widget.controller == null &&
+                        model.invalidated &&
+                        widget.onRefreshMembership != null
+                  ? _retryInvalidatedScope
+                  : model.busy || model.invalidated
+                  ? null
+                  : () {
+                      _rereadStatistics();
                       unawaited(_apply());
                     },
-                    175,
-                  ),
-                  IconButton(
-                    onPressed: model.invalidated
-                        ? null
-                        : () {
-                            _descending = !_descending;
-                            unawaited(_apply());
-                          },
-                    tooltip: t(_descending ? 'descending' : 'ascending'),
-                    icon: StandardIcon(_descending ? StandardIconSemantic.south : StandardIconSemantic.north),
-                  ),
-                ],
-              ),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 38,
-              child: ListView(
-                key: const ValueKey('community-ship-filters'),
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final filter in const [
-                    'all',
-                    'capital',
-                    'large',
-                    'medium',
-                    'small',
-                    'flyable',
-                    'concept',
-                    'unknown',
-                  ])
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 8),
-                      child: ChoiceChip(
-                        key: ValueKey('community-ship-filter-$filter'),
-                        showCheckmark: false,
-                        labelStyle: Theme.of(context).textTheme.labelLarge,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        elevation: 0,
-                        pressElevation: 0,
-                        chipAnimationStyle: ChipAnimationStyle(
-                          enableAnimation: AnimationStyle.noAnimation,
-                          selectAnimation: AnimationStyle.noAnimation,
-                          avatarDrawerAnimation: AnimationStyle.noAnimation,
-                          deleteDrawerAnimation: AnimationStyle.noAnimation,
-                        ),
-                        label: Text(t(filter)),
-                        selected: _filter == filter,
-                        onSelected: model.invalidated
-                            ? null
-                            : (_) {
-                                _filter = filter;
-                                unawaited(_apply());
-                              },
-                      ),
-                    ),
-                ],
+            if (!model.invalidated && (model.error == null || page != null))
+              Material(
+                type: MaterialType.transparency,
+                child: CommunityShipStatisticsPanel(
+                  key: ValueKey(
+                    'ship-statistics:${widget.targetRef}:${communityShipsCulture(context)}:$_statisticsRefresh',
+                  ),
+                  port: widget.port,
+                  targetRef: widget.targetRef,
+                  culture: communityShipsCulture(context),
+                  // Only the first page can say the inventory changed.
+                  firstPage: _pages.firstOrNull,
+                  initial: model.statisticsFor(communityShipsCulture(context)),
+                  onStatistics: (stats) {
+                    if (!mounted) return;
+                    model.holdStatistics(
+                      stats,
+                      communityShipsCulture(context),
+                    );
+                    if (stats != null) model.showOwners(stats.ships);
+                    setState(() {
+                      _statistics = stats;
+                      // Another filter may hide it; the whole library cannot.
+                      final held = model.selectedShipRef;
+                      if (stats != null &&
+                          held != null &&
+                          !stats.ships.any((s) => s.shipRef == held)) {
+                        _selection.clear();
+                      }
+                    });
+                  },
+                  avatarOf: model.avatar,
+                  decoder: model.avatars.images.decode,
+                ),
               ),
-            ),
             const SizedBox(height: 10),
+            CommunityShipsToolbar(
+              search: _search,
+              filter: _filter,
+              sort: _sort,
+              descending: _descending,
+              viewMode: model.viewMode,
+              enabled: !model.invalidated,
+              counts: _counts,
+              onSearch: () => unawaited(_apply()),
+              onFilter: (key) {
+                _filter = key;
+                unawaited(_apply());
+              },
+              onSort: (key) {
+                _sort = key;
+                // Size, status and price read best largest first.
+                _descending = const {'spec', 'status', 'price'}.contains(key);
+                unawaited(_apply());
+              },
+              onDirection: () {
+                _descending = !_descending;
+                unawaited(_apply());
+              },
+              onView: (view) => setState(() => model.viewMode = view),
+            ),
+            const SizedBox(height: 8),
             if (model.mediaFailed)
               Text(
                 t('mediaFailed'),
                 style: TextStyle(color: context.tokens.colors.warning),
               ),
-            const CommunityShipColumnHeader(),
             SizedBox(
               height: 2,
-              child: page != null && model.busy
+              child: _pages.isNotEmpty && model.busy
                   ? const LinearProgressIndicator()
                   : null,
             ),
-            if (page != null && model.error != null)
+            if (_pages.isNotEmpty && model.error != null)
               Row(
                 children: [
                   Expanded(child: Text(t('refreshFailed'))),
-                  TextButton(
-                    onPressed: model.busy ? null : _apply,
+                  StarBridgeActionButton(
+                    controlKey: const Key('community-ships-refresh-failed'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: model.busy ? null : (_) => _apply(),
                     child: Text(t('refresh')),
                   ),
                 ],
               ),
             Expanded(
-              child: model.busy && page == null
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(),
-                          const SizedBox(height: 12),
-                          Text(t('loading')),
-                        ],
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+                      _step(1),
+                  const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+                      _step(-1),
+                },
+                child: Focus(
+                  focusNode: _focus,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(child: _content()),
+                            if (_pages.isNotEmpty &&
+                                model.viewMode != 'owners' &&
+                                _ships.isNotEmpty)
+                              _trailing(
+                                _ships.length,
+                                _pages.last.matchedCount,
+                              ),
+                          ],
+                        ),
                       ),
-                    )
-                  : model.error != null && page == null
-                  ? _state(t(model.error!))
-                  : page == null
-                  ? const SizedBox.shrink()
-                  : page.ships.isEmpty
-                  ? _state(
-                      t(page.totalCount == 0 ? 'empty' : 'noMatches'),
-                      clear: page.totalCount > 0,
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsetsDirectional.only(end: 16),
-                      key: ValueKey((
-                        widget.targetRef,
-                        page.query,
-                        page.offset,
-                      )),
-                      itemCount: page.ships.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) => Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _ship(page.ships[index]),
-                          CommunityShipLoaners(ship: page.ships[index]),
-                        ],
-                      ),
-                    ),
-            ),
-            if (page != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      '${page.matchedCount == 0 ? 0 : page.offset + 1}–${page.offset + page.ships.length} / ${page.matchedCount}',
-                    ),
-                    OutlinedButton(
-                      onPressed: page.offset == 0 || model.busy
-                          ? null
-                          : () => unawaited(model.previous()),
-                      child: Text(t('previous')),
-                    ),
-                    OutlinedButton(
-                      onPressed: page.next == null || model.busy
-                          ? null
-                          : () => unawaited(model.next()),
-                      child: Text(t('next')),
-                    ),
-                  ],
+                      if (_wide && !model.invalidated && _pages.isNotEmpty) ...[
+                        const SizedBox(width: 16),
+                        _side(),
+                      ],
+                    ],
+                  ),
                 ),
               ),
+            ),
           ],
         );
         // Keep all controls reachable when an expanded organization header
-        // leaves too little room for the ship tools and the first banner.
-        final minimumHeight = available.maxWidth < 760 ? 1050.0 : 740.0;
+        // leaves too little room for the ship tools and the first row.
+        final minimumHeight = available.maxWidth < 760 ? 1050.0 : 700.0;
         if (available.maxHeight < minimumHeight) {
           return SingleChildScrollView(
             child: SizedBox(height: minimumHeight, child: body),
@@ -528,202 +755,22 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
         return body;
       },
     );
+    // No control on this page follows the interaction suite (user 2026-10-30).
+    return OrganizationHoloFace(child: content);
   }
 
-  Widget _state(String message, {bool clear = false}) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(message, textAlign: TextAlign.center),
-          const SizedBox(height: 10),
-          if (clear)
-            TextButton(onPressed: _clear, child: Text(t('clear')))
-          else if (!model.invalidated)
-            TextButton(
-              onPressed: () => unawaited(_apply()),
-              child: Text(t('refresh')),
-            ),
-        ],
-      ),
-    ),
-  );
-  Widget _ship(CommunitySharedShip ship) {
-    final colors = context.tokens.colors;
-    final owner = ship.ownerCallsign.isNotEmpty
-        ? ship.ownerCallsign
-        : ship.ownerGameName.isNotEmpty
-        ? ship.ownerGameName
-        : t('owner');
-    final presenceKey = !ship.ownerOnline
-        ? 'presence.offline'
-        : ship.ownerLiveStatus.toLowerCase() == 'ingame'
-        ? 'presence.inGame'
-        : ship.ownerLiveStatus.toLowerCase() == 'away'
-        ? 'presence.away'
-        : 'presence.online';
-    final presence = presenceColor(colors, presenceKey);
-    final status = ship.catalogStatus?.toLowerCase() ?? '';
-    final statusColor = const {'flyable', '可飞', '可飛'}.contains(status)
-        ? colors.success
-        : status.contains('concept') || status.contains('概念')
-        ? colors.warning
-        : colors.textSecondary;
-    final roleColor = shipCategoryColor(
-      context,
-      ship.displayCategory?.toLowerCase() ?? 'unknown',
-    );
-    final specColor = shipSizeColor(context, ship.displaySpec);
-    String value(String? text, [String fallback = 'unknown']) =>
-        text == null || text.isEmpty ? t(fallback) : text;
-    Widget line(
-      String text, {
-      Color? color,
-      bool bold = false,
-      bool title = false,
-    }) => Tooltip(
-      message: text,
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: color ?? colors.textPrimary,
-          fontWeight: bold ? FontWeight.w600 : null,
-          fontSize: title ? 14 : null,
-        ),
-      ),
-    );
-    Widget badge(String text, Color color) =>
-        ShipClassificationTag(label: text, color: color);
-    final ownerRow = Row(
-      children: [
-        Tooltip(
-          message: AppStrings.of(context).text(presenceKey),
-          child: UserAvatarMenu(
-            name: owner,
-            avatarBytes: model.avatar(ship.ownerMemberRef),
-            isSelf: ship.ownerIsSelf,
-            target: UserTarget.community(widget.targetRef, ship.ownerMemberRef, query: ship.ownerGameName),
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: presence, width: 2)),
-              ),
-              child: CommunityWorkspaceImage(
-                bytes: model.avatar(ship.ownerMemberRef),
-                decoder: model.avatars.images.decode,
-                maxWidth: 96,
-                loading: model.avatarLoading(ship.ownerMemberRef),
-                icon: StandardIconSemantic.person,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              line(
-                '$owner${ship.ownerIsSelf ? ' · ${t('self')}' : ''}',
-                bold: true,
-              ),
-              line(
-                ship.ownerGameName.isNotEmpty && ship.ownerGameName != owner
-                    ? ship.ownerGameName
-                    : AppStrings.of(context).text(presenceKey),
-                color: colors.textSecondary,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-    final imported = ship.hangarImportedAt?.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    final date = imported == null
-        ? t('notRecorded')
-        : '${imported.year}-${two(imported.month)}-${two(imported.day)}';
-    return CommunityShipRowSurface(
-      child: CommunityShipBanner(
-        key: ValueKey('community-ship-banner-${ship.shipRef}'),
-        identity: Row(
-          children: [
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: CommunityCatalogShipImage(
-                asset: ship.catalogThumbnailAsset ?? ship.catalogImageAsset,
-                compact: true,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  line(
-                    ship.displayName.isEmpty ? ship.code : ship.displayName,
-                    bold: true,
-                    title: true,
-                  ),
-                  if (ship.subtitleFor(
-                        Localizations.localeOf(context).languageCode,
-                      )
-                      case final subtitle?)
-                    line(subtitle, color: colors.textSecondary),
-                ],
-              ),
-            ),
-          ],
-        ),
-        spec: badge(
-          communityShipDisplayText(context, ship.displaySpec),
-          specColor,
-        ),
-        status: Row(
-          children: [
-            Container(
-              width: 5,
-              height: 5,
-              decoration: BoxDecoration(
-                color: statusColor,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 5),
-            Expanded(
-              child: line(value(ship.catalogStatus), color: statusColor),
-            ),
-          ],
-        ),
-        price: line(
-          ShipCatalogDisplay.usdText(ship.catalogPriceUsd) ?? t('unpublished'),
-          color: ShipCatalogDisplay.usdCents(ship.catalogPriceUsd) == null
-              ? colors.textSecondary
-              : colors.info,
-        ),
-        role: badge(
-          communityShipDisplayText(context, ship.displayRole),
-          roleColor,
-        ),
-        vehicleIcon: CommunityShipVehicleIcon(ship: ship),
-        owner: ownerRow,
-        importedAt: Tooltip(
-          message: t('importedAt'),
-          child: line(date, color: colors.textSecondary),
-        ),
-        action: OutlinedButton(
-          key: ValueKey('community-ship-details-${ship.shipRef}'),
-          onPressed: () => unawaited(_openDetail(ship)),
-          child: Text(t('view')),
-        ),
-      ),
-    );
-  }
+  Widget _state(String message, {bool clear = false}) =>
+      CommunityShipsEmptyState(
+        message: message,
+        onClear: clear ? _clear : null,
+        onRetry:
+            widget.retryInvalidatedScope &&
+                widget.controller == null &&
+                model.invalidated &&
+                widget.onRefreshMembership != null
+            ? _retryInvalidatedScope
+            : !model.invalidated
+            ? () => unawaited(_apply())
+            : null,
+      );
 }

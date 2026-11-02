@@ -20,26 +20,29 @@ internal sealed partial class PrivacyRelayWriter
         if (response.StatusCode == HttpStatusCode.Conflict)
             throw new AccountBridgeHostException("privacy_publication.members_changed");
         RequireSuccess(response);
-        using var document = await ReadAsync(response, token);
-        try
+        return await ObservePublicationReceiptAsync(response, async () =>
         {
-            var page = document.RootElement.Deserialize<CommunityMemberDirectoryPage>(LocalPrivacyStore.Json);
-            if (page is null || page.SchemaVersion != 3 || page.Code != input.Scope.Code ||
-                page.JoinedAt != input.Scope.JoinedAt || page.Offset != input.Offset ||
-                page.Total < page.Offset || page.Total > 100000 || !ValidRevision(page.Revision) ||
-                input.Offset > 0 && page.Revision != input.Revision || page.Members is null ||
-                page.Members.Length != Math.Min(100, page.Total - page.Offset)) throw Invalid();
-            foreach (var member in page.Members)
+            using var document = await ReadAsync(response, token);
+            try
             {
-                if (member is null || !ValidMemberText(member.Name, 256) || !ValidMemberText(member.Handle, 256)) throw Invalid();
-                CommunityMemberFieldOverride.ValidateAndCopy([
-                    new(member.AccountId, member.JoinedAt, member.LegacyGroupFields)]);
+                var page = document.RootElement.Deserialize<CommunityMemberDirectoryPage>(LocalPrivacyStore.Json);
+                if (page is null || page.SchemaVersion != 3 || page.Code != input.Scope.Code ||
+                    page.JoinedAt != input.Scope.JoinedAt || page.Offset != input.Offset ||
+                    page.Total < page.Offset || page.Total > 100000 || !ValidRevision(page.Revision) ||
+                    input.Offset > 0 && page.Revision != input.Revision || page.Members is null ||
+                    page.Members.Length != Math.Min(100, page.Total - page.Offset)) throw Invalid();
+                foreach (var member in page.Members)
+                {
+                    if (member is null || !ValidMemberText(member.Name, 256) || !ValidMemberText(member.Handle, 256)) throw Invalid();
+                    CommunityMemberFieldOverride.ValidateAndCopy([
+                        new(member.AccountId, member.JoinedAt, member.LegacyGroupFields)]);
+                }
+                if (page.Members.Select(row => row.AccountId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != page.Members.Length ||
+                    page.Members.Count(row => row.IsSelf) > 1) throw Invalid();
+                return page;
             }
-            if (page.Members.Select(row => row.AccountId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != page.Members.Length ||
-                page.Members.Count(row => row.IsSelf) > 1) throw Invalid();
-            return page;
-        }
-        catch (Exception error) when (error is JsonException or ArgumentException) { throw Invalid(); }
+            catch (Exception error) when (error is JsonException or ArgumentException) { throw Invalid(); }
+        }, "publication-member-directory");
     }
 
     internal static void ValidateMemberRequest(CommunityMemberDirectoryRequest input)

@@ -78,7 +78,8 @@ public static class OverlayPresetSourcesCodec
         // Import/share never installs automatic behavior on the recipient's device.
         return new(new(Clean(sources.Binding),
             false,
-            modules), removed);
+            modules, sources.ChatSources.Any(binding => binding.Mode == OverlaySourceMode.Fleet)
+                ? sources.ChatSources.Where(binding => binding.Mode is OverlaySourceMode.Room or OverlaySourceMode.Fleet).ToArray() : null), removed);
     }
 
     private static object BindingWire(OverlaySourceBinding binding) => new
@@ -95,6 +96,7 @@ public static class OverlayPresetSourcesCodec
             "auto" => OverlaySourceMode.Auto,
             "room" => OverlaySourceMode.Room,
             "community" => OverlaySourceMode.Community,
+            "fleet" => OverlaySourceMode.Fleet,
             _ => throw new FormatException("Unsupported source binding.")
         };
         return new(mode, node.GetProperty("communityCode").GetString(), node.GetProperty("ownerKey").GetString());
@@ -103,7 +105,7 @@ public static class OverlayPresetSourcesCodec
     private static string ModeName(OverlaySourceMode mode) => mode switch
     {
         OverlaySourceMode.None => "none", OverlaySourceMode.Auto => "auto", OverlaySourceMode.Room => "room",
-        OverlaySourceMode.Community => "community", _ => throw new ArgumentException("Unsupported source binding.")
+        OverlaySourceMode.Community => "community", OverlaySourceMode.Fleet => "fleet", _ => throw new ArgumentException("Unsupported source binding.")
     };
     private static string ModuleName(OverlaySourceModule module) => module switch
     {

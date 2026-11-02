@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_row.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -51,10 +53,11 @@ class OverlayWorkspaceAppearanceEntry extends StatelessWidget {
           side: BorderSide(color: tokens.surfaces.panel.border),
           borderRadius: tokens.shape.small,
         ),
-        child: InkWell(
-          key: const Key('overlay-appearance-center-entry'),
-          onTap: onPressed,
-          borderRadius: tokens.shape.small,
+        child: StarBridgeActionRow(
+          controlKey: const Key('overlay-appearance-center-entry'),
+          semanticLabel:
+              '${_copy(context, 'overlay.workspace.appearance.current')} · $name · $status',
+          onActivate: (_, _) => onPressed(),
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: tokens.space.sm),
             child: Row(
@@ -74,7 +77,8 @@ class OverlayWorkspaceAppearanceEntry extends StatelessWidget {
                       Text(
                         name,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                     ],

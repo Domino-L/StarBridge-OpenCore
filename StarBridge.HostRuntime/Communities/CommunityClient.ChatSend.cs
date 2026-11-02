@@ -41,7 +41,7 @@ internal sealed partial class CommunityClient
             var channel = FleetChatIdentity.FleetChannelId(target.Code);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, "/api/fleets/chat/messages"))
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, CommunicationPath(target, "/chat/messages")))
                 { Content = JsonContent.Create(new FleetChatSendRequestContract(target.Code, channel, text, key, attachment)) };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
             current();

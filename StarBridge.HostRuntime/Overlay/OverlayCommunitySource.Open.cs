@@ -9,6 +9,9 @@ internal sealed partial class OverlayCommunitySource
     // or start a second retry loop alongside the normal refresh schedule.
     internal async Task PrepareForDisplayAsync(CancellationToken token)
     {
+        using var work = _retirement.Enter(token);
+        if (work is null) return;
+        token = work.Token;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
         (StarBridge.NativeBridge.BridgeAccountContext? Owner, long Generation) scope;
@@ -24,7 +27,7 @@ internal sealed partial class OverlayCommunitySource
                 // cancellation are not transient transport failures. Never
                 // revive an old source or renew its authorization here.
                 if (!Current(scope, revision) || Read() is not null ||
-                    _transientFailures == 0 || _driver is null) return;
+                    _transientFailures == 0 || !_drivers.IsStarted) return;
                 progress = _readProgress.Task;
             }
             await progress.WaitAsync(deadline.Token).ConfigureAwait(false);

@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -169,17 +171,26 @@ void main() {
     final session = MenuOrganizationsSession(port, (_) {})..show(true);
     addTearDown(session.dispose);
     final initial = await ready(session, 'chat');
-    final key = initial.buttons.singleWhere((b) => b.label == '发送消息').key;
+    final key = initial.buttons.singleWhere((b) => b.role == 'sendMessage').key;
     session.show(false);
     session.show(true);
     await ready(session, 'chat');
     session.act(key, 'Still in the editor');
     expect(port.sends, isEmpty);
-    expect(MenuFeatureView.parse(session.currentView).rejectedAction, key);
+    expect(
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+          .rejectedAction,
+      key,
+    );
     await session.refresh();
-    expect(MenuFeatureView.parse(session.currentView).rejectedAction, key);
-    final nextKey = MenuFeatureView.parse(session.currentView).buttons
-        .singleWhere((b) => b.label == '发送消息')
+    expect(
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+          .rejectedAction,
+      key,
+    );
+    final nextKey = MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+        .buttons
+        .singleWhere((b) => b.role == 'sendMessage')
         .key;
     session.show(false);
     session.act(nextKey, 'Input raced with hiding');
@@ -197,7 +208,7 @@ void main() {
       addTearDown(session.dispose);
       var view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Only first organization',
       );
       port.reply.complete(const CommunityChatSendOutcome('unknown'));
@@ -206,12 +217,12 @@ void main() {
       session.act(view.organization!.navigation.last.key, '');
       view = await ready(session, 'chat');
       expect(view.chat!.outbox!.messages, isEmpty);
-      expect(view.buttons.any((b) => b.label == '发送消息'), isTrue);
+      expect(view.buttons.any((b) => b.role == 'sendMessage'), isTrue);
       session.act(view.organization!.navigation.first.key, '');
       view = await ready(session, 'chat');
       expect(view.chat!.outbox!.messages.single.id, localId);
       expect(view.chat!.outbox!.messages.single.state, 'unknown');
-      expect(view.buttons.any((b) => b.label == '发送消息'), isFalse);
+      expect(view.buttons.any((b) => b.role == 'sendMessage'), isFalse);
       port.firstAuthorized = false;
       await session.refresh();
       view = await ready(session, 'chat');
@@ -231,13 +242,17 @@ void main() {
     final session = MenuOrganizationsSession(port, (_) {})..show(true);
     addTearDown(session.dispose);
     final view = await ready(session, 'chat');
-    final send = view.buttons.singleWhere((b) => b.label == '发送消息');
+    final send = view.buttons.singleWhere((b) => b.role == 'sendMessage');
     session.act(send.key, 'Locally owned message');
     session.act(send.key, 'Locally owned message');
     session.act('a999', 'Next input raced with busy state');
     expect(port.sends, hasLength(1));
-    expect(MenuFeatureView.parse(session.currentView).rejectedAction, 'a999');
-    final chat = session.currentView['chat'] as Map;
+    expect(
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+          .rejectedAction,
+      'a999',
+    );
+    final chat = resolvedMenuCopy(session.currentView)['chat'] as Map;
     expect(chat['acceptedAction'], send.key);
     expect(chat['localMessages'], hasLength(1));
     final local = (chat['localMessages'] as List).single as Map;
@@ -248,7 +263,8 @@ void main() {
     port.reply.complete(const CommunityChatSendOutcome('unknown'));
     await ready(session, 'chat');
     expect(
-      ((session.currentView['chat'] as Map)['localMessages'] as List)
+      ((resolvedMenuCopy(session.currentView)['chat'] as Map)['localMessages']
+              as List)
           .single['state'],
       'unknown',
     );
@@ -259,9 +275,11 @@ void main() {
     final session = MenuOrganizationsSession(port, (_) {})..show(true);
     addTearDown(session.dispose);
     final view = await ready(session, 'chat');
-    final key = view.buttons.singleWhere((b) => b.label == '发送消息').key;
+    final key = view.buttons.singleWhere((b) => b.role == 'sendMessage').key;
     session.act(key, 'Invalid\u0000text');
-    final rejected = MenuFeatureView.parse(session.currentView);
+    final rejected = MenuFeatureView.parse(
+      resolvedMenuCopy(session.currentView),
+    );
     expect(rejected.rejectedAction, key);
     expect(rejected.chat!.outbox!.acceptedAction, isNull);
     expect(rejected.chat!.outbox!.messages, isEmpty);
@@ -277,12 +295,15 @@ void main() {
       addTearDown(session.dispose);
       var view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Kept on return',
       );
       port.reply.complete(const CommunityChatSendOutcome('unknown'));
       view = await ready(session, 'chat');
-      session.act(view.buttons.singleWhere((b) => b.label == '返回组织列表').key, '');
+      session.act(
+        view.buttons.singleWhere((b) => b.role == 'organizationsHome').key,
+        '',
+      );
       view = await ready(session, 'chat');
       expect(view.chat!.outbox!.messages.single.text, 'Kept on return');
       expect(port.sends, hasLength(1));
@@ -298,7 +319,7 @@ void main() {
       addTearDown(session.dispose);
       final view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'One coherent message',
       );
       views.clear();
@@ -326,7 +347,10 @@ void main() {
         );
       }
       expect(
-        MenuFeatureView.parse(session.currentView).chat!.outbox!.messages,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .chat!
+            .outbox!
+            .messages,
         isEmpty,
       );
     },
@@ -340,7 +364,7 @@ void main() {
       addTearDown(session.dispose);
       var view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Kept text',
       );
       port.reply.complete(
@@ -373,12 +397,14 @@ void main() {
       addTearDown(session.dispose);
       final view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Retained on reopen',
       );
       session.show(false);
       session.show(true);
-      final reopened = MenuFeatureView.parse(session.currentView);
+      final reopened = MenuFeatureView.parse(
+        resolvedMenuCopy(session.currentView),
+      );
       expect(reopened.state, 'ready');
       expect(reopened.rows, isEmpty);
       expect(reopened.chat!.receipts, isEmpty);
@@ -397,7 +423,7 @@ void main() {
       addTearDown(session.dispose);
       final view = await ready(session, 'chat');
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Retired account text',
       );
       port.changes.add(null);
@@ -455,13 +481,13 @@ void main() {
       for (var i = 0; i < 15; i++) {
         await tester.pump(const Duration(milliseconds: 20));
       }
-      var view = MenuFeatureView.parse(session.currentView);
+      var view = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
       session.act(
-        view.buttons.singleWhere((b) => b.label == '发送消息').key,
+        view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
         'Slow result',
       );
       await tester.pump(const Duration(seconds: 16));
-      view = MenuFeatureView.parse(session.currentView);
+      view = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
       expect(view.state, 'ready');
       expect(view.busy, isFalse);
       expect(view.chat!.status, 'unknown');
@@ -472,7 +498,7 @@ void main() {
       for (var i = 0; i < 15; i++) {
         await tester.pump(const Duration(milliseconds: 20));
       }
-      view = MenuFeatureView.parse(session.currentView);
+      view = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
       expect(view.chat!.outbox!.messages.single.state, 'failed');
       expect(view.chat!.outbox!.messages.single.retry, isNotNull);
       session.dispose();
@@ -663,7 +689,10 @@ void main() {
     }
     expect(tester.widget<TextField>(input).controller!.text, 'First outgoing');
     expect(
-      MenuFeatureView.parse(session.currentView).chat!.outbox!.messages,
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+          .chat!
+          .outbox!
+          .messages,
       isEmpty,
     );
     expect(port.sends, hasLength(1));

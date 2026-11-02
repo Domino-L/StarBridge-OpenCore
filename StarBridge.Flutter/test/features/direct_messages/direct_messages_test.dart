@@ -86,7 +86,7 @@ Widget app(Locale locale, DirectMessagesPort Function() factory) {
 }
 
 void main() {
-  testWidgets('confirmed sent hint clears after a short acknowledgement', (
+  testWidgets('a confirmed send ends in history with no status left behind', (
     tester,
   ) async {
     final module = DirectMessagesModule(ExampleDirectMessages());
@@ -95,8 +95,11 @@ void main() {
     await module.open(module.rows.first);
     module.editDraft('fixture');
     await module.send();
-    expect(module.sendStatus, 'sent');
+    // A2: the bubble carries the state; the status line stays free.
+    expect(module.sendStatus, isNull);
     await tester.pump(const Duration(seconds: 4));
+    expect(module.outgoing, isEmpty);
+    expect(module.messages.last.text, 'fixture');
     expect(module.sendStatus, isNull);
   });
   for (final entry in <String, String>{
@@ -105,24 +108,25 @@ void main() {
     'inGame': '游戏中',
     'offline': '离线',
   }.entries) {
-    testWidgets('private chat shows authorized ${entry.key} on row and header', (
-      tester,
-    ) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(920, 700);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(
-        app(const Locale('zh', 'CN'), () => PresenceFixture(entry.key)),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text(entry.value), findsOneWidget);
-      await tester.tap(find.text('示例好友  @Example'));
-      await tester.pumpAndSettle();
-      expect(find.text(entry.value), findsNWidgets(2));
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    });
+    testWidgets(
+      'private chat shows authorized ${entry.key} on row and header',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(920, 700);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          app(const Locale('zh', 'CN'), () => PresenceFixture(entry.key)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(entry.value), findsOneWidget);
+        await tester.tap(find.text('示例好友  @Example'));
+        await tester.pumpAndSettle();
+        expect(find.text(entry.value), findsNWidgets(2));
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
   }
   testWidgets(
     'wide chat keeps directory, searches locally and shows authorized status',
@@ -321,9 +325,7 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
       expect(find.byType(ChatAvatar), findsWidgets);
       expect(tester.takeException(), isNull);
-      await tester.tap(
-        find.byTooltip(AppStrings.resolve(locale).text('direct.backList')),
-      );
+      await tester.tap(find.byKey(const ValueKey('chat-back-list')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.text(AppStrings.resolve(locale).text('direct.requests')),
@@ -344,6 +346,8 @@ void main() {
       for (final font in {
         'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
         'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
       }.entries) {

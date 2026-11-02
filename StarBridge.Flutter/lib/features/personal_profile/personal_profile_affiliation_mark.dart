@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../shared/inline_image_cache.dart';
+import '../common/organization_logo_hints.dart';
+import '../../shared/remote_image.dart';
 
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -22,9 +24,19 @@ class PersonalProfileAffiliationMark extends StatelessWidget {
     final tokens = context.tokens;
     final fallback = _AffiliationFallback(
       kind: affiliation.kind,
+      code: affiliation.code,
       color: _foreground(tokens),
     );
-    final image = _embeddedImage(context, fallback) ?? _networkImage(fallback);
+    // The main fleet mark is never a placeholder: without its own logo it
+    // uses the logo the main fleet page already read for the same SID.
+    final hint =
+        affiliation.kind == PersonalProfileAffiliationKind.officialFleet
+        ? OrganizationLogoHints.of(context, affiliation.code)
+        : null;
+    final image =
+        _embeddedImage(context, fallback) ??
+        _networkImage(affiliation.logoUrl, fallback) ??
+        _networkImage(hint, fallback);
     return Container(
       key: Key('profile-affiliation-mark-${affiliation.kind.name}'),
       width: size,
@@ -65,8 +77,7 @@ class PersonalProfileAffiliationMark extends StatelessWidget {
     );
   }
 
-  Widget? _networkImage(Widget fallback) {
-    final source = affiliation.logoUrl;
+  Widget? _networkImage(String? source, Widget fallback) {
     if (source == null) return null;
     final uri = Uri.tryParse(source);
     if (uri == null ||
@@ -75,8 +86,9 @@ class PersonalProfileAffiliationMark extends StatelessWidget {
         uri.userInfo.isNotEmpty) {
       return null;
     }
-    return Image.network(
+    return RemoteImage(
       source,
+      kind: RemoteImageResourceKind.organization,
       key: Key('profile-affiliation-logo-${affiliation.kind.name}'),
       fit: BoxFit.cover,
       semanticLabel: affiliation.name,
@@ -100,20 +112,37 @@ class PersonalProfileAffiliationMark extends StatelessWidget {
 }
 
 class _AffiliationFallback extends StatelessWidget {
-  const _AffiliationFallback({required this.kind, required this.color});
+  const _AffiliationFallback({
+    required this.kind,
+    required this.code,
+    required this.color,
+  });
 
   final PersonalProfileAffiliationKind kind;
+  final String code;
   final Color color;
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: StarBridgeIcon(
-      kind == PersonalProfileAffiliationKind.officialFleet
-          ? StarBridgeIconSemantic.officialFleet
-          : StarBridgeIconSemantic.community,
-      key: Key('profile-affiliation-fallback-${kind.name}'),
-      size: context.tokens.icons.medium,
-      color: color,
-    ),
-  );
+  Widget build(BuildContext context) =>
+      kind == PersonalProfileAffiliationKind.officialFleet &&
+          code.trim().isNotEmpty
+      // No logo anywhere: the fleet's own initials, not a generic emblem.
+      ? Center(
+          key: Key('profile-affiliation-initials-${kind.name}'),
+          child: Text(
+            code.trim().characters.take(2).toString().toUpperCase(),
+            style: Theme.of(context).textTheme.labelLarge
+                ?.copyWith(color: color, fontWeight: FontWeight.w700),
+          ),
+        )
+      : Center(
+          child: StarBridgeIcon(
+            kind == PersonalProfileAffiliationKind.officialFleet
+                ? StarBridgeIconSemantic.officialFleet
+                : StarBridgeIconSemantic.community,
+            key: Key('profile-affiliation-fallback-${kind.name}'),
+            size: context.tokens.icons.medium,
+            color: color,
+          ),
+        );
 }

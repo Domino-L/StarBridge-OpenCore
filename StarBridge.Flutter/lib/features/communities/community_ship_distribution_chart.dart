@@ -3,6 +3,9 @@ import '../../shared/ships/ship_category_colors.dart';
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
+import '../../design_system/interaction/starbridge_expansion_tile.dart';
 import 'community_ship_statistics.dart';
 import 'community_fleet_summary.dart';
 import 'community_ships_copy.dart';
@@ -122,52 +125,51 @@ class _ChartState extends State<CommunityShipDistributionChart> {
                             if (stats.countAt(size, role) > 0)
                               Expanded(
                                 flex: stats.countAt(size, role),
-                                child: Tooltip(
+                                child: StarBridgeTooltip(
                                   message: detail(size, role),
-                                  child: Semantics(
-                                    label: detail(size, role),
-                                    button: true,
-                                    child: InkWell(
-                                      key: ValueKey(
-                                        'ship-distribution-$size-$role',
-                                      ),
-                                      onTap: () => setState(
+                                  child: Focus(
+                                    canRequestFocus: false,
+                                    onFocusChange: (focus) {
+                                      if (focus) {
+                                        setState(() => selected = (size, role));
+                                      }
+                                    },
+                                    child: MouseRegion(
+                                      onEnter: (_) => setState(
                                         () => selected = (size, role),
                                       ),
-                                      onFocusChange: (focus) {
-                                        if (focus) {
-                                          setState(
-                                            () => selected = (size, role),
-                                          );
-                                        }
-                                      },
-                                      onHover: (hover) {
-                                        if (hover) {
-                                          setState(
-                                            () => selected = (size, role),
-                                          );
-                                        }
-                                      },
-                                      child: Ink(
-                                        color: palette[role]!.withValues(
-                                          alpha: .55,
+                                      child: StarBridgeActionRow(
+                                        controlKey: ValueKey(
+                                          'ship-distribution-$size-$role',
                                         ),
-                                        child: LayoutBuilder(
-                                          builder: (context, constraints) => Center(
-                                            child: constraints.maxWidth >= 30
-                                                ? ExcludeSemantics(
-                                                    child: Text(
-                                                      '${stats.countAt(size, role)}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: colors
-                                                                .textPrimary,
-                                                          ),
-                                                    ),
-                                                  )
-                                                : const SizedBox.shrink(),
+                                        semanticLabel: detail(size, role),
+                                        semanticSelected:
+                                            selected == (size, role),
+                                        baseRadius: 0,
+                                        onActivate: (_, _) => setState(
+                                          () => selected = (size, role),
+                                        ),
+                                        child: ColoredBox(
+                                          color: palette[role]!.withValues(
+                                            alpha: .55,
+                                          ),
+                                          child: LayoutBuilder(
+                                            builder: (context, constraints) => Center(
+                                              child: constraints.maxWidth >= 30
+                                                  ? ExcludeSemantics(
+                                                      child: Text(
+                                                        '${stats.countAt(size, role)}',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: colors
+                                                                  .textPrimary,
+                                                            ),
+                                                      ),
+                                                    )
+                                                  : const SizedBox.shrink(),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -223,13 +225,10 @@ class _ChartState extends State<CommunityShipDistributionChart> {
             ),
           ),
         ),
-        ExpansionTile(
+        StarBridgeExpansionTile(
           key: const ValueKey('ship-distribution-table-toggle'),
-          tilePadding: EdgeInsets.zero,
-          title: Text(
-            t('crossTable'),
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          title: t('crossTable'),
+          titleStyle: Theme.of(context).textTheme.bodyMedium,
           children: [
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,

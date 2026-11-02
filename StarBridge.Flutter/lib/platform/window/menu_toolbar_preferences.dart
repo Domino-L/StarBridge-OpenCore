@@ -16,6 +16,7 @@ final class MenuToolbarPreferences {
     'screenshot',
     'image',
     'browser',
+    'execHangar',
   ];
   final List<String> order, hidden;
   final String density, labels;
@@ -46,8 +47,10 @@ final class MenuToolbarPreferences {
       return null;
     }
     final order = raw['order'] as List, hidden = raw['hidden'] as List;
-    if (order.length != ids.length ||
-        order.toSet().length != ids.length ||
+    final legacy =
+        order.length == ids.length - 1 && !order.contains('execHangar');
+    if ((!legacy && order.length != ids.length) ||
+        order.toSet().length != order.length ||
         order.any((id) => !ids.contains(id)) ||
         hidden.length >= ids.length ||
         hidden.toSet().length != hidden.length ||
@@ -55,7 +58,7 @@ final class MenuToolbarPreferences {
       return null;
     }
     return MenuToolbarPreferences(
-      order: List<String>.unmodifiable(order),
+      order: List<String>.unmodifiable([...order, if (legacy) 'execHangar']),
       hidden: List<String>.unmodifiable(hidden),
       density: raw['density'] as String,
       labels: raw['labels'] as String,

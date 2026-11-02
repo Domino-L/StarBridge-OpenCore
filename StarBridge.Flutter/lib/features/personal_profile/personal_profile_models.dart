@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import 'personal_profile_presentation.dart';
+import 'personal_profile_public_header.dart';
+
 enum PersonalProfileAvailability { loading, signedOut, unavailable, available }
 
 enum PersonalProfileOperation { none, refreshing, saving }
@@ -31,7 +34,10 @@ enum PersonalProfileVisibility {
     'profile.visibility.friendsAndMainFleet',
   ),
   friendsOnly('friendsOnly', 'profile.visibility.friendsOnly'),
-  friendsFleetAndOrganizations('friendsFleetAndOrganizations', 'profile.visibility.related'),
+  friendsFleetAndOrganizations(
+    'friendsFleetAndOrganizations',
+    'profile.visibility.related',
+  ),
   onlyMe('private', 'profile.visibility.private');
 
   const PersonalProfileVisibility(this.bridgeValue, this.labelKey);
@@ -223,12 +229,17 @@ final class PersonalProfileShipIdentity {
     required this.simplifiedChineseName,
     required this.traditionalChineseName,
     this.catalogId,
+    this.nickname,
   });
 
   final String runtimeId;
   final String englishName;
   final String simplifiedChineseName;
   final String traditionalChineseName;
+
+  /// Local instance label; never part of the published model identity.
+  final String? nickname;
+
   /// Canonical model identity, distinct from an instance or legacy runtime ID.
   final String? catalogId;
 }
@@ -341,6 +352,9 @@ final class PersonalProfileHangarSummary {
 final class PersonalProfileSnapshot {
   const PersonalProfileSnapshot.signedOut()
     : availability = PersonalProfileAvailability.signedOut,
+      cachedAtUtc = null,
+      transientReadFailure = false,
+      presentation = null,
       local = null,
       allowEditing = false,
       failureKey = null,
@@ -355,7 +369,7 @@ final class PersonalProfileSnapshot {
       affiliations = const [],
       availabilityWindows = const [],
       timeZoneLabel = '',
-      gameplayMinutes = 0,
+      gameplayMinutes = null,
       activityRhythm = PersonalProfileActivityRhythm.casual,
       roles = const [],
       participationInterests = const [],
@@ -363,11 +377,20 @@ final class PersonalProfileSnapshot {
       shipWishlist = const [],
       favoriteShips = const [],
       hangarSummary = const PersonalProfileHangarSummary.empty(),
-      moduleLayout = const [];
+      moduleLayout = const [],
+      restricted = false,
+      publicTradeWindow = null,
+      defaultedPage = false,
+      nameMasked = false,
+      publicFacts = null,
+      affiliationStatus = null;
 
   const PersonalProfileSnapshot.unavailable({
     this.failureKey = 'profile.error.unavailable',
+    this.transientReadFailure = false,
   }) : availability = PersonalProfileAvailability.unavailable,
+       cachedAtUtc = null,
+       presentation = null,
        local = null,
        allowEditing = false,
        callSign = '',
@@ -381,7 +404,7 @@ final class PersonalProfileSnapshot {
        affiliations = const [],
        availabilityWindows = const [],
        timeZoneLabel = '',
-       gameplayMinutes = 0,
+       gameplayMinutes = null,
        activityRhythm = PersonalProfileActivityRhythm.casual,
        roles = const [],
        participationInterests = const [],
@@ -389,9 +412,17 @@ final class PersonalProfileSnapshot {
        shipWishlist = const [],
        favoriteShips = const [],
        hangarSummary = const PersonalProfileHangarSummary.empty(),
-       moduleLayout = const [];
+       moduleLayout = const [],
+       restricted = false,
+       publicTradeWindow = null,
+       defaultedPage = false,
+       nameMasked = false,
+       publicFacts = null,
+       affiliationStatus = null;
 
   const PersonalProfileSnapshot.available({
+    this.cachedAtUtc,
+    this.presentation,
     this.avatarImageData,
     required this.callSign,
     required this.gameHandle,
@@ -415,10 +446,38 @@ final class PersonalProfileSnapshot {
     this.allowEditing = true,
     this.failureKey,
     this.local,
-  }) : availability = PersonalProfileAvailability.available;
+    this.restricted = false,
+    this.publicTradeWindow,
+    this.defaultedPage = false,
+    this.nameMasked = false,
+    this.publicFacts,
+    this.affiliationStatus,
+  }) : availability = PersonalProfileAvailability.available,
+       transientReadFailure = false;
+
+  /// A visitor outside the profile's visibility: only the always-public
+  /// header (callsign, avatar, trade window) was returned.
+  final bool restricted;
+  final PersonalProfilePublicTradeWindow? publicTradeWindow;
+
+  /// The owner never chose a visibility: the page is not "set to" private.
+  final bool defaultedPage;
+
+  /// The name is masked until this viewer has a trade with the owner.
+  final bool nameMasked;
+  final PersonalProfilePublicFacts? publicFacts;
+
+  /// What a visitor's server said about the organization slot: shown, none,
+  /// hidden or unavailable; null from servers that predate it (2026-10-29).
+  final String? affiliationStatus;
 
   final PersonalProfileLocalView? local;
+
+  /// Original saved observation for readonly cache, never the time of rereading it.
+  final DateTime? cachedAtUtc;
+  final PersonalProfilePresentation? presentation;
   final PersonalProfileAvailability availability;
+  final bool transientReadFailure;
   final bool allowEditing;
   final String? failureKey;
   final String callSign;
@@ -432,7 +491,9 @@ final class PersonalProfileSnapshot {
   final List<PersonalProfileAffiliationSummary> affiliations;
   final List<PersonalProfileAvailabilityWindow> availabilityWindows;
   final String timeZoneLabel;
-  final int gameplayMinutes;
+
+  /// Null means the account profile did not return a playtime observation.
+  final int? gameplayMinutes;
   final PersonalProfileActivityRhythm activityRhythm;
   final List<PersonalProfileTagValue> roles;
   final List<PersonalProfileTagValue> participationInterests;
@@ -473,6 +534,14 @@ final class PersonalProfileProjection {
     required this.allowEditing,
     this.failureKey,
     this.local,
+    this.synchronizedAtUtc,
+    this.refreshFailed = false,
+    this.restricted = false,
+    this.publicTradeWindow,
+    this.defaultedPage = false,
+    this.nameMasked = false,
+    this.publicFacts,
+    this.affiliationStatus,
   });
 
   const PersonalProfileProjection.loading()
@@ -489,7 +558,7 @@ final class PersonalProfileProjection {
         affiliations: const [],
         availabilityWindows: const [],
         timeZoneLabel: '',
-        gameplayMinutes: 0,
+        gameplayMinutes: null,
         activityRhythm: PersonalProfileActivityRhythm.casual,
         roles: const [],
         participationInterests: const [],
@@ -515,7 +584,7 @@ final class PersonalProfileProjection {
   final List<PersonalProfileAffiliationSummary> affiliations;
   final List<PersonalProfileAvailabilityWindow> availabilityWindows;
   final String timeZoneLabel;
-  final int gameplayMinutes;
+  final int? gameplayMinutes;
   final PersonalProfileActivityRhythm activityRhythm;
   final List<PersonalProfileTagValue> roles;
   final List<PersonalProfileTagValue> participationInterests;
@@ -526,6 +595,23 @@ final class PersonalProfileProjection {
   final List<PersonalProfileModuleLayoutItem> moduleLayout;
   final bool allowEditing;
   final String? failureKey;
+
+  final DateTime? synchronizedAtUtc;
+  final bool refreshFailed;
+
+  /// See [PersonalProfileSnapshot.restricted].
+  final bool restricted;
+  final PersonalProfilePublicTradeWindow? publicTradeWindow;
+
+  /// See [PersonalProfileSnapshot.defaultedPage].
+  final bool defaultedPage;
+
+  /// See [PersonalProfileSnapshot.nameMasked].
+  final bool nameMasked;
+  final PersonalProfilePublicFacts? publicFacts;
+
+  /// See [PersonalProfileSnapshot.affiliationStatus].
+  final String? affiliationStatus;
 
   bool get isPublic => visibility == PersonalProfileVisibility.everyone;
 
@@ -545,6 +631,10 @@ final class PersonalProfileProjection {
     PersonalProfileVisibility? visibility,
     String? failureKey,
     bool clearFailure = false,
+    bool? allowEditing,
+    DateTime? synchronizedAtUtc,
+    bool? refreshFailed,
+    String? affiliationStatus,
   }) {
     return PersonalProfileProjection(
       availability: availability,
@@ -569,9 +659,17 @@ final class PersonalProfileProjection {
       favoriteShips: favoriteShips,
       hangarSummary: hangarSummary,
       moduleLayout: moduleLayout,
-      allowEditing: allowEditing,
+      allowEditing: allowEditing ?? this.allowEditing,
       local: local,
       failureKey: clearFailure ? null : failureKey ?? this.failureKey,
+      synchronizedAtUtc: synchronizedAtUtc ?? this.synchronizedAtUtc,
+      refreshFailed: refreshFailed ?? this.refreshFailed,
+      restricted: restricted,
+      publicTradeWindow: publicTradeWindow,
+      defaultedPage: defaultedPage,
+      nameMasked: nameMasked,
+      publicFacts: publicFacts,
+      affiliationStatus: affiliationStatus ?? this.affiliationStatus,
     );
   }
 
@@ -606,6 +704,12 @@ final class PersonalProfileProjection {
       allowEditing: snapshot.allowEditing,
       local: snapshot.local,
       failureKey: snapshot.failureKey,
+      restricted: snapshot.restricted,
+      publicTradeWindow: snapshot.publicTradeWindow,
+      defaultedPage: snapshot.defaultedPage,
+      nameMasked: snapshot.nameMasked,
+      publicFacts: snapshot.publicFacts,
+      affiliationStatus: snapshot.affiliationStatus,
     );
   }
 }
@@ -649,12 +753,14 @@ final class PersonalProfileLocalView {
     this.partial = false,
     this.timeZones = const {},
     this.retainedChoices = const [],
+    this.accountCallSign = false,
   });
   final List<PersonalProfileShipSummary> choices;
   final List<PersonalProfileShipSummary> retainedChoices;
   final List<String>? favoriteShipIds;
   final bool hangarAvailable;
   final bool remoteAvailable;
+  final bool accountCallSign;
   final bool needsCreation;
   final DateTime? savedAt;
   final bool partial;
@@ -663,8 +769,16 @@ final class PersonalProfileLocalView {
 
 @immutable
 final class PersonalProfileActionResult {
-  const PersonalProfileActionResult(this.outcome, {this.failureKey});
+  const PersonalProfileActionResult(
+    this.outcome, {
+    this.failureKey,
+    this.requiresReload = false,
+  });
 
   final PersonalProfileActionOutcome outcome;
   final String? failureKey;
+
+  /// The edit lease is consumed or stale. Preserve the draft for inspection,
+  /// but do not submit it again until a newly read page is explicitly edited.
+  final bool requiresReload;
 }

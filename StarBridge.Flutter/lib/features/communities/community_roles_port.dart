@@ -23,6 +23,7 @@ const communityRolePermissions = <String, List<String>>{
     'announcements.manage',
     'broadcasts.publish',
     'fleet.avatar.edit',
+    'fleet.banner.edit',
   ],
   'members': ['members.review', 'members.remove'],
   'audit': ['audit.view', 'audit.delete'],

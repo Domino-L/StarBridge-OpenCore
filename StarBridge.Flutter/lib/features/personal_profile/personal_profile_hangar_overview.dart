@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'personal_profile_domain_colors.dart';
@@ -153,7 +154,8 @@ class PersonalProfileHangarOverview extends StatelessWidget {
               '${sourceKey.startsWith('profile.local.') ? '' : AppStrings.of(context).text('profile.hangar.syncedAt')} '
               '${summary.syncedAtLabel}',
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              overflow: TextOverflow.fade,
+              softWrap: false,
               style: _caption(context)
                   ?.copyWith(color: tokens.colors.textSecondary),
             ),
@@ -521,7 +523,7 @@ class _ValuePanel extends StatelessWidget {
     final tokens = context.tokens;
     return _HangarPanel(
       key: const Key('profile-hangar-value-panel'),
-      child: Tooltip(
+      child: StarBridgeTooltip(
         message: unpriced == null
             ? ''
             : AppStrings.of(context).text('profile.local.catalogPrice'),
@@ -546,7 +548,8 @@ class _ValuePanel extends StatelessWidget {
                   child: Text(
                     value,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: tokens.colors.info,
                       fontWeight: FontWeight.w600,
@@ -560,7 +563,8 @@ class _ValuePanel extends StatelessWidget {
                 '$unpriced ${AppStrings.of(context).text('profile.local.unpriced')}',
                 style: _caption(context),
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
               ),
           ],
         ),
@@ -623,7 +627,8 @@ class _RecentShipPanel extends StatelessWidget {
                       : '${strings.text('profile.hangar.recentlyAdded')} · '
                             '$addedAtLabel',
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: _caption(context)
                       ?.copyWith(color: tokens.colors.textSecondary),
                 ),
@@ -632,7 +637,8 @@ class _RecentShipPanel extends StatelessWidget {
                       ? strings.text('profile.hangar.none')
                       : PersonalProfileShipNames.primary(context, ship!),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: _caption(context),
                 ),
               ],
@@ -716,7 +722,8 @@ class _InlineFact extends StatelessWidget {
           child: Text(
             AppStrings.of(context).text(labelKey),
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            overflow: TextOverflow.fade,
+            softWrap: false,
             style: _caption(context)
                 ?.copyWith(color: tokens.colors.textSecondary),
           ),
@@ -726,7 +733,8 @@ class _InlineFact extends StatelessWidget {
           child: Text(
             value,
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            overflow: TextOverflow.fade,
+            softWrap: false,
             style: _caption(context),
           ),
         ),

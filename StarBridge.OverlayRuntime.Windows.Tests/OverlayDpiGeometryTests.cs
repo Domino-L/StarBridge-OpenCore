@@ -18,8 +18,9 @@ internal static class OverlayDpiGeometryTests
             {
                 typeof(OverlayCompositionHudWindow).GetMethod("ResolveDeviceBounds", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
                 int Read(string name) => (int)typeof(OverlayCompositionHudWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
-                if (Read("_pixelWidth") != 2560 || Read("_pixelHeight") != 1440 || Read("_left") != -2560)
-                    throw new Exception($"Headless Host at {scale * 100}% must preserve physical monitor bounds; actual {Read("_pixelWidth")}x{Read("_pixelHeight")}");
+                // One row short of the monitor: covering it all would make Windows treat the HUD as a full-screen app.
+                if (Read("_pixelWidth") != 2560 || Read("_pixelHeight") != 1439 || Read("_left") != -2560)
+                    throw new Exception($"Headless Host at {scale * 100}% must keep the physical monitor width and stop one row short; actual {Read("_pixelWidth")}x{Read("_pixelHeight")}");
             }
             finally { window.Close(); }
         }

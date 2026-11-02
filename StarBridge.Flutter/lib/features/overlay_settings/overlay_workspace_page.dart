@@ -1,4 +1,22 @@
+import '../../shared/guide/guide_scope.dart';
+import 'overlay_appearance_qualification.dart';
+
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
+
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+
 import 'package:flutter/services.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -8,25 +26,29 @@ import 'overlay_settings_models.dart';
 import 'overlay_preset_import_preview.dart';
 import 'overlay_preset_transfer.dart';
 import 'overlay_scene_controller.dart';
-import 'overlay_scene_picker.dart';
+import 'overlay_source_card.dart';
 import 'overlay_source_binding_field.dart';
 import 'overlay_chat_sources_field.dart';
 import 'overlay_source_limit_notice.dart';
 import 'overlay_roster_editor.dart';
 import 'overlay_workspace_appearance_center.dart';
+import 'overlay_workspace_appearance_entry.dart';
 import 'overlay_workspace_controls.dart';
 import 'overlay_workspace_editor_state.dart';
+import 'overlay_calm_display_controls.dart';
 import 'overlay_workspace_fullscreen.dart';
+import 'overlay_workspace_gesture_save.dart';
 import 'overlay_workspace_group_navigation.dart';
 import 'overlay_workspace_frame.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_preset_name.dart';
 import 'overlay_workspace_module.dart';
 import 'overlay_workspace_module_style_controls.dart';
 import 'overlay_workspace_preset_bar.dart';
 import 'overlay_workspace_preview_stage.dart';
 import 'overlay_workspace_runtime_card.dart';
-import 'overlay_settings_save_bar.dart';
 import 'overlay_workspace_schema.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class OverlayWorkspacePage extends StatefulWidget {
   const OverlayWorkspacePage({
@@ -50,6 +72,77 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
   bool _settingsOpen = false;
   final _editor = OverlayWorkspaceEditorState();
   final _previewKey = GlobalKey();
+  bool _retrying = false;
+  int _retryEpoch = 0;
+  ValueGetter<InteractionSource> _retrySource = () =>
+      InteractionSource.programmatic;
+
+  @override
+  void didUpdateWidget(OverlayWorkspacePage old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.module, widget.module)) {
+      ++_retryEpoch;
+      _retrying = false;
+      _retrySource = () => InteractionSource.programmatic;
+    }
+  }
+
+  Future<void> _retry(InteractionSource source) async {
+    final owner = widget.module, before = widget.module.projection.value;
+    if (_retrying || before.busy) return;
+    final epoch = ++_retryEpoch;
+    setState(() => _retrying = true);
+    try {
+      await runStarBridgeActivation(source, () async {
+        _retrySource = captureStarBridgeActivationSource();
+        // A failed save retries the save; reading again would drop the
+        // adjustments it still holds.
+        if (before.dirty) {
+          await owner.save();
+          return;
+        }
+        if (!mounted ||
+            epoch != _retryEpoch ||
+            !identical(owner, widget.module) ||
+            owner.projection.value.busy) {
+          return;
+        }
+        await owner.refresh();
+      });
+    } finally {
+      if (mounted && epoch == _retryEpoch && identical(owner, widget.module)) {
+        setState(() => _retrying = false);
+      }
+    }
+  }
+
+  Widget _waiting() => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        final source = resolveStarBridgeInitialReadSource(
+          context,
+          _retrySource(),
+        );
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion || source == InteractionSource.keyboard,
+          ),
+          child: Semantics(
+            liveRegion: true,
+            child: SuiteBusyFrame(
+              busy: true,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: SuiteBusyLabel(_copy(context, 'overlay.loading')),
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
 
   @override
   void initState() {
@@ -73,15 +166,33 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
       valueListenable: widget.module.projection,
       builder: (context, projection, _) {
         if (projection.operation == OverlayWorkspaceOperation.reading) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!projection.available) {
-          return _Unavailable(
-            failure: projection.failure,
-            onRetry: widget.module.refresh,
+          return LoadingContentProbe(
+            route: '/overlay',
+            status: LoadingContentStatus.waiting,
+            child: Center(child: _waiting()),
           );
         }
-        return _content(context, projection);
+        if (!projection.available) {
+          return LoadingContentProbe(
+            route: '/overlay',
+            status: LoadingContentStatus.unavailable,
+            child: _Unavailable(
+              failure: projection.failure,
+              onRetry: _retrying || projection.busy
+                  ? null
+                  : (source) => unawaited(_retry(source)),
+            ),
+          );
+        }
+        return LoadingContentProbe(
+          route: '/overlay',
+          status: LoadingContentStatus.data,
+          items: 1,
+          child: OverlayWorkspaceGestureSave(
+            module: widget.module,
+            child: _content(context, projection),
+          ),
+        );
       },
     );
   }
@@ -98,42 +209,18 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
               (widget.scenes == null || field.field != 'scenePreference'),
         )
         .toList(growable: false);
-    return Stack(
-      children: [
-        if (_appearanceCenterOpen)
-          OverlayWorkspaceAppearanceCenter(
-            projection: projection,
-            module: widget.module,
-            onBack: () => setState(() => _appearanceCenterOpen = false),
-          )
-        else
-          _workspace(context, projection, active, fields),
-        Align(
-          alignment: AlignmentDirectional.bottomCenter,
-          child: MediaQuery.disableAnimationsOf(context)
-              ? (projection.dirty
-                    ? _SaveBar(projection: projection, module: widget.module)
-                    : const SizedBox.shrink())
-              : AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 160),
-                  reverseDuration: const Duration(milliseconds: 100),
-                  switchInCurve: const Cubic(0.16, 1, 0.3, 1),
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween(
-                        begin: const Offset(0, .15),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  ),
-                  child: projection.dirty
-                      ? _SaveBar(projection: projection, module: widget.module)
-                      : const SizedBox.shrink(),
-                ),
-        ),
-      ],
+    // Edits save on their own (OverlayWorkspaceModule); there is no save bar.
+    return ValueListenableBuilder<bool>(
+      valueListenable: widget.module.appearanceQualificationUnknown,
+      builder: (_, unknown, child) =>
+          OverlayAppearanceQualification(unknown: unknown, child: child!),
+      child: _appearanceCenterOpen
+          ? OverlayWorkspaceAppearanceCenter(
+              projection: projection,
+              module: widget.module,
+              onBack: () => setState(() => _appearanceCenterOpen = false),
+            )
+          : _workspace(context, projection, active, fields),
     );
   }
 
@@ -147,13 +234,23 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
       children: [
         OverlayWorkspaceSettingsGroup(
           group: _group,
+          editOwner: (widget.module, projection.snapshot),
+          currentEditOwner: () =>
+              (widget.module, widget.module.projection.value.snapshot),
           fields: fields,
           settings: projection.settings!,
           appearances: projection.snapshot!.appearances,
           onChanged: widget.module.updateSetting,
           onExperiencePreset: widget.module.applyExperiencePreset,
           footer: _moduleStyleControls(projection),
-          header: _sourceField(projection),
+          // Appearance Center stays the full appearance page; this group keeps
+          // the quick fields and links to it.
+          header: _group == 'appearance'
+              ? OverlayWorkspaceAppearanceEntry(
+                  projection: projection,
+                  onPressed: () => setState(() => _appearanceCenterOpen = true),
+                )
+              : _sourceField(projection),
         ),
         if (_group == 'startup')
           OverlayWorkspaceHotkeyCard(
@@ -215,7 +312,7 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
       module: widget.module,
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, projection.dirty ? 76 : 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -229,10 +326,13 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
                     _copy(context, 'overlay.title'),
                     style: Theme.of(context).textTheme.titleLarge,
                   );
-                  final runtime = OverlayWorkspaceRuntimeCard(
-                    projection: projection,
-                    compact: true,
-                    onAction: () => _runRuntimeAction(projection),
+                  final runtime = GuideAnchor(
+                    id: 'overlay.runtime',
+                    child: OverlayWorkspaceRuntimeCard(
+                      projection: projection,
+                      compact: true,
+                      onAction: () => _runRuntimeAction(projection),
+                    ),
                   );
                   return constraints.maxWidth >= 760
                       ? Row(
@@ -254,27 +354,54 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
-              OverlayWorkspacePresetBar(
-                scenes: widget.scenes,
-                compact: true,
-                showLegacyScene: widget.scenes == null,
-                projection: projection,
-                module: widget.module,
-                onImport: () => _importPreset(projection),
-                onExport: () => _exportPreset(active),
-                onOpenAppearance: () =>
-                    setState(() => _appearanceCenterOpen = true),
-                sourceSelector: widget.scenes == null
-                    ? null
-                    : OverlayScenePicker(
-                        controller: widget.scenes!,
-                        compact: true,
-                      ),
+              GuideAnchor(
+                id: 'overlay.presets',
+                child: OverlayWorkspacePresetBar(
+                  scenes: widget.scenes,
+                  compact: true,
+                  showLegacyScene: widget.scenes == null,
+                  projection: projection,
+                  module: widget.module,
+                  onImport: () => _importPreset(projection),
+                  onImportSource: (source) =>
+                      _importPreset(projection, source: source),
+                  onExport: () => _exportPreset(active),
+                  onExportSource: (source) =>
+                      _exportPreset(active, source: source),
+                  onOpenAppearance: () =>
+                      setState(() => _appearanceCenterOpen = true),
+                ),
               ),
+              if (widget.scenes case final scenes?
+                  when projection.snapshot?.sourcePresetsEnabled == true) ...[
+                const SizedBox(height: 12),
+                GuideAnchor(
+                  id: 'overlay.sources',
+                  child: OverlaySourceCard(
+                    scenes: scenes,
+                    workspace: widget.module,
+                  ),
+                ),
+              ],
             ],
           ),
           if (projection.failure case final failure?)
-            _Failure(failure: failure, onRetry: widget.module.refresh),
+            _Failure(
+              failure: failure,
+              onRetry: _retrying || projection.busy
+                  ? null
+                  : (source) => unawaited(_retry(source)),
+              onDiscard: projection.dirty && !_retrying && !projection.busy
+                  ? widget.module.discardChanges
+                  : null,
+            ),
+          // A failed save is more urgent; the introduction waits for it.
+          if (projection.settings?['calmDisplay'] == 'Unset' &&
+              projection.failure == null)
+            OverlayCalmDisplayIntro(
+              onChoose: (value) =>
+                  widget.module.updateSetting('calmDisplay', value),
+            ),
           if (projection.runtime.failureCode ==
               'overlay.sources_limit_exceeded')
             OverlaySourceLimitNotice(
@@ -285,12 +412,19 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
           Expanded(
             key: const Key('overlay-workspace-content'),
             child: OverlayWorkspaceFrame(
-              navigation: OverlayWorkspaceGroupNavigation(
-                selected: _group,
-                onSelected: _selectGroup,
+              navigation: GuideAnchor(
+                id: 'overlay.groups',
+                child: OverlayWorkspaceGroupNavigation(
+                  selected: _group,
+                  onSelected: _selectGroup,
+                  mark: (group) => overlayWorkspaceGroupMark(projection, group),
+                ),
               ),
-              selector: DropdownButtonFormField<String>(
+              selector: StarBridgeSelectFormField<String>(
                 key: ValueKey('overlay-group-compact-$_group'),
+                identity: 'overlay-workspace-group',
+                controlKey: const Key('overlay-workspace-group-command'),
+                semanticLabel: _copy(context, 'overlay.workspace.sections'),
                 initialValue: _group,
                 isExpanded: true,
                 decoration: const InputDecoration(isDense: true),
@@ -298,14 +432,19 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
                   for (final group in overlayWorkspaceNavigationGroupOrder)
                     DropdownMenuItem(
                       value: group,
-                      child: Text(overlayWorkspaceGroupName(context, group)),
+                      child: Text(
+                        overlayWorkspaceGroupName(context, group),
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                      ),
                     ),
                 ],
                 onChanged: (value) {
                   if (value != null) _selectGroup(value);
                 },
               ),
-              preview: preview,
+              preview: GuideAnchor(id: 'overlay.preview', child: preview),
               settings: _settings(projection, fields),
               settingsOpen: _settingsOpen,
               onToggleSettings: () =>
@@ -397,46 +536,81 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     }
   }
 
-  Future<void> _exportPreset(OverlayWorkspacePreset preset) async {
+  Future<void> _exportPreset(
+    OverlayWorkspacePreset preset, {
+    InteractionSource? source,
+  }) async {
+    source ??= currentStarBridgeActivationSource;
     final package = OverlayPresetTransfer(
-      name: preset.name,
+      name: preset.shownName(AppStrings.of(context)),
       settings: preset.settings,
       layout: preset.layout,
       sources: preset.sources,
     ).serialize();
     await Clipboard.setData(ClipboardData(text: package));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_copy(context, 'overlay.workspace.exported'))),
+    showStarBridgeSnackBar(
+      context,
+      starBridgeTimedSnackBar(
+        content: Text(_copy(context, 'overlay.workspace.exported')),
+      ),
+      source: source,
     );
   }
 
-  Future<void> _importPreset(OverlayWorkspaceProjection projection) async {
+  Future<void> _importPreset(
+    OverlayWorkspaceProjection projection, {
+    InteractionSource? source,
+  }) => runStarBridgeActivation<void>(
+    source ?? currentStarBridgeActivationSource,
+    () => _inspectAndImportPreset(projection, source: source),
+  );
+
+  Future<void> _inspectAndImportPreset(
+    OverlayWorkspaceProjection projection, {
+    InteractionSource? source,
+  }) async {
     var importText = '';
-    final payload = await showDialog<String>(
-      context: context,
+    var inspectSource = source;
+    final payload = await showStarBridgeDialog<String>(
+      context,
+      source: source,
       builder: (context) => AlertDialog(
         title: Text(_copy(context, 'overlay.workspace.importTitle')),
         scrollable: true,
         content: SizedBox(
           width: 560,
-          child: TextField(
-            onChanged: (value) => importText = value,
-            minLines: 8,
-            maxLines: 14,
-            decoration: InputDecoration(
-              labelText: _copy(context, 'overlay.workspace.importLabel'),
-              helperText: _copy(context, 'overlay.workspace.importHelp'),
+          child: StarBridgeFieldFrame(
+            builder: (_, focus) => TextField(
+              key: const Key('overlay-preset-import-text'),
+              focusNode: focus,
+              onChanged: (value) => importText = value,
+              minLines: 8,
+              maxLines: 14,
+              decoration: InputDecoration(
+                labelText: _copy(context, 'overlay.workspace.importLabel'),
+                helperText: _copy(context, 'overlay.workspace.importHelp'),
+              ),
             ),
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) =>
+                dismissStarBridgeDialog<String>(context, source: source),
             child: Text(_copy(context, 'overlay.workspace.cancel')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, importText),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            onActivate: (source) {
+              inspectSource = source;
+              dismissStarBridgeDialog(
+                context,
+                source: source,
+                result: importText,
+              );
+            },
             child: Text(_copy(context, 'overlay.importPreview.inspect')),
           ),
         ],
@@ -451,8 +625,9 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
         throw const FormatException();
       }
       if (!mounted) return;
-      final confirmed = await showDialog<bool>(
-        context: context,
+      final confirmed = await showStarBridgeDialog<bool>(
+        context,
+        source: inspectSource,
         builder: (_) => OverlayPresetImportPreview(
           name: package.name,
           settings: package.settings,
@@ -471,31 +646,14 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
       );
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+      showStarBridgeSnackBar(
+        context,
+        starBridgeTimedSnackBar(
           content: Text(_copy(context, 'overlay.workspace.importInvalid')),
         ),
+        source: currentStarBridgeActivationSource,
       );
     }
-  }
-}
-
-class _SaveBar extends StatelessWidget {
-  const _SaveBar({required this.projection, required this.module});
-
-  final OverlayWorkspaceProjection projection;
-  final OverlayWorkspaceModule module;
-
-  @override
-  Widget build(BuildContext context) {
-    return OverlaySettingsSaveBar(
-      busy: projection.busy,
-      onUndo: module.canUndo ? module.undo : null,
-      onRedo: module.canRedo ? module.redo : null,
-      onDiscard: projection.dirty ? module.discardChanges : null,
-      onSave: projection.dirty ? module.save : null,
-      saveKey: const Key('overlay-workspace-save'),
-    );
   }
 }
 
@@ -503,7 +661,7 @@ class _Unavailable extends StatelessWidget {
   const _Unavailable({required this.failure, required this.onRetry});
 
   final OverlaySettingsFailure? failure;
-  final VoidCallback onRetry;
+  final ValueChanged<InteractionSource>? onRetry;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -520,8 +678,10 @@ class _Unavailable extends StatelessWidget {
           const SizedBox(height: 8),
           Text(_failureText(context, failure)),
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: onRetry,
+          StarBridgeActionButton(
+            controlKey: const Key('overlay-workspace-reload'),
+            kind: StarBridgeActionKind.primary,
+            onActivate: onRetry,
             child: Text(_copy(context, 'overlay.retry')),
           ),
         ],
@@ -531,17 +691,33 @@ class _Unavailable extends StatelessWidget {
 }
 
 class _Failure extends StatelessWidget {
-  const _Failure({required this.failure, required this.onRetry});
+  const _Failure({
+    required this.failure,
+    required this.onRetry,
+    required this.onDiscard,
+  });
 
   final OverlaySettingsFailure failure;
-  final VoidCallback onRetry;
+  final ValueChanged<InteractionSource>? onRetry;
+
+  /// Only while unsaved adjustments are held after a failed save.
+  final VoidCallback? onDiscard;
 
   @override
   Widget build(BuildContext context) => MaterialBanner(
     content: Text(_failureText(context, failure)),
     actions: [
-      TextButton(
-        onPressed: onRetry,
+      if (onDiscard case final discard?)
+        StarBridgeActionButton(
+          controlKey: const Key('overlay-workspace-discard-failed'),
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (_) => discard(),
+          child: Text(_copy(context, 'overlay.workspace.discard')),
+        ),
+      StarBridgeActionButton(
+        controlKey: const Key('overlay-workspace-retry-failure'),
+        kind: StarBridgeActionKind.quiet,
+        onActivate: onRetry,
         child: Text(_copy(context, 'overlay.retry')),
       ),
     ],
@@ -554,6 +730,8 @@ String _failureText(BuildContext context, OverlaySettingsFailure? failure) =>
       OverlaySettingsFailure.invalidValue => 'overlay.error.invalidValue',
       OverlaySettingsFailure.writeFailed => 'overlay.error.writeFailed',
       OverlaySettingsFailure.readFailed => 'overlay.error.readFailed',
+      OverlaySettingsFailure.versionUnsupported =>
+        'overlay.error.versionUnsupported',
       _ => 'overlay.error.hostUnavailable',
     });
 

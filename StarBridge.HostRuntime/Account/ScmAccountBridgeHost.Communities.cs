@@ -14,6 +14,16 @@ internal sealed partial class ScmAccountBridgeHost
         var generation = Generation;
         if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+        if (session.Scm is not null && _communities is not null)
+        {
+            // Validate the original member-route shape and its scoped target before adapting to the shared reader.
+            _communities.ResolveVisitorProfileTarget(payload, FriendScope(context, generation), null, allowHistoricalProfile: true);
+            return await ReadUserProfileAsync(context, JsonSerializer.SerializeToElement(new {
+                schemaVersion = 1, source = "community",
+                reference = payload.GetProperty("memberRef").GetString(),
+                contextRef = payload.GetProperty("targetRef").GetString()
+            }), token);
+        }
         if (session.Legacy is null || _legacyPasswordLogin is null || _communities is null)
             throw new AccountBridgeHostException("profile.visitor_unavailable");
         var target = _communities.ResolveVisitorProfileTarget(payload, FriendScope(context, generation), session.Legacy.AccountId);
@@ -186,6 +196,9 @@ internal sealed partial class ScmAccountBridgeHost
             if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
             RequireSameRelaySession(RequireRelaySession(context), session);
         }
+        var imageRead = surface == "media" && payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("kind", out var imageKind) && imageKind.ValueKind == JsonValueKind.String && imageKind.GetString() == "logo"
+                ? OrganizationImageReadStarting?.Invoke(context, generation, token) : null;
         Overlay.OverlayCommunityTarget? rosterTarget = null;
         if (surface == "workspace" && !backgroundActivity && payload.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("targetRef", out var rosterReference) && rosterReference.ValueKind == JsonValueKind.String)
@@ -211,7 +224,7 @@ internal sealed partial class ScmAccountBridgeHost
                 }, token);
             if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
             RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
-            _session = result.ActiveSession.Scm;
+            CommitSharingSession(session, result.ActiveSession);
             token.ThrowIfCancellationRequested();
             if (workspaceRoster is not null)
             {
@@ -219,6 +232,7 @@ internal sealed partial class ScmAccountBridgeHost
                 rosterReady?.Invoke(workspaceRoster);
             }
             PublishPlayerActivity(context, generation, sequence, activity);
+            if (surface == "media") ObserveOrganizationLogo(imageRead, context, generation, payload, result.Result, token);
             return result.Result;
         }
         catch (AccountBridgeHostException error) when (rosterTarget is not null &&
@@ -320,19 +334,38 @@ internal sealed partial class ScmAccountBridgeHost
         if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
-        var result = await SendRelayRequestAsync(session,
-            (active, ct) => active.Legacy is { } legacy
-                ? client.ReadWpfS2Async(active.AccessToken, query, FriendScope(context, generation), legacy.AccountId, ct, observed, backgroundActivity, includeManagement,
-                    !backgroundActivity && CommunityDirectoryObserved is not null ? value => directoryRosters = value : null)
-                : client.ReadAsync(active.AccessToken, query, FriendScope(context, generation), ct), token);
-        if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
-        RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
-        _session = result.ActiveSession.Scm;
-        token.ThrowIfCancellationRequested();
-        if (directoryRosters is not null)
-            CommunityDirectoryObserved?.Invoke(context, generation, rosterSequence, rosterStartedAt, directoryRosters);
-        PublishPlayerActivity(context, generation, sequence, activity);
-        return result.Result;
+        var displayRead = await BeginOrganizationDisplayRead(context, generation, query, token);
+        var withdrawDisplay = false;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
+            RequireSameRelaySession(RequireRelaySession(context), session);
+            var result = await SendRelayRequestAsync(session,
+                (active, ct) => active.Legacy is { } legacy
+                    ? client.ReadWpfS2Async(active.AccessToken, query, FriendScope(context, generation), legacy.AccountId, ct, observed, backgroundActivity, includeManagement,
+                        !backgroundActivity && CommunityDirectoryObserved is not null ? value => directoryRosters = value : null)
+                    : client.ReadAsync(active.AccessToken, query, FriendScope(context, generation), ct), token);
+            if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
+            RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
+            CommitSharingSession(session, result.ActiveSession);
+            token.ThrowIfCancellationRequested();
+            if (directoryRosters is not null)
+                CommunityDirectoryObserved?.Invoke(context, generation, rosterSequence, rosterStartedAt, directoryRosters);
+            PublishPlayerActivity(context, generation, sequence, activity);
+            ObserveOrganizationDisplay(displayRead, context, generation, query, result.Result, token);
+            return result.Result;
+        }
+        catch (Exception error)
+        {
+            withdrawDisplay = error is not (OperationCanceledException or BridgeStaleGenerationException) &&
+                error is not AccountBridgeHostException { Code: "communities.readTransient" };
+            throw;
+        }
+        finally
+        {
+            if (displayRead is not null) OrganizationReadFinished?.Invoke(displayRead, generation, withdrawDisplay);
+        }
     }
 
     public async Task<object> ExecuteCommunityAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)

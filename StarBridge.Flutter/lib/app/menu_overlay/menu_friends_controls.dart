@@ -1,24 +1,35 @@
+import 'menu_overlay_locale.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
 import 'menu_native_popup.dart';
+import 'menu_chrome_hint.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import 'package:flutter/services.dart';
 
 import 'menu_bridge_style.dart';
 import 'menu_friends_view.dart';
 import 'menu_comms_panel.dart' show MenuInlineAvatar;
 import '../presence/manual_presence_widgets.dart';
+import '../../shared/release/official_client_profile.dart';
 
-String menuFriendActionLabel(String action) => switch (action) {
-  'send' => '发送好友申请',
-  'accept' => '接受申请',
-  'reject' => '拒绝申请',
-  'cancel' => '撤回申请',
-  'remove' => '移除好友',
-  'block' => '屏蔽此人',
-  'unblock' => '解除屏蔽',
-  _ => '',
-};
+String menuFriendActionLabel(BuildContext? context, String action) =>
+    switch (action) {
+      'send' => menuText(context, 'menu.overlay.friends.send'),
+      'accept' => menuText(context, 'menu.overlay.friends.accept'),
+      'reject' => menuText(context, 'menu.overlay.friends.reject'),
+      'cancel' => menuText(context, 'friends.action.cancel'),
+      'remove' => menuText(context, 'menu.overlay.friends.remove'),
+      'block' => menuText(context, 'menu.overlay.friends.block'),
+      'unblock' => menuText(context, 'friends.action.unblock'),
+      _ => '',
+    };
 
 class MenuFriendsControls extends StatefulWidget {
   const MenuFriendsControls({
@@ -36,7 +47,8 @@ class MenuFriendsControls extends StatefulWidget {
 
 class _MenuFriendsControlsState extends State<MenuFriendsControls> {
   MenuBridgeColors get ink => MenuBridgeColors.of(context);
-  Color _statusColor(String value) => menuPresenceColor(value, context: context);
+  Color _statusColor(String value) =>
+      menuPresenceColor(value, context: context);
 
   late final _query = TextEditingController(text: widget.view.query);
   final _confirmationAnchor = GlobalKey(), _feedbackAnchor = GlobalKey();
@@ -107,7 +119,7 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                     Text(
                       view.identity?.name.isNotEmpty == true
                           ? view.identity!.name
-                          : '我的状态',
+                          : menuText(context, 'menu.overlay.friends.myStatus'),
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -116,136 +128,249 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                     if (view.identity?.handle.isNotEmpty == true)
                       Text(
                         view.identity!.handle,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: ink.muted,
-                        ),
+                        style: TextStyle(fontSize: 12, color: ink.muted),
                       ),
                     MenuNativePopup(
-                      style: MenuStyle(
-                        backgroundColor: WidgetStatePropertyAll(
-                          ink.ground,
-                        ),
+                      identity: (view.scope, own.key, 'presence'),
+                      label: menuText(
+                        context,
+                        'menu.overlay.friends.changePresence',
                       ),
-                      menuChildren: [
+                      enabled:
+                          (own.change ||
+                              view.canEnterOffline ||
+                              own.status == 'presence.manualOffline') &&
+                          !own.busy,
+                      style: MenuStyle(
+                        backgroundColor: WidgetStatePropertyAll(ink.ground),
+                      ),
+                      entries: [
                         for (final mode in ['online', 'invisible'])
-                          MenuItemButton(
-                            onPressed: own.change && !own.busy
-                                ? () =>
+                          StarBridgeMenuEntry(
+                            id: 'friends-presence-$mode',
+                            label: mode == 'online'
+                                ? OfficialClientProfile.connectionModes &&
+                                          view.canRestoreOnline
+                                      ? menuText(
+                                          context,
+                                          'menu.overlay.friends.resumeOnline',
+                                        )
+                                      : menuText(
+                                          context,
+                                          'menu.overlay.friends.online',
+                                        )
+                                : menuText(
+                                    context,
+                                    'menu.overlay.friends.invisible',
+                                  ),
+                            onActivate:
+                                mode == 'online' &&
+                                    OfficialClientProfile.connectionModes &&
+                                    view.canRestoreOnline &&
+                                    !own.busy
+                                ? (_) => widget.onAction(
+                                    'resumeOnline',
+                                    own.key,
+                                    '',
+                                  )
+                                : own.change && !own.busy
+                                ? (_) =>
                                       widget.onAction('presence', own.key, mode)
                                 : null,
                             child: Text(
-                              mode == 'online' ? '在线' : '隐身',
+                              mode == 'online'
+                                  ? OfficialClientProfile.connectionModes &&
+                                            view.canRestoreOnline
+                                        ? menuText(
+                                            context,
+                                            'menu.overlay.friends.resumeOnline',
+                                          )
+                                        : menuText(
+                                            context,
+                                            'menu.overlay.friends.online',
+                                          )
+                                  : menuText(
+                                      context,
+                                      'menu.overlay.friends.invisible',
+                                    ),
                               style: TextStyle(color: _statusColor(mode)),
                             ),
                           ),
-                      ],
-                      builder: (context, controller, child) => BridgeMenuAction(
-                        label: '更改我的在线状态',
-                        padding: EdgeInsets.symmetric(vertical: 6),
-                        onPressed: own.change && !own.busy
-                            ? () => controller.isOpen
-                                  ? controller.close()
-                                  : controller.open()
-                            : null,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _statusColor(
-                                  own.status.replaceFirst('presence.', ''),
-                                ),
-                              ),
+                        if (OfficialClientProfile.connectionModes)
+                          StarBridgeMenuEntry(
+                            id: 'friends-presence-offline',
+                            controlKey: const ValueKey(
+                              'friends-presence-offline',
                             ),
-                            SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                manualPresenceText(context, own.status),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: _statusColor(
-                                    own.status.replaceFirst('presence.', ''),
+                            label: manualPresenceText(
+                              context,
+                              'presence.selectOffline',
+                            ),
+                            onActivate: view.canEnterOffline && !own.busy
+                                ? (_) => widget.onAction(
+                                    'offlineMode',
+                                    own.key,
+                                    '',
+                                  )
+                                : null,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _statusColor('manualOffline'),
+                                  ),
+                                  child: const SizedBox.square(dimension: 8),
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Text(
+                                    manualPresenceText(
+                                      context,
+                                      'presence.selectOffline',
+                                    ),
+                                    style: TextStyle(
+                                      color: _statusColor('manualOffline'),
+                                    ),
                                   ),
                                 ),
-                              ),
+                              ],
                             ),
-                            SizedBox(width: 4),
-                            MenuGlyphView(
-                              MenuGlyph.down,
-                              size: 16,
-                              color: ink.muted,
+                          ),
+                      ],
+                      builder: (context, controller, focus, toggle) =>
+                          BridgeMenuAction(
+                            focusNode: focus,
+                            label: menuText(
+                              context,
+                              'menu.overlay.friends.changePresence',
                             ),
-                          ],
-                        ),
-                      ),
+                            padding: EdgeInsets.symmetric(vertical: 6),
+                            onPressed:
+                                (own.change ||
+                                        view.canEnterOffline ||
+                                        own.status ==
+                                            'presence.manualOffline') &&
+                                    !own.busy
+                                ? () =>
+                                      toggle(currentStarBridgeActivationSource)
+                                : null,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _statusColor(
+                                      own.status.replaceFirst('presence.', ''),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    manualPresenceText(context, own.status),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _statusColor(
+                                        own.status.replaceFirst(
+                                          'presence.',
+                                          '',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                MenuGlyphView(
+                                  MenuGlyph.down,
+                                  size: 16,
+                                  color: ink.muted,
+                                ),
+                              ],
+                            ),
+                          ),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          if (own.busy) BridgeCaption('正在切换状态…'),
-          if (own.failed) BridgeCaption('状态未更新，请核对后重试。'),
+          if (own.busy)
+            BridgeCaption(menuText(context, 'menu.overlay.friends.switching')),
+          if (own.failed)
+            BridgeCaption(
+              menuText(context, 'menu.overlay.friends.statusFailed'),
+            ),
           SizedBox(height: 12),
         ],
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
-              child: TextField(
-                key: ValueKey('friends-account-search'),
-                controller: _query,
-                readOnly: view.busy,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: ink.text,
-                  fontFamily: 'Source Sans 3',
-                  fontFamilyFallback: ['Source Han Sans CN'],
-                ),
-                onChanged: widget.onFilter,
-                onSubmitted: view.busy
-                    ? null
-                    : (value) => widget.onAction('search', '', value),
-                textInputAction: TextInputAction.search,
-                inputFormatters: [
-                  TextInputFormatter.withFunction(
-                    (oldValue, newValue) =>
-                        newValue.text.length <= 128 ? newValue : oldValue,
-                  ),
-                ],
-                decoration: InputDecoration(
-                  hintText: '搜索好友 / 添加好友',
-                  hintStyle: TextStyle(
-                    color: ink.muted,
+              child: StarBridgeFieldFrame(
+                key: const ValueKey('friends-account-field-frame'),
+                builder: (_, focus) => TextField(
+                  focusNode: focus,
+                  key: ValueKey('friends-account-search'),
+                  controller: _query,
+                  readOnly: view.busy,
+                  style: TextStyle(
                     fontSize: 13,
+                    color: ink.text,
                     fontFamily: 'Source Sans 3',
                     fontFamilyFallback: ['Source Han Sans CN'],
                   ),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 10,
-                  ),
-                  filled: true,
-                  fillColor: ink.ground,
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: ink.line),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: ink.blue),
+                  onChanged: widget.onFilter,
+                  onSubmitted: view.busy
+                      ? null
+                      : (value) => runStarBridgeSynchronousActivation(
+                          InteractionSource.keyboard,
+                          () => widget.onAction('search', '', value),
+                        ),
+                  textInputAction: TextInputAction.search,
+                  inputFormatters: [
+                    TextInputFormatter.withFunction(
+                      (oldValue, newValue) =>
+                          newValue.text.length <= 128 ? newValue : oldValue,
+                    ),
+                  ],
+                  decoration: InputDecoration(
+                    hintText: menuText(
+                      context,
+                      'menu.overlay.friends.searchHint',
+                    ),
+                    hintStyle: TextStyle(
+                      color: ink.muted,
+                      fontSize: 13,
+                      fontFamily: 'Source Sans 3',
+                      fontFamilyFallback: ['Source Han Sans CN'],
+                    ),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 10,
+                    ),
+                    filled: true,
+                    fillColor: ink.ground,
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: ink.line),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: ink.blue),
+                    ),
                   ),
                 ),
               ),
             ),
-            Tooltip(
-              message: '搜索账号（Enter）',
+            MenuChromeHint(
+              message: menuText(context, 'menu.overlay.friends.searchEnter'),
               child: BridgeMenuAction(
                 key: ValueKey('friends-search'),
-                label: '搜索账号',
+                label: menuText(context, 'menu.overlay.friends.search'),
                 onPressed: view.busy
                     ? null
                     : () => widget.onAction('search', '', _query.text),
@@ -257,11 +382,11 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
                 ),
               ),
             ),
-            Tooltip(
-              message: '刷新列表',
+            MenuChromeHint(
+              message: menuText(context, 'menu.overlay.friends.refresh'),
               child: BridgeMenuAction(
                 key: ValueKey('friends-refresh-'),
-                label: '刷新列表',
+                label: menuText(context, 'menu.overlay.friends.refresh'),
                 onPressed: view.busy
                     ? null
                     : () => widget.onAction('refresh', '', ''),
@@ -281,66 +406,84 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
             Expanded(
               child: view.section == 'friends'
                   ? Text(
-                      '查看状态 · 点选好友开始聊天',
+                      menuText(context, 'menu.overlay.friends.selectToChat'),
                       style: TextStyle(fontSize: 12, color: ink.muted),
                     )
                   : BridgeMenuAction(
                       key: ValueKey('friends-section-friends'),
-                      label: '返回好友列表',
+                      label: menuText(context, 'menu.overlay.friends.back'),
                       padding: EdgeInsets.symmetric(vertical: 8),
                       onPressed: view.busy
                           ? null
                           : () => widget.onAction('section', '', 'friends'),
                       child: Text(
-                        '‹ 返回好友列表',
+                        menuText(context, 'menu.overlay.friends.backArrow'),
                         style: TextStyle(color: ink.blue, fontSize: 13),
                       ),
                     ),
             ),
             MenuNativePopup(
+              identity: (view.scope, 'manage'),
+              label: menuText(context, 'menu.overlay.friends.manage'),
               style: MenuStyle(
                 backgroundColor: WidgetStatePropertyAll(ink.ground),
               ),
-              menuChildren: [
+              entries: [
                 for (final section in {
-                  'incoming': '收到的申请',
-                  'outgoing': '已发出的申请',
-                  'blocked': '屏蔽名单',
+                  'incoming': menuText(context, 'friends.incoming'),
+                  'outgoing': menuText(
+                    context,
+                    'menu.overlay.friends.outgoing',
+                  ),
+                  'blocked': menuText(context, 'menu.overlay.friends.blocked'),
                 }.entries)
-                  MenuItemButton(
-                    key: ValueKey('friends-section-${section.key}'),
-                    onPressed: view.busy
+                  StarBridgeMenuEntry(
+                    id: 'friends-section-${section.key}',
+                    controlKey: ValueKey('friends-section-${section.key}'),
+                    label: section.value,
+                    onActivate: view.busy
                         ? null
-                        : () => widget.onAction('section', '', section.key),
+                        : (_) => widget.onAction('section', '', section.key),
                     child: Text(section.value),
                   ),
               ],
-              builder: (context, controller, child) => BridgeMenuAction(
+              builder: (context, controller, focus, toggle) => BridgeMenuAction(
+                focusNode: focus,
                 key: ValueKey('friends-manage'),
-                label: '好友管理',
+                label: menuText(context, 'menu.overlay.friends.manage'),
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                onPressed: () =>
-                    controller.isOpen ? controller.close() : controller.open(),
+                onPressed: () => toggle(currentStarBridgeActivationSource),
                 child: Text(
-                  '管理 ▾',
+                  menuText(context, 'menu.overlay.friends.manageMenu'),
                   style: TextStyle(fontSize: 13, color: ink.blue),
                 ),
               ),
             ),
           ],
         ),
-        if (view.busy) BridgeCaption('正在处理，请勿重复操作…'),
+        if (view.busy)
+          BridgeCaption(menuText(context, 'menu.overlay.friends.busy')),
         if (view.feedback.isNotEmpty)
           BridgeCaption(key: _feedbackAnchor, switch (view.feedback) {
-            'invalidSearch' => '请输入 2–128 个字符的账号或呼号。',
-            'expired' => '此操作已失效，请刷新列表后重新选择。',
-            'rejected' => '操作未完成。请刷新列表确认关系与权限后再试。',
-            'unknown' => '操作结果尚未确认。请刷新列表核对，勿重复操作。',
-            'reviewed' => '列表已更新，请核对当前关系。',
-            _ =>
-              '${menuFriendActionLabel(view.feedback.replaceFirst('success.', ''))}已完成。',
+            'invalidSearch' => menuText(
+              context,
+              'menu.overlay.friends.invalidSearch',
+            ),
+            'expired' => menuText(context, 'menu.overlay.friends.expired'),
+            'rejected' => menuText(context, 'menu.overlay.friends.rejected'),
+            'unknown' => menuText(context, 'menu.overlay.friends.unknown'),
+            'reviewed' => menuText(context, 'menu.overlay.friends.reviewed'),
+            _ => menuText(context, 'menu.overlay.friends.completed', {
+              'action': menuFriendActionLabel(
+                context,
+                view.feedback.replaceFirst('success.', ''),
+              ),
+            }),
           }),
-        if (view.requiresRefresh) BridgeCaption('核对列表前暂不可继续好友操作。'),
+        if (view.requiresRefresh)
+          BridgeCaption(
+            menuText(context, 'menu.overlay.friends.reviewRequired'),
+          ),
         if (pending != null)
           Container(
             key: ValueKey('friends-confirmation'),
@@ -354,20 +497,30 @@ class _MenuFriendsControlsState extends State<MenuFriendsControls> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${menuFriendActionLabel(pending.action)}：${pending.name}？',
+                    menuText(context, 'menu.overlay.friends.confirm', {
+                      'action': menuFriendActionLabel(context, pending.action),
+                      'name': pending.name,
+                    }),
                 ),
                 if (pending.action == 'remove')
-                  BridgeCaption('移除后需要重新发送好友申请才能恢复好友关系。'),
+                  BridgeCaption(
+                    menuText(context, 'menu.overlay.friends.removeHint'),
+                  ),
                 if (pending.action == 'block')
-                  BridgeCaption('现有好友或申请关系会被移除，对方无法再向你发送好友申请。可在屏蔽名单中解除。'),
+                  BridgeCaption(
+                    menuText(context, 'menu.overlay.friends.blockHint'),
+                  ),
                 Wrap(
                   children: [
                     action(
-                      menuFriendActionLabel(pending.action),
+                      menuFriendActionLabel(context, pending.action),
                       'confirm',
                       key: pending.token,
                     ),
-                    action('取消', 'dismiss'),
+                    action(
+                      menuText(context, 'menu.overlay.window.cancel'),
+                      'dismiss',
+                    ),
                   ],
                 ),
               ],

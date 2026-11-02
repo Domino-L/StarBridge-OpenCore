@@ -15,7 +15,10 @@ class MenuDisplaySettingsCard extends StatelessWidget {
         section: 'display',
         read: (settings) => MenuDisplayPreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuDisplayEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuDisplayEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

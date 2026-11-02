@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -35,7 +37,7 @@ class AdminPort extends SettingsPort
   );
   @override
   Future<RoomReadResult> read() async {
-    final result = await super.read();
+    final result = resolvedMenuCopy(await super.read());
     if (result.directory == null) return result;
     final d = result.directory!, r = d.rooms.single;
     return RoomReadResult(

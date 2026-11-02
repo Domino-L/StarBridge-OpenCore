@@ -36,6 +36,8 @@ void main() {
     if (const bool.fromEnvironment('PROFILE_MODULE_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       }.entries) {
         await (FontLoader(
@@ -45,8 +47,8 @@ void main() {
     }
   });
 
-  test('confirmed missing local page creates, saves and reopens without remote data', () async {
-    final h = Harness();
+  test('legacy missing local page creates, saves and reopens without remote data', () async {
+    final h = Harness(legacy: true);
     addTearDown(h.close);
     h.remote.available = false;
     h.connection.displayName = 'Account display name';
@@ -93,9 +95,9 @@ void main() {
 
   for (final saved in [false, true]) {
     test(
-      'online adapter exception does not block local content (saved=$saved)',
+      'legacy online adapter exception does not block local content (saved=$saved)',
       () async {
-        final h = Harness();
+        final h = Harness(legacy: true);
         addTearDown(h.close);
         if (saved) await h.port.save(edit(await h.port.read()));
         h.remote.readError = StateError('Offline fixture');
@@ -186,13 +188,13 @@ void main() {
     for (final mode in AppearanceMode.values) {
       for (final width in [360.0, 1280.0]) {
         testWidgets(
-          'first page cancel, failure, retry and save $locale $mode $width',
+          'legacy first page cancel, failure, retry and save $locale $mode $width',
           (tester) async {
             tester.view.devicePixelRatio = 1;
             tester.view.physicalSize = Size(width, 1100);
             addTearDown(tester.view.resetDevicePixelRatio);
             addTearDown(tester.view.resetPhysicalSize);
-            final h = Harness();
+            final h = Harness(legacy: true);
             h.remote.available = false;
             final module = createPersonalProfileModule(h.port);
             await tester.runAsync(module.initialize);

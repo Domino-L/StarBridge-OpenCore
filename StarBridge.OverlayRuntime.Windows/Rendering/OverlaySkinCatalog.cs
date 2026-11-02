@@ -95,30 +95,11 @@ internal static partial class OverlaySkinCatalog
                 "#081722",
                 "#29AFFF",
                 "#69CCFF"),
-            OverlaySkinPublicationState.Released),
-            new(
-            OverlaySkin.LagrangeWeave,
-            "拉格朗日织网",
-            "Lagrange Weave",
-            OverlayVisualTheme.LagrangeWeave,
-            LocksTheme: true,
-            OverlayStartupTransitionStyle.LagrangeWeaveEquilibrium,
-            Entitlement: null,
-            SupportsBloom: true,
-            OverlaySkinRenderKind.LagrangeWeave,
-            OverlaySkin.Default,
-            new OverlaySkinPresentation(
-                "以平衡点、连接织网与几何融合表现模块关系，适合强调全局态势。",
-                "Equilibrium points, connected meshes, and fused geometry emphasize the wider tactical picture.",
-                ["平衡点", "连接织网", "模块融合"],
-                ["Equilibrium points", "Connected mesh", "Module fusion"],
-                "#071215",
-                "#B7FF58",
-                "#48D8C8"),
-            OverlaySkinPublicationState.Archived)
+            OverlaySkinPublicationState.Released)
         ];
 
         RegisterAdditionalProfiles(profiles);
+        RegisterInstalledProfiles(profiles);
         ConfigureOptionalProfiles(profiles);
 
         var duplicateIds = profiles
@@ -136,6 +117,7 @@ internal static partial class OverlaySkinCatalog
     }
 
     static partial void RegisterAdditionalProfiles(List<OverlaySkinProfile> profiles);
+    static partial void RegisterInstalledProfiles(List<OverlaySkinProfile> profiles);
     static partial void ConfigureOptionalProfiles(List<OverlaySkinProfile> profiles);
 
     private static readonly IReadOnlyDictionary<OverlaySkin, OverlaySkinProfile> ProfilesById =
@@ -304,6 +286,7 @@ internal static partial class OverlaySkinCatalog
                !Get(settings.Skin).IsReleased ||
                !Get(settings.EffectiveRequestedSkin).IsReleased ||
                Profiles.Any(profile =>
+                   profile.DefaultTheme != OverlayVisualTheme.Default &&
                    profile.DefaultTheme == settings.Theme &&
                    !profile.IsReleased);
     }

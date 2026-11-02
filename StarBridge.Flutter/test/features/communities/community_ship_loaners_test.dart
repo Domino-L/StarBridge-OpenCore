@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
@@ -101,7 +102,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Loaners · 1'));
+    // The header's text is presentation-only under IgnorePointer.
+    final disclosure = find.byWidgetPredicate(
+      (widget) =>
+          widget is SuitePressable && widget.semanticLabel == 'Loaners · 1',
+    );
+    expect(disclosure, findsOneWidget);
+    await tester.ensureVisible(disclosure);
+    await tester.tap(disclosure);
     await tester.pumpAndSettle();
     expect(find.text('Replacement Test'), findsNWidgets(2));
     expect(tester.takeException(), isNull);

@@ -1,7 +1,12 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_activation_origin.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_panel.dart';
@@ -33,7 +38,7 @@ void main() {
     // Slow presence must not hold up usable chat or require a member-tab visit.
     port.workspaceGate.complete();
     await Future<void>.delayed(const Duration(milliseconds: 150));
-    final org = session.currentView['organization'] as Map;
+    final org = resolvedMenuCopy(session.currentView)['organization'] as Map;
     expect(org['tab'], 'chat');
     expect((org['overview'] as Map)['online'], isA<int>());
     expect(port.workspaceReads, 1);
@@ -81,7 +86,7 @@ void main() {
       );
       await Future<void>.delayed(const Duration(milliseconds: 20));
       session.act(
-        memberPage.buttons.firstWhere((b) => b.label == '搜索成员').key,
+        memberPage.buttons.firstWhere((b) => b.role == 'searchMembers').key,
         'pilot',
       );
       await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -98,7 +103,8 @@ void main() {
       );
       port.changes.add(null);
       expect(
-        MenuFeatureView.parse(session.currentView).organization,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .organization,
         isNull,
         reason: 'Account invalidation clears retained chrome immediately',
       );
@@ -108,20 +114,92 @@ void main() {
     tester,
   ) async {
     size(tester, const Size(1200, 450));
+    final data = fixture();
+    final org = data['organization'] as Map;
+    final sampleRows = org['rows'] as List;
+    data['rows'] = [
+      for (var i = 0; i < 60; i++) {'title': 'Scroll Pilot $i', 'detail': ''},
+    ];
+    org['rows'] = [
+      for (var i = 0; i < 60; i++)
+        {
+          ...sampleRows[i % sampleRows.length] as Map,
+          'handle': 'Scroll_ID_$i',
+          'profileKey': 'om${i + 1}',
+        },
+    ];
+    org['total'] = 60;
+    org['matched'] = 60;
+    final actions = <(String, String, InteractionSource)>[];
     await tester.pumpWidget(
       app(
         MenuOrganizationsPanel(
-          view: MenuFeatureView.parse(fixture()),
-          onAction: (_, _) {},
+          view: MenuFeatureView.parse(data),
+          onAction: (key, value) =>
+              actions.add((key, value, currentStarBridgeActivationSource)),
+          onProfile: (_) {},
         ),
       ),
     );
     await tester.pumpAndSettle();
     final tab = find.byKey(const ValueKey('community-section-members'));
-    final rect = tester.getRect(tab);
-    await tester.drag(find.text('@Pilot_2').first, const Offset(0, -220));
+    final header = find.byType(MenuOrganizationHeader);
+    final tabRect = tester.getRect(tab), headerRect = tester.getRect(header);
+    final body = find.byKey(const ValueKey('menu-org-body-members'));
+    final vertical = find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable &&
+          axisDirectionToAxis(widget.axisDirection) == Axis.vertical,
+    );
+    final bodyScrollables = find.descendant(of: body, matching: vertical);
+    expect(bodyScrollables, findsOneWidget);
+    final owner = tester.state<ScrollableState>(bodyScrollables).position;
+    final list = find.byKey(const Key('menu-org-rows'));
+    expect(find.descendant(of: list, matching: vertical), findsNothing);
+    expect(owner.maxScrollExtent, greaterThan(0));
+    final bodyRect = tester.getRect(body);
+    // The gutter and rows must feed the same body scroll position.
+    await tester.dragFrom(
+      Offset(bodyRect.right - 4, bodyRect.center.dy),
+      const Offset(0, -120),
+    );
     await tester.pumpAndSettle();
-    expect(tester.getRect(tab), rect);
+    expect(owner.pixels, greaterThan(0));
+    expect(tester.getRect(tab), tabRect);
+    expect(tester.getRect(header), headerRect);
+    final gutterOffset = owner.pixels;
+    final visibleList = tester.getRect(list).intersect(tester.getRect(body));
+    await tester.dragFrom(visibleList.center, const Offset(0, -120));
+    await tester.pumpAndSettle();
+    expect(owner.pixels, greaterThan(gutterOffset));
+    expect(tester.getRect(tab), tabRect);
+    expect(tester.getRect(header), headerRect);
+
+    final visibleIdentity = find
+        .byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              (widget.data?.startsWith('Scroll_ID_') ?? false),
+        )
+        .hitTestable()
+        .first;
+    Focus.of(tester.element(visibleIdentity)).requestFocus();
+    await tester.pump();
+    final beforeKeyboard = owner.pixels;
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await tester.pumpAndSettle();
+    expect(owner.pixels, greaterThan(beforeKeyboard));
+    expect(tester.getRect(tab), tabRect);
+    expect(tester.getRect(header), headerRect);
+    expect(actions, isEmpty);
+
+    owner.jumpTo(0);
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('menu-org-search')), 'pilot');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(actions, [('a6', 'pilot', InteractionSource.keyboard)]);
+    expect(tester.takeException(), isNull);
   });
   testWidgets(
     'client menu tabs keep rects and shape through press selection and loading',
@@ -221,7 +299,9 @@ void main() {
         'identity': 'old-$identity',
       },
     });
-    final failed = MenuFeatureView.parse(shell.failed(card.targetRef, 'ships'));
+    final failed = MenuFeatureView.parse(
+      resolvedMenuCopy(shell.failed(card.targetRef, 'ships')),
+    );
     expect(failed.state, 'ready');
     expect(failed.busy, isFalse);
     expect(failed.organization!.bodyError, isTrue);

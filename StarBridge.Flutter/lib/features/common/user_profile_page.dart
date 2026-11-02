@@ -5,6 +5,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_page_route.dart';
 import '../personal_profile/personal_profile_models.dart';
 import '../personal_profile/personal_profile_module.dart';
 import '../personal_profile/personal_profile_page.dart';
@@ -26,17 +29,41 @@ class UserProfilePage extends StatefulWidget implements SelfNavigatingUserPage {
 }
 
 class _UserProfilePageState extends State<UserProfilePage> {
-  late final PersonalProfileModule module;
+  late PersonalProfileModule module;
   String? _avatar;
   int _avatarEpoch = 0;
   @override
   void initState() {
     super.initState();
+    _bindProfile();
+  }
+
+  void _bindProfile() {
     module = createPersonalProfileModule(
       _ReadOnlyProfile(widget.port, widget.target),
+      retainContentOnRefresh: false,
     );
     module.projection.addListener(_profileChanged);
     unawaited(module.initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant UserProfilePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final before = oldWidget.target, after = widget.target;
+    // Host ReadUserProfileAsync resolves source/reference/context, not query.
+    // Query is a social display hint; changing it must not renew a revoked
+    // read-only wrapper. The avatar path already reads the current target.
+    if (!identical(oldWidget.port, widget.port) ||
+        before.source != after.source ||
+        before.reference != after.reference ||
+        before.contextRef != after.contextRef) {
+      _avatarEpoch++;
+      _avatar = null;
+      module.projection.removeListener(_profileChanged);
+      module.dispose();
+      _bindProfile();
+    }
   }
 
   void _profileChanged() {
@@ -88,18 +115,28 @@ class _UserProfilePageState extends State<UserProfilePage> {
       pageToolbar: Row(
         key: const Key('visitor-profile-toolbar'),
         children: [
-          BackButton(
-            onPressed: () async {
-              final guard = UserPageLeaveScope.maybeOf(context)?.confirm;
-              if (guard != null && !await guard()) return;
-              if (context.mounted) Navigator.of(context).maybePop();
-            },
+          StarBridgeIconAction(
+            controlKey: const Key('visitor-profile-back'),
+            label: MaterialLocalizations.of(context).backButtonTooltip,
+            icon: const StandardIcon(StandardIconSemantic.arrowBack),
+            onActivate: (source) => unawaited(
+              runStarBridgeActivation<void>(source, () async {
+                final owner = module, route = ModalRoute.of(context);
+                final guard = UserPageLeaveScope.maybeOf(context)?.confirm;
+                if (guard != null && !await guard()) return;
+                if (context.mounted &&
+                    identical(owner, module) &&
+                    (route?.isCurrent ?? true)) {
+                  await popStarBridgePageAfterGuard(context);
+                }
+              }),
+            ),
           ),
           const Spacer(),
-          IconButton(
-            key: const Key('visitor-profile-refresh'),
-            tooltip: AppStrings.of(context).text('profile.refresh'),
-            onPressed: () => unawaited(module.refresh()),
+          StarBridgeIconAction(
+            controlKey: const Key('visitor-profile-refresh'),
+            label: AppStrings.of(context).text('profile.refresh'),
+            onActivate: (_) => unawaited(module.refresh()),
             icon: const StandardIcon(StandardIconSemantic.refresh),
           ),
         ],

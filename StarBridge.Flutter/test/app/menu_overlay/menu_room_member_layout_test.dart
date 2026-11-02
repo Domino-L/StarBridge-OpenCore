@@ -33,6 +33,8 @@ void main() {
               label: '操作',
               confirm: null,
               input: null,
+              role: 'leaveRoom',
+              secret: false,
               limit: 0,
             ),
             enabled: true,

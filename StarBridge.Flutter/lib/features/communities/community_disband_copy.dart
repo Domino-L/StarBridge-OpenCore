@@ -3,6 +3,12 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityDisbandCopy = <String, (String, String, String)>{
+  'activityLoading': (
+    '正在读取解散确认…',
+    '正在讀取解散確認…',
+    'Loading disband confirmation…',
+  ),
+  'activitySending': ('正在处理解散请求…', '正在處理解散請求…', 'Processing disband request…'),
   'action': ('解散组织', '解散組織', 'Disband organization'),
   'title': ('解散此组织？', '解散此組織？', 'Disband this organization?'),
   'members': ('当前 {count} 位成员', '目前 {count} 位成員', 'Currently {count} members'),

@@ -2,6 +2,7 @@ import 'community_image_test_support.dart';
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -103,6 +104,7 @@ Future<void> open(
   Locale locale = const Locale('zh', 'CN'),
   double width = 1100,
   void Function(String code, String name)? onNameConfirmed,
+  Uint8List? bannerBytes,
 }) async {
   tester.view.physicalSize = Size(width, 900);
   tester.view.devicePixelRatio = 1;
@@ -135,6 +137,7 @@ Future<void> open(
                     port: port,
                     onNameConfirmed: onNameConfirmed,
                     targetRef: 'a' * 32,
+                    bannerBytes: bannerBytes,
                   ),
                 ),
               );
@@ -182,7 +185,7 @@ void main() {
         'canEditBanner': false,
       };
       await open(tester, port);
-      await tester.tap(find.byTooltip(text(tester, 'close')));
+      await tester.tap(find.byKey(const Key('profile-close')));
       await settleCommunityImages(tester);
       await tester.pumpWidget(
         MaterialApp(
@@ -284,7 +287,7 @@ void main() {
       final port = EditorPort();
       await open(tester, port);
       await enter(tester, 'description', 'Unsaved');
-      await tester.tap(find.byTooltip(text(tester, 'close')));
+      await tester.tap(find.byKey(const Key('profile-close')));
       await settleCommunityImages(tester);
       expect(find.byType(AlertDialog), findsOneWidget);
       await tester.tap(
@@ -293,7 +296,7 @@ void main() {
       await settleCommunityImages(tester);
       expect(find.text('Unsaved'), findsOneWidget);
       expect(port.saves, isEmpty);
-      await tester.tap(find.byTooltip(text(tester, 'close')));
+      await tester.tap(find.byKey(const Key('profile-close')));
       await settleCommunityImages(tester);
       await tester.tap(
         find.widgetWithText(TextButton, text(tester, 'discard')).last,
@@ -334,7 +337,7 @@ void main() {
       await save(tester);
       expect(port.saves.single, {'publicShowExternalContacts': true});
       await enter(tester, 'websiteUrl', 'https://example.invalid');
-      await tester.tap(find.byTooltip(text(tester, 'close')));
+      await tester.tap(find.byKey(const Key('profile-close')));
       await settleCommunityImages(tester);
       port.changes.add(null);
       await settleCommunityImages(tester);
@@ -374,8 +377,8 @@ void main() {
     await tab(tester, 'schedule');
     final end = find.byWidgetPredicate(
       (w) =>
-          w is DropdownButtonFormField<String> &&
-          w.key.toString().contains('-endTime-0'),
+          w is DropdownButtonFormField<int> &&
+          w.key.toString().contains('-0-end-hour'),
     );
     await tester.ensureVisible(end);
     await tester.tap(end);

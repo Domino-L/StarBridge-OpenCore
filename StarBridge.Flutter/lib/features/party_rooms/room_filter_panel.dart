@@ -1,5 +1,14 @@
-import 'package:flutter/material.dart';
+import '../../app/localization/app_strings.dart';
 
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/icons/standard_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_expansion_tile.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_tag_catalog.dart';
@@ -22,26 +31,84 @@ class RoomFilterPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final catalog = RoomTagCatalog(options);
     final tokens = context.tokens;
-    Widget choice(String id, String label) => CheckboxListTile(
-      key: ValueKey('room-filter-$id'),
-      dense: true,
-      controlAffinity: ListTileControlAffinity.leading,
+    Widget choice(String id, String label) => StarBridgeCheckboxTile(
+      controlKey: ValueKey('room-filter-$id'),
+      label: label,
       activeColor: roomTagColors(context, id).foreground,
-      title: Text(label),
       value: selected.contains(id),
       onChanged: (value) => onChanged(
         value == true
             ? catalog.adding(selected, id)
             : (Set<String>.of(selected)..remove(id)),
       ),
+      rowBuilder: (control) =>
+          ListTile(dense: true, leading: control, title: Text(label)),
     );
+    Widget disclosure(String key, String title, List<Widget> children) =>
+        Padding(
+          // Match the native ExpansionTile's transparent one-pixel borders.
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: StarBridgeExpansionTile(
+            key: PageStorageKey(key),
+            title: title,
+            useNativePageStorage: true,
+            headerMinHeight: 0,
+            headerBuilder: (context, visual, open) {
+              final theme = Theme.of(context);
+              final data = InteractionScope.of(context);
+              final expansion = ExpansionTileTheme.of(context);
+              final progress = SuiteMotion.curve.transform(open);
+              return ListTileTheme.merge(
+                textColor: Color.lerp(
+                  expansion.collapsedTextColor ??
+                      (theme.useMaterial3
+                          ? theme.colorScheme.onSurface
+                          : theme.textTheme.titleMedium?.color),
+                  expansion.textColor ??
+                      (theme.useMaterial3
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.primary),
+                  progress,
+                ),
+                iconColor: Color.lerp(
+                  expansion.collapsedIconColor ??
+                      (theme.useMaterial3
+                          ? theme.colorScheme.onSurfaceVariant
+                          : theme.unselectedWidgetColor),
+                  expansion.iconColor ?? theme.colorScheme.primary,
+                  progress,
+                ),
+                child: ListTile(
+                  key: ValueKey((
+                    data.animates ? null : theme,
+                    open <= 0
+                        ? 0
+                        : open >= 1
+                        ? 1
+                        : 2,
+                  )),
+                  mouseCursor: MouseCursor.defer,
+                  contentPadding: expansion.tilePadding,
+                  title: Text(title),
+                  trailing: Transform.rotate(
+                    angle: math.pi * progress,
+                    child: const StandardIcon(StandardIconSemantic.expandMore),
+                  ),
+                ),
+              );
+            },
+            children: children,
+          ),
+        );
     Widget branch(String id) {
       final children = catalog.children(id);
-      if (children.isEmpty) return choice(id, catalog.label(id));
-      return ExpansionTile(
-        key: PageStorageKey('room-filter-branch-$id'),
-        title: Text(catalog.label(id)),
-        children: [
+      if (children.isEmpty) {
+        return choice(id, catalog.label(id, strings: AppStrings.of(context)));
+      }
+      return disclosure(
+        'room-filter-branch-$id',
+        catalog.label(id, strings: AppStrings.of(context)),
+        [
           if (catalog.options.containsKey(id))
             choice(id, tagCopy(context, 'add')),
           for (final child in children) branch(child),
@@ -67,8 +134,10 @@ class RoomFilterPanel extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                TextButton(
-                  onPressed: selected.isEmpty ? null : () => onChanged({}),
+                StarBridgeActionButton(
+                  controlKey: const Key('room-filter-clear'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: selected.isEmpty ? null : (_) => onChanged({}),
                   child: Text(tagCopy(context, 'clear')),
                 ),
               ],
@@ -86,14 +155,20 @@ class RoomFilterPanel extends StatelessWidget {
                         !tag.isGameplay &&
                         RoomTagCatalog.group(tag.id) == group,
                   ))
-                    ExpansionTile(
-                      key: PageStorageKey('room-filter-context-$group'),
-                      title: Text(tagCopy(context, group)),
-                      children: [
+                    disclosure(
+                      'room-filter-context-$group',
+                      tagCopy(context, group),
+                      [
                         for (final tag in options)
                           if (!tag.isGameplay &&
                               RoomTagCatalog.group(tag.id) == group)
-                            choice(tag.id, tag.text),
+                            choice(
+                              tag.id,
+                              RoomTagCatalog.fullText(
+                                tag,
+                                strings: AppStrings.of(context),
+                              ),
+                            ),
                       ],
                     ),
               ],

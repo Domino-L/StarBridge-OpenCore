@@ -170,7 +170,10 @@ final class BridgeNotificationSettingsAdapter
         (data.containsKey('directMessageWindowsEnabled') &&
             data['directMessageWindowsEnabled'] is! bool) ||
         (data.containsKey('overlayEnabled') &&
-            data['overlayEnabled'] is! bool)) {
+            data['overlayEnabled'] is! bool) ||
+        (data.containsKey('rallyAlerts') && data['rallyAlerts'] is! bool) ||
+        (data.containsKey('tradeWindowsEnabled') &&
+            data['tradeWindowsEnabled'] is! bool)) {
       throw const FormatException();
     }
     final positions = DesktopNotificationPosition.values.where(
@@ -191,6 +194,8 @@ final class BridgeNotificationSettingsAdapter
           'directMessageWindowsEnabled',
         ),
         overlayDeliveryAvailable: data.containsKey('overlayEnabled'),
+        rallyAlertsAvailable: data.containsKey('rallyAlerts'),
+        tradeDeliveryAvailable: data.containsKey('tradeWindowsEnabled'),
         channels: NotificationChannelSettings(
           inAppEnabled: enabled,
           windowsDesktopEnabled: data['windowsEnabled'] == true,
@@ -199,6 +204,9 @@ final class BridgeNotificationSettingsAdapter
           overlayEnabled: data['overlayEnabled'] == true,
           desktopPosition: positions.single,
           sound: const NotificationSoundSettings.notImplemented(),
+          rallyAlertsEnabled: data['rallyAlerts'] != false,
+          // Missing means an older Host: the Host default (on) applies.
+          tradeWindowsEnabled: data['tradeWindowsEnabled'] != false,
         ),
         sourceRules: const [],
         previewMode: previews.single,
@@ -235,9 +243,13 @@ final class BridgeNotificationSettingsAdapter
           'windowsEnabled': value.channels.windowsDesktopEnabled,
         if (value.overlayDeliveryAvailable)
           'overlayEnabled': value.channels.overlayEnabled,
+        if (value.rallyAlertsAvailable)
+          'rallyAlerts': value.channels.rallyAlertsEnabled,
         if (value.directMessageDeliveryAvailable)
           'directMessageWindowsEnabled':
               value.channels.directMessageWindowsEnabled,
+        if (value.tradeDeliveryAvailable)
+          'tradeWindowsEnabled': value.channels.tradeWindowsEnabled,
       });
       if (result.availability != NotificationSettingsAvailability.available) {
         return const NotificationSettingsWriteResult.failed(

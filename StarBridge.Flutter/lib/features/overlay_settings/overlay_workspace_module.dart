@@ -5,13 +5,22 @@ import 'package:flutter/foundation.dart';
 import '../../platform/window/overlay_editor_window_port.dart';
 
 import 'overlay_preview_identity.dart';
+import 'overlay_preview_guide_port.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_settings_models.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_port.dart';
+import 'overlay_workspace_port_capabilities.dart';
+import 'overlay_workspace_runtime_sync.dart';
+import 'overlay_workspace_auto_save.dart';
+import 'overlay_workspace_commit.dart';
+import 'overlay_experience_presets.dart';
+import 'overlay_appearance_progress.dart';
+import 'overlay_appearance_live_session.dart';
 import 'overlay_workspace_rules.dart';
 import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_projection.dart';
+import 'overlay_workspace_draft.dart';
 
 export 'overlay_workspace_projection.dart';
 
@@ -21,22 +30,44 @@ final class OverlayWorkspaceModule {
     this.editorWindow = const UnavailableOverlayEditorWindow(),
     this.previewIdentity,
     this.sourceScenes,
-  });
+  }) {
+    _pushes = OverlayRuntimePushes(_port, apply: _applyPushedRuntime);
+  }
 
   final OverlayEditorWindowPort editorWindow;
   final ValueListenable<OverlayPreviewIdentity?>? previewIdentity;
   final ValueListenable<OverlaySceneState>? sourceScenes;
 
   final OverlayWorkspacePort _port;
+  final _qualificationUnknown = ValueNotifier(false);
+  ValueListenable<bool> get appearanceQualificationUnknown =>
+      _qualificationUnknown;
+  void setAppearanceQualificationUnknown(bool value) {
+    if (!_disposed) _qualificationUnknown.value = value;
+  }
+
+  OverlayPreviewGuidePort? get previewGuidePort => _port.previewGuide;
+  OverlayAppearanceLivePort? get appearanceLivePort => _port.appearanceLive;
+  OverlayAppearanceProgressPort? get appearanceProgressPort =>
+      _port.appearanceProgress;
+  OverlayAppearancePreviewPort? get appearancePreviewPort =>
+      _port.appearancePreview;
   final ValueNotifier<OverlayWorkspaceProjection> _projection = ValueNotifier(
     const OverlayWorkspaceProjection.loading(),
   );
   bool _disposed = false;
   bool _refreshing = false;
-  bool _liveSyncInFlight = false;
-  bool _liveSyncRequested = false;
-  final List<_OverlayWorkspaceDraft> _undoHistory = [];
-  final List<_OverlayWorkspaceDraft> _redoHistory = [];
+  late final _liveSync = OverlayLiveRuntimeSync(
+    canSync: () {
+      final current = _projection.value;
+      return !_disposed && current.available && current.runtime.enabled;
+    },
+    round: _liveRuntimeRound,
+  );
+  late final OverlayRuntimePushes _pushes;
+  late final _autoSave = OverlayWorkspaceAutoSave(commit: _commitDraft);
+  final List<OverlayWorkspaceDraft> _undoHistory = [];
+  final List<OverlayWorkspaceDraft> _redoHistory = [];
   String? _lastHistoryKey;
   String _runtimeLanguage = 'zh';
   String get runtimeLanguage => _runtimeLanguage;
@@ -44,6 +75,10 @@ final class OverlayWorkspaceModule {
   int get manualPresetSelection => _manualPresetSelection;
 
   ValueListenable<OverlayWorkspaceProjection> get projection => _projection;
+
+  /// The Host pushes runtime changes (`overlay.runtime.changed`), so callers
+  /// can read once on open instead of polling. False on an older Host.
+  bool get supportsRuntimeChanges => _pushes.supported;
   bool get canUndo => _undoHistory.isNotEmpty;
   bool get canRedo => _redoHistory.isNotEmpty;
 
@@ -52,38 +87,37 @@ final class OverlayWorkspaceModule {
   /// Renew local workspace/runtime facts without blanking the page, discarding
   /// a draft, or replaying an open/close/save command after an uncertain result.
   Future<void> synchronize() async {
-    if (_disposed || _refreshing || _projection.value.busy) return;
+    if (_disposed ||
+        _refreshing ||
+        _projection.value.busy ||
+        _projection.value.dirty ||
+        _autoSave.pending) {
+      return;
+    }
     _refreshing = true;
     final before = _projection.value;
     try {
       final snapshot = await _port.read();
-      if (_disposed || !identical(before, _projection.value)) return;
+      final latest = _projection.value;
+      if (_disposed) return;
+      if (!OverlayRuntimePushes.sameExceptRuntime(before, latest)) return;
       if (snapshot.availability != OverlayWorkspaceAvailability.available) {
         if (!before.available) {
           _projection.value = OverlayWorkspaceProjection.fromSnapshot(snapshot);
         }
         return;
       }
-      if (before.dirty) {
-        // Never apply an old draft onto a changed authoritative revision.
-        if (snapshot.revision != before.snapshot?.revision) {
-          _projection.value = before.copyWith(
-            failure: OverlaySettingsFailure.writeConflict,
-          );
-          return;
-        }
-      } else {
-        if (snapshot.revision != before.snapshot?.revision) _resetHistory();
-        _projection.value = OverlayWorkspaceProjection.fromSnapshot(
-          snapshot,
-          runtime: before.runtime,
-        );
-      }
+      if (snapshot.revision != before.snapshot?.revision) _resetHistory();
+      _projection.value = OverlayWorkspaceProjection.fromSnapshot(
+        snapshot,
+        runtime: latest.runtime,
+      );
       final current = _projection.value;
+      // A push during this read changes identity, so the push wins below.
       final runtime = await _port.executeRuntime(
         OverlayRuntimeAction.getState,
         language: _runtimeLanguage,
-        draft: _runtimeDraft(current),
+        draft: current.runtimeDraft,
       );
       if (!_disposed && identical(current, _projection.value)) {
         _projection.value = current.copyWith(runtime: runtime);
@@ -104,6 +138,7 @@ final class OverlayWorkspaceModule {
   }
 
   Future<void> refresh() async {
+    if (_projection.value.dirty && !await save()) return;
     if (_disposed ||
         _refreshing ||
         (_projection.value.busy &&
@@ -121,6 +156,7 @@ final class OverlayWorkspaceModule {
           _projection.value = _projection.value.copyWith(
             runtimeOperation: OverlayRuntimeOperation.reading,
           );
+          final pushes = _pushes.mark;
           final runtime = await _port.executeRuntime(
             OverlayRuntimeAction.getState,
             language: _runtimeLanguage,
@@ -128,7 +164,7 @@ final class OverlayWorkspaceModule {
           if (!_disposed) {
             _projection.value = _projection.value.copyWith(
               runtimeOperation: OverlayRuntimeOperation.none,
-              runtime: runtime,
+              runtime: _pushes.unchangedSince(pushes) ? runtime : null,
             );
           }
         }
@@ -184,7 +220,7 @@ final class OverlayWorkspaceModule {
         clearFailure: true,
         dirty: true,
       );
-      _queueLiveRuntimeSync();
+      _edited();
     } on Object {
       _projection.value = current.copyWith(
         failure: OverlaySettingsFailure.invalidValue,
@@ -195,6 +231,24 @@ final class OverlayWorkspaceModule {
   void updateModuleSource(
     OverlaySourceModule module,
     OverlaySourceBinding binding,
+  ) => _updateSources(
+    (sources) => sources.withModule(module, binding),
+    'source:${module.name}',
+  );
+
+  /// Every module shows the shared choice again; the plan's fixed source and
+  /// automatic use are untouched (released only from the source pickers).
+  void followSharedSourceInModules() => _updateSources(
+    (sources) => OverlayPresetSources(
+      binding: sources.binding,
+      autoSwitch: sources.autoSwitch,
+    ),
+    'source:modules',
+  );
+
+  void _updateSources(
+    OverlayPresetSources Function(OverlayPresetSources sources) change,
+    String key,
   ) {
     final current = _projection.value;
     if (_disposed ||
@@ -204,71 +258,62 @@ final class OverlayWorkspaceModule {
         current.sources == null) {
       return;
     }
-    final next = current.sources!.withModule(module, binding);
+    final next = change(current.sources!);
     if (next == current.sources) return;
-    _recordChange(current, key: 'source:${module.name}', coalesce: false);
+    _recordChange(current, key: key, coalesce: false);
     _projection.value = current.copyWith(
       sources: next,
       dirty: true,
       clearFailure: true,
     );
-    _queueLiveRuntimeSync();
+    _edited();
   }
 
-  void updateChatSources(List<OverlaySourceBinding> sources) {
+  /// Edits presentation values through the same draft/revision/history owner
+  /// as settings and layout. This does not select a skin or grant access to it.
+  void updateAppearanceOptions(OverlayAppearanceOptions options) {
     final current = _projection.value;
     if (_disposed ||
         current.busy ||
         !current.available ||
-        current.snapshot?.sourcePresetsEnabled != true ||
-        current.sources == null) {
+        current.snapshot?.appearanceOptionsEnabled != true ||
+        current.snapshot?.storageState == 'corrupt' ||
+        current.snapshot!.presets.any(
+          (preset) => preset.isActive && preset.storageState == 'corrupt',
+        ) ||
+        options == current.appearanceOptions) {
       return;
     }
-    final next = current.sources!.withChatSources(sources);
-    if (next == current.sources) return;
-    _recordChange(current, key: 'source:chat', coalesce: false);
+    _recordChange(current, key: 'appearanceOptions', coalesce: false);
     _projection.value = current.copyWith(
-      sources: next,
+      appearanceOptions: options,
       dirty: true,
       clearFailure: true,
     );
-    _queueLiveRuntimeSync();
+    _edited();
   }
+
+  void updateChatSources(List<OverlaySourceBinding> sources) =>
+      _updateSources((value) => value.withChatSources(sources), 'source:chat');
 
   void applyExperiencePreset(String preset) {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available) return;
-    final values = switch (preset) {
-      'Smooth' => const <String, Object>{
-        'enableStartupTransition': true,
-        'startupTransitionFrameRate': 'Fps120',
-        'animationFrameRate': 'Fps120',
-      },
-      'ReducedMotion' => const <String, Object>{
-        'enableStartupTransition': false,
-        'startupTransitionFrameRate': 'Fps60',
-        'animationFrameRate': 'Fps60',
-      },
-      'Balanced' => const <String, Object>{
-        'enableStartupTransition': true,
-        'startupTransitionFrameRate': 'Fps60',
-        'animationFrameRate': 'Fps60',
-      },
-      _ => null,
-    };
+    final values = overlayExperiencePresets[preset];
     if (values == null) return;
     try {
-      var next = current.settings!;
-      for (final entry in values.entries) {
-        next = applyOverlayWorkspaceSettingChange(next, entry.key, entry.value);
-      }
+      final next = values.entries.fold(
+        current.settings!,
+        (next, entry) =>
+            applyOverlayWorkspaceSettingChange(next, entry.key, entry.value),
+      );
       _recordChange(current, key: 'setting:experiencePreset', coalesce: false);
       _projection.value = current.copyWith(
         settings: next,
         clearFailure: true,
         dirty: true,
       );
-      _queueLiveRuntimeSync();
+      _edited();
     } on Object {
       _projection.value = current.copyWith(
         failure: OverlaySettingsFailure.invalidValue,
@@ -306,7 +351,7 @@ final class OverlayWorkspaceModule {
         clearFailure: true,
         dirty: true,
       );
-      _queueLiveRuntimeSync();
+      _edited();
     } on Object {
       _projection.value = current.copyWith(
         failure: OverlaySettingsFailure.invalidValue,
@@ -334,16 +379,20 @@ final class OverlayWorkspaceModule {
       clearFailure: true,
       dirty: true,
     );
-    _queueLiveRuntimeSync();
+    _edited();
   }
 
-  void updateHotkey({String? binding, bool? enabled}) {
+  void updateHotkey({String? binding, bool? enabled, bool? registerHotKey}) {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available) return;
     final value = current.hotkey!;
     _recordChange(
       current,
-      key: binding != null ? 'hotkey:binding' : 'hotkey:enabled',
+      key: binding != null
+          ? 'hotkey:binding'
+          : registerHotKey != null
+          ? 'hotkey:registerHotKey'
+          : 'hotkey:enabled',
       coalesce: binding != null,
     );
     _projection.value = current.copyWith(
@@ -351,28 +400,30 @@ final class OverlayWorkspaceModule {
         binding: binding ?? value.binding,
         enabled: enabled ?? value.enabled,
         runtimeState: value.runtimeState,
+        registerHotKey: registerHotKey ?? value.registerHotKey,
       ),
       clearFailure: true,
       dirty: true,
     );
-    _queueLiveRuntimeSync();
+    _edited();
   }
 
   void discardChanges() {
     final snapshot = _projection.value.snapshot;
     if (_disposed || snapshot == null || _projection.value.busy) return;
+    _autoSave.cancel();
     _resetHistory();
     _projection.value = OverlayWorkspaceProjection.fromSnapshot(
       snapshot,
       runtime: _projection.value.runtime,
     );
-    _queueLiveRuntimeSync();
+    _edited();
   }
 
   void undo() {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available || !canUndo) return;
-    _redoHistory.add(_OverlayWorkspaceDraft.fromProjection(current));
+    _redoHistory.add(OverlayWorkspaceDraft.fromProjection(current));
     _applyDraft(current, _undoHistory.removeLast());
     _lastHistoryKey = null;
   }
@@ -380,34 +431,37 @@ final class OverlayWorkspaceModule {
   void redo() {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available || !canRedo) return;
-    _undoHistory.add(_OverlayWorkspaceDraft.fromProjection(current));
+    _undoHistory.add(OverlayWorkspaceDraft.fromProjection(current));
     _applyDraft(current, _redoHistory.removeLast());
     _lastHistoryKey = null;
   }
 
-  Future<bool> save() {
-    final current = _projection.value;
-    if (!current.available || current.busy || !current.dirty) {
-      return Future.value(false);
-    }
-    return _apply(
-      OverlayWorkspaceMutation.saveActive(
-        settings: current.settings!,
-        layout: current.layout,
-        renderMode: current.renderMode!,
-        hotkey: current.hotkey!,
-        sources: current.sources,
-      ),
-      OverlayWorkspaceOperation.saving,
-    );
+  /// Edits save on their own; this writes anything still pending now.
+  Future<bool> save() => _autoSave.flush();
+
+  /// In-game placement is an explicit session: Done saves, Cancel restores.
+  void holdCommits() => _autoSave.hold();
+  void releaseCommits() => _autoSave.release();
+
+  void _edited() {
+    _liveSync.request();
+    if (_projection.value.dirty) _autoSave.schedule();
   }
+
+  Future<bool> _commitDraft() => commitOverlayDraft(
+    port: _port,
+    read: () => _projection.value,
+    write: (value) => _projection.value = value,
+    disposed: () => _disposed,
+    resetHistory: _resetHistory,
+  );
 
   Future<bool> selectTemporarySource(
     OverlaySourceBinding choice,
     String ownerKey,
   ) {
     final current = _projection.value;
-    final draft = _runtimeDraft(current);
+    final draft = current.runtimeDraft;
     if (current.snapshot?.sourcePresetsEnabled != true || draft == null) {
       return Future.value(false);
     }
@@ -505,7 +559,10 @@ final class OverlayWorkspaceModule {
     bool autoSwitch, {
     String? replaceAutoSwitchPresetId,
     int? expectedRevision,
-  }) {
+  }) async {
+    // Pending edits save first and the write is built from that saved plan,
+    // so it never writes older module sources back over them.
+    if (_projection.value.dirty && !await save()) return false;
     final current = _projection.value;
     final preset = current.snapshot?.presets
         .where((p) => p.id == presetId)
@@ -514,7 +571,7 @@ final class OverlayWorkspaceModule {
         preset?.sources == null ||
         expectedRevision != null &&
             current.snapshot?.revision != expectedRevision) {
-      return Future.value(false);
+      return false;
     }
     return _apply(
       OverlayWorkspaceMutation.configurePresetSources(
@@ -564,6 +621,7 @@ final class OverlayWorkspaceModule {
     OverlayWorkspaceOperation operation, {
     bool preserveDraft = false,
   }) async {
+    if (_projection.value.dirty && !await save()) return false;
     final current = _projection.value;
     final revision = current.snapshot?.revision;
     if (_disposed || current.busy || !current.available || revision == null) {
@@ -609,16 +667,22 @@ final class OverlayWorkspaceModule {
               renderMode: current.renderMode,
               hotkey: current.hotkey,
               sources: retainedSources,
+              appearanceOptions: current.appearanceOptions,
               dirty: current.dirty,
             )
           : updated;
+      final pushes = _pushes.mark;
       final runtime = await _port.executeRuntime(
         OverlayRuntimeAction.getState,
         language: _runtimeLanguage,
-        draft: preserveDraft ? _runtimeDraft(next) : null,
+        draft: preserveDraft ? next.runtimeDraft : null,
       );
       if (_disposed) return false;
-      _projection.value = next.copyWith(runtime: runtime);
+      _projection.value = next.copyWith(
+        runtime: _pushes.unchangedSince(pushes)
+            ? runtime
+            : _projection.value.runtime,
+      );
       return true;
     }
     _projection.value = current.copyWith(
@@ -637,19 +701,18 @@ final class OverlayWorkspaceModule {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available) return false;
     _runtimeLanguage = language;
-    if (action == OverlayRuntimeAction.close) _liveSyncRequested = false;
+    if (action == OverlayRuntimeAction.close) _liveSync.cancelPending();
     _projection.value = current.copyWith(runtimeOperation: operation);
+    final pushes = _pushes.mark;
     final runtime = await _port.executeRuntime(
       action,
       language: language,
-      draft: action == OverlayRuntimeAction.close
-          ? null
-          : _runtimeDraft(current),
+      draft: action == OverlayRuntimeAction.close ? null : current.runtimeDraft,
     );
     if (_disposed) return false;
     _projection.value = _projection.value.copyWith(
       runtimeOperation: OverlayRuntimeOperation.none,
-      runtime: runtime,
+      runtime: _pushes.unchangedSince(pushes) ? runtime : null,
     );
     return runtime.available && !runtime.failed;
   }
@@ -663,7 +726,7 @@ final class OverlayWorkspaceModule {
       if (_undoHistory.length == 100) {
         _undoHistory.removeAt(0);
       }
-      _undoHistory.add(_OverlayWorkspaceDraft.fromProjection(current));
+      _undoHistory.add(OverlayWorkspaceDraft.fromProjection(current));
     }
     _redoHistory.clear();
     _lastHistoryKey = coalesce ? key : null;
@@ -671,61 +734,31 @@ final class OverlayWorkspaceModule {
 
   void _applyDraft(
     OverlayWorkspaceProjection current,
-    _OverlayWorkspaceDraft draft,
+    OverlayWorkspaceDraft draft,
   ) {
-    _projection.value = current.copyWith(
-      settings: draft.settings,
-      layout: draft.layout,
-      renderMode: draft.renderMode,
-      hotkey: draft.hotkey,
-      sources: draft.sources,
-      clearFailure: true,
-      dirty: draft.dirty,
-    );
-    _queueLiveRuntimeSync();
+    _projection.value = draft.applyTo(current).copyWith(dirty: true);
+    _edited();
   }
 
-  OverlayWorkspaceRuntimeDraft? _runtimeDraft(
-    OverlayWorkspaceProjection projection,
-  ) {
-    final revision = projection.snapshot?.revision;
-    if (!projection.available || revision == null) return null;
-    return OverlayWorkspaceRuntimeDraft(
-      expectedRevision: revision,
-      settings: projection.settings!,
-      layout: projection.layout,
-      hotkey: projection.hotkey!,
-      sources: projection.sources,
-    );
-  }
-
-  void _queueLiveRuntimeSync() {
+  Future<void> _liveRuntimeRound() async {
     final current = _projection.value;
-    if (_disposed || !current.available || !current.runtime.enabled) return;
-    _liveSyncRequested = true;
-    if (!_liveSyncInFlight) unawaited(_drainLiveRuntimeSync());
+    final pushes = _pushes.mark;
+    final runtime = await _port.executeRuntime(
+      OverlayRuntimeAction.getState,
+      language: _runtimeLanguage,
+      draft: current.runtimeDraft,
+    );
+    if (_disposed || !_pushes.unchangedSince(pushes)) return;
+    _projection.value = _projection.value.copyWith(runtime: runtime);
   }
 
-  Future<void> _drainLiveRuntimeSync() async {
-    if (_liveSyncInFlight || _disposed) return;
-    _liveSyncInFlight = true;
-    try {
-      while (_liveSyncRequested && !_disposed) {
-        _liveSyncRequested = false;
-        final current = _projection.value;
-        if (!current.available || !current.runtime.enabled) break;
-        final runtime = await _port.executeRuntime(
-          OverlayRuntimeAction.getState,
-          language: _runtimeLanguage,
-          draft: _runtimeDraft(current),
-        );
-        if (_disposed) return;
-        _projection.value = _projection.value.copyWith(runtime: runtime);
-      }
-    } finally {
-      _liveSyncInFlight = false;
-      if (_liveSyncRequested && !_disposed) _queueLiveRuntimeSync();
-    }
+  // Runtime facts only: never touches the draft, history, revision or an
+  // in-flight operation. Ignored until a workspace has been read.
+  bool _applyPushedRuntime(OverlayRuntimeSnapshot runtime) {
+    final current = _projection.value;
+    if (_disposed || !current.available) return false;
+    _projection.value = current.copyWith(runtime: runtime);
+    return true;
   }
 
   void _resetHistory() {
@@ -736,48 +769,27 @@ final class OverlayWorkspaceModule {
 
   void dispose() {
     if (_disposed) return;
+    final last = _projection.value;
+    final unsaved = last.dirty && last.snapshot?.revision != null;
     _disposed = true;
-    _liveSyncRequested = false;
+    _qualificationUnknown.dispose();
+    _autoSave.close();
+    _liveSync.close();
+    _pushes.dispose();
     _projection.dispose();
-    _port.close();
+    if (!unsaved) {
+      _port.close();
+      return;
+    }
+    // Closing must not lose an edit that was still waiting to be written.
+    unawaited(
+      _port
+          .apply(
+            overlaySaveMutation(last),
+            expectedRevision: last.snapshot!.revision!,
+          )
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(_port.close),
+    );
   }
-}
-
-@immutable
-final class _OverlayWorkspaceDraft {
-  const _OverlayWorkspaceDraft({
-    required this.settings,
-    required this.layout,
-    required this.renderMode,
-    required this.hotkey,
-    this.sources,
-    required this.dirty,
-  });
-
-  factory _OverlayWorkspaceDraft.fromProjection(
-    OverlayWorkspaceProjection projection,
-  ) => _OverlayWorkspaceDraft(
-    settings: projection.settings!,
-    layout: List.unmodifiable(projection.layout),
-    renderMode: projection.renderMode!,
-    hotkey: projection.hotkey!,
-    sources: projection.sources,
-    dirty: projection.dirty,
-  );
-
-  final OverlayWorkspaceSettings settings;
-  final List<OverlayWorkspaceLayoutItem> layout;
-  final String renderMode;
-  final OverlayWorkspaceHotkey hotkey;
-  final OverlayPresetSources? sources;
-  final bool dirty;
-  _OverlayWorkspaceDraft withSources(OverlayPresetSources? value) =>
-      _OverlayWorkspaceDraft(
-        settings: settings,
-        layout: layout,
-        renderMode: renderMode,
-        hotkey: hotkey,
-        dirty: dirty,
-        sources: value,
-      );
 }

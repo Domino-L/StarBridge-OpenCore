@@ -109,14 +109,17 @@ internal sealed partial class CommunityClient
                 // never substitute the row now occupying the old position.
                 if (!found) return Finish(new("rejected", "refreshRequired"));
             }
+            var receiptGeneration = intent.Action == "generateInvite" && page.GetProperty("inviteGenerationVersion").GetInt32() == 1;
             var path = intent.Action switch
             {
-                "generateInvite" => "/api/fleets/invites",
+                "generateInvite" => "/api/fleets/invites" + (receiptGeneration ? "?view=client" : ""),
                 "revokeInvite" => "/api/fleets/invites/revoke",
                 _ => "/api/fleets/applications/decide"
             };
             object payload = intent.Action switch
             {
+                "generateInvite" when receiptGeneration => new { FleetCode = target.Code, intent.ExpiresInDays, intent.MaxUses,
+                    AcceptMode = "Direct", Purpose = "code", ClientRequestId = intent.RequestId, ClientRequestedAt = DateTimeOffset.UtcNow },
                 "generateInvite" => new { FleetCode = target.Code, intent.ExpiresInDays, intent.MaxUses, AcceptMode = "Direct", Purpose = "code" },
                 "revokeInvite" => new { FleetCode = target.Code, InviteId = entry!.Id },
                 _ => new { FleetCode = target.Code, ApplicationId = entry!.Id, Approve = intent.Action == "approve" }
@@ -135,6 +138,27 @@ internal sealed partial class CommunityClient
             }
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             current();
+            if (receiptGeneration && response.StatusCode == HttpStatusCode.OK)
+            {
+                using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                using var buffer = new MemoryStream();
+                var chunk = new byte[1024];
+                int count;
+                while ((count = await stream.ReadAsync(chunk, deadline.Token)) > 0)
+                {
+                    if (buffer.Length + count > 4096) throw Invalid();
+                    buffer.Write(chunk, 0, count);
+                }
+                using var document = JsonDocument.Parse(buffer.ToArray());
+                var receipt = document.RootElement;
+                if (Number(receipt, "schemaVersion", 1, 1) != 1 || Text(receipt, "requestId", 32) != intent.RequestId) throw Invalid();
+                current();
+                return Finish(Text(receipt, "status", 16) switch
+                {
+                    "accepted" => new("accepted"), "unavailable" => new("rejected", "inviteInvalid"),
+                    _ => new("unknown", "outcomeUnknown")
+                });
+            }
             // These exact WPF endpoints return 200 only after SaveAsync completes.
             // Do not deserialize or forward their unrestricted bulk snapshot. The UI
             // refreshes the narrow admissions projection separately, including the code.

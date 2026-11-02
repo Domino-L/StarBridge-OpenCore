@@ -38,9 +38,9 @@ internal static class LocalProfileCollaborationPolicy
 
     public static void Validate(LocalProfilePlayStyle? style, LocalProfileSchedule? schedule)
     {
-        Selection(style?.Roles, Roles, 5);
-        Selection(style?.Interests, Interests, 3);
-        Selection(style?.Support, Support, 3);
+        StoredSelection(style?.Roles);
+        StoredSelection(style?.Interests);
+        StoredSelection(style?.Support);
         if (schedule is null) return;
         if (schedule.Rhythm is not ("casual" or "regular" or "intensive" or "weekends" or "irregular") ||
             schedule.Windows is null || schedule.Windows.Count > 3 ||
@@ -64,10 +64,26 @@ internal static class LocalProfileCollaborationPolicy
     // End <= start means next day, including equal times (a full day), matching WPF.
     private static bool Time(string? value) => value is { Length: 5 } &&
         TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
-    private static void Selection(IReadOnlyList<string>? values, HashSet<string> known, int maximum)
+    // Imported legacy labels are bounded presentation data, not new catalog IDs.
+    // Keep them verbatim; ordinary edits may retain/remove them but cannot invent them.
+    internal static void ValidateEdit(LocalProfilePlayStyle? next, LocalProfilePlayStyle? previous)
     {
-        if (values is not null && (values.Count > maximum || values.Distinct().Count() != values.Count ||
-            values.Any(v => v is null || !known.Contains(v)))) Invalid();
+        EditSelection(next?.Roles, previous?.Roles, Roles, 5);
+        EditSelection(next?.Interests, previous?.Interests, Interests, 3);
+        EditSelection(next?.Support, previous?.Support, Support, 3);
+    }
+    private static void StoredSelection(IReadOnlyList<string>? values)
+    {
+        if (values is not null && (values.Count > 8 || values.Distinct().Count() != values.Count ||
+            values.Any(v => string.IsNullOrWhiteSpace(v) || v.Length > 80 || v.Any(char.IsControl)))) Invalid();
+    }
+    private static void EditSelection(IReadOnlyList<string>? values, IReadOnlyList<string>? previous,
+        HashSet<string> known, int maximum)
+    {
+        if (values is null) return;
+        var retained = previous ?? [];
+        if (values.All(retained.Contains)) return;
+        if (values.Count > maximum || values.Any(v => !known.Contains(v) && !retained.Contains(v))) Invalid();
     }
     private static void Invalid() => throw new LocalProfileException("profile_local.invalid_request");
 }

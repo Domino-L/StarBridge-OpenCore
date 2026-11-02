@@ -3,12 +3,79 @@ using StarBridge.Core.Ships;
 namespace StarBridge.Core.Tests;
 internal static class ShipPresentationCatalogTests
 {
+    private static void ApprovedSharedArtworkDoesNotMergeIdentity()
+    {
+        const string names = """
+        {"schemaVersion":1,"entries":[
+          {"runtimeId":"ESPR_Blade","englishName":"Blade","chineseName":"复刻刀锋","aliases":[]},
+          {"runtimeId":"VNCL_Blade","englishName":"Blade","chineseName":"原版刀锋","aliases":[]},
+          {"runtimeId":"ESPR_Glaive","englishName":"Glaive","chineseName":"复刻长刀","aliases":[]},
+          {"runtimeId":"VNCL_Glaive","englishName":"Glaive","chineseName":"原版长刀","aliases":[]},
+          {"runtimeId":"ESPR_Stinger","englishName":"Stinger","chineseName":"复刻毒刺","aliases":[]},
+          {"runtimeId":"VNCL_Stinger","englishName":"Stinger","chineseName":"原版毒刺","aliases":[]}]}
+        """;
+        var catalog = new ShipPresentationCatalog(names,
+            "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\t价格USD\t图片路径\n" +
+            "小型\tBlade\t图片目录甲\tCombat\t\t275\tData/ShipImages/test-blade.png\n" +
+            "中型\tGlaive\t图片目录乙\tCombat\t\t350\tData/ShipImages/test-glaive.jpg\n" +
+            "中型\tStinger\t图片目录丙\tCombat\t\t315\tData/ShipImages/test-stinger.jpg\n");
+        foreach (var id in new[] { "ESPR_Blade", "VNCL_Blade", "ESPR_Glaive", "VNCL_Glaive", "ESPR_Stinger", "VNCL_Stinger" })
+        {
+            var item = catalog.Find(id);
+            Require(item.ImageKey == "test-" + id.Split('_')[1].ToLowerInvariant(), "Explicit approved artwork reuse: " + id);
+            Require(item.CatalogId is null && item.PriceUsd is null && item.SizeClass is null,
+                "Artwork reuse cannot copy catalog identity, price or size");
+        }
+        Require(catalog.Find("VNCL_Blade_Special").ImageKey is null, "No prefix or special-edition inference");
+        Require(new ShipPresentationCatalog(names, null).Find("VNCL_Blade").ImageKey is null, "Absent optional catalog stays absent");
+        var displayOnly = new ShipPresentationCatalog(null,
+            "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\t图片路径\n" +
+            "大型\tTyilui\t测试显示\tTransport\t\tData/ShipImages/fixture-tyilui.jpg\n");
+        Require(displayOnly.Find("Gatac Tyilui").ImageKey == "fixture-tyilui", "Explicit manufacturer display alias resolves without a runtime identity");
+        Require(displayOnly.Find("Gatac Tyilui Special").ImageKey is null, "Display alias does not match future variants");
+        Require(catalog.Find("ARGO_ATLS_IKTI").ImageKey is null, "IKTI cannot inherit Akuma artwork");
+    }
+
+    private static void ConfirmedRuntimeCatalogAliasesKeepArtwork()
+    {
+        using var stream = typeof(ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
+        using var reader = new StreamReader(stream);
+        var pairs = new[] { ("CRUS_Starlifter_C2", "C2 Hercules"), ("CRUS_Starlifter_M2", "M2 Hercules"),
+            ("CRUS_Star_Runner", "Mercury"), ("CRUS_Starliner", "Genesis"),
+            ("RSI_Aurora_CL", "Aurora Mk I CL"), ("RSI_Aurora_ES", "Aurora Mk I ES"),
+            ("RSI_Aurora_LN", "Aurora Mk I LN"), ("RSI_Aurora_LX", "Aurora Mk I LX"), ("RSI_Aurora_MR", "Aurora Mk I MR"),
+            ("RSI_Scorpius_Interdiction", "Scorpius Antares") };
+        var rows = pairs.Select((p, i) => $"大型\t{p.Item2}\t测试显示{i}\tTransport\t\tData/ShipImages/fixture-{i}.jpg\n");
+        var catalog = new ShipPresentationCatalog(reader.ReadToEnd(),
+            "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\t图片路径\n" + string.Concat(rows));
+        for (var i = 0; i < pairs.Length; i++)
+            Require(catalog.Find(pairs[i].Item1).ImageKey == $"fixture-{i}", "Confirmed exact catalog alias " + pairs[i].Item1);
+        Require(catalog.Find("CRUS_Starlifter_2951_BIS").ImageKey is null, "No automatic BIS artwork reuse");
+    }
+
+    private static void A2CatalogArtworkResolvesThroughOfficialHangarName()
+    {
+        using var stream = typeof(ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
+        using var reader = new StreamReader(stream);
+        var catalog = new ShipPresentationCatalog(reader.ReadToEnd(),
+            "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\t图片路径\n" +
+            "大型\tA2 Hercules\t目录显示名\tCombat\t\tData/ShipImages/fixture-a2.jpg\n");
+        foreach (var title in new[] { "A2 Hercules", "Hercules Starlifter A2", "Starlifter A2", "CRUS_Starlifter_A2" })
+            Require(catalog.Find(title).ImageKey == "fixture-a2", "A2 exact hangar aliases retain catalog artwork: " + title);
+        Require(catalog.Find("CRUS_Starlifter_A2_Collector_Military").ImageKey is null,
+            "An A2 special variant must not inherit base-model artwork by guessing");
+    }
+
     public static void RunAll()
     {
         ReviewedDisplayDoesNotRewriteOfficialData();
         PublishedCatalogIdentityRetainsArtworkAndNames();
         ManufacturerComesFromExactMetadata();
+        SelectedManufacturerDoesNotRewriteRuntimeIdentity();
         NewVariantsRemainDistinctWithoutRuntimeAliases();
+        A2CatalogArtworkResolvesThroughOfficialHangarName();
+        ConfirmedRuntimeCatalogAliasesKeepArtwork();
+        ApprovedSharedArtworkDoesNotMergeIdentity();
         const string header = "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\n";
         var catalog = new ShipPresentationCatalog(null, header +
             "小型\tSmall Combat\t小型战斗\tCombat / Heavy Fighter\t\n" +
@@ -82,6 +149,30 @@ internal static class ShipPresentationCatalogTests
         Require(known.Find("catalog-fixtureship").Manufacturer == "Aegis Dynamics" &&
             new ShipPresentationCatalog(names, null).Find("AEGS_Fixture").EnglishName == "Fixture Ship",
             "Existing exact name-pack identities reuse the established manufacturer vocabulary");
+    }
+
+    private static void SelectedManufacturerDoesNotRewriteRuntimeIdentity()
+    {
+        const string names = """
+        {"schemaVersion":1,"entries":[
+          {"runtimeId":"VNCL_Collector","englishName":"Collector Fighter","chineseName":"收藏战机","aliases":[]},
+          {"runtimeId":"VNCL_Enemy","englishName":"Enemy Fighter","chineseName":"敌方战机","aliases":[]}]}
+        """;
+        const string data = "规格\t英文飞船名\t中文飞船名\t定位\t隐藏标签\t官网状态\t价格USD\t图片路径\t制造商\n" +
+            "小型\tCollector Fighter\t收藏战机\tCombat\t\t可飞\t300\tData/ShipImages/collector.jpg\tEsperia\n";
+        var catalog = new ShipPresentationCatalog(names, data);
+        var runtime = catalog.Find("VNCL_Collector");
+        var published = catalog.Find("catalog-collectorfighter", "Collector Fighter");
+        Require(runtime.Manufacturer == "Esperia" && published == runtime,
+            "Explicit player-model manufacturer wins over the runtime prefix and survives organization publication");
+        Require(ShipNameIndex.Parse(names).Find("Collector Fighter")?.RuntimeId == "VNCL_Collector" &&
+            runtime.PriceUsd == 300 && runtime.ImageKey == "collector" && runtime.DeliveryStatus == "flyable",
+            "Manufacturer presentation keeps the original runtime identity and other catalog facts");
+        Require(catalog.Find("VNCL_Enemy").Manufacturer == "Vanduul" &&
+            catalog.Find("VNCL_Enemy").CatalogId is null,
+            "Player presentation policy must not relabel unrelated enemy identities");
+        Require(catalog.Find("Collector Fighter Special").Manufacturer is null,
+            "An unreviewed edition cannot inherit the corrected manufacturer by fuzzy matching");
     }
 
     private static void PublishedCatalogIdentityRetainsArtworkAndNames()

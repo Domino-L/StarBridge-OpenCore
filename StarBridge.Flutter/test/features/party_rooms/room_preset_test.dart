@@ -203,8 +203,9 @@ void main() {
     await host.close();
   });
   test(
-    'attachment send uses current account and existing room endpoint',
+    'SCM-only preset send retains attachment and self acknowledgement without Handle',
     () async {
+      final card = await ExampleRoomChat().exportPreset('example-preset', 1);
       final host = Harness(
         capabilities: [
           'partyRooms.chat',
@@ -218,21 +219,26 @@ void main() {
             'sequence': 1,
             'messageId': 'm1',
             'senderCallsign': '呼号',
-            'senderGameId': 'Handle_CN',
+            'senderGameId': '',
+            'isSelf': true,
+            'attachment': card,
             'kind': 'player',
             'text': '',
             'createdAt': '2026-09-06T12:00:00Z',
           },
         },
       );
-      final card = await ExampleRoomChat().exportPreset('example-preset', 1);
-      await BridgeRoomChat(host.session).sendPreset('one', '', card);
+      final sent = await BridgeRoomChat(host.session).sendPreset('one', '', card);
+      expect(sent.isSelf, isTrue);
+      expect(sent.gameId, isEmpty);
+      expect(sent.attachment, card);
       expect(host.requests.last.payload['data'], {
         'roomId': 'one',
         'text': '',
         'attachment': card,
       });
       expect(host.requests.last.accountContext?.subject, 'test-subject');
+      expect(host.requests.last.accountContext?.authority, 'scm-test');
       expect(
         host.requests.where((r) => r.name == 'partyRooms.execute'),
         hasLength(1),
@@ -247,7 +253,7 @@ void main() {
       await composition.partyRooms.selectPreviewScene('current');
       await tester.pumpAndSettle();
       final module = composition.partyRooms.chat!;
-      await tester.tap(find.widgetWithText(TextButton, '分享浮层预设'));
+      await tester.tap(find.widgetWithText(TextButton, '分享浮层方案'));
       await tester.pumpAndSettle();
       expect(find.textContaining('未保存的调整不会发送'), findsOneWidget);
       await tester.tap(find.text('示例浮层预设'));
@@ -258,11 +264,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(module.messages.last.attachment?['kind'], 'overlay_preset');
       final initial = await module.presets!.readPresets();
-      final importButton = find.widgetWithText(TextButton, '导入为新预设');
+      final importButton = find.widgetWithText(TextButton, '导入为新方案');
       await tester.ensureVisible(importButton);
       await tester.tap(importButton);
       await tester.pumpAndSettle();
-      expect(find.textContaining('不覆盖或切换当前预设'), findsOneWidget);
+      expect(find.textContaining('不覆盖或切换当前方案'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '取消'));
       await tester.pumpAndSettle();
       expect(
@@ -271,7 +277,7 @@ void main() {
       );
       await tester.tap(importButton);
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+      await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
       expect(

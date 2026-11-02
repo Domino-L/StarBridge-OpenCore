@@ -1,5 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -18,12 +26,15 @@ class NotificationChannelPanel extends StatelessWidget {
     required this.onSave,
     this.showSound = true,
     this.desktop,
+    this.onPreviewRally,
     super.key,
   });
 
   final NotificationSettingsValue settings;
   final bool showSound;
   final DesktopNotificationPort? desktop;
+  // Shows a sample rally alert; null when the Host cannot.
+  final Future<void> Function()? onPreviewRally;
   final bool enabled;
   final Future<bool> Function(NotificationSettingsValue settings) onSave;
 
@@ -35,6 +46,10 @@ class NotificationChannelPanel extends StatelessWidget {
     final overlayColor = tokens.domainColors
         .resolve(DomainColorRole.recon)
         .foreground;
+    final showDirectMessage =
+        !settings.localInAppOnly || settings.directMessageDeliveryAvailable;
+    final showTrade =
+        !settings.localInAppOnly || settings.tradeDeliveryAvailable;
     return NotificationSettingsPanel(
       key: const Key('notification-channel-panel'),
       icon: StarBridgeIconSemantic.notifications,
@@ -81,6 +96,10 @@ class NotificationChannelPanel extends StatelessWidget {
                   ? 'settings.notification.local.windowsDescription'
                   : 'settings.notification.channels.windows.description',
               value: channels.windowsDesktopEnabled,
+              // Off by default; recommended until the user turns it on.
+              recommendKey: channels.windowsDesktopEnabled
+                  ? null
+                  : 'settings.notification.channels.windows.recommended',
               showDivider: false,
               enabled: enabled,
               onChanged: (value) => onSave(
@@ -109,8 +128,7 @@ class NotificationChannelPanel extends StatelessWidget {
                 ),
               ),
           ],
-          if (!settings.localInAppOnly ||
-              settings.directMessageDeliveryAvailable) ...[
+          if (showDirectMessage || showTrade) ...[
             Padding(
               key: const Key('notification-desktop-child'),
               padding: EdgeInsetsDirectional.only(
@@ -123,29 +141,57 @@ class NotificationChannelPanel extends StatelessWidget {
                 ),
                 child: Padding(
                   padding: EdgeInsetsDirectional.only(start: tokens.space.sm),
-                  child: NotificationToggleRow(
-                    settingKey: const Key(
-                      'notification-channel-direct-message',
-                    ),
-                    titleKey:
-                        'settings.notification.channels.directMessage.title',
-                    descriptionKey: 'settings.notification.channels.directMessage.description',
-                    value: channels.directMessageWindowsEnabled,
-                    showDivider: false,
-                    enabled: enabled && channels.windowsDesktopEnabled,
-                    onChanged: (value) => onSave(
-                      settings.copyWith(
-                        channels: channels.copyWith(
-                          directMessageWindowsEnabled: value,
+                  child: Column(
+                    children: [
+                      if (showDirectMessage)
+                        NotificationToggleRow(
+                          settingKey: const Key(
+                            'notification-channel-direct-message',
+                          ),
+                          titleKey: 'settings.notification.channels.directMessage.title',
+                          descriptionKey: 'settings.notification.channels.directMessage.description',
+                          value: channels.directMessageWindowsEnabled,
+                          showDivider: false,
+                          enabled: enabled && channels.windowsDesktopEnabled,
+                          onChanged: (value) => onSave(
+                            settings.copyWith(
+                              channels: channels.copyWith(
+                                directMessageWindowsEnabled: value,
+                              ),
+                            ),
+                          ),
+                          leading: StarBridgeIcon(
+                            StarBridgeIconSemantic.friends,
+                            size: tokens.icons.medium,
+                            color: tokens.colors.warning,
+                          ),
+                          badgeKey: 'settings.notification.channels.directMessage.defaultOff',
                         ),
-                      ),
-                    ),
-                    leading: StarBridgeIcon(
-                      StarBridgeIconSemantic.friends,
-                      size: tokens.icons.medium,
-                      color: tokens.colors.warning,
-                    ),
-                    badgeKey: 'settings.notification.channels.directMessage.defaultOff',
+                      if (showTrade)
+                        NotificationToggleRow(
+                          settingKey: const Key('notification-channel-trade'),
+                          titleKey:
+                              'settings.notification.channels.trade.title',
+                          descriptionKey: 'settings.notification.channels.trade.description',
+                          value: channels.tradeWindowsEnabled,
+                          showDivider: false,
+                          enabled: enabled && channels.windowsDesktopEnabled,
+                          onChanged: (value) => onSave(
+                            settings.copyWith(
+                              channels: channels.copyWith(
+                                tradeWindowsEnabled: value,
+                              ),
+                            ),
+                          ),
+                          leading: StarBridgeIcon(
+                            StarBridgeIconSemantic.marketplace,
+                            size: tokens.icons.medium,
+                            color: tokens.colors.success,
+                          ),
+                          badgeKey:
+                              'settings.notification.channels.trade.defaultOn',
+                        ),
+                    ],
                   ),
                 ),
               ),
@@ -175,6 +221,64 @@ class NotificationChannelPanel extends StatelessWidget {
                   ? null
                   : 'settings.notification.scope.device',
             ),
+          ],
+          if (settings.rallyAlertsAvailable) ...[
+            NotificationToggleRow(
+              settingKey: const Key('notification-channel-rally'),
+              titleKey: 'settings.notification.channels.rally.title',
+              descriptionKey:
+                  'settings.notification.channels.rally.description',
+              value: channels.rallyAlertsEnabled,
+              // The preview button below belongs to this row.
+              showDivider: onPreviewRally == null,
+              enabled: enabled,
+              onChanged: (value) => onSave(
+                settings.copyWith(
+                  channels: channels.copyWith(rallyAlertsEnabled: value),
+                ),
+              ),
+              leading: StarBridgeIcon(
+                StarBridgeIconSemantic.officialFleet,
+                size: tokens.icons.medium,
+                color: tokens.colors.warning,
+              ),
+              badgeKey: 'settings.notification.scope.device',
+            ),
+            if (onPreviewRally != null)
+              Container(
+                alignment: AlignmentDirectional.centerStart,
+                padding: EdgeInsetsDirectional.only(
+                  start: tokens.icons.medium + tokens.space.sm,
+                  bottom: tokens.space.sm,
+                ),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: tokens.surfaces.panel.border,
+                      width: tokens.stroke.hairline,
+                    ),
+                  ),
+                ),
+                child: StarBridgeTooltip(
+                  message: strings.text(
+                    'settings.notification.channels.rally.previewHint',
+                  ),
+                  child: StarBridgeActionButton(
+                    controlKey: const Key('notification-rally-preview'),
+                    semanticLabel: strings.text(
+                      'settings.notification.channels.rally.preview',
+                    ),
+                    onActivate: enabled && channels.rallyAlertsEnabled
+                        ? (_) => unawaited(onPreviewRally!())
+                        : null,
+                    child: Text(
+                      strings.text(
+                        'settings.notification.channels.rally.preview',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
           if (showSound) ...[
             if (channels.sound.availability !=
@@ -216,8 +320,9 @@ class NotificationChannelPanel extends StatelessWidget {
                 channels: channels.copyWith(desktopPosition: value),
               ),
             ),
-            onTest: () => showStarBridgeNotificationToast(
+            onTest: (source) => showStarBridgeNotificationToast(
               context,
+              source: source,
               alignment: _toastAlignment(channels.desktopPosition),
               title: strings.text(
                 settings.localInAppOnly
@@ -362,7 +467,7 @@ class _DesktopPositionSelector extends StatelessWidget {
   final DesktopNotificationPosition value;
   final bool enabled;
   final Future<bool> Function(DesktopNotificationPosition value) onChanged;
-  final VoidCallback onTest;
+  final ValueChanged<InteractionSource> onTest;
   final bool localOnly;
 
   @override
@@ -373,32 +478,35 @@ class _DesktopPositionSelector extends StatelessWidget {
       padding: EdgeInsets.only(top: tokens.space.sm),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final selector = DropdownButtonFormField<DesktopNotificationPosition>(
-            key: const Key('notification-desktop-position'),
-            initialValue: value,
-            isExpanded: true,
-            decoration: InputDecoration(
-              labelText: strings.text(
-                localOnly
-                    ? 'settings.notification.local.position'
-                    : 'settings.notification.channels.position.label',
-              ),
-            ),
-            items: [
-              for (final position in DesktopNotificationPosition.values)
-                DropdownMenuItem(
-                  value: position,
-                  child: Text(strings.text(_positionKey(position))),
+          final selector =
+              StarBridgeSelectFormField<DesktopNotificationPosition>(
+                identity: 'notification-desktop-position',
+                controlKey: const Key('notification-desktop-position-control'),
+                key: const Key('notification-desktop-position'),
+                initialValue: value,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: strings.text(
+                    localOnly
+                        ? 'settings.notification.local.position'
+                        : 'settings.notification.channels.position.label',
+                  ),
                 ),
-            ],
-            onChanged: enabled
-                ? (next) {
-                    if (next != null) {
-                      onChanged(next);
-                    }
-                  }
-                : null,
-          );
+                items: [
+                  for (final position in DesktopNotificationPosition.values)
+                    DropdownMenuItem(
+                      value: position,
+                      child: Text(strings.text(_positionKey(position))),
+                    ),
+                ],
+                onChanged: enabled
+                    ? (next) {
+                        if (next != null) {
+                          onChanged(next);
+                        }
+                      }
+                    : null,
+              );
           if (constraints.maxWidth < 600) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -412,17 +520,7 @@ class _DesktopPositionSelector extends StatelessWidget {
                 SizedBox(height: tokens.space.sm),
                 selector,
                 SizedBox(height: tokens.space.sm),
-                OutlinedButton.icon(
-                  key: const Key('notification-test-button'),
-                  onPressed: enabled ? onTest : null,
-                  icon: const StarBridgeIcon(
-                    StarBridgeIconSemantic.notifications,
-                    size: 16,
-                  ),
-                  label: Text(
-                    strings.text('settings.notification.test.action'),
-                  ),
-                ),
+                _testButton(strings),
               ],
             );
           }
@@ -439,21 +537,27 @@ class _DesktopPositionSelector extends StatelessWidget {
               SizedBox(width: tokens.space.md),
               SizedBox(width: 220, child: selector),
               SizedBox(width: tokens.space.sm),
-              OutlinedButton.icon(
-                key: const Key('notification-test-button'),
-                onPressed: enabled ? onTest : null,
-                icon: const StarBridgeIcon(
-                  StarBridgeIconSemantic.notifications,
-                  size: 16,
-                ),
-                label: Text(strings.text('settings.notification.test.action')),
-              ),
+              _testButton(strings),
             ],
           );
         },
       ),
     );
   }
+
+  Widget _testButton(AppStrings strings) => StarBridgeActionButton(
+    controlKey: const Key('notification-test-button'),
+    semanticLabel: strings.text('settings.notification.test.action'),
+    onActivate: enabled ? onTest : null,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const StarBridgeIcon(StarBridgeIconSemantic.notifications, size: 16),
+        const SizedBox(width: 8),
+        Text(strings.text('settings.notification.test.action')),
+      ],
+    ),
+  );
 }
 
 Alignment _toastAlignment(DesktopNotificationPosition position) =>
@@ -483,67 +587,79 @@ class _PreviewChoice extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Semantics(
-      selected: selected,
-      enabled: enabled,
-      button: true,
-      label: strings.text(_previewTitleKey(mode)),
-      hint: strings.text(
-        localOnly
-            ? 'settings.notification.local.preview.${mode.name}'
-            : _previewBodyKey(mode),
-      ),
-      child: ExcludeSemantics(
-        child: Material(
-          color: selected
-              ? tokens.surfaces.selected.fill
-              : tokens.surfaces.ground.fill,
-          borderRadius: tokens.shape.small,
-          child: InkWell(
-            key: Key('notification-preview-${mode.name}'),
-            onTap: enabled && !selected ? onSelect : null,
+    return StarBridgeInteractionRegion(
+      child: Builder(
+        builder: (_) => Semantics(
+          inMutuallyExclusiveGroup: true,
+          hint: strings.text(
+            localOnly
+                ? 'settings.notification.local.preview.${mode.name}'
+                : _previewBodyKey(mode),
+          ),
+          child: Material(
+            color: selected
+                ? tokens.surfaces.selected.fill
+                : tokens.surfaces.ground.fill,
             borderRadius: tokens.shape.small,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 64),
-              padding: EdgeInsets.all(tokens.space.sm),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: selected
-                      ? tokens.colors.accent
-                      : tokens.surfaces.panel.border,
-                  width: tokens.stroke.regular,
+            child: SuitePressable(
+              key: Key('notification-preview-${mode.name}'),
+              kind: PressableKind.row,
+              selected: selected,
+              semanticSelected: selected,
+              semanticLabel: strings.text(_previewTitleKey(mode)),
+              excludeChildSemantics: true,
+              baseRadius: tokens.shape.radiusSmall,
+              onActivate: enabled
+                  ? (source) {
+                      if (!selected) {
+                        unawaited(
+                          runStarBridgeActivation<bool>(source, onSelect),
+                        );
+                      }
+                    }
+                  : null,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 64),
+                padding: EdgeInsets.all(tokens.space.sm),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: selected
+                        ? tokens.colors.accent
+                        : tokens.surfaces.panel.border,
+                    width: tokens.stroke.regular,
+                  ),
+                  borderRadius: tokens.shape.small,
                 ),
-                borderRadius: tokens.shape.small,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          strings.text(_previewTitleKey(mode)),
-                          style: Theme.of(context).textTheme.labelLarge,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            strings.text(_previewTitleKey(mode)),
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
                         ),
-                      ),
-                      if (selected)
-                        StarBridgeIcon(
-                          StarBridgeIconSemantic.connected,
-                          size: tokens.icons.small,
-                          color: tokens.colors.accent,
-                        ),
-                    ],
-                  ),
-                  SizedBox(height: tokens.space.xs),
-                  Text(
-                    strings.text(
-                      localOnly
-                          ? 'settings.notification.local.preview.${mode.name}'
-                          : _previewBodyKey(mode),
+                        if (selected)
+                          StarBridgeIcon(
+                            StarBridgeIconSemantic.connected,
+                            size: tokens.icons.small,
+                            color: tokens.colors.accent,
+                          ),
+                      ],
                     ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
+                    SizedBox(height: tokens.space.xs),
+                    Text(
+                      strings.text(
+                        localOnly
+                            ? 'settings.notification.local.preview.${mode.name}'
+                            : _previewBodyKey(mode),
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

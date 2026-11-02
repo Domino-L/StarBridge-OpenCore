@@ -30,6 +30,7 @@ class DirectMessagePrivacySetting extends StatelessWidget {
     final snapshot = projection?.snapshot;
     final availability = snapshot?.availability;
     return AuthoritativePrivacySetting(
+      presentationChanges: module?.projection,
       settingKey: const Key('privacy-stranger-messages-authoritative'),
       titleKey: 'settings.privacy.social.strangerMessages',
       descriptionKey: 'settings.privacy.social.strangerMessagesDescription',

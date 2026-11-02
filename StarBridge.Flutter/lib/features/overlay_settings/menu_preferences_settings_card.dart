@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../platform/window/menu_window_preferences.dart';
 
 /// Shared explicit-save flow; editors own only a patch, not geometry or revision.
@@ -19,7 +20,7 @@ class MenuPreferencesSettingsCard<T extends Object> extends StatefulWidget {
   final String section;
   final T Function(Map<String, Object?>) read;
   final Map<String, Object?> Function(T) patch;
-  final Widget Function(T, ValueChanged<T>) editor;
+  final Widget Function(T, ValueChanged<T>, bool enabled) editor;
   @override
   State<MenuPreferencesSettingsCard<T>> createState() => _CardState<T>();
 }
@@ -88,14 +89,14 @@ class _CardState<T extends Object>
               excluding: _busy,
               child: AbsorbPointer(
                 absorbing: _busy,
-                child: widget.editor(
-                  draft,
-                  (value) => setState(() {
+                child: widget.editor(draft, (value) {
+                  if (!mounted || _busy) return;
+                  setState(() {
                     _draft = value;
                     _dirty = true;
                     _failed = false;
-                  }),
-                ),
+                  });
+                }, !_busy),
               ),
             ),
           if (_failed)
@@ -105,16 +106,20 @@ class _CardState<T extends Object>
           Wrap(
             spacing: 8,
             children: [
-              FilledButton(
+              StarBridgeActionButton(
                 key: Key('menu-${widget.section}-save'),
-                onPressed: _busy || !_dirty || _saved == null
+                kind: StarBridgeActionKind.primary,
+                semanticLabel: text(_busy ? 'busy' : 'save'),
+                onActivate: _busy || !_dirty || _saved == null
                     ? null
-                    : () => _load(save: true),
+                    : (_) => _load(save: true),
                 child: Text(text(_busy ? 'busy' : 'save')),
               ),
-              TextButton(
+              StarBridgeActionButton(
                 key: Key('menu-${widget.section}-reload'),
-                onPressed: _busy ? null : _load,
+                kind: StarBridgeActionKind.quiet,
+                semanticLabel: text('reload'),
+                onActivate: _busy ? null : (_) => _load(),
                 child: Text(text('reload')),
               ),
             ],

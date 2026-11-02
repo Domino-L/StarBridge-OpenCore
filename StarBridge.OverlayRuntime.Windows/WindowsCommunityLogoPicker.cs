@@ -18,7 +18,10 @@ public sealed class WindowsCommunityLogoPicker(int parentProcessId) : ICommunity
     private long _revision;
     private bool _disposed;
 
-    public Task<CommunityLogoSource?> PickAsync(CancellationToken token)
+    public bool SupportsWideImage => true;
+    public Task<CommunityLogoSource?> PickAsync(CancellationToken token) => PickAsync(token, false);
+    public Task<CommunityLogoSource?> PickWideAsync(CancellationToken token) => PickAsync(token, true);
+    private Task<CommunityLogoSource?> PickAsync(CancellationToken token, bool wide)
     {
         long revision;
         lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); revision = ++_revision; _original = null; _sourceRef = null; }
@@ -53,7 +56,7 @@ public sealed class WindowsCommunityLogoPicker(int parentProcessId) : ICommunity
                 // Only the path just chosen by this native dialog may be opened. No path enters Bridge.
                 using var input = dialog.OpenFile();
                 var retained = WindowsCommunityLogoImage.Load(input);
-                var preview = WindowsCommunityLogoImage.Preview(retained);
+                var preview = wide ? WindowsCommunityWideImage.Preview(retained) : WindowsCommunityLogoImage.Preview(retained);
                 token.ThrowIfCancellationRequested();
                 lock (_gate)
                 {
@@ -84,6 +87,15 @@ public sealed class WindowsCommunityLogoPicker(int parentProcessId) : ICommunity
     }
 
     public void Clear() { lock (_gate) { _revision++; _original = null; _sourceRef = null; } }
+    public string CropWide(string sourceRef, string kind, double x, double y, double width)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_original is null || sourceRef != _sourceRef) throw new InvalidDataException();
+            return WindowsCommunityWideImage.Crop(_original, kind, x, y, width);
+        }
+    }
     public string CropAvatar(string sourceRef, double x, double y, double size)
     {
         lock (_gate)

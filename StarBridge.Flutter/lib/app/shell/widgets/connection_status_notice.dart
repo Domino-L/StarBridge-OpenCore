@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import '../../../design_system/icons/icon_semantic.dart';
 import '../../../design_system/icons/starbridge_icon.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
+import '../../../design_system/interaction/starbridge_action_button.dart';
+import '../../../design_system/controls/semantic_action_style.dart';
+import '../../../design_system/interaction/social_read_activity.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../../localization/app_strings.dart';
 import '../chrome/shell_chrome_projection.dart';
 
@@ -24,15 +30,21 @@ class ConnectionStatusNotice extends StatefulWidget {
 
 class _ConnectionStatusNoticeState extends State<ConnectionStatusNotice> {
   var _retryInFlight = false;
+  InteractionSource _retrySource = InteractionSource.programmatic;
+  int _retryRevision = 0;
 
   bool get _retrying => widget.retrying || _retryInFlight;
 
-  Future<void> _retry() async {
+  Future<void> _retry(InteractionSource source) async {
     final callback = widget.onRetry;
     if (callback == null || _retrying) {
       return;
     }
-    setState(() => _retryInFlight = true);
+    setState(() {
+      _retrySource = source;
+      _retryRevision++;
+      _retryInFlight = true;
+    });
     try {
       await callback();
     } finally {
@@ -110,7 +122,8 @@ class _ConnectionStatusNoticeState extends State<ConnectionStatusNotice> {
                   fontWeight: FontWeight.w600,
                 ),
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
               ),
             ),
             SizedBox(width: tokens.space.md),
@@ -127,15 +140,26 @@ class _ConnectionStatusNoticeState extends State<ConnectionStatusNotice> {
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: tokens.colors.textSecondary),
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
               ),
             ),
             if (widget.onRetry != null) ...[
               SizedBox(width: tokens.space.sm),
-              TextButton.icon(
-                key: const Key('connection-status-retry'),
-                onPressed: _retrying ? null : _retry,
-                style: TextButton.styleFrom(
+              StarBridgeActionButton(
+                controlKey: const Key('connection-status-retry'),
+                kind: StarBridgeActionKind.quiet,
+                tone: switch (widget.issue.state) {
+                  ConnectionVisualState.pending => ActionTone.info,
+                  ConnectionVisualState.limited ||
+                  ConnectionVisualState.stale => ActionTone.warning,
+                  ConnectionVisualState.disconnected => ActionTone.danger,
+                  ConnectionVisualState.normal => null,
+                },
+                onActivate: _retrying ? null : (source) => _retry(source),
+                minHeight: tokens.density.statusBarHeight - tokens.space.xxs,
+                padding: EdgeInsets.symmetric(horizontal: tokens.space.sm),
+                nativeStyle: TextButton.styleFrom(
                   foregroundColor: tone.foreground,
                   disabledForegroundColor: tone.foreground.withValues(
                     alpha: 0.72,
@@ -148,25 +172,65 @@ class _ConnectionStatusNoticeState extends State<ConnectionStatusNotice> {
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
                 ),
-                icon: _retrying
-                    ? SizedBox.square(
-                        dimension: tokens.icons.small,
-                        child: CircularProgressIndicator(
-                          key: const Key('connection-status-retry-loading'),
-                          strokeWidth: tokens.stroke.strong,
-                          color: tone.foreground,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_retrying)
+                      ExcludeSemantics(
+                        child: SizedBox.square(
+                          dimension: tokens.icons.small,
+                          child: Center(
+                            child: Theme(
+                              data: Theme.of(context).copyWith(
+                                progressIndicatorTheme:
+                                    ProgressIndicatorThemeData(
+                                      color: tone.foreground,
+                                    ),
+                              ),
+                              child: KeyedSubtree(
+                                key: ValueKey((
+                                  'connection-retry',
+                                  _retryRevision,
+                                  _retryInFlight,
+                                )),
+                                child: SocialReadActivity(
+                                  key: const Key(
+                                    'connection-status-retry-loading',
+                                  ),
+                                  source: _retryInFlight
+                                      ? _retrySource
+                                      : InteractionSource.programmatic,
+                                  opening: false,
+                                  label: strings.text(
+                                    'connection.action.retrying',
+                                  ),
+                                  circularStandard: true,
+                                  circularSize: tokens.icons.small,
+                                  circularStrokeWidth: tokens.stroke.strong,
+                                  height: 2,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       )
-                    : StarBridgeIcon(
+                    else
+                      StarBridgeIcon(
                         StarBridgeIconSemantic.refresh,
                         size: tokens.icons.small,
                       ),
-                label: Text(
-                  strings.text(
-                    _retrying
-                        ? 'connection.action.retrying'
-                        : 'connection.action.retryNow',
-                  ),
+                    const SizedBox(width: 8),
+                    Text(
+                      strings.text(
+                        _retrying
+                            ? 'connection.action.retrying'
+                            : widget.issue.action ==
+                                  ConnectionIssueAction.restoreOnline
+                            ? 'connection.action.restoreOnline'
+                            : 'connection.action.retryNow',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

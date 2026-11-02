@@ -1,7 +1,15 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show InteractionScope;
 
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_native_icon_action.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -18,9 +26,13 @@ abstract final class CigFankitLegalNotice {
 }
 
 Future<void> showCigFankitNoticeDialog(BuildContext context) {
-  return showDialog<void>(
-    context: context,
-    builder: (context) => const _CigFankitNoticeDialog(),
+  return showStarBridgeDialog<void>(
+    context,
+    builder: (context) => StarBridgeInteractionConfiguration(
+      suite: InteractionScope.of(context).suite,
+      reduceMotion: InteractionScope.of(context).reduceMotion,
+      child: const _CigFankitNoticeDialog(),
+    ),
   );
 }
 
@@ -31,25 +43,71 @@ class CigFankitNoticeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return OutlinedButton.icon(
-      onPressed: () => showCigFankitNoticeDialog(context),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: tokens.colors.textPrimary,
-        backgroundColor: tokens.surfaces.floating.fill,
-        side: BorderSide(
-          color: tokens.surfaces.floating.border,
-          width: tokens.stroke.regular,
-        ),
-        padding: EdgeInsets.symmetric(
-          horizontal: tokens.space.sm,
-          vertical: tokens.space.xs,
+    final theme = Theme.of(context);
+    final title = strings.text('legal.fankit.inlineAction');
+    final style = OutlinedButton.styleFrom(
+      foregroundColor: tokens.colors.textPrimary,
+      backgroundColor: tokens.surfaces.floating.fill,
+      side: BorderSide(
+        color: tokens.surfaces.floating.border,
+        width: tokens.stroke.regular,
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: tokens.space.sm,
+        vertical: tokens.space.xs,
+      ),
+    ).merge(OutlinedButtonTheme.of(context).style);
+    final defaults = OutlinedButton(
+      onPressed: () {},
+      child: const SizedBox.shrink(),
+    ).defaultStyleOf(context);
+    final effective = style.merge(defaults);
+    final minimum = effective.minimumSize!.resolve({})!;
+    final adjustment =
+        (effective.visualDensity ?? theme.visualDensity).baseSizeAdjustment;
+    final target =
+        (effective.tapTargetSize ?? theme.materialTapTargetSize) ==
+            MaterialTapTargetSize.padded
+        ? kMinInteractiveDimension
+        : 0.0;
+    final scale = (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
+      1.0,
+      2.0,
+    );
+    final labelStyle = effective.textStyle?.resolve({});
+    final icon = StarBridgeIcon(
+      StarBridgeIconSemantic.legalNotice,
+      size: tokens.icons.small,
+    );
+    final label = Flexible(
+      child: Text(
+        title,
+        style: labelStyle?.copyWith(
+          inherit: false,
+          color: tokens.colors.textPrimary,
         ),
       ),
-      icon: StarBridgeIcon(
-        StarBridgeIconSemantic.legalNotice,
-        size: tokens.icons.small,
+    );
+    final alignment =
+        OutlinedButtonTheme.of(context).style?.iconAlignment ??
+        style.iconAlignment ??
+        IconAlignment.start;
+    return StarBridgeActionButton(
+      nativeStyle: style,
+      minHeight: math.max(
+        minimum.height + adjustment.dy,
+        target + adjustment.dy,
       ),
-      label: Text(strings.text('legal.fankit.inlineAction')),
+      padding: effective.padding?.resolve({}),
+      semanticLabel: title,
+      onActivate: (_) => showCigFankitNoticeDialog(context),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 8 - (scale - 1) * 4,
+        children: alignment == IconAlignment.start
+            ? [icon, label]
+            : [label, icon],
+      ),
     );
   }
 }
@@ -163,10 +221,11 @@ class _CigFankitNoticeDialog extends StatelessWidget {
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
-                  IconButton(
-                    key: const Key('cig-fankit-notice-close'),
-                    tooltip: strings.text('legal.close'),
-                    onPressed: () => Navigator.of(context).pop(),
+                  StarBridgeNativeIconAction(
+                    controlKey: const Key('cig-fankit-notice-close'),
+                    label: strings.text('legal.close'),
+                    onActivate: (source) =>
+                        dismissStarBridgeDialog<void>(context, source: source),
                     icon: const StarBridgeIcon(
                       StarBridgeIconSemantic.windowClose,
                     ),

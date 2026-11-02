@@ -5,22 +5,30 @@ import '../../app/menu_overlay/menu_local_tools.dart';
 import '../../platform/window/menu_display_preferences.dart';
 import '../../platform/window/menu_toolbar_preferences.dart';
 import '../../platform/window/menu_social_preferences.dart';
+import '../../platform/window/menu_exec_hangar_summary.dart';
+import '../../platform/window/menu_window_preferences.dart';
+import '../tools/exec_hangar_port.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import 'menu_settings_draft.dart';
 
-/// Synthetic presentation only: no live ports, native calls, receipts or saves.
+/// Synthetic presentation: no native calls, receipts or saves. The only live
+/// read is the public executive hangar schedule, so its countdown matches the
+/// real menu instead of a fixed sample.
 class MenuSettingsPreview extends StatefulWidget {
-  const MenuSettingsPreview({super.key, required this.draft});
+  const MenuSettingsPreview({super.key, required this.draft, this.execHangar});
   final MenuSettingsDraft draft;
+  final ExecHangarPort? Function()? execHangar;
   @override
   State<MenuSettingsPreview> createState() => _PreviewState();
 }
 
 class _PreviewState extends State<MenuSettingsPreview> {
   final tools = MenuLocalToolsController((_, _) async => null);
+  late final hangar = _PreviewHangarPort(() => widget.execHangar?.call());
   bool actualSize = false;
   final transform = TransformationController();
   @override
@@ -84,6 +92,10 @@ class _PreviewState extends State<MenuSettingsPreview> {
               child: MenuBridgePreview(
                 visible: true,
                 settingsPreview: true,
+                initialSettings: widget.draft.ready
+                    ? widget.draft.settings
+                    : MenuWindowPreferences.defaults.settings,
+                hangar: hangar,
                 localToolsController: tools,
                 onDismiss: () {},
                 contextValues: [
@@ -118,9 +130,9 @@ class _PreviewState extends State<MenuSettingsPreview> {
                   strings.text('overlay.preview.stageTitle'),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
-                OutlinedButton(
-                  key: const Key('menu-preview-zoom'),
-                  onPressed: () => setState(() {
+                StarBridgeActionButton(
+                  controlKey: const Key('menu-preview-zoom'),
+                  onActivate: (_) => setState(() {
                     actualSize = !actualSize;
                     transform.value = Matrix4.identity();
                   }),
@@ -167,5 +179,44 @@ class _PreviewState extends State<MenuSettingsPreview> {
         ],
       ),
     );
+  }
+}
+
+/// Reads the same schedule the real menu shows (exactly as the menu converts
+/// it). Without a hangar capability, or when that read fails, the settings
+/// illustration falls back to a sample; no native tool is ever invoked.
+final class _PreviewHangarPort implements MenuExecHangarSummaryPort {
+  _PreviewHangarPort(this.live);
+  final ExecHangarPort? Function() live;
+  @override
+  Future<MenuExecHangarSummary> read() async {
+    final port = live();
+    if (port != null) {
+      try {
+        return MenuExecHangarSummary.fromSnapshot(await port.read());
+      } on Object {
+        // Keep the illustration; the real menu reports its own failure.
+      }
+    }
+    final now = DateTime.now().toUtc();
+    final open = now.subtract(const Duration(minutes: 45));
+    final close = now.add(const Duration(minutes: 20));
+    return MenuExecHangarSummary.parse({
+      'now': now.toIso8601String(),
+      'reliable': true,
+      'fetchedAt': now.toIso8601String(),
+      'phases': [
+        {
+          'start': open.toIso8601String(),
+          'end': close.toIso8601String(),
+          'open': true,
+          'green': 5,
+          'red': 0,
+        },
+      ],
+      'windows': [
+        {'open': open.toIso8601String(), 'close': close.toIso8601String()},
+      ],
+    });
   }
 }

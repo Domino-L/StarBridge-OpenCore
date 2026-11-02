@@ -1,0 +1,275 @@
+using System.Numerics;
+using Vortice.Direct2D1;
+using Vortice.DirectWrite;
+using Vortice.Mathematics;
+using DWriteTextAlignment = Vortice.DirectWrite.TextAlignment;
+using WpfRect = System.Windows.Rect;
+
+namespace StarBridge.Desktop;
+
+/// <summary>The chat module: message list and barrage.</summary>
+internal sealed partial class OverlayCompositionHudWindow
+{
+    private void DrawChatPanel(ID2D1RenderTarget target, OverlayCompositionFrameState state)
+    {
+        // Barrage stays barrage: with nothing to show (still syncing or unavailable)
+        // it draws nothing, rather than falling back to a list box for the message.
+        if (state.ChatDisplayMode == OverlayChatDisplayMode.FullScreenBarrage)
+        {
+            if (state.EmptyStates.Chat is null) DrawChatBarrage(target, state);
+            return;
+        }
+
+        var rect = state.ChatRect;
+        var style = state.ChatStyle;
+        var textOpacity = state.Opacity * style.TextOpacity;
+        var nightShadowJoin = NightShadowPanelJoin.None;
+        const bool useNightShadowLayout = false;
+        DrawPanelFrame(target, rect, state, 28, 142, 28, 126, style.BackgroundOpacity, style.DecorationOpacity, nightShadowJoin, "Chat");
+        var left = (float)rect.X + (useNightShadowLayout ? 28 : 18);
+        var titleLeft = (float)rect.X + (useNightShadowLayout ? 28 : 18);
+        var top = (float)rect.Y + (useNightShadowLayout ? 18 : 14);
+        var contentWidth = (float)Math.Max(1, rect.Width - (useNightShadowLayout ? 56 : 36));
+        var contentTop = top + (useNightShadowLayout ? 36 : 30);
+        var contentBottom = (float)rect.Bottom - 8;
+        var clipRect = RectF((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
+        var chatTitleFormat = _titleFormat;
+        DrawSourceHeader(
+            target,
+            state.ChatTitle,
+            state.SourceLabels.Chat,
+            state.SourceLabels.IsOwn(OverlayModuleFlags.Chat),
+            chatTitleFormat,
+            titleLeft,
+            top,
+            Math.Max(1, (float)rect.Right - titleLeft - 28),
+            state,
+            textOpacity);
+        var chatMeta = state.ChatTitle.Contains("房间", StringComparison.OrdinalIgnoreCase) ||
+                       state.ChatTitle.Equals("PARTY COMMS", StringComparison.OrdinalIgnoreCase)
+            ? "PARTY COMMS"
+            : "FLEET COMMS";
+
+        if (DrawModuleEmptyMessage(target, state.EmptyStates.Chat, left, contentTop, contentWidth,
+                contentBottom - contentTop, state, textOpacity)) return;
+        var cursorTop = contentTop;
+        target.PushAxisAlignedClip(clipRect, AntialiasMode.PerPrimitive);
+        try
+        {
+            for (var index = state.ChatRows.Count - 1; index >= 0; index--)
+            {
+                var row = state.ChatRows[index];
+                var titleWidth = Math.Max(30, contentWidth - 58);
+                var detailHeight = MeasureWrappedTextHeight(row.Detail, _eventDetailFormat, contentWidth - 12, 42, 14);
+                var desiredRowHeight = Math.Max(42, 22 + detailHeight + 8);
+                var availableHeight = contentBottom - cursorTop;
+                if (availableHeight < 42)
+                {
+                    break;
+                }
+
+                var rowHeight = index == state.ChatRows.Count - 1
+                    ? Math.Min(desiredRowHeight, availableHeight)
+                    : desiredRowHeight;
+                if (rowHeight > availableHeight)
+                {
+                    break;
+                }
+
+                var detailMaxHeight = Math.Max(14, rowHeight - 30);
+                FillRect(target, left, cursorTop + 3, 2, rowHeight - 10, row.AccentColor, textOpacity * 0.78);
+                DrawText(target, row.Title, _eventTitleFormat, left + 10, cursorTop, titleWidth, 18, row.AccentColor, textOpacity);
+                DrawText(target, row.Timestamp, _mutedRightFormat, left + contentWidth - 48, cursorTop, 48, 18, state.Palette.Muted, textOpacity * 0.78);
+                DrawWrappedText(target, row.Detail, _eventDetailFormat, left + 10, cursorTop + 20, contentWidth - 12, detailMaxHeight, state.Palette.Text, textOpacity * 0.92);
+
+                cursorTop += rowHeight;
+            }
+        }
+        finally
+        {
+            target.PopAxisAlignedClip();
+        }
+    }
+
+    private void DrawChatBarrage(ID2D1RenderTarget target, OverlayCompositionFrameState state)
+    {
+        EnsureChatBarrageTextFormats((float)state.ChatBarrageFontSize);
+        var style = state.ChatStyle;
+        var safeTop = (float)Math.Clamp(state.Height * 0.08, 54, 108);
+        var safeBottom = state.ChatBarrageRegion switch
+        {
+            OverlayChatBarrageRegion.Upper => (float)(state.Height * 0.38),
+            OverlayChatBarrageRegion.FullScreen => (float)(state.Height * 0.92),
+            _ => (float)(state.Height * 0.66)
+        };
+        safeBottom = Math.Max(safeTop + 1, safeBottom);
+        var laneSpacing = state.ChatBarrageDensity switch
+        {
+            OverlayChatBarrageDensity.Sparse => (float)state.ChatBarrageFontSize + 24,
+            OverlayChatBarrageDensity.Dense => (float)state.ChatBarrageFontSize + 8,
+            _ => (float)state.ChatBarrageFontSize + 15
+        };
+        var maximumLanes = state.ChatBarrageDensity switch
+        {
+            OverlayChatBarrageDensity.Sparse => 5,
+            OverlayChatBarrageDensity.Dense => 12,
+            _ => 9
+        };
+        var laneCount = Math.Clamp((int)Math.Floor((safeBottom - safeTop) / laneSpacing) + 1, 1, maximumLanes);
+        var textOpacity = state.Opacity * style.TextOpacity;
+        var now = _frameNowUtc;
+        var fontScale = (float)(state.ChatBarrageFontSize / 16d);
+        foreach (var row in state.ChatRows)
+        {
+            var title = string.IsNullOrWhiteSpace(row.Title) ? "通讯消息" : row.Title;
+            var titleWidth = MeasureBarrageTextWidth(title, _chatBarrageTitleFormat, state.ChatBarrageFontSize, 0, 9, 260);
+            var detailWidth = MeasureBarrageTextWidth(row.Detail, _chatBarrageTextFormat, state.ChatBarrageFontSize, 1, 18, 980);
+            var timestampWidth = string.IsNullOrWhiteSpace(row.Timestamp)
+                ? 0
+                : MeasureBarrageTextWidth(row.Timestamp, _chatBarrageTimestampFormat, state.ChatBarrageFontSize * 0.72, 2, 28, 58);
+            var titleDetailGap = 8 * fontScale;
+            var timestampGap = timestampWidth > 0 ? 10 * fontScale : 0;
+            var totalWidth = 18 * fontScale + titleWidth + titleDetailGap + detailWidth + timestampGap + timestampWidth;
+            var durationMs = Math.Max(1, row.BarrageDurationSeconds * 1000);
+            var progress = state.ChatBarrageMotionEnabled && row.IsBarrageActive
+                ? (float)Math.Clamp((now - row.BarrageStartedAtUtc).TotalMilliseconds / durationMs, 0, 1)
+                : 0.2f;
+            var travel = (float)state.Width + totalWidth + 120;
+            var x = (float)state.Width + 48 - travel * progress;
+            var lane = Math.Abs(row.BarrageLane) % laneCount;
+            var y = ResolveChatBarrageLaneY(state, lane, laneCount, safeTop, safeBottom);
+            var edgeFade = Math.Clamp(Math.Min(progress / 0.035f, (1 - progress) / 0.055f), 0, 1);
+            var alpha = textOpacity * row.Opacity * edgeFade;
+            if (!state.ChatBarrageMotionEnabled)
+            {
+                alpha = textOpacity * row.Opacity;
+            }
+
+
+
+            var textHeight = (float)state.ChatBarrageFontSize + 8;
+            FillRect(target, x, y + 5, Math.Max(2, 3 * fontScale), Math.Max(8, 11 * fontScale), row.AccentColor, alpha * 0.86);
+
+            var textX = x + 18 * fontScale;
+            DrawChatBarrageText(target, title, _chatBarrageTitleFormat, textX, y, titleWidth, textHeight, row.AccentColor, alpha, state.ChatTextEdgeStrength);
+            textX += titleWidth + titleDetailGap;
+            DrawChatBarrageText(target, row.Detail, _chatBarrageTextFormat, textX, y, detailWidth, textHeight, state.Palette.Text, alpha, state.ChatTextEdgeStrength);
+            if (timestampWidth > 0)
+            {
+                DrawChatBarrageText(target, row.Timestamp, _chatBarrageTimestampFormat, textX + detailWidth + timestampGap, y + 2, timestampWidth, textHeight, state.Palette.Muted, alpha * 0.72, state.ChatTextEdgeStrength);
+            }
+        }
+    }
+
+    private static float ResolveChatBarrageLaneY(
+        OverlayCompositionFrameState state,
+        int lane,
+        int laneCount,
+        float safeTop,
+        float safeBottom)
+    {
+        if (!state.ChatBarrageAvoidCenter || state.ChatBarrageRegion == OverlayChatBarrageRegion.Upper)
+        {
+            return laneCount <= 1 ? safeTop : safeTop + (safeBottom - safeTop) * lane / (laneCount - 1);
+        }
+
+        var upperBottom = (float)Math.Min(safeBottom, state.Height * 0.39);
+        var lowerTop = (float)Math.Max(safeTop, state.Height * 0.61);
+        var upperSpan = Math.Max(0, upperBottom - safeTop);
+        var lowerSpan = Math.Max(0, safeBottom - lowerTop);
+        if (lowerSpan <= 1)
+        {
+            return laneCount <= 1 ? safeTop : safeTop + upperSpan * lane / (laneCount - 1);
+        }
+
+        var upperLaneCount = Math.Clamp(
+            (int)Math.Round(laneCount * upperSpan / Math.Max(1, upperSpan + lowerSpan)),
+            1,
+            Math.Max(1, laneCount - 1));
+        if (lane < upperLaneCount)
+        {
+            return upperLaneCount <= 1 ? safeTop : safeTop + upperSpan * lane / (upperLaneCount - 1);
+        }
+
+        var lowerLane = lane - upperLaneCount;
+        var lowerLaneCount = laneCount - upperLaneCount;
+        return lowerLaneCount <= 1 ? lowerTop : lowerTop + lowerSpan * lowerLane / (lowerLaneCount - 1);
+    }
+
+
+    private void DrawChatBarrageText(
+        ID2D1RenderTarget target,
+        string text,
+        IDWriteTextFormat? format,
+        float x,
+        float y,
+        float width,
+        float height,
+        HudColor color,
+        double alpha,
+        OverlayChatTextEdgeStrength edgeStrength)
+    {
+        var normalizedStrength = OverlayDisplaySettings.NormalizeChatTextEdgeStrength(edgeStrength);
+        if (normalizedStrength == OverlayChatTextEdgeStrength.Off)
+        {
+            DrawText(target, text, format, x, y, width, height, color, alpha, DrawTextOptions.Clip | DrawTextOptions.NoSnap);
+            return;
+        }
+
+        var edge = HudColor.FromRgb(0, 0, 0);
+        var edgeAlpha = alpha * (normalizedStrength switch
+        {
+            OverlayChatTextEdgeStrength.Light => 0.42,
+            OverlayChatTextEdgeStrength.Strong => 0.9,
+            _ => 0.68
+        });
+        var edgeOffset = normalizedStrength switch
+        {
+            OverlayChatTextEdgeStrength.Light => 0.45f,
+            OverlayChatTextEdgeStrength.Strong => 1.0f,
+            _ => 0.7f
+        };
+        var options = DrawTextOptions.Clip | DrawTextOptions.NoSnap;
+        DrawText(target, text, format, x - edgeOffset, y, width, height, edge, edgeAlpha, options);
+        DrawText(target, text, format, x + edgeOffset, y, width, height, edge, edgeAlpha, options);
+        DrawText(target, text, format, x, y - edgeOffset, width, height, edge, edgeAlpha, options);
+        DrawText(target, text, format, x, y + edgeOffset, width, height, edge, edgeAlpha, options);
+        DrawText(target, text, format, x, y, width, height, color, alpha, options);
+    }
+
+    private float MeasureBarrageTextWidth(
+        string value,
+        IDWriteTextFormat? format,
+        double fontSize,
+        int formatRole,
+        float minimum,
+        float maximum)
+    {
+        var scale = (float)(OverlayDisplaySettings.NormalizeChatBarrageFontSize(fontSize) / 16d);
+        var fallback = Math.Clamp(
+            (float)OverlayDisplaySettings.EstimateChatBarrageTextWidth(value, fontSize),
+            minimum * scale,
+            maximum * scale);
+        if (_writeFactory is null || format is null || string.IsNullOrEmpty(value))
+        {
+            return fallback;
+        }
+
+        return _chatBarrageTextMeasurementCache.GetOrAdd(
+            value,
+            (float)fontSize,
+            formatRole,
+            () =>
+            {
+                using var layout = _writeFactory.CreateTextLayout(
+                    value,
+                    format,
+                    maximum * scale,
+                    Math.Max(24, (float)fontSize + 10));
+                return Math.Clamp(
+                    layout.Metrics.WidthIncludingTrailingWhitespace + Math.Max(1, scale),
+                    minimum * scale,
+                    maximum * scale);
+            });
+    }
+}

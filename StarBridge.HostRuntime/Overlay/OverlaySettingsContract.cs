@@ -24,6 +24,9 @@ internal static class OverlayRequestNames
     internal const string RuntimeOpen = "overlay.runtime.open";
     internal const string RuntimeClose = "overlay.runtime.close";
     internal const string RuntimeRetry = "overlay.runtime.retry";
+    internal const string AppearancePreviewOpen = "overlay.appearancePreview.open";
+    internal const string AppearancePreviewClose = "overlay.appearancePreview.close";
+    internal const string AppearanceProgressRead = "overlay.appearanceProgress.read";
 }
 
 public sealed record OverlaySettingsSnapshot(

@@ -106,13 +106,21 @@ final class ColorTokens {
     required this.infoSoft,
     required this.offline,
     required this.scrim,
-  });
+    Color? stateAccent,
+    Color? stateAccentSoft,
+  }) : stateAccent = stateAccent ?? accent,
+       stateAccentSoft = stateAccentSoft ?? accentSoft;
 
   final Color textPrimary;
   final Color textSecondary;
   final Color textDisabled;
   final Color accent;
   final Color accentSoft;
+
+  /// 表示状态的那个主色（在线、已连接等）。平时和 [accent] 一样；
+  /// 节日只换 [accent]，状态色不动（用户 10-30："在线状态这种状态色也不要动"）。
+  final Color stateAccent;
+  final Color stateAccentSoft;
   final Color onAccent;
   final Color focusRing;
   final Color success;
@@ -133,6 +141,8 @@ final class ColorTokens {
       textDisabled: Color.lerp(textDisabled, other.textDisabled, t)!,
       accent: Color.lerp(accent, other.accent, t)!,
       accentSoft: Color.lerp(accentSoft, other.accentSoft, t)!,
+      stateAccent: Color.lerp(stateAccent, other.stateAccent, t)!,
+      stateAccentSoft: Color.lerp(stateAccentSoft, other.stateAccentSoft, t)!,
       onAccent: Color.lerp(onAccent, other.onAccent, t)!,
       focusRing: Color.lerp(focusRing, other.focusRing, t)!,
       success: Color.lerp(success, other.success, t)!,

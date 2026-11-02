@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_combat_icon.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_read_diagnostics.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_page.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_detail.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_ship_row.dart';
 import 'package:starbridge_flutter/features/hangar/bridge_local_hangar.dart';
@@ -17,7 +19,74 @@ import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 
 import 'bridge_local_hangar_test.dart' show LocalConnection;
 
+import 'package:starbridge_flutter/features/hangar/hangar_page.dart';
+import 'package:starbridge_flutter/features/onboarding/connection_mode_controller.dart';
+import 'package:starbridge_flutter/features/onboarding/connection_mode_port.dart';
+
+import '../onboarding/connection_mode_test.dart' show ModePort, modeFact;
+import '../../app/presence/direct_online_restore_flow_test.dart'
+    show RetainedAccount;
+
 void main() {
+  testWidgets(
+    'cold offline hangar mounts read-only and clears on owner mode change',
+    (tester) async {
+      final connection = LocalConnection();
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 7,
+      );
+      final port = BridgeLocalHangar.offline(session, 22);
+      final modePort = ModePort()
+        ..current = ConnectionModeSnapshot(
+          scope: 7,
+          revision: 22,
+          state: ConnectionModeState.offline,
+          offlineAccount: OfflineAccountDisplay(
+            'Synthetic Pilot',
+            DateTime.utc(2026, 10, 14),
+          ),
+        );
+      final mode = ConnectionModeController(modePort);
+      final account = RetainedAccount(() => 7, coldStart: true);
+      addTearDown(() async {
+        account.dispose();
+        mode.dispose();
+        await modePort.events.close();
+        await session.close();
+      });
+      await tester.runAsync(mode.refresh);
+      await tester.pumpWidget(
+        _app(
+          port,
+          replacement: HangarPage(
+            account: account,
+            connectionMode: mode,
+            previewFactory: () =>
+                throw StateError('Offline must not open the scanner'),
+            offlineFactory: (revision) {
+              expect(revision, 22);
+              return port;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(LocalHangarPage), findsOneWidget);
+      expect(find.byKey(const Key('local-hangar-summary')), findsOneWidget);
+      expect(find.byKey(const Key('local-hangar-read')), findsNothing);
+      expect(
+        connection.requests.every((r) => r.name == 'onboarding.mode.hangar'),
+        isTrue,
+      );
+      modePort.current = modeFact('local');
+      await tester.runAsync(mode.refresh);
+      await tester.pumpAndSettle();
+      expect(find.byType(LocalHangarPage), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'real adapter displays unsaved local hangar when optional profile display is omitted',
     (tester) async {
@@ -98,9 +167,7 @@ void main() {
     }
     expect(tester.takeException(), isNull);
   });
-  testWidgets('ship detail image fills its frame with proportional cropping', (
-    tester,
-  ) async {
+  testWidgets('ship detail image preserves the complete ship', (tester) async {
     final port = _LocalPort();
     await tester.pumpWidget(_app(port));
     port.reads.single.complete(
@@ -121,80 +188,74 @@ void main() {
     await tester.pumpAndSettle();
     final image = tester.widget<LocalHangarShipImage>(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(LocalHangarDetail),
         matching: find.byType(LocalHangarShipImage),
       ),
     );
-    expect(image.fit, BoxFit.cover);
-    expect(image.width / image.height, closeTo(300 / 105, .00001));
+    expect(image.fit, BoxFit.contain);
+    expect(image.width / image.height, closeTo(16 / 9, .00001));
     expect(tester.takeException(), isNull);
   });
-  testWidgets(
-    'saved scan review is available on demand, without a persistent warning',
-    (tester) async {
-      final port = _LocalPort();
-      await tester.pumpWidget(_app(port));
-      port.reads.single.complete(
-        const LocalHangarSnapshot(
-          revision: 1,
-          partial: true,
-          ships: [LocalHangarShip(id: 'read-ship', title: 'Carrack')],
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.textContaining('读取不完整'), findsNothing);
-      expect(find.textContaining('物品'), findsNothing);
-      expect(find.byTooltip('部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。'), findsOneWidget);
-    },
-  );
-  testWidgets(
-    'history shows one model with the last removal time, separate from current ships',
-    (tester) async {
-      final port = _LocalPort();
-      await tester.pumpWidget(_app(port));
-      final first = LocalHangarShip(
-        id: 'former-a',
-        title: 'Carrack',
-        removedAt: DateTime.utc(2026, 9, 19),
-      );
-      final last = LocalHangarShip(
-        id: 'former-b',
-        title: 'Carrack',
-        removedAt: DateTime.utc(2026, 9, 20),
-      );
-      final snapshot = LocalHangarSnapshot(
-        revision: 3,
-        ships: [],
-        formerShips: [last, first],
-      );
-      expect(snapshot.formerModels.single.id, 'former-b');
-      expect(
-        LocalHangarSnapshot(
-          revision: 2,
-          ships: [first],
-          formerShips: [last],
-        ).formerModels,
-        isEmpty,
-      );
-      port.reads.single.complete(snapshot);
-      await tester.pumpAndSettle();
-      expect(find.text('Carrack'), findsNothing);
-      await tester.tap(find.byKey(const Key('hangar-former')));
-      await tester.pumpAndSettle();
-      expect(find.text('Carrack'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('local-hangar-ship-former-a')),
-        findsNothing,
-      );
-      await tester.tap(
-        find.byKey(const ValueKey('local-hangar-ship-former-b')),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('最后移出机库'), findsOneWidget);
-      expect(find.textContaining('2026'), findsWidgets);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('saved partial scan review is visible without hovering', (
+    tester,
+  ) async {
+    final port = _LocalPort();
+    await tester.pumpWidget(_app(port));
+    port.reads.single.complete(
+      const LocalHangarSnapshot(
+        revision: 1,
+        partial: true,
+        ships: [LocalHangarShip(id: 'read-ship', title: 'Carrack')],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('读取不完整'), findsNothing);
+    expect(find.byKey(const Key('hangar-partial-warning')), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is StarBridgeTooltip &&
+            widget.message == '部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。',
+      ),
+      findsOneWidget,
+    );
+  });
+  testWidgets('history shows each instance with its own removal time', (
+    tester,
+  ) async {
+    final port = _LocalPort();
+    await tester.pumpWidget(_app(port));
+    final first = LocalHangarShip(
+      id: 'former-a',
+      title: 'Carrack',
+      removedAt: DateTime.utc(2026, 9, 19),
+    );
+    final last = LocalHangarShip(
+      id: 'former-b',
+      title: 'Carrack',
+      removedAt: DateTime.utc(2026, 9, 20),
+    );
+    final snapshot = LocalHangarSnapshot(
+      revision: 3,
+      ships: [],
+      formerShips: [last, first],
+    );
+    port.reads.single.complete(snapshot);
+    await tester.pumpAndSettle();
+    expect(find.text('Carrack'), findsNothing);
+    await tester.tap(find.byKey(const Key('hangar-former')));
+    await tester.pumpAndSettle();
+    expect(find.text('Carrack'), findsNWidgets(2));
+    expect(
+      find.byKey(const ValueKey('local-hangar-ship-former-a')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('local-hangar-ship-former-b')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('最后移出机库'), findsOneWidget);
+    expect(find.textContaining('2026'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('missing combat size does not label a ship unclassified', (
     tester,
   ) async {
@@ -223,6 +284,8 @@ void main() {
     if (const bool.fromEnvironment('LOCAL_HANGAR_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
         'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
       }.entries) {
@@ -307,13 +370,27 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       expect(opened, isTrue);
       await tester.tap(find.byKey(const Key('local-hangar-search')));
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      var cardFocused = false;
+      for (var i = 0; i < 60 && !cardFocused; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        FocusManager.instance.primaryFocus?.context?.visitAncestorElements((
+          element,
+        ) {
+          if (element.widget.key ==
+              const ValueKey('local-hangar-ship-synthetic-lightning')) {
+            cardFocused = true;
+            return false;
+          }
+          return true;
+        });
+      }
+      expect(cardFocused, isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(LocalHangarDetail), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(LocalHangarDetail), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -357,7 +434,7 @@ void main() {
       find.byKey(const ValueKey('local-hangar-ship-instance-59')),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(LocalHangarDetail), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -370,11 +447,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('F8C 闪电'));
     await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(LocalHangarDetail), findsOneWidget);
 
     await tester.pumpWidget(_app(current));
-    await tester.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(LocalHangarDetail), findsNothing);
     expect(find.text('F8C Lightning', skipOffstage: false), findsNothing);
     current.reads.single.complete(
       const LocalHangarSnapshot(
@@ -385,7 +462,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Current ship'));
     await tester.pumpAndSettle();
-    final dialogContext = tester.element(find.byType(AlertDialog));
+    final dialogContext = tester.element(find.byType(LocalHangarDetail));
     unawaited(
       Navigator.of(dialogContext).push(
         DialogRoute<void>(
@@ -420,7 +497,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('机库中还没有舰船'), findsOneWidget);
     expect(find.text('尚未保存机库'), findsNothing);
-    expect(find.textContaining('保存在本机'), findsOneWidget);
+    expect(find.textContaining('从 RSI 读取保存于'), findsOneWidget);
     await tester.tap(find.byKey(const Key('local-hangar-read')));
     expect(opened, isTrue);
   });
@@ -471,9 +548,9 @@ void main() {
     await tester.pumpWidget(_app(port));
     port.reads.single.complete(_saved(partial: true));
     await tester.pumpAndSettle();
-    expect(find.text('部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。'), findsNothing);
+    expect(find.text('部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。'), findsOneWidget);
     expect(find.text('2 艘舰船'), findsOneWidget);
-    expect(find.textContaining('保存在本机 · '), findsOneWidget);
+    expect(find.textContaining('从 RSI 读取保存于 '), findsOneWidget);
     expect(find.textContaining('2026'), findsOneWidget);
     await _reveal(tester, 'synthetic-lightning');
     expect(
@@ -486,22 +563,28 @@ void main() {
 
     await tester.tap(find.text('F8C 闪电'));
     await tester.pumpAndSettle();
-    final dialog = find.byType(AlertDialog);
+    final dialog = find.byType(LocalHangarDetail);
     expect(dialog, findsOneWidget);
     expect(
-      find.descendant(of: dialog, matching: find.text('F8C Lightning')),
+      find.descendant(
+        of: dialog,
+        matching: find.textContaining('F8C Lightning'),
+      ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dialog, matching: find.text('Anvil Aerospace')),
+      find.descendant(
+        of: dialog,
+        matching: find.textContaining('Anvil Aerospace'),
+      ),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dialog, matching: find.text('加入时间')),
+      find.descendant(of: dialog, matching: find.textContaining('加入时间')),
       findsOneWidget,
     );
     expect(find.textContaining('USD'), findsNothing);
-    await tester.tap(find.text('关闭'));
+    await tester.tap(find.byKey(const Key('hangar-detail-close')));
     await tester.pumpAndSettle();
     expect(dialog, findsNothing);
     await _reveal(tester, 'synthetic-ironclad');
@@ -570,7 +653,7 @@ void main() {
     port.reads.last.complete(_saved());
     await tester.pumpAndSettle();
     expect(find.text('F8C 闪电'), findsOneWidget);
-    expect(find.textContaining('保存在本机'), findsOneWidget);
+    expect(find.textContaining('从 RSI 读取保存于'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('local-hangar-refresh')));
     await tester.pump();

@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -49,16 +52,16 @@ class OverlayWorkspaceEditorTools extends StatelessWidget {
               children: [
                 ?fullscreenButton,
                 if (allowSimulation)
-                  FilterChip(
-                    key: const Key('overlay-editor-simulate'),
-                    label: Text(_copy(context, 'overlay.editor.simulate')),
+                  StarBridgeChoiceChip.filter(
+                    controlKey: const Key('overlay-editor-simulate'),
+                    label: _copy(context, 'overlay.editor.simulate'),
                     selected: editor.simulateInformation,
                     onSelected: (value) =>
                         editor.change(() => editor.simulateInformation = value),
                   ),
-                FilterChip(
-                  key: const Key('overlay-layout-show-grid'),
-                  label: Text(_copy(context, 'overlay.editor.showGrid')),
+                StarBridgeChoiceChip.filter(
+                  controlKey: const Key('overlay-layout-show-grid'),
+                  label: _copy(context, 'overlay.editor.showGrid'),
                   selected: editor.showGrid,
                   onSelected: (value) =>
                       editor.change(() => editor.showGrid = value),
@@ -88,9 +91,11 @@ class OverlayWorkspaceEditorTools extends StatelessWidget {
                     runSpacing: tokens.space.xs,
                     children: <double>[16, 32, 64]
                         .map(
-                          (value) => ChoiceChip(
-                            key: Key('overlay-layout-grid-${value.round()}'),
-                            label: Text('${value.round()} px'),
+                          (value) => StarBridgeChoiceChip(
+                            controlKey: Key(
+                              'overlay-layout-grid-${value.round()}',
+                            ),
+                            label: '${value.round()} px',
                             selected: editor.gridSize == value,
                             onSelected: (_) =>
                                 editor.change(() => editor.gridSize = value),
@@ -132,9 +137,11 @@ class OverlayWorkspaceEditorTools extends StatelessWidget {
                   children: [
                     Text(_copy(context, 'overlay.workspace.layout.nudgeStep')),
                     ...<double>[1, 5, 10].map(
-                      (value) => ChoiceChip(
-                        key: Key('overlay-layout-nudge-${value.round()}'),
-                        label: Text('${value.round()} px'),
+                      (value) => StarBridgeChoiceChip(
+                        controlKey: Key(
+                          'overlay-layout-nudge-${value.round()}',
+                        ),
+                        label: '${value.round()} px',
                         selected: editor.nudgePixels == value,
                         onSelected: (_) =>
                             editor.change(() => editor.nudgePixels = value),
@@ -168,7 +175,12 @@ class _ToolToggleRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: [
       Expanded(child: Text(label)),
-      Switch(key: switchKey, value: value, onChanged: onChanged),
+      StarBridgeSwitch(
+        controlKey: switchKey,
+        value: value,
+        label: label,
+        onChanged: onChanged,
+      ),
     ],
   );
 }

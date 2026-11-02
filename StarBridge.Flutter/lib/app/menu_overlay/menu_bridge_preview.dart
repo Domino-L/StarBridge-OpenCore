@@ -1,14 +1,20 @@
+import 'menu_overlay_locale.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'menu_bridge_dock.dart';
+import 'menu_bridge_panel_specs.dart';
+import 'menu_panel_recovery_identity.dart';
 import 'menu_bridge_panels.dart';
 import 'menu_bridge_style.dart';
 import 'menu_friends_view.dart';
 import 'menu_comms_view.dart';
 import 'menu_bridge_workspace.dart';
+import 'menu_hud_quick_panel.dart';
+import 'menu_hud_menu_hooks.dart';
 import 'menu_notice_banner.dart';
 import '../../platform/window/menu_notice.dart';
 import 'menu_workspace_controller.dart';
@@ -32,6 +38,9 @@ import '../../platform/window/menu_shortcut_settings.dart';
 import '../../platform/window/menu_toolbar_preferences.dart';
 import '../../platform/window/menu_attention.dart';
 import '../localization/app_strings.dart';
+import '../../platform/window/menu_desktop_widgets.dart';
+import '../../platform/window/menu_exec_hangar_summary.dart';
+import 'menu_exec_hangar_widget.dart';
 
 /// Shared workspace presentation. Preview callers cannot acquire authority;
 /// live ports are supplied only by the primary owner's current opening lease.
@@ -70,6 +79,11 @@ class MenuBridgePreview extends StatefulWidget {
     this.recoveryOverlay,
     this.startupMode = 'normal',
     this.settingsPreview = false,
+    this.hangar,
+    this.hangarInitial,
+    this.onHangarSnapshot,
+    this.onOpenHangar,
+    this.hangarOpenFailed = false,
   });
   final bool visible;
   final VoidCallback onDismiss;
@@ -107,6 +121,11 @@ class MenuBridgePreview extends StatefulWidget {
 
   /// Presentation only; does not supply any live ports or action authority.
   final bool settingsPreview;
+  final MenuExecHangarSummaryPort? hangar;
+  final MenuExecHangarSummary? hangarInitial;
+  final ValueChanged<MenuExecHangarSummary>? onHangarSnapshot;
+  final VoidCallback? onOpenHangar;
+  final bool hangarOpenFailed;
   @override
   State<MenuBridgePreview> createState() => _MenuBridgePreviewState();
 }
@@ -123,60 +142,18 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   String? _notice;
   MenuLocalToolsController? localTools;
   MenuBrowserResumeController? _browserResume;
+  MenuDesktopWidgets _desktopWidgets = const MenuDesktopWidgets();
+  bool _editingWidgets = false;
   Size get _initialViewport =>
       context.getInheritedWidgetOfExactType<MediaQuery>()?.data.size ??
       const Size(1200, 800);
-  static Rect _initialOrganizationBounds(Size viewport) {
-    final width = (viewport.width - 48).clamp(320.0, 900.0);
-    final height = (viewport.height - 180).clamp(200.0, 620.0);
-    // Initial placement only: never clamp a restored or manually moved window.
-    return Rect.fromLTWH((viewport.width - width) / 2, 64, width, height);
-  }
-
-  List<MenuPanelSpec> get _specs => [
-    if (widget.onFeatureVisible != null)
-      for (final id in const ['organizations', 'rooms'])
-        MenuPanelSpec(
-          id: id,
-          initialBounds: id == 'organizations'
-              ? const Rect.fromLTWH(168, 132, 900, 620)
-              : const Rect.fromLTWH(168, 132, 680, 550),
-          viewportBounds: id == 'organizations'
-              ? _initialOrganizationBounds
-              : null,
-          minimumSize: const Size(320, 200),
-        ),
-    if (widget.localCall != null)
-      for (final id in const ['screenshot', 'image', 'browser', 'settings'])
-        MenuPanelSpec(
-          id: id,
-          initialBounds: const Rect.fromLTWH(128, 132, 820, 560),
-          minimumSize: const Size(320, 200),
-        ),
-    MenuPanelSpec(
-      id: 'friends',
-      initialBounds: const Rect.fromLTWH(28, 112, 340, 550),
-      minimumSize: const Size(300, 180),
-    ),
-    MenuPanelSpec(
-      id: 'comms',
-      initialBounds: widget.comms == null
-          ? const Rect.fromLTWH(408, 136, 460, 480)
-          : Rect.fromLTWH(
-              48,
-              88,
-              (_initialViewport.width - 96).clamp(320, 980),
-              (_initialViewport.height - 176).clamp(240, 680),
-            ),
-      minimumSize: const Size(320, 180),
-    ),
-    for (final id in _profileTargets.keys)
-      MenuPanelSpec(
-        id: id,
-        initialBounds: const Rect.fromLTWH(108, 132, 900, 620),
-        minimumSize: const Size(360, 240),
-      ),
-  ];
+  List<MenuPanelSpec> get _specs => menuBridgePanelSpecs(
+    hasHangar: widget.hangar != null,
+    hasLocalTools: widget.localCall != null,
+    profileIds: _profileTargets.keys,
+    hudPanel: widget.onFeatureVisible != null ? menuHudPanelSpec() : null,
+    commsViewport: widget.comms == null ? null : _initialViewport,
+  );
 
   void _openProfile(String source, String key) {
     for (final entry in _profileTargets.entries) {
@@ -186,7 +163,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
       }
     }
     if (_profileTargets.length >= 4) {
-      setState(() => _notice = '最多同时打开 4 个个人页面，请先关闭一个。');
+      setState(
+        () => _notice = menuText(context, 'menu.overlay.window.profileLimit'),
+      );
       return;
     }
     final id = 'p${++_profileSerial}';
@@ -202,10 +181,16 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   @override
   void initState() {
     super.initState();
+    _desktopWidgets =
+        MenuDesktopWidgets.parse(widget.initialSettings?['widgets']) ??
+        const MenuDesktopWidgets();
     if (widget.localToolsController != null || widget.localCall != null) {
       localTools =
           widget.localToolsController ??
-          MenuLocalToolsController(widget.localCall!);
+          MenuLocalToolsController(
+            widget.localCall!,
+            locale: () => Localizations.localeOf(context),
+          );
       localTools!.addListener(_localChanged);
       final settings = widget.initialSettings;
       if (settings != null) {
@@ -290,6 +275,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
               'image',
               'browser',
               'settings',
+              'execHangar',
             ].contains(p['id']),
           )
           .toList(),
@@ -320,6 +306,12 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   @override
   void didUpdateWidget(MenuBridgePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.settingsPreview &&
+        oldWidget.initialSettings != widget.initialSettings) {
+      _desktopWidgets =
+          MenuDesktopWidgets.parse(widget.initialSettings?['widgets']) ??
+          const MenuDesktopWidgets();
+    }
     if (oldWidget.browserResume != widget.browserResume) {
       _browserResume?.dispose();
       _browserResume = null;
@@ -333,14 +325,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
   }
 
   void toggle(BridgePreviewPanel panel) {
-    if (panel == BridgePreviewPanel.hud) {
-      if (!widget.settingsPreview &&
-          widget.visible &&
-          !(widget.features['hud']?.busy ?? false)) {
-        widget.onFeatureAction?.call('hud', 'toggle', '');
-      }
-      return;
-    }
+    if (panel == BridgePreviewPanel.hud && widget.settingsPreview) return;
     final wasOpen = workspace.isOpen(panel.name);
     workspace.open(panel.name);
     final size = MediaQuery.sizeOf(context);
@@ -371,15 +356,33 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
         ...tools.browser.toSettingsPatch(),
         ...tools.imagePreferences.toSettingsPatch(),
         ...tools.screenshotPreferences.toSettingsPatch(),
+        'widgets': _desktopWidgets.toMap(),
       });
       _workspaceChanged();
     }
     if (mounted) setState(() {});
   }
 
+  void _changeWidgets(MenuDesktopWidgets value, bool persist) {
+    setState(() => _desktopWidgets = value);
+    if (persist) _localChanged();
+  }
+
+  void _pinHangar(bool value) {
+    _changeWidgets(_desktopWidgets.copyWith(hangar: value), true);
+    if (value) workspace.close('execHangar');
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!widget.visible) return const SizedBox.expand();
+    if (menuHudPlacementFor(widget) case final placing?) {
+      return MenuPresentation(
+        safeMode: widget.startupMode == 'safe',
+        reduceMotion: localTools?.display.reduceMotion ?? false,
+        child: placing,
+      );
+    }
     return MenuPresentation(
       highContrast: localTools?.display.highContrast ?? false,
       tooltipDelayMilliseconds:
@@ -415,8 +418,11 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            ColoredBox(
-                              key: const ValueKey('menu-game-scrim'),
+                            MenuHudScrim(
+                              scrimKey: const ValueKey('menu-game-scrim'),
+                              quick: workspace.isOpen('hud')
+                                  ? widget.features['hud']?.hudQuick
+                                  : null,
                               color: localTools == null
                                   ? BridgeInk.scrim
                                   : BridgeInk.scrim.withValues(
@@ -452,6 +458,42 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                         child: Column(
                                           children: [
                                             MenuBridgeHeader(
+                                              desktopWidget:
+                                                  _desktopWidgets.hangar &&
+                                                      widget.hangar != null
+                                                  ? MenuExecHangarWidget(
+                                                      port: widget.hangar!,
+                                                      preferences:
+                                                          _desktopWidgets,
+                                                      initial:
+                                                          widget.hangarInitial,
+                                                      onSnapshot: widget
+                                                          .onHangarSnapshot,
+                                                      editing: _editingWidgets,
+                                                      onOpen: () => toggle(
+                                                        BridgePreviewPanel
+                                                            .execHangar,
+                                                      ),
+                                                      onEdit: () => setState(
+                                                        () => _editingWidgets =
+                                                            true,
+                                                      ),
+                                                      onChanged: _changeWidgets,
+                                                    )
+                                                  : null,
+                                              onAddHangar:
+                                                  widget.hangar == null ||
+                                                      _desktopWidgets.hangar
+                                                  ? null
+                                                  : () => _pinHangar(true),
+                                              editingWidgets: _editingWidgets,
+                                              onEditWidgets:
+                                                  widget.hangar == null
+                                                  ? null
+                                                  : () => setState(
+                                                      () => _editingWidgets =
+                                                          !_editingWidgets,
+                                                    ),
                                               windowsHidden:
                                                   workspace.panelsHidden,
                                               onToggleWindows:
@@ -489,9 +531,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                   ? (widget.settingsPreview
                                                         ? () {}
                                                         : null)
-                                                  : () => toggle(
-                                                      BridgePreviewPanel.hud,
-                                                    ),
+                                                  : () => menuHudToggle(widget),
                                               hudEnabled: widget
                                                   .features['hud']
                                                   ?.hudEnabled,
@@ -503,6 +543,12 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                             ),
                                             if (_notice != null)
                                               BridgeCaption(_notice!),
+                                            if (widget.hangarOpenFailed)
+                                              BridgeCaption(
+                                                AppStrings.of(context).text(
+                                                  'execHangar.widgetOpenFailed',
+                                                ),
+                                              ),
                                             if (!widget.settingsPreview &&
                                                 widget.onFeatureVisible !=
                                                     null &&
@@ -532,8 +578,11 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                 ),
                                               ),
                                             if (widget.preferencesFailed)
-                                              const BridgeCaption(
-                                                '菜单设置未保存或未读取成功；本次调整仅在当前运行中生效。',
+                                              BridgeCaption(
+                                                menuText(
+                                                  context,
+                                                  'menu.overlay.window.settingsTemporary',
+                                                ),
                                               ),
                                             const SizedBox(height: 22),
                                             const Spacer(),
@@ -563,6 +612,8 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                 ),
                                               ),
                                             BridgePreviewDock(
+                                              execHangarEnabled:
+                                                  widget.hangar != null,
                                               attention: widget.attention,
                                               preferences:
                                                   localTools?.toolbar ??
@@ -591,6 +642,8 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                   BridgePreviewPanel.image,
                                                 'browser' =>
                                                   BridgePreviewPanel.browser,
+                                                'execHangar' =>
+                                                  BridgePreviewPanel.execHangar,
                                                 _ => null,
                                               },
                                               openPanels: {
@@ -611,6 +664,10 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                     panel,
                                               },
                                               onToggle: toggle,
+                                              recoveryIdentities:
+                                                  menuPanelRecoveryIdentities(
+                                                    workspace.openPanels,
+                                                  ),
                                               hudBusy:
                                                   widget
                                                       .features['hud']
@@ -626,7 +683,10 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                             BridgeCaption(
                                               widget.friends == null &&
                                                       !widget.settingsPreview
-                                                  ? '视觉预览 · 好友与通讯可展开 · 演示数据'
+                                                  ? menuText(
+                                                      context,
+                                                      'menu.overlay.window.preview',
+                                                    )
                                                   : AppStrings.of(context).text(
                                                       'overlay.sections.menu',
                                                     ),
@@ -639,9 +699,13 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                 ),
                               ),
                             ),
-                            // Desktop chrome is behind every floating window, including
-                            // hit testing. Empty workspace space still reaches the dock.
                             MenuBridgeWorkspace(
+                              hangar: widget.hangar,
+                              hangarInitial: widget.hangarInitial,
+                              onHangarSnapshot: widget.onHangarSnapshot,
+                              hangarPinned: _desktopWidgets.hangar,
+                              onHangarPinned: _pinHangar,
+                              onHangarSettings: widget.onOpenHangar,
                               safeMode: widget.startupMode == 'safe',
                               controller: workspace,
                               shortcutSettings: widget.shortcutSettings,

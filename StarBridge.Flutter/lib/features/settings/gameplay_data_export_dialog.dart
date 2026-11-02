@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../account/account_models.dart';
@@ -18,8 +20,8 @@ Future<void> showGameplayDataExportDialog(
   BuildContext context,
   ValueListenable<AccountProjection> account,
   BridgeClientSession? session,
-) => showDialog<void>(
-  context: context,
+) => showStarBridgeDialog<void>(
+  context,
   builder: (_) => GameplayDataExportDialog(account: account, session: session),
 );
 
@@ -40,7 +42,7 @@ class GameplayDataExportDialog extends StatefulWidget {
 
 class _GameplayDataExportDialogState extends State<GameplayDataExportDialog> {
   GameplayDataExportPort _port = const UnavailableGameplayDataExport();
-  (AccountSessionState, int, int?)? _ownerKey;
+  Object? _ownerKey;
   StreamSubscription<BridgeEnvelope>? _events;
   BridgeRequestOperation? _resolve;
   int _epoch = 0;
@@ -49,24 +51,49 @@ class _GameplayDataExportDialogState extends State<GameplayDataExportDialog> {
   void initState() {
     super.initState();
     widget.account.addListener(_bind);
-    _events = widget.session?.events.listen((event) {
-      if (event.name == 'account.changed' ||
-          event.name == 'bootstrap.invalidated') {
-        _bind();
-      }
-    });
+    _attachEvents();
     _bind();
   }
 
-  void _bind() {
+  void _attachEvents() {
+    final owner = widget.session;
+    _events = owner?.events.listen((event) {
+      if (!mounted || !identical(owner, widget.session)) return;
+      if (event.name == 'account.changed' ||
+          event.name == 'bootstrap.invalidated') {
+        _bind(force: true);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(GameplayDataExportDialog old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.account, widget.account)) {
+      old.account.removeListener(_bind);
+      widget.account.addListener(_bind);
+    }
+    if (!identical(old.session, widget.session)) {
+      unawaited(_events?.cancel());
+      _attachEvents();
+    }
+    if (!identical(old.account, widget.account) ||
+        !identical(old.session, widget.session)) {
+      _bind(force: true);
+    }
+  }
+
+  void _bind({bool force = false}) {
     final account = widget.account.value;
     final session = widget.session;
     final key = (
+      widget.account,
+      session,
       account.sessionState,
       account.generation,
       session?.activeGeneration,
     );
-    if (_ownerKey == key) return;
+    if (!force && _ownerKey == key) return;
     _ownerKey = key;
     final epoch = ++_epoch;
     _port.cancel();
@@ -135,6 +162,7 @@ class _GameplayDataExportDialogState extends State<GameplayDataExportDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final epoch = _epoch;
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     String t(String key) => settingsEntryText(strings, key);
@@ -155,18 +183,28 @@ class _GameplayDataExportDialogState extends State<GameplayDataExportDialog> {
             const Divider(),
             Text(t('unavailable')),
             SizedBox(height: tokens.space.sm),
-            OutlinedButton(
-              key: const Key('settings-action-local-data-management-clearData'),
-              onPressed: null,
+            StarBridgeActionButton(
+              controlKey: const Key(
+                'settings-action-local-data-management-clearData',
+              ),
+              onActivate: null,
               child: Text(t('clearData')),
             ),
           ],
         ),
       ),
       actions: [
-        TextButton(
-          key: const Key('settings-entry-close'),
-          onPressed: () => Navigator.of(context).pop(),
+        StarBridgeActionButton(
+          controlKey: const Key('settings-entry-close'),
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) {
+            if (!mounted ||
+                epoch != _epoch ||
+                ModalRoute.of(context)?.isCurrent != true) {
+              return;
+            }
+            dismissStarBridgeDialog(context, source: source);
+          },
           child: Text(t('close')),
         ),
       ],

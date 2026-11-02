@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -45,6 +46,7 @@ class MenuRoomsPanel extends StatelessWidget {
           if (view.notice.isNotEmpty) Text(view.notice),
           for (final action in view.buttons)
             MenuFeatureAction(
+              identity: view.scope,
               action: action,
               enabled: !view.busy,
               onAction: onAction,
@@ -108,8 +110,10 @@ class MenuRoomsPanel extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              TextButton(
-                onPressed: view.busy ? null : () => onAction('refresh', ''),
+              StarBridgeActionButton(
+                controlKey: const Key('menu-room-message-refresh'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: view.busy ? null : (_) => onAction('refresh', ''),
                 child: Text(roomActionText(context, 'refreshMessages')),
               ),
             ],
@@ -142,8 +146,10 @@ class MenuRoomsPanel extends StatelessWidget {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                 ),
-                TextButton(
-                  onPressed: view.busy ? null : () => onAction('refresh', ''),
+                StarBridgeActionButton(
+                  controlKey: const Key('menu-room-refresh'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: view.busy ? null : (_) => onAction('refresh', ''),
                   child: Text(roomText(context, 'refresh')),
                 ),
               ],
@@ -153,14 +159,16 @@ class MenuRoomsPanel extends StatelessWidget {
               RoomCurrentToolbar(
                 module: module,
                 leaveAction: view.buttons
-                    .where((b) => b.label == '退出房间')
+                    .where((b) => b.role == 'leaveRoom')
                     .map(
                       (action) => MenuFeatureAction(
-                        key: const ValueKey('退出房间'),
+                        key: const ValueKey('leaveRoom'),
+                        identity: view.scope,
                         action: action,
                         enabled: !view.busy,
                         onAction: onAction,
                         outlined: true,
+                        tone: roomLeaveTone(module.selectedRoom),
                         buttonStyle: semanticActionStyle(
                           context,
                           roomLeaveTone(module.selectedRoom),
@@ -178,22 +186,28 @@ class MenuRoomsPanel extends StatelessWidget {
                   for (final action in view.buttons.where(
                     (b) =>
                         !const {
-                          '成员',
-                          '聊天',
-                          '发送消息',
-                          '较早消息',
-                          '最新消息',
-                        }.contains(b.label) &&
+                          'members',
+                          'chat',
+                          'sendMessage',
+                          'olderMessages',
+                          'latestMessages',
+                        }.contains(b.role) &&
                         !room.memberActions.containsValue(b.key) &&
                         !room.memberTransferActions.containsValue(b.key),
                   ))
                     MenuFeatureAction(
-                      key: ValueKey(action.label),
+                      key: ValueKey(action.role ?? action.label),
+                      identity: view.scope,
                       action: action,
                       enabled: !view.busy,
                       onAction: onAction,
                       outlined: true,
-                      buttonStyle: action.label == '退出房间'
+                      tone: action.role == 'leaveRoom'
+                          ? roomLeaveTone(
+                              room.presentation(view.title, view.scope),
+                            )
+                          : null,
+                      buttonStyle: action.role == 'leaveRoom'
                           ? semanticActionStyle(
                               context,
                               roomLeaveTone(
@@ -204,11 +218,12 @@ class MenuRoomsPanel extends StatelessWidget {
                           : null,
                     ),
                   if (room.settings?.action != null)
-                    OutlinedButton(
-                      key: const ValueKey('menu-room-settings'),
-                      onPressed: view.busy
+                    StarBridgeActionButton(
+                      controlKey: const ValueKey('menu-room-settings'),
+                      onActivate: view.busy
                           ? null
-                          : () => editRoomDialog(context, module),
+                          : (source) =>
+                                editRoomDialog(context, module, source: source),
                       child: Text(roomActionText(context, 'edit')),
                     ),
                 ],

@@ -1,0 +1,41 @@
+{
+  "empty": {
+    "schemaVersion": 1,
+    "earnedAt": {},
+    "progress": {}
+  },
+  "withoutCities": {
+    "schemaVersion": 1,
+    "earnedAt": {
+      "first-entry": "2026-10-30T20:33:12.123Z",
+      "hangar-home-1": "2026-10-30T20:33:13.500Z"
+    },
+    "progress": {
+      "hangar-home": 2,
+      "hangar-collection": 2,
+      "hangar-paths": 1
+    }
+  },
+  "withCities": {
+    "schemaVersion": 1,
+    "earnedAt": {
+      "first-entry": "2026-10-30T20:33:12.123Z",
+      "hangar-home-1": "2026-10-30T20:33:13.500Z",
+      "journey-lorville": "2026-10-30T20:33:14Z"
+    },
+    "progress": {
+      "hangar-home": 2,
+      "hangar-collection": 2,
+      "hangar-paths": 1,
+      "journey-stanton": 1
+    }
+  },
+  "releasedClientProgress": {
+    "maximumKeys": 3,
+    "keys": [
+      "hangar-home",
+      "hangar-collection",
+      "hangar-paths"
+    ]
+  }
+}

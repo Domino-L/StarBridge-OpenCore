@@ -24,6 +24,10 @@ final class InMemoryWindowChrome implements WindowChromePort {
     _isMaximized.value = !_isMaximized.value;
   }
 
+  @override
+  Future<void> setIconVariant(String variant) async =>
+      commands.add('setIconVariant:$variant');
+
   void setMaximizedForTest(bool value) {
     _isMaximized.value = value;
   }

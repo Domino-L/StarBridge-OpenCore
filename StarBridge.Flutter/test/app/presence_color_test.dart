@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
@@ -82,6 +83,8 @@ void main() {
       final button = tester.widget<OutlinedButton>(
         find.byKey(const Key('account-command')),
       );
+      // Focus frames follow keyboard input (KeyboardModality), not focus alone.
+      await tester.sendKeyEvent(LogicalKeyboardKey.shift);
       expect(button.style!.side!.resolve({}), BorderSide.none);
       expect(
         button.style!.side!.resolve({WidgetState.hovered}),

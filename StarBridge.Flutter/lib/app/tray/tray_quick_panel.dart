@@ -8,11 +8,13 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_native_icon_action.dart';
 import 'tray_quick_panel_copy.dart';
 import '../shell/chrome/shell_chrome_projection.dart';
 import 'tray_presence_status.dart';
+import 'tray_command_button.dart';
+import 'tray_presence_menu.dart';
 import '../presence/manual_presence.dart';
-import '../presence/manual_presence_widgets.dart';
 
 enum TrayRuntimeState { running, background, unavailable }
 
@@ -88,170 +90,153 @@ class _TrayQuickPanelState extends State<TrayQuickPanel> {
       StarBridgeIconSemantic icon,
       Future<void> Function()? action, {
       bool danger = false,
-    }) => OutlinedButton.icon(
-      key: Key('tray-$key'),
+    }) => TrayCommandButton(
+      controlKey: Key('tray-$key'),
       onPressed: _busy || action == null ? null : () => _run(action),
       style: danger
           ? OutlinedButton.styleFrom(foregroundColor: tokens.colors.danger)
           : null,
       icon: StarBridgeIcon(icon),
-      label: Text(t(key)),
+      label: t(key),
     );
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): widget.onDismiss,
-      },
-      child: Focus(
-        autofocus: true,
-        child: SizedBox(
-          width: 336,
-          child: StarBridgeSurface(
-            role: SurfaceRole.floating,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      StarBridgeAppIcon(key: widget.logoKey, size: 36),
-                      SizedBox(width: tokens.space.sm),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              t('brand'),
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            Text(
-                              t('runtime.${state.runtime.name}'),
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                            if (state.version case final version?)
-                              Text(
-                                version,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: tokens.colors.textSecondary,
-                                    ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: t('close'),
-                        onPressed: widget.onDismiss,
-                        icon: const StarBridgeIcon(
-                          StarBridgeIconSemantic.windowClose,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: tokens.space.md),
-                  if (widget.manualPresence case final presence?)
-                    MenuAnchor(
-                      menuChildren: [
-                        ManualPresenceChoices(controller: presence),
-                      ],
-                      builder: (context, controller, _) => TextButton(
-                        key: const Key('tray-presence-menu'),
-                        onPressed: () => controller.isOpen
-                            ? controller.close()
-                            : controller.open(),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                manualPresenceText(context, 'presence.title'),
-                              ),
-                            ),
-                            ManualPresenceBadge(controller: presence),
-                            const SizedBox(width: 8),
-                            const StarBridgeIcon(
-                              StarBridgeIconSemantic.menuDown,
-                              size: 12,
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    TrayPresenceStatus(projection: widget.chromeProjection),
-                  SizedBox(height: tokens.space.md),
-                  StarBridgeSurface(
-                    role: SurfaceRole.panel,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+    // Material's inherited text style has a separate implicit fade. Resolve
+    // this panel's base text from the live theme so reduced motion settles
+    // with that theme, without waiting for Scaffold's text tween.
+    return DefaultTextStyle(
+      style: Theme.of(context).textTheme.bodyMedium!,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): widget.onDismiss,
+        },
+        child: Focus(
+          autofocus: true,
+          child: SizedBox(
+            width: 336,
+            child: StarBridgeSurface(
+              role: SurfaceRole.floating,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          t('overlay'),
-                          style: Theme.of(context).textTheme.labelMedium,
-                        ),
-                        SizedBox(height: tokens.space.xs),
-                        Text(
-                          t('overlay.${state.overlay.name}'),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: state.overlay == TrayOverlayState.enabled
-                                    ? tokens.colors.success
-                                    : tokens.colors.textSecondary,
+                        StarBridgeAppIcon(key: widget.logoKey, size: 36),
+                        SizedBox(width: tokens.space.sm),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t('brand'),
+                                style: Theme.of(context).textTheme.titleMedium,
                               ),
+                              Text(
+                                t('runtime.${state.runtime.name}'),
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              if (state.version case final version?)
+                                Text(
+                                  version,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: tokens.colors.textSecondary,
+                                      ),
+                                ),
+                            ],
+                          ),
                         ),
-                        SizedBox(height: tokens.space.sm),
-                        button(
-                          state.overlay == TrayOverlayState.enabled
-                              ? 'disable'
-                              : state.overlay == TrayOverlayState.opening
-                              ? 'cancelOpening'
-                              : 'enable',
-                          StarBridgeIconSemantic.overlay,
-                          state.overlay == TrayOverlayState.unavailable
-                              ? null
-                              : widget.onToggleOverlay,
-                        ),
-                        SizedBox(height: tokens.space.sm),
-                        Text(
-                          t('scene'),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: tokens.colors.textSecondary),
-                        ),
-                        Text(
-                          state.scene ?? t('unknown'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        StarBridgeNativeIconAction(
+                          controlKey: const Key('tray-close'),
+                          label: t('close'),
+                          onActivate: (_) => widget.onDismiss(),
+                          icon: const StarBridgeIcon(
+                            StarBridgeIconSemantic.windowClose,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  SizedBox(height: tokens.space.sm),
-                  button('open', StarBridgeIconSemantic.home, widget.onOpen),
-                  button(
-                    'settings',
-                    StarBridgeIconSemantic.settings,
-                    widget.onOverlaySettings,
-                  ),
-                  SizedBox(height: tokens.space.xs),
-                  const Divider(),
-                  button(
-                    'exit',
-                    StarBridgeIconSemantic.logout,
-                    widget.onExit,
-                    danger: true,
-                  ),
-                  if (_busy)
-                    Text(
-                      t('busy'),
-                      style: Theme.of(context).textTheme.bodySmall,
+                    SizedBox(height: tokens.space.md),
+                    if (widget.manualPresence case final presence?)
+                      TrayPresenceMenu(controller: presence)
+                    else
+                      TrayPresenceStatus(projection: widget.chromeProjection),
+                    SizedBox(height: tokens.space.md),
+                    StarBridgeSurface(
+                      role: SurfaceRole.panel,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            t('overlay'),
+                            style: Theme.of(context).textTheme.labelMedium,
+                          ),
+                          SizedBox(height: tokens.space.xs),
+                          Text(
+                            t('overlay.${state.overlay.name}'),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color:
+                                      state.overlay == TrayOverlayState.enabled
+                                      ? tokens.colors.success
+                                      : tokens.colors.textSecondary,
+                                ),
+                          ),
+                          SizedBox(height: tokens.space.sm),
+                          button(
+                            state.overlay == TrayOverlayState.enabled
+                                ? 'disable'
+                                : state.overlay == TrayOverlayState.opening
+                                ? 'cancelOpening'
+                                : 'enable',
+                            StarBridgeIconSemantic.overlay,
+                            state.overlay == TrayOverlayState.unavailable
+                                ? null
+                                : widget.onToggleOverlay,
+                          ),
+                          SizedBox(height: tokens.space.sm),
+                          Text(
+                            t('scene'),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: tokens.colors.textSecondary),
+                          ),
+                          Text(
+                            state.scene ?? t('unknown'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                  if (_failed)
-                    Text(
-                      t('failed'),
-                      style: TextStyle(color: tokens.colors.danger),
+                    SizedBox(height: tokens.space.sm),
+                    button('open', StarBridgeIconSemantic.home, widget.onOpen),
+                    button(
+                      'settings',
+                      StarBridgeIconSemantic.settings,
+                      widget.onOverlaySettings,
                     ),
-                ],
+                    SizedBox(height: tokens.space.xs),
+                    const Divider(),
+                    button(
+                      'exit',
+                      StarBridgeIconSemantic.logout,
+                      widget.onExit,
+                      danger: true,
+                    ),
+                    if (_busy)
+                      Text(
+                        t('busy'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    if (_failed)
+                      Text(
+                        t('failed'),
+                        style: TextStyle(color: tokens.colors.danger),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

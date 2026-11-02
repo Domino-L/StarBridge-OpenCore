@@ -16,8 +16,6 @@ internal static class OverlayStartupFocusPolicy
         if (!motionEnabled || !settings.EnableStartupTransition) return WithoutTransitionDelayMs;
         if (settings.StartupTransitionStyle == OverlayStartupTransitionStyle.BridgeTerminal)
             return Math.Ceiling(OverlayCompositionStartupTransitionWindow.PreferredGameFocusDelayMs);
-        if (settings.StartupTransitionStyle == OverlayStartupTransitionStyle.LagrangeWeaveEquilibrium)
-            return Math.Ceiling(LagrangeWeaveTimeline.FocusHandoffMs);
         return WithoutTransitionDelayMs;
     }
 

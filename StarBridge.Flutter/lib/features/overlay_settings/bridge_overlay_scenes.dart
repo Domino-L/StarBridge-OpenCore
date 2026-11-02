@@ -38,6 +38,9 @@ final class BridgeOverlayScenes implements OverlayScenePort {
   Future<OverlaySceneState> focusCommunity(String code) =>
       _request('overlayScenes.focusCommunity', {'code': code});
   @override
+  Future<OverlaySceneState> focusFleet() =>
+      _request('overlayScenes.focusFleet');
+  @override
   Future<OverlaySceneState> select(int revision, String mode, String? code) =>
       _request('overlayScenes.select', {
         'revision': revision,
@@ -84,7 +87,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
     if (p['schemaVersion'] != 1 ||
         p['revision'] is! int ||
         (p['revision']! as int) < 0 ||
-        !['auto', 'room', 'community'].contains(p['mode']) ||
+        !['auto', 'room', 'community', 'fleet'].contains(p['mode']) ||
         ![
           'ready',
           'local',
@@ -92,6 +95,8 @@ final class BridgeOverlayScenes implements OverlayScenePort {
           'loading',
           'standby',
           'bindingUnavailable',
+          // A fixed main fleet the viewer has not joined.
+          'notMember',
         ].contains(p['status']) ||
         p['organizations'] is! List) {
       throw const FormatException('Invalid scene snapshot');
@@ -117,6 +122,29 @@ final class BridgeOverlayScenes implements OverlayScenePort {
         : code != null) {
       throw const FormatException();
     }
+    // Only a Host that can show the main fleet sends this; older Hosts keep the
+    // option off. An unknown status is a malformed snapshot, not a fallback.
+    String? fleetStatus;
+    String? fleetName;
+    if (p['fleet'] case final Map fleet) {
+      fleetStatus = optional(fleet['status']);
+      fleetName = optional(fleet['name']);
+      if (fleetName != null && fleetName.trim().isEmpty) fleetName = null;
+      if (!const [
+        'ready',
+        'notMember',
+        'unavailable',
+        'loading',
+      ].contains(fleetStatus)) {
+        throw const FormatException('Invalid main fleet status');
+      }
+    } else if (p['fleet'] != null) {
+      throw const FormatException('Invalid main fleet state');
+    }
+    if (p['mode'] == 'fleet' && fleetStatus == null) {
+      throw const FormatException('Main fleet choice without support');
+    }
+    final fleet = fleetStatus != null;
     final targets = <OverlaySceneTarget>[];
     final seen = <String>{};
     for (final row in p['organizations']! as List) {
@@ -137,6 +165,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
       final id = optional(raw);
       if (id != null &&
           !['auto', 'room', 'missing'].contains(id) &&
+          !(fleet && id == 'fleet') &&
           !targets.any((target) => id == 'org:${target.code}')) {
         throw const FormatException('Invalid selection identity');
       }
@@ -146,7 +175,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
     final bindingId = selection(p['presetBindingId']);
     Map<String, String?>? resolutions;
     if (p['resolvedSourceIds'] case final Map raw) {
-      if (sourceOwnerKey == null || raw.length > targets.length + 2) {
+      if (sourceOwnerKey == null || raw.length > targets.length + 3) {
         throw const FormatException('Invalid source preview scope');
       }
       resolutions = {};
@@ -158,6 +187,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
             result != null &&
                 result != 'room' &&
                 result != 'local' &&
+                !(fleet && result == 'fleet') &&
                 !targets.any((target) => result == 'org:${target.code}')) {
           throw const FormatException('Invalid source preview identity');
         }
@@ -167,14 +197,18 @@ final class BridgeOverlayScenes implements OverlayScenePort {
     } else if (p['resolvedSourceIds'] != null) {
       throw const FormatException('Invalid source preview');
     }
+    // A session-only source can be left over from an older build, even after
+    // the plan stopped fixing a source. It is shown as a plain result and the
+    // next selection clears it; it must never make the whole read invalid.
     final temporaryId = selection(p['temporarySourceId']);
-    if (temporaryId != null && (bindingId == null || sourceOwnerKey == null)) {
-      throw const FormatException('Temporary source requires a bound session');
+    if (temporaryId != null && sourceOwnerKey == null) {
+      throw const FormatException('Temporary source requires an owner');
     }
     final automaticSource = optional(p['automaticPresetSourceId']);
     if (automaticSource != null &&
         (sourceOwnerKey == null ||
             !(automaticSource == 'local' ||
+                fleet && automaticSource == 'fleet' ||
                 automaticSource.startsWith('room:') &&
                     automaticSource.length > 5 ||
                 targets.any((x) => automaticSource == 'org:${x.code}')))) {
@@ -183,6 +217,7 @@ final class BridgeOverlayScenes implements OverlayScenePort {
     if (actual != null &&
         actual != 'room' &&
         actual != 'local' &&
+        !(fleet && actual == 'fleet') &&
         !targets.any((x) => actual == 'org:${x.code}')) {
       throw const FormatException();
     }
@@ -198,6 +233,8 @@ final class BridgeOverlayScenes implements OverlayScenePort {
       resolvedSourceIds: resolutions,
       temporarySourceId: temporaryId,
       status: p['status']! as String,
+      fleetStatus: fleetStatus,
+      fleetName: fleetName,
       targets: List.unmodifiable(targets),
       available: true,
     );

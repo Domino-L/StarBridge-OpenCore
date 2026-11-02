@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
 import '../common/user_avatar_menu.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -13,7 +14,10 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../shared/embedded_avatar.dart';
 import 'account_models.dart';
 import 'account_module.dart';
+import 'account_login_dialog.dart';
 import 'account_view_components.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import 'account_operation_motion.dart';
 import 'password_recovery_dialog.dart';
 import 'legacy_password_login_dialog.dart';
 
@@ -36,7 +40,7 @@ class AccountLoadingView extends StatelessWidget {
         children: [
           SizedBox.square(
             dimension: tokens.icons.medium,
-            child: const CircularProgressIndicator(strokeWidth: 2),
+            child: const AccountOperationWaiting(),
           ),
           SizedBox(width: tokens.space.md),
           Expanded(child: Text(strings.text('account.loading'))),
@@ -62,8 +66,12 @@ class AccountSignedOutView extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    final signingIn = projection.operation == AccountOperation.signingIn;
-    final cancelling = projection.operation == AccountOperation.cancellingLogin;
+    final signingIn =
+        !isAccountLoginDialogOpen(module) &&
+        projection.operation == AccountOperation.signingIn;
+    final cancelling =
+        !isAccountLoginDialogOpen(module) &&
+        projection.operation == AccountOperation.cancellingLogin;
     final checkingConnection =
         projection.operation == AccountOperation.refreshing;
     final credentialUnavailable =
@@ -120,31 +128,41 @@ class AccountSignedOutView extends StatelessWidget {
             ),
             SizedBox(height: tokens.space.lg),
             if (credentialUnavailable && checkingConnection) ...[
-              LinearProgressIndicator(
-                minHeight: tokens.stroke.strong,
-                borderRadius: tokens.shape.small,
-              ),
+              AccountOperationWaiting(module: module),
               SizedBox(height: tokens.space.sm),
               Text(
                 strings.text('account.credentialUnavailable.checking'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ] else if (credentialUnavailable)
-              FilledButton.icon(
-                key: const Key('account-retry-session'),
-                onPressed: projection.canRetrySessionRestore
-                    ? () => unawaited(module.refresh())
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.primary,
+                controlKey: const Key('account-retry-session'),
+                onActivate: projection.canRetrySessionRestore
+                    ? (source) => unawaited(
+                        runAccountMotionCommand(
+                          module,
+                          AccountOperation.refreshing,
+                          source,
+                          module.refresh,
+                        ),
+                      )
                     : null,
-                icon: StarBridgeIcon(StarBridgeIconSemantic.refresh),
-                label: Text(
-                  strings.text('account.credentialUnavailable.retry'),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    StarBridgeIcon(StarBridgeIconSemantic.refresh),
+                    SizedBox(width: tokens.space.xs),
+                    Flexible(
+                      child: Text(
+                        strings.text('account.credentialUnavailable.retry'),
+                      ),
+                    ),
+                  ],
                 ),
               )
             else if (signingIn || cancelling) ...[
-              LinearProgressIndicator(
-                minHeight: tokens.stroke.strong,
-                borderRadius: tokens.shape.small,
-              ),
+              AccountOperationWaiting(module: module),
               SizedBox(height: tokens.space.sm),
               Text(
                 strings.text(
@@ -155,57 +173,123 @@ class AccountSignedOutView extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               SizedBox(height: tokens.space.md),
-              OutlinedButton(
-                key: const Key('account-cancel-login'),
-                onPressed: cancelling
+              StarBridgeActionButton(
+                controlKey: const Key('account-cancel-login'),
+                onActivate: cancelling
                     ? null
-                    : () => unawaited(module.cancelLogin()),
+                    : (source) => unawaited(
+                        runAccountMotionCommand(
+                          module,
+                          AccountOperation.cancellingLogin,
+                          source,
+                          module.cancelLogin,
+                        ),
+                      ),
                 child: Text(strings.text('account.login.cancel')),
               ),
             ] else
-              FilledButton.icon(
-                key: Key(
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.primary,
+                controlKey: Key(
                   reauthorization ? 'account-reauthorize' : 'account-login',
                 ),
-                onPressed: projection.canLogin
-                    ? () => unawaited(module.beginLogin())
+                onActivate: projection.canLogin
+                    ? (source) => unawaited(
+                        showAccountLoginDialog(context, module, source: source),
+                      )
                     : null,
-                icon: StarBridgeIcon(StarBridgeIconSemantic.login),
-                label: Text(
-                  strings.text(
-                    reauthorization
-                        ? 'account.reauthorization.action'
-                        : 'account.login.action',
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    StarBridgeIcon(StarBridgeIconSemantic.login),
+                    SizedBox(width: tokens.space.xs),
+                    Flexible(
+                      child: Text(
+                        strings.text(
+                          reauthorization
+                              ? 'account.reauthorization.action'
+                              : 'account.login.action',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             if (reason == AccountSignedOutReason.noSession &&
                 module.legacyPasswordLogin != null) ...[
               SizedBox(height: tokens.space.sm),
-              OutlinedButton(
-                key: const Key('account-legacy-login'),
-                onPressed: projection.isBusy
+              StarBridgeActionButton(
+                controlKey: const Key('account-legacy-login'),
+                onActivate: projection.isBusy
                     ? null
-                    : () async {
+                    : (source) async {
+                        final login = module.legacyPasswordLogin;
+                        bool current() =>
+                            context.mounted &&
+                            context.widget is AccountSignedOutView &&
+                            identical(
+                              (context.widget as AccountSignedOutView).module,
+                              module,
+                            ) &&
+                            module.projection.value.generation ==
+                                projection.generation &&
+                            identical(module.legacyPasswordLogin, login);
+                        if (login == null ||
+                            !current() ||
+                            module.projection.value.isBusy) {
+                          return;
+                        }
                         await showLegacyPasswordLoginDialog(
                           context,
-                          module.legacyPasswordLogin!,
+                          login,
                           recovery: module.passwordRecovery,
+                          source: source,
+                          isCurrent: current,
+                          ownerChanges: module.projection,
                         );
-                        await module.refresh();
+                        if (current()) {
+                          await runAccountMotionCommand(
+                            module,
+                            AccountOperation.refreshing,
+                            source,
+                            module.refresh,
+                          );
+                        }
                       },
                 child: Text(strings.text('account.legacyLogin.title')),
               ),
             ],
             if (module.passwordRecovery case final recovery?) ...[
               SizedBox(height: tokens.space.sm),
-              TextButton(
-                key: const Key('account-password-recovery'),
-                onPressed: projection.isBusy
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('account-password-recovery'),
+                onActivate: projection.isBusy
                     ? null
-                    : () => unawaited(
-                        showPasswordRecoveryDialog(context, recovery),
-                      ),
+                    : (source) {
+                        bool current() =>
+                            context.mounted &&
+                            context.widget is AccountSignedOutView &&
+                            identical(
+                              (context.widget as AccountSignedOutView).module,
+                              module,
+                            ) &&
+                            module.projection.value.generation ==
+                                projection.generation &&
+                            identical(module.passwordRecovery, recovery);
+                        if (!current() || module.projection.value.isBusy) {
+                          return;
+                        }
+                        unawaited(
+                          showPasswordRecoveryDialog(
+                            context,
+                            recovery,
+                            source: source,
+                            isCurrent: current,
+                            ownerChanges: module.projection,
+                          ),
+                        );
+                      },
                 child: Text(strings.text('account.recovery.title')),
               ),
             ],
@@ -231,8 +315,12 @@ class AccountLegacySessionView extends StatelessWidget {
     final tokens = context.tokens;
     final unavailable =
         projection.sessionState == AccountSessionState.legacyUnavailable;
-    final signingIn = projection.operation == AccountOperation.signingIn;
-    final cancelling = projection.operation == AccountOperation.cancellingLogin;
+    final signingIn =
+        !isAccountLoginDialogOpen(module) &&
+        projection.operation == AccountOperation.signingIn;
+    final cancelling =
+        !isAccountLoginDialogOpen(module) &&
+        projection.operation == AccountOperation.cancellingLogin;
     return StarBridgeSurface(
       key: const Key('account-legacy-session'),
       role: SurfaceRole.raised,
@@ -246,10 +334,14 @@ class AccountLegacySessionView extends StatelessWidget {
                 borderRadius: tokens.shape.medium,
                 child: SizedBox.square(
                   dimension: tokens.density.controlHeight * 1.35,
-                  child: UserAvatarMenu(name: projection.profile?.displayName ?? '', isSelf: true, child: EmbeddedAvatar(
-                    source: projection.profile?.avatarImageData,
-                    fallback: StarBridgeIcon(StarBridgeIconSemantic.account),
-                  )),
+                  child: UserAvatarMenu(
+                    name: projection.profile?.displayName ?? '',
+                    isSelf: true,
+                    child: EmbeddedAvatar(
+                      source: projection.profile?.avatarImageData,
+                      fallback: StarBridgeIcon(StarBridgeIconSemantic.account),
+                    ),
+                  ),
                 ),
               ),
               SizedBox(width: tokens.space.md),
@@ -292,7 +384,7 @@ class AccountLegacySessionView extends StatelessWidget {
           Text(strings.text('account.legacySession.body')),
           SizedBox(height: tokens.space.md),
           if (signingIn || cancelling) ...[
-            const LinearProgressIndicator(),
+            AccountOperationWaiting(module: module),
             SizedBox(height: tokens.space.sm),
             Text(
               strings.text(
@@ -308,32 +400,60 @@ class AccountLegacySessionView extends StatelessWidget {
             runSpacing: tokens.space.sm,
             children: [
               if (signingIn || cancelling)
-                OutlinedButton(
-                  key: const Key('account-cancel-login'),
-                  onPressed: cancelling
+                StarBridgeActionButton(
+                  controlKey: const Key('account-cancel-login'),
+                  onActivate: cancelling
                       ? null
-                      : () => unawaited(module.cancelLogin()),
+                      : (source) => unawaited(
+                          runAccountMotionCommand(
+                            module,
+                            AccountOperation.cancellingLogin,
+                            source,
+                            module.cancelLogin,
+                          ),
+                        ),
                   child: Text(strings.text('account.login.cancel')),
                 )
               else
-                OutlinedButton(
-                  key: const Key('account-login'),
-                  onPressed: projection.canLogin
-                      ? () => unawaited(module.beginLogin())
+                StarBridgeActionButton(
+                  controlKey: const Key('account-login'),
+                  onActivate: projection.canLogin
+                      ? (source) => unawaited(
+                          showAccountLoginDialog(
+                            context,
+                            module,
+                            source: source,
+                          ),
+                        )
                       : null,
                   child: Text(strings.text('account.login.action')),
                 ),
-              OutlinedButton(
-                key: const Key('account-legacy-refresh'),
-                onPressed: projection.isBusy
+              StarBridgeActionButton(
+                controlKey: const Key('account-legacy-refresh'),
+                onActivate: projection.isBusy
                     ? null
-                    : () => unawaited(module.refresh()),
+                    : (source) => unawaited(
+                        runAccountMotionCommand(
+                          module,
+                          AccountOperation.refreshing,
+                          source,
+                          module.refresh,
+                        ),
+                      ),
                 child: Text(strings.text('account.legacySession.refresh')),
               ),
-              TextButton(
-                key: const Key('account-legacy-logout'),
-                onPressed: projection.canLogout
-                    ? () => unawaited(module.logout())
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('account-legacy-logout'),
+                onActivate: projection.canLogout
+                    ? (source) => unawaited(
+                        runAccountMotionCommand(
+                          module,
+                          AccountOperation.signingOut,
+                          source,
+                          module.logout,
+                        ),
+                      )
                     : null,
                 child: Text(strings.text('account.logout.action')),
               ),

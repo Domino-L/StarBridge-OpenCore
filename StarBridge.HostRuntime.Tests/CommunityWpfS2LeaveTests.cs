@@ -11,10 +11,18 @@ internal static class CommunityWpfS2LeaveTests
         using (var f = new Fixture())
         {
             var first = await f.Card(); var second = await f.Card();
+            var member = CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "A", "scope", true);
+            var otherOrganization = CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "B", "scope", true);
+            var otherScope = CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "A", "other", true);
             Check(first.Actions.SequenceEqual(new[] { "leave" }), "Only ordinary leave is offered");
             var calls = f.Calls;
             Check((await f.Leave(first, "other")).Status == "rejected" && f.Calls == calls, "Cross-account reference rejected before HTTP");
             Check((await f.Leave(first)).Status == "accepted" && f.Posts == 1 && f.Member is null, "Original exit followed by membership confirmation");
+            Check(member is not null && CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "A", "scope", false) is null,
+                "Leaving clears the retained identity even after its authorization entry has gone");
+            Check(CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "B", "scope", false) == otherOrganization &&
+                CommunityMemberReferenceTests.Retained(f.Client, "account:fixture", "A", "other", false) == otherScope,
+                "Leaving only clears mappings in the departing organization and account generation");
             calls = f.Calls;
             Check((await f.Leave(second)).Status == "rejected" && f.Calls == calls, "All old organization references invalidated");
             try

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../../platform/window/native_viewport_visibility.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 import 'community_announcements_controller.dart';
 
 /// Matches the WPF announcement cadence without inventing a new transport:
@@ -29,7 +30,9 @@ mixin CommunityAnnouncementsRefresh<T extends StatefulWidget> on State<T> {
       announcementModel.refreshTimeLabels();
       if (++_announcementTicks % 5 == 0 &&
           announcementModel.error != 'refreshRequired') {
-        unawaited(announcementModel.refresh(background: true));
+        unawaited(backgroundLoadingRead(
+          () => announcementModel.refresh(background: true),
+        ));
       }
     });
   }

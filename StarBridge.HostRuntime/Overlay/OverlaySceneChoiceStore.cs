@@ -5,9 +5,32 @@ using StarBridge.NativeBridge;
 
 namespace StarBridge.HostRuntime.Overlay;
 
-public sealed record InformationOverlayRosterPreferences(string[] Pinned, string[] Excluded)
+/// <summary>
+/// Local member-module preferences. The display fields are omitted from the file
+/// while they keep their defaults, so an unchanged file stays readable by older hosts.
+/// </summary>
+public sealed record InformationOverlayRosterPreferences(
+    string[] Pinned,
+    string[] Excluded,
+    // null = summary ("N more"), "rotate" or "truncate".
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] string? Overflow = null,
+    // 0 = as many rows as the panel height allows.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RowLimit = 0,
+    // 0 = the default interval.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RotationIntervalSeconds = 0)
 {
+    public const int DefaultRotationIntervalSeconds = 10;
+    public const int MaximumRowLimit = 12;
     public static InformationOverlayRosterPreferences Empty { get; } = new([], []);
+
+    public string EffectiveOverflow => Overflow ?? "summary";
+    public int EffectiveRotationIntervalSeconds =>
+        RotationIntervalSeconds == 0 ? DefaultRotationIntervalSeconds : RotationIntervalSeconds;
+
+    internal static bool ValidDisplay(string? overflow, int rowLimit, int rotationIntervalSeconds) =>
+        overflow is null or "rotate" or "truncate" &&
+        rowLimit is >= 0 and <= MaximumRowLimit &&
+        (rotationIntervalSeconds == 0 || rotationIntervalSeconds is >= 5 and <= 60);
 }
 internal sealed record OverlaySceneChoice(long Revision = 0, string Mode = "auto", string? Code = null)
 {
@@ -51,13 +74,15 @@ internal sealed class OverlaySceneChoiceStore(string root)
         if (data is null || data.SchemaVersion != 1 || data.OwnerHash != hash || data.Choice is null ||
             data.Choice.Revision < 0 || !Valid(data.Choice.Mode, data.Choice.Code) || data.Choice.Roster is null ||
             data.Choice.Roster.Pinned is null || data.Choice.Roster.Excluded is null ||
+            !InformationOverlayRosterPreferences.ValidDisplay(data.Choice.Roster.Overflow, data.Choice.Roster.RowLimit,
+                data.Choice.Roster.RotationIntervalSeconds) ||
             data.Choice.Roster.Pinned.Length + data.Choice.Roster.Excluded.Length > 1000 ||
             data.Choice.Roster.Pinned.Concat(data.Choice.Roster.Excluded).Any(key =>
                 key is null || key.Length != 71 || !key.StartsWith("member:", StringComparison.Ordinal) || !key[7..].All(Uri.IsHexDigit)))
             throw new InvalidDataException();
         return data.Choice;
     }
-    internal static bool Valid(string mode, string? code) => mode is "auto" or "room" ? code is null :
+    internal static bool Valid(string mode, string? code) => mode is "auto" or "room" or "fleet" ? code is null :
         mode == "community" && !string.IsNullOrWhiteSpace(code) && code.Length <= 256 && code == code.Trim() && !code.Any(char.IsControl);
     internal OverlaySceneChoice Save(BridgeAccountContext owner, long revision, string mode, string? code, Func<bool> current,
         InformationOverlayRosterPreferences? roster = null)

@@ -31,7 +31,11 @@ Future<void> mount(
   );
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const Key('client-version-open')));
-  await tester.pumpAndSettle();
+  // A pending read now has an intentional looping wait. Finish only the route
+  // entrance; do not advance the fake clock until its business timeout fires.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 700));
+  await tester.pump();
 }
 
 void main() {

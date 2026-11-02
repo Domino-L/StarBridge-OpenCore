@@ -52,7 +52,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(CommunityInviteDialog),
-          matching: find.byTooltip('关闭'),
+          matching: find.byKey(const Key('community-admission-close-icon')),
         ),
       );
       await tester.pumpAndSettle();

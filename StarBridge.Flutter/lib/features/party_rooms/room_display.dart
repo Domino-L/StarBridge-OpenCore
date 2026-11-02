@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_tag_catalog.dart';
@@ -107,10 +108,12 @@ class RoomIdentityAvatar extends StatelessWidget {
     this.isSelf = false,
     this.size = 44,
     this.includeSocialActions = true,
+    this.includeNameInHint = false,
   });
   final String name, gameId;
   final String? avatarData, userRef;
   final bool isSelf, includeSocialActions;
+  final bool includeNameInHint;
   final double size;
   Uint8List? _bytes() {
     final data = avatarData;
@@ -142,6 +145,7 @@ class RoomIdentityAvatar extends StatelessWidget {
       avatarImageData: avatarData,
       isSelf: isSelf,
       includeSocialActions: includeSocialActions,
+      includeNameInHint: includeNameInHint,
       target: userRef == null
           ? null
           : UserTarget('room', userRef!, query: gameId),
@@ -214,8 +218,11 @@ class RoomTags extends StatelessWidget {
     runSpacing: 6,
     children: [
       for (final tag in RoomTagCatalog.ordered(room.tags))
-        Tooltip(
-          message: RoomTagCatalog.fullText(tag),
+        StarBridgeTooltip(
+          message: RoomTagCatalog.fullText(
+            tag,
+            strings: AppStrings.of(context),
+          ),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -229,7 +236,7 @@ class RoomTags extends StatelessWidget {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              RoomTagCatalog.compactText(tag),
+              RoomTagCatalog.compactText(tag, strings: AppStrings.of(context)),
               style: Theme.of(context).textTheme.bodySmall
                   ?.copyWith(color: roomTagColors(context, tag.id).foreground),
             ),

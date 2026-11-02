@@ -33,6 +33,21 @@ public sealed record OverlayRosterSelectionSettings(
 
     internal static OverlayRosterSelectionSettings Default { get; } = new();
 
+    /// <summary>The Host's account-local member preferences, including how overflow is shown.</summary>
+    internal static OverlayRosterSelectionSettings FromHostPreferences(
+        StarBridge.HostRuntime.Overlay.InformationOverlayRosterPreferences preferences) =>
+        new OverlayRosterSelectionSettings(
+            preferences.Pinned,
+            preferences.Excluded,
+            OverflowMode: preferences.EffectiveOverflow switch
+            {
+                "rotate" => OverlayRosterOverflowMode.Rotate,
+                "truncate" => OverlayRosterOverflowMode.Truncate,
+                _ => OverlayRosterOverflowMode.Summary
+            },
+            UserRowLimit: preferences.RowLimit,
+            RotationIntervalSeconds: preferences.EffectiveRotationIntervalSeconds).Normalize();
+
     internal OverlayRosterSelectionSettings Normalize()
     {
         var excluded = NormalizeIds(ExcludedAccountIds);
@@ -98,6 +113,9 @@ internal sealed class OverlayRosterRotationCursor
     }
 
     internal void Advance() => Page++;
+
+    // A flip may go straight to the page holding an unseen relevant change.
+    internal void JumpTo(int page) => Page = Math.Max(0, page);
 
     private static bool Equivalent(
         OverlayRosterSelectionSettings? left,
@@ -290,7 +308,25 @@ internal sealed record OverlayRosterProjection(
     int HiddenOfflineCount,
     int HiddenPinnedCount,
     bool ShowOverflowSummary,
-    int Capacity);
+    int Capacity)
+{
+    /// <summary>Ordering group of each visible row, aligned with <see cref="VisibleSourceIndices"/>.</summary>
+    internal IReadOnlyList<OverlayRosterGroup> Groups { get; init; } = [];
+    internal int PageIndex { get; init; }
+    internal int PageCount { get; init; } = 1;
+    /// <summary>Rotating page of every non-pinned eligible member, by source index.</summary>
+    internal IReadOnlyDictionary<int, int> RotationPages { get; init; } = new Dictionary<int, int>();
+}
+
+/// <summary>The ordering group a member row falls in; adjacent rows of different groups get a divider.</summary>
+internal enum OverlayRosterGroup
+{
+    Pinned,
+    SameServer,
+    SameLocation,
+    Online,
+    Offline
+}
 
 /// <summary>
 /// The single policy seam for overlay member selection. It intentionally accepts only
@@ -320,11 +356,7 @@ internal static class OverlayRosterPlanner
         var pinnedOrder = (preferences.PinnedAccountIds ?? [])
             .Select((id, index) => (Id: id, Index: index))
             .ToDictionary(pair => pair.Id, pair => pair.Index, StringComparer.OrdinalIgnoreCase);
-        var self = closedSet.Members.FirstOrDefault(member => member.IsSelf);
-        var localLocation = NormalizeComparableLocation(viewport.LocalLocationKey) ??
-                            NormalizeComparableLocation(self);
-        var localShard = NormalizeComparableShard(viewport.LocalServerShard) ??
-                         NormalizeComparableShard(self?.ServerShard);
+        var (localShard, localLocation) = ResolveLocalContext(closedSet, viewport);
 
         var eligible = closedSet.Members
             .Select((member, sourceIndex) => new RankedMember(
@@ -356,13 +388,7 @@ internal static class OverlayRosterPlanner
 
         if (eligible.Length <= capacity)
         {
-            return new OverlayRosterProjection(
-                eligible.Select(member => member.SourceIndex).ToArray(),
-                0,
-                0,
-                0,
-                false,
-                capacity);
+            return CreateProjection(eligible, eligible, showSummary: false, capacity);
         }
 
         return preferences.OverflowMode switch
@@ -420,19 +446,26 @@ internal static class OverlayRosterPlanner
             return CreateProjection(eligible, fixedPinned, showSummary: false, capacity);
         }
 
+        // Fixed pages: every member appears on exactly one page and the last
+        // page may be short, so a page indicator means something.
         var automatic = eligible
             .Where(member => member.PinnedIndex == int.MaxValue)
             .ToArray();
-        var offset = automatic.Length == 0
-            ? 0
-            : (int)((Math.Abs((long)rotationPage) * remainingCapacity) % automatic.Length);
+        var pageCount = Math.Max(1, (automatic.Length + remainingCapacity - 1) / remainingCapacity);
+        var page = (int)(Math.Abs((long)rotationPage) % pageCount);
         var rotated = automatic
-            .Skip(offset)
-            .Concat(automatic.Take(offset))
+            .Skip(page * remainingCapacity)
             .Take(remainingCapacity)
             .ToArray();
         var selected = fixedPinned.Concat(rotated).ToArray();
-        return CreateProjection(eligible, selected, showSummary: false, capacity);
+        return CreateProjection(eligible, selected, showSummary: false, capacity) with
+        {
+            PageIndex = page,
+            PageCount = pageCount,
+            RotationPages = automatic
+                .Select((member, index) => (member.SourceIndex, Page: index / remainingCapacity))
+                .ToDictionary(pair => pair.SourceIndex, pair => pair.Page)
+        };
     }
 
     private static OverlayRosterProjection CreateProjection(
@@ -449,8 +482,42 @@ internal static class OverlayRosterPlanner
             hidden.Count(member => !member.Online),
             hidden.Count(member => member.PinnedIndex < int.MaxValue),
             showSummary && hidden.Length > 0,
-            capacity);
+            capacity)
+        {
+            Groups = selected.Select(ResolveGroup).ToArray()
+        };
     }
+
+    /// <summary>
+    /// The same server / location / presence facts the ordering uses, for every
+    /// authorized member, so paging can tell when a hidden member becomes relevant.
+    /// </summary>
+    internal static IReadOnlyList<(PlayerRow Player, bool SameServer, bool SameLocation, bool Online)> ClassifyMembers(
+        OverlayAuthorizedRoster closedSet,
+        OverlayRosterViewport viewport)
+    {
+        var (localShard, localLocation) = ResolveLocalContext(closedSet, viewport);
+        return closedSet.Members
+            .Select(member => (member, IsOnSameServer(member, localShard), IsAtSameLocation(member, localLocation), IsOnline(member)))
+            .ToArray();
+    }
+
+    internal static (string? Shard, string? Location) ResolveLocalContext(
+        OverlayAuthorizedRoster closedSet,
+        OverlayRosterViewport viewport)
+    {
+        var self = closedSet.Members.FirstOrDefault(member => member.IsSelf);
+        return (
+            NormalizeComparableShard(viewport.LocalServerShard) ?? NormalizeComparableShard(self?.ServerShard),
+            NormalizeComparableLocation(viewport.LocalLocationKey) ?? NormalizeComparableLocation(self));
+    }
+
+    private static OverlayRosterGroup ResolveGroup(RankedMember member) =>
+        member.PinnedIndex < int.MaxValue ? OverlayRosterGroup.Pinned
+        : member.SameServer ? OverlayRosterGroup.SameServer
+        : member.SameLocation ? OverlayRosterGroup.SameLocation
+        : member.Online ? OverlayRosterGroup.Online
+        : OverlayRosterGroup.Offline;
 
     private static bool IsExcluded(PlayerRow member, HashSet<string> excluded)
     {
@@ -472,7 +539,8 @@ internal static class OverlayRosterPlanner
     private static bool IsOnSameServer(PlayerRow player, string? localShard)
     {
         var playerShard = NormalizeComparableShard(player.ServerShard);
-        return localShard is not null &&
+        return !player.RealtimeStateUnknown &&
+               localShard is not null &&
                playerShard is not null &&
                playerShard.Equals(localShard, StringComparison.OrdinalIgnoreCase);
     }

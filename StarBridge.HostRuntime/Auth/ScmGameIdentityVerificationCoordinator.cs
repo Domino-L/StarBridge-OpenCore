@@ -1,4 +1,3 @@
-using System.Runtime.ExceptionServices;
 using System.Net.Http;
 
 namespace StarBridge.HostRuntime.Auth;
@@ -7,7 +6,8 @@ public sealed record ScmGameIdentityVerificationAttempt(
     bool Accepted,
     bool Reconciled,
     string? Message,
-    ScmOAuthSession ActiveSession);
+    ScmOAuthSession ActiveSession,
+    bool OutcomeUnknown = false);
 
 /// <summary>
 /// Treats the SCM identity projection as authoritative when a verification write has an
@@ -16,47 +16,53 @@ public sealed record ScmGameIdentityVerificationAttempt(
 /// </summary>
 public sealed class ScmGameIdentityVerificationCoordinator
 {
-    private readonly OAuthPkceClient _client;
     private readonly TimeSpan _requestTimeout;
     private readonly TimeSpan _reconciliationTimeout;
+    private readonly Func<ScmOAuthSession, CancellationToken, Action<ScmOAuthSession>?, Task<ScmOAuthSession>> _readIdentity;
+    private readonly Func<ScmOAuthSession, string, string, CancellationToken, Action<ScmOAuthSession>?, Task<ScmGameIdentityVerificationResult>> _verifyIdentity;
 
     public ScmGameIdentityVerificationCoordinator(
         OAuthPkceClient client,
         TimeSpan? requestTimeout = null,
         TimeSpan? reconciliationTimeout = null)
     {
-        _client = client;
         _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(30);
         _reconciliationTimeout = reconciliationTimeout ?? TimeSpan.FromSeconds(10);
+        _readIdentity = client.RefreshIdentityAsync;
+        _verifyIdentity = client.VerifyGameIdentityAsync;
     }
+
+    // Candidate IO must never enter the installed resource-session pipeline.
+    // Ordinary account/WPF callers retain exactly the public constructor policy.
+    internal ScmGameIdentityVerificationCoordinator(OAuthPkceClient client,
+        Func<ScmOAuthSession, CancellationToken, Action<ScmOAuthSession>?, Task<ScmOAuthSession>> readIdentity,
+        Func<ScmOAuthSession, string, string, CancellationToken, Action<ScmOAuthSession>?, Task<ScmGameIdentityVerificationResult>> verifyIdentity)
+        : this(client)
+    { _readIdentity = readIdentity; _verifyIdentity = verifyIdentity; }
 
     public async Task<ScmGameIdentityVerificationAttempt> VerifyAsync(
         ScmOAuthSession session,
         string gameName,
         string contact,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action<ScmOAuthSession>? sessionReady = null)
     {
+        void Adopt(ScmOAuthSession active) { sessionReady?.Invoke(active); session = active; }
         ScmGameIdentityVerificationResult? result = null;
-        Exception? ambiguousFailure = null;
 
         try
         {
             using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             requestCancellation.CancelAfter(_requestTimeout);
-            result = await _client.VerifyGameIdentityAsync(
+            result = await _verifyIdentity(
                 session,
                 gameName,
                 contact,
-                requestCancellation.Token);
+                requestCancellation.Token, Adopt);
         }
-        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            ambiguousFailure = exception;
-        }
-        catch (HttpRequestException exception)
-        {
-            ambiguousFailure = exception;
-        }
+        catch (ScmApiForbiddenException) { throw; }
+        catch (ScmApiAuthenticationException) { throw; }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        catch (HttpRequestException) { }
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -65,9 +71,9 @@ public sealed class ScmGameIdentityVerificationCoordinator
             using var reconciliationCancellation =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             reconciliationCancellation.CancelAfter(_reconciliationTimeout);
-            var refreshedSession = await _client.RefreshIdentityAsync(
+            var refreshedSession = await _readIdentity(
                 session,
-                reconciliationCancellation.Token);
+                reconciliationCancellation.Token, Adopt);
             if (refreshedSession.GameIdentityVerified)
             {
                 return new ScmGameIdentityVerificationAttempt(
@@ -83,9 +89,12 @@ public sealed class ScmGameIdentityVerificationCoordinator
                     Accepted: result.Available && result.Success,
                     Reconciled: false,
                     Message: result.Message,
-                    ActiveSession: refreshedSession);
+                    ActiveSession: refreshedSession,
+                    OutcomeUnknown: !result.Available);
             }
         }
+        catch (ScmApiForbiddenException) { throw; }
+        catch (ScmApiAuthenticationException) { throw; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             // The read-back has its own bounded budget. Preserve the original outcome below.
@@ -102,12 +111,12 @@ public sealed class ScmGameIdentityVerificationCoordinator
                 Accepted: result.Available && result.Success,
                 Reconciled: false,
                 Message: result.Message,
-                ActiveSession: session);
+                ActiveSession: session,
+                OutcomeUnknown: !result.Available);
         }
 
-        ExceptionDispatchInfo.Capture(
-            ambiguousFailure ?? new HttpRequestException("SCM 游戏身份验证状态未知。"))
-            .Throw();
-        throw new InvalidOperationException("Unreachable");
+        // Neither a transport exception nor its text is safe to propagate:
+        // handlers and upstream failures can include the submitted private data.
+        throw new HttpRequestException("SCM game identity verification outcome is unknown.");
     }
 }

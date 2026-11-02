@@ -2,23 +2,37 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/routing/exit_application_intent.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'data_location_copy.dart';
 import 'data_location_port.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 Future<void> showDataLocationDialog(
   BuildContext context,
-  DataLocationPort port,
-) async {
+  DataLocationPort port, {
+  InteractionSource? source,
+}) async {
   final canExit = Actions.maybeFind<ExitApplicationIntent>(context) != null;
-  final choice = await showDialog<DataLocationMigrationChoice>(
-    context: context,
-    builder: (_) => DataLocationDialog(port: port, exitAvailable: canExit),
+  var operationSource = source ?? StarBridgeActivationOrigin.sourceOf(context);
+  final choice = await showStarBridgeDialog<DataLocationMigrationChoice>(
+    context,
+    source: operationSource,
+    builder: (_) => DataLocationDialog(
+      port: port,
+      exitAvailable: canExit,
+      onSourceChanged: (value) => operationSource = value,
+    ),
   );
   if (choice == null ||
       !context.mounted ||
@@ -34,19 +48,23 @@ Future<void> showDataLocationDialog(
           return true;
         } on Object catch (error) {
           if (context.mounted) {
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              SnackBar(
-                content: Text(
-                  dataLocationCopy(
-                    context,
-                    error is BridgeClientException &&
-                            error.code == 'dataLocation.wpf_running'
-                        ? 'migrationWpfRunning'
-                        : 'migrationStartFailed',
+            if (ScaffoldMessenger.maybeOf(context) != null) {
+              showStarBridgeSnackBar(
+                context,
+                starBridgeTimedSnackBar(
+                  content: Text(
+                    dataLocationCopy(
+                      context,
+                      error is BridgeClientException &&
+                              error.code == 'dataLocation.wpf_running'
+                          ? 'migrationWpfRunning'
+                          : 'migrationStartFailed',
+                    ),
                   ),
                 ),
-              ),
-            );
+                source: operationSource,
+              );
+            }
           }
           return false;
         }
@@ -59,10 +77,15 @@ class DataLocationDialog extends StatefulWidget {
   const DataLocationDialog({
     required this.port,
     this.exitAvailable = false,
+    this.onSourceChanged,
     super.key,
   });
   final DataLocationPort port;
   final bool exitAvailable;
+
+  /// Presentation origin only. Migration and exit remain owned by the Port
+  /// and the existing ExitApplicationIntent handoff.
+  final ValueChanged<InteractionSource>? onSourceChanged;
 
   @override
   State<DataLocationDialog> createState() => _DataLocationDialogState();
@@ -76,10 +99,31 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
   int _revision = 0;
   Timer? _retryTimer;
   int _failedReads = 0;
+  InteractionSource _source = InteractionSource.programmatic;
+  StarBridgeDialogRoute<bool>? _confirmation;
+
+  bool get _canMigrate =>
+      !_loading &&
+      _location?.exists == true &&
+      widget.exitAvailable &&
+      widget.port is DataLocationMigrationPort &&
+      (widget.port as DataLocationMigrationPort).migrationAvailable;
+
+  void _rememberSource(InteractionSource source) {
+    _source = source;
+    widget.onSourceChanged?.call(source);
+  }
+
+  void _retireConfirmation() {
+    final route = _confirmation;
+    _confirmation = null;
+    retireStarBridgeDialog(route);
+  }
 
   @override
   void dispose() {
     _retryTimer?.cancel();
+    _retireConfirmation();
     super.dispose();
   }
 
@@ -92,7 +136,13 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
   @override
   void didUpdateWidget(DataLocationDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.port != widget.port) unawaited(_read());
+    if (oldWidget.port != widget.port) {
+      _source = InteractionSource.programmatic;
+      _retireConfirmation();
+      unawaited(_read());
+    } else if (!_canMigrate) {
+      _retireConfirmation();
+    }
   }
 
   Future<void> _read() async {
@@ -127,7 +177,7 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
 
   Future<void> _act(bool copy) async {
     final location = _location;
-    if (_busy || location == null) return;
+    if (_busy || location == null || (!copy && !location.exists)) return;
     final revision = _revision;
     setState(() {
       _busy = true;
@@ -151,12 +201,10 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
   }
 
   Future<void> _chooseMigration() async {
-    final port = widget.port;
-    if (_busy ||
-        port is! DataLocationMigrationPort ||
-        !port.migrationAvailable) {
+    if (_busy || !_canMigrate) {
       return;
     }
+    final port = widget.port as DataLocationMigrationPort;
     final revision = _revision;
     setState(() {
       _busy = true;
@@ -165,12 +213,18 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
     try {
       final choice = await port.chooseMigration();
       if (!mounted || revision != _revision) return;
-      if (choice == null) {
+      if (choice == null || !_canMigrate) {
         setState(() => _busy = false);
         return;
       }
-      final confirmed = await showDialog<bool>(
-        context: context,
+      late StarBridgeDialogRoute<bool> confirmation;
+      final confirmed = await showStarBridgeDialog<bool>(
+        context,
+        source: _source,
+        onRouteCreated: (route) {
+          confirmation = route;
+          setState(() => _confirmation = route);
+        },
         builder: (dialogContext) => AlertDialog(
           key: const Key('data-location-confirm-dialog'),
           title: Text(dataLocationCopy(dialogContext, 'confirmTitle')),
@@ -205,21 +259,57 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const Key('data-location-keep'),
+              onActivate: (source) {
+                if (!mounted ||
+                    revision != _revision ||
+                    !confirmation.isCurrent) {
+                  return;
+                }
+                if (!_canMigrate) {
+                  _retireConfirmation();
+                  return;
+                }
+                _rememberSource(source);
+                dismissStarBridgeDialog(
+                  dialogContext,
+                  result: false,
+                  source: source,
+                );
+              },
               child: Text(dataLocationCopy(dialogContext, 'keep')),
             ),
-            FilledButton(
-              key: const Key('data-location-confirm'),
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('data-location-confirm'),
+              onActivate: (source) {
+                if (!mounted ||
+                    revision != _revision ||
+                    !confirmation.isCurrent) {
+                  return;
+                }
+                if (!_canMigrate) {
+                  _retireConfirmation();
+                  return;
+                }
+                _rememberSource(source);
+                dismissStarBridgeDialog(
+                  dialogContext,
+                  result: true,
+                  source: source,
+                );
+              },
               child: Text(dataLocationCopy(dialogContext, 'migrate')),
             ),
           ],
         ),
       );
+      if (_confirmation == confirmation) _confirmation = null;
       if (!mounted || revision != _revision) return;
-      if (confirmed == true) {
-        Navigator.of(context).pop(choice);
+      if (confirmed == true && _canMigrate) {
+        dismissStarBridgeDialog(context, result: choice, source: _source);
       } else {
         setState(() => _busy = false);
       }
@@ -249,7 +339,9 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_loading)
-              const Center(child: CircularProgressIndicator())
+              _LocationWaiting(
+                source: resolveStarBridgeInitialReadSource(context, _source),
+              )
             else if (location == null)
               Text(t('failed'))
             else ...[
@@ -271,20 +363,35 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
                 spacing: tokens.space.sm,
                 runSpacing: tokens.space.sm,
                 children: [
-                  FilledButton(
-                    key: const Key('data-location-open'),
-                    onPressed: _busy || !location.exists
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.primary,
+                    controlKey: const Key('data-location-open'),
+                    onActivate: _busy || !location.exists
                         ? null
-                        : () => _act(false),
+                        : (source) {
+                            _rememberSource(source);
+                            unawaited(_act(false));
+                          },
                     child: Text(t('open')),
                   ),
-                  OutlinedButton(
-                    key: const Key('data-location-copy'),
-                    onPressed: _busy ? null : () => _act(true),
+                  StarBridgeActionButton(
+                    controlKey: const Key('data-location-copy'),
+                    onActivate: _busy
+                        ? null
+                        : (source) {
+                            _rememberSource(source);
+                            unawaited(_act(true));
+                          },
                     child: Text(t('copy')),
                   ),
                 ],
               ),
+            ],
+            // Choosing a folder/opening it is an async wait. Once the
+            // confirmation is shown we are waiting for the user, not IO.
+            if (_busy && _confirmation == null) ...[
+              SizedBox(height: tokens.space.sm),
+              _LocationWaiting(source: _source),
             ],
             if (_feedback != null)
               Padding(
@@ -292,34 +399,70 @@ class _DataLocationDialogState extends State<DataLocationDialog> {
                 child: Semantics(liveRegion: true, child: Text(t(_feedback!))),
               ),
             SizedBox(height: tokens.space.md),
-            OutlinedButton(
-              key: const Key('data-location-move'),
-              onPressed:
-                  _busy ||
-                      _loading ||
-                      _location?.exists != true ||
-                      !widget.exitAvailable ||
-                      widget.port is! DataLocationMigrationPort ||
-                      !(widget.port as DataLocationMigrationPort)
-                          .migrationAvailable
-                  ? null
-                  : _chooseMigration,
-              style: OutlinedButton.styleFrom(
-                disabledForegroundColor: tokens.colors.textSecondary,
+            OutlinedButtonTheme(
+              data: OutlinedButtonThemeData(
+                style: OutlinedButton.styleFrom(
+                  disabledForegroundColor: tokens.colors.textSecondary,
+                ),
               ),
-              child: Text(t('move')),
+              child: StarBridgeActionButton(
+                controlKey: const Key('data-location-move'),
+                onActivate: _busy || !_canMigrate
+                    ? null
+                    : (source) {
+                        _rememberSource(source);
+                        unawaited(_chooseMigration());
+                      },
+                child: Text(t('move')),
+              ),
             ),
           ],
         ),
       ),
       actions: [
         if (!_loading && _location == null)
-          TextButton(onPressed: _busy ? null : _read, child: Text(t('retry'))),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: const Key('data-location-retry'),
+            onActivate: _busy
+                ? null
+                : (source) {
+                    _rememberSource(source);
+                    unawaited(_read());
+                  },
+            child: Text(t('retry')),
+          ),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('data-location-close'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(t('close')),
         ),
       ],
     );
   }
+}
+
+class _LocationWaiting extends StatelessWidget {
+  const _LocationWaiting({required this.source});
+  final InteractionSource source;
+  @override
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion || source == InteractionSource.keyboard,
+          ),
+          child: const SuiteProgressBar(
+            value: null,
+            phase: ProgressPhase.running,
+          ),
+        );
+      },
+    ),
+  );
 }

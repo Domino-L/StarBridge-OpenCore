@@ -3,7 +3,24 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityChatCopy = <String, (String, String, String)>{
+  'avatarActivityRead': ('正在读取头像…', '正在讀取頭像…', 'Loading avatar…'),
+  'mediaActivityRead': ('正在读取附件…', '正在讀取附件…', 'Loading attachment…'),
+  'presetActivityRead': ('正在读取本机方案…', '正在讀取本機方案…', 'Loading local profiles…'),
+  'presetActivityInspect': (
+    '正在读取导入预览…',
+    '正在讀取匯入預覽…',
+    'Loading import preview…',
+  ),
+  'presetActivityExport': (
+    '正在准备方案附件…',
+    '正在準備方案附件…',
+    'Preparing profile attachment…',
+  ),
+  'presetActivityImport': ('正在新增本机方案…', '正在新增本機方案…', 'Adding local profile…'),
   'self': ('我', '我', 'Me'),
+  'today': ('今天', '今天', 'Today'),
+  'yesterday': ('昨天', '昨天', 'Yesterday'),
+  'member': ('成员', '成員', 'Member'),
   'restoreLocalDraft': ('放回输入框编辑', '放回輸入框編輯', 'Move back to composer'),
   'restoreLocalBlocked': (
     '输入框有未发送内容，清空后可放回。',
@@ -29,43 +46,43 @@ const communityChatCopy = <String, (String, String, String)>{
     '有較多訊息尚未核對，請先重新整理訊息。新草稿會保留。',
     'Several messages still need checking. Refresh messages first; your new draft is kept.',
   ),
-  'sharePreset': ('分享浮层预设', '分享浮層預設', 'Share overlay preset'),
-  'importPreset': ('导入为新预设', '匯入為新預設', 'Import as new preset'),
+  'sharePreset': ('分享浮层方案', '分享浮層方案', 'Share overlay profile'),
+  'importPreset': ('导入为新方案', '匯入為新方案', 'Import as new profile'),
   'shareHint': (
-    '选择本机已保存的预设，添加到草稿后再发送。',
-    '選擇本機已儲存的預設，加入草稿後再傳送。',
-    'Choose a saved preset to attach to your draft before sending.',
+    '选择本机已保存的方案，添加到草稿后再发送。',
+    '選擇本機已儲存的方案，加入草稿後再傳送。',
+    'Choose a saved profile to attach to your draft before sending.',
   ),
   'importHint': (
-    '新增到本机，不覆盖或切换当前预设。外观仍需拥有使用资格。',
-    '新增至本機，不覆寫或切換目前預設。外觀仍需擁有使用資格。',
-    'Adds a local preset without replacing or activating one. Appearance access is still required.',
+    '新增到本机，不覆盖或切换当前方案。外观仍需拥有使用资格。',
+    '新增至本機，不覆寫或切換目前方案。外觀仍需擁有使用資格。',
+    'Adds a local profile without replacing or activating one. Appearance access is still required.',
   ),
   'presetReadFailed': (
-    '暂时无法读取预设，请重试。',
-    '暫時無法讀取預設，請重試。',
-    'Could not read presets. Try again.',
+    '暂时无法读取方案，请重试。',
+    '暫時無法讀取方案，請重試。',
+    'Could not read profiles. Try again.',
   ),
   'presetChanged': (
-    '预设已发生变化，请重新读取后再选择。',
-    '預設已變更，請重新讀取後再選擇。',
-    'Presets changed. Reload them before continuing.',
+    '方案已发生变化，请重新读取后再选择。',
+    '方案已變更，請重新讀取後再選擇。',
+    'Profiles changed. Reload them before continuing.',
   ),
   'presetInvalid': (
-    '此预设无法导入，请联系发送者重新分享。',
-    '此預設無法匯入，請聯絡傳送者重新分享。',
-    'This preset cannot be imported. Ask the sender to share it again.',
+    '此方案无法导入，请联系发送者重新分享。',
+    '此方案無法匯入，請聯絡傳送者重新分享。',
+    'This profile cannot be imported. Ask the sender to share it again.',
   ),
   'presetImportUnknown': (
     '尚未确认是否导入成功，请先到浮层设置检查，避免重复导入。',
     '尚未確認是否匯入成功，請先至浮層設定檢查，避免重複匯入。',
     'Import is unconfirmed. Check overlay settings before importing again.',
   ),
-  'imported': ('已新增预设', '已新增預設', 'Preset added'),
+  'imported': ('已新增方案', '已新增方案', 'Profile added'),
   'noPresets': (
-    '没有可分享的预设，请先在浮层设置中创建。',
-    '沒有可分享的預設，請先在浮層設定中建立。',
-    'No presets to share. Create one in overlay settings first.',
+    '没有可分享的方案，请先在浮层设置中创建。',
+    '沒有可分享的方案，請先在浮層設定中建立。',
+    'No profiles to share. Create one in overlay settings first.',
   ),
   'close': ('关闭', '關閉', 'Close'),
   'title': ('组织聊天', '組織聊天', 'Organization chat'),
@@ -73,6 +90,12 @@ const communityChatCopy = <String, (String, String, String)>{
   'refresh': ('刷新消息', '重新整理訊息', 'Refresh messages'),
   'older': ('查看更早消息', '查看更早訊息', 'Older messages'),
   'latest': ('回到最新', '回到最新', 'Back to latest'),
+  'newCount': (
+    '{count} 条新消息 · 回到最新',
+    '{count} 則新訊息 · 回到最新',
+    '{count} new · Back to latest',
+  ),
+  'unreadBelow': ('以下是新消息', '以下是新訊息', 'New messages below'),
   'newMessages': (
     '有新消息 · 回到最新',
     '有新訊息 · 回到最新',
@@ -95,6 +118,21 @@ const communityChatCopy = <String, (String, String, String)>{
     '已读状态未能确认，未读提醒暂时保留。',
     '已讀狀態未能確認，未讀提醒暫時保留。',
     'Could not confirm read status. Unread reminders are unchanged.',
+  ),
+  'readRateLimited': (
+    '已读状态更新过于频繁，请稍后重试。未读提醒暂时保留。',
+    '已讀狀態更新過於頻繁，請稍後重試。未讀提醒暫時保留。',
+    'Read status updates are temporarily limited. Try again shortly; unread reminders are unchanged.',
+  ),
+  'readDataInvalid': (
+    '已读状态更新请求未被接受，请刷新消息后重试。未读提醒暂时保留。',
+    '已讀狀態更新請求未被接受，請重新整理訊息後重試。未讀提醒暫時保留。',
+    'The read status request was not accepted. Refresh messages and retry; unread reminders are unchanged.',
+  ),
+  'readRefreshRequired': (
+    '需要重新读取消息才能更新已读状态。未读提醒暂时保留。',
+    '需要重新讀取訊息才能更新已讀狀態。未讀提醒暫時保留。',
+    'Reload messages before updating read status. Unread reminders are unchanged.',
   ),
   'unavailable': (
     '暂时无法读取消息，请刷新重试。',
@@ -151,7 +189,7 @@ const communityChatCopy = <String, (String, String, String)>{
     '圖片或附件未能載入。',
     'The image or attachment could not be loaded.',
   ),
-  'preset': ('浮层预设', '浮層預設', 'Overlay preset'),
+  'preset': ('浮层方案', '浮層方案', 'Overlay profile'),
   'removeAttachment': ('移除附件', '移除附件', 'Remove attachment'),
   'leaveTitle': ('离开组织聊天？', '離開組織聊天？', 'Leave this conversation?'),
   'leaveBody': (
@@ -161,6 +199,14 @@ const communityChatCopy = <String, (String, String, String)>{
   ),
   'stay': ('继续编辑', '繼續編輯', 'Keep editing'),
   'leave': ('丢弃草稿并返回', '捨棄草稿並返回', 'Discard draft and return'),
+};
+
+String communityChatReceiptCopyKey(String? error) => switch (error) {
+  'rateLimited' => 'readRateLimited',
+  'dataInvalid' => 'readDataInvalid',
+  'refreshRequired' || 'notFound' => 'readRefreshRequired',
+  'identityUnavailable' || 'notAllowed' => error!,
+  _ => 'readFailed',
 };
 
 String communityChatText(BuildContext context, String key) {

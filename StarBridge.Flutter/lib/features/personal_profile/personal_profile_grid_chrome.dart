@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_drag_surface.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -86,18 +87,7 @@ class PersonalProfileGridDropPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return IgnorePointer(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: tokens.shape.medium,
-          border: Border.all(
-            color: tokens.colors.focusRing,
-            width: tokens.stroke.focusWidth,
-          ),
-        ),
-      ),
-    );
+    return const StarBridgeDragSurface(child: SizedBox.expand());
   }
 }
 

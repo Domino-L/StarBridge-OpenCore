@@ -6,6 +6,8 @@ internal static partial class LegacyPasswordLoginTests
 {
     internal static async Task ProfileVisibility()
     {
+        await ScmProfileVisibility();
+        await ScmProfileBackgroundRead();
         await ProfileBackground();
         var transport = new Transport();
         using var client = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), transport);
@@ -37,6 +39,8 @@ internal static partial class LegacyPasswordLoginTests
             new { schemaVersion = 1, expectedRevision = 1, visibility = "public" }, context));
         Check(failed.Response.Error is not null && transport.Calls == calls, "old account cannot publish");
     }
+
+    
 
     private static async Task ProfileBackground()
     {

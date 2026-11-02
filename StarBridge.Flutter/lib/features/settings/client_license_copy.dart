@@ -9,8 +9,8 @@ String clientLicenseText(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
-  'open': ('查看完整客户端许可', '查看完整用戶端授權條款', 'View full client license'),
-  'title': ('客户端许可', '用戶端授權條款', 'Client license'),
+  'open': ('查看使用条款与声明', '查看使用條款與聲明', 'View terms and notices'),
+  'title': ('使用条款与声明', '使用條款與聲明', 'Terms and notices'),
   'loading': ('正在读取…', '正在讀取…', 'Loading…'),
   'missing': (
     '未找到许可文件，请检查安装包是否完整。',

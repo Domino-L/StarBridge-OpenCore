@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
@@ -74,6 +75,8 @@ void main() {
     if (const bool.fromEnvironment('LOCAL_HANGAR_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       }.entries) {
         await (FontLoader(
@@ -202,7 +205,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(Image), findsOneWidget);
-    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
+    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.contain);
     expect(find.byType(HangarCombatIcon), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(
@@ -215,7 +218,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('暂无图片'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is StarBridgeTooltip && widget.message == '暂无图片',
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

@@ -2,12 +2,28 @@
   "schemaVersion": 1,
   "assets": [
     {
+      "assetId": "achievement-approved-f1",
+      "cueId": "achievement.unlock",
+      "fileName": "achievement.unlock.wav",
+      "tier": "approved",
+      "priority": 320,
+      "sha256": "acce64cef4b0539512f00e119a6de109eb7a3326423f867c65446d4cff62d6e9"
+    },
+    {
       "assetId": "soft-approved-v1",
       "cueId": "notify.soft",
       "fileName": "notify.soft.wav",
       "tier": "approved",
       "priority": 320,
       "sha256": "2ff1ead9863e3238e155d169b74d6b9aca859fe64b11e301aa0f887c25e1ef81"
+    },
+    {
+      "assetId": "trade-approved-p4",
+      "cueId": "notify.trade",
+      "fileName": "notify.trade.wav",
+      "tier": "approved",
+      "priority": 320,
+      "sha256": "3ed700222039e1de4fded04a6a055462fdc8a7d781579a08aeca30510b84cefc"
     },
     {
       "assetId": "action-candidate-a",

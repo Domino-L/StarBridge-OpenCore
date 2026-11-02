@@ -1,7 +1,11 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 
 import '../communities/community_hangar_sharing_dialog.dart';
 import '../communities/community_hangar_sharing_port.dart';
@@ -18,14 +22,12 @@ class HangarSharingAction extends StatefulWidget {
 }
 
 class _HangarSharingActionState extends State<HangarSharingAction> {
-  DialogRoute<bool>? _route;
+  StarBridgeDialogRoute<bool>? _route;
 
   void _close() {
     final route = _route;
     _route = null;
-    scheduleMicrotask(() {
-      if (route?.isActive == true) route!.navigator?.removeRoute(route);
-    });
+    retireStarBridgeDialog(route);
   }
 
   @override
@@ -43,21 +45,28 @@ class _HangarSharingActionState extends State<HangarSharingAction> {
   Future<void> _open() async {
     if (_route != null || !widget.port.hangarSharingAvailable) return;
     final port = widget.port;
-    final route = DialogRoute<bool>(
-      context: context,
+    StarBridgeDialogRoute<bool>? opened;
+    await showStarBridgeDialog<bool>(
+      context,
+      useRootNavigator: false,
       barrierDismissible: false,
       builder: (_) => CommunityHangarSharingDialog(port: port),
+      onRouteCreated: (route) => _route = opened = route,
     );
-    _route = route;
-    await Navigator.of(context).push(route);
-    if (identical(_route, route)) _route = null;
+    if (identical(_route, opened)) _route = null;
   }
 
   @override
-  Widget build(BuildContext context) => OutlinedButton.icon(
-    key: const Key('local-hangar-sharing'),
-    onPressed: _open,
-    icon: const StandardIcon(StandardIconSemantic.share, size: 18),
-    label: Text(communityShipsText(context, 'sharingTitle')),
+  Widget build(BuildContext context) => StarBridgeActionButton(
+    controlKey: const Key('local-hangar-sharing'),
+    onActivate: (_) => _open(),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const StandardIcon(StandardIconSemantic.share, size: 18),
+        const SizedBox(width: 8),
+        Text(communityShipsText(context, 'sharingTitle')),
+      ],
+    ),
   );
 }

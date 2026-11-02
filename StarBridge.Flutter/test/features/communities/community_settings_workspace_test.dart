@@ -11,6 +11,7 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/communities/community_settings_workspace.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_compact_select.dart';
 import 'package:starbridge_flutter/features/communities/community_profile_dialog.dart';
 import 'package:starbridge_flutter/features/communities/community_gameplay_tags.dart';
 import 'package:starbridge_flutter/features/communities/community_creation_port.dart';
@@ -27,12 +28,18 @@ import 'package:starbridge_flutter/features/communities/community_announcements_
 
 import '../friends/social_layout_test.dart' show loadFonts;
 import 'community_image_test_support.dart';
+
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
+
 import 'community_roles_test.dart' show RolesFake, rolesPayload;
 import 'community_management_dialog_test.dart' show ManagementTestPort;
 import 'community_admissions_test.dart' show admissionsPayload;
+import 'community_workspace_test.dart' show workspacePayload;
 import 'community_navigation_test.dart' show shell;
 
 import 'package:starbridge_flutter/features/communities/communities_module.dart';
+
+import 'community_holo_test_support.dart';
 
 const target = '00000000000000000000000000000002';
 
@@ -117,7 +124,14 @@ class SettingsTestPort
     String section,
     int offset,
   ) async => CommunityAdmissionsPage.parse(
-    {...admissionsPayload(), 'targetRef': targetRef},
+    {
+      ...admissionsPayload(),
+      'targetRef': targetRef,
+      'access': {
+        ...(admissionsPayload()['access'] as Map),
+        'canDecideApplications': admissions.canDecide,
+      },
+    },
     targetRef,
     section,
     offset,
@@ -170,6 +184,7 @@ Future<SettingsTestPort> openSettings(
   Size size = const Size(1040, 550),
   AppearanceMode mode = AppearanceMode.dark,
   Locale locale = const Locale('zh', 'CN'),
+  bool reviewerOnly = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -177,7 +192,12 @@ Future<SettingsTestPort> openSettings(
   addTearDown(tester.view.resetDevicePixelRatio);
   final port = SettingsTestPort();
   addTearDown(port.close);
-  final workspace = await port.readWorkspace(target, '', 0);
+  port.admissions.canDecide = !reviewerOnly;
+  final reviewerPayload = workspacePayload(target: target);
+  (reviewerPayload['access'] as Map)['canReviewApplications'] = true;
+  final workspace = reviewerOnly
+      ? CommunityWorkspace.parse(reviewerPayload)
+      : await port.readWorkspace(target, '', 0);
   await tester.pumpWidget(
     MaterialApp(
       locale: locale,
@@ -214,8 +234,9 @@ Future<void> select(
   if (compact) {
     await tester.tap(find.byKey(const ValueKey('settings-category')));
     await tester.pumpAndSettle();
-    final context = tester.element(find.byType(CommunitySettingsWorkspace));
-    await tester.tap(find.text(communitySettingsText(context, section)).last);
+    await tester.tap(
+      find.byKey(ValueKey<Object>(('community-settings-category', section))),
+    );
   } else {
     final item = find.byKey(ValueKey('settings-nav-$section'));
     await tester.ensureVisible(item);
@@ -227,6 +248,40 @@ Future<void> select(
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'non-owner read-only reviewer opens applications without write grants',
+    (tester) async {
+      final port = await openSettings(
+        tester,
+        size: const Size(1280, 900),
+        locale: const Locale('en'),
+        reviewerOnly: true,
+      );
+      expect(find.byKey(const ValueKey('settings-nav-profile')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-nav-roles')), findsNothing);
+      await select(tester, 'admissions');
+      expect(find.widgetWithText(OutlinedButton, 'Approve'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Approve'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Decline'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(port.admissions.intents, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets('desktop profile scrollbar has a gutter outside form controls', (
     tester,
   ) async {
@@ -235,7 +290,7 @@ void main() {
     final viewport = tester.getRect(
       find.byKey(const ValueKey('profile-continuous-scroll')),
     );
-    final control = tester.getRect(find.byType(SwitchListTile).first);
+    final control = tester.getRect(find.byType(StarBridgeSwitch).first);
     expect(viewport.right - control.right, greaterThanOrEqualTo(16));
     expect(tester.takeException(), isNull);
     final boundary = tester.renderObject<RenderRepaintBoundary>(
@@ -292,7 +347,7 @@ void main() {
         if (compact) {
           expect(
             tester
-                .widget<DropdownButton<String>>(
+                .widget<StarBridgeCompactSelect<String>>(
                   find.byKey(const ValueKey('settings-category')),
                 )
                 .value,
@@ -302,7 +357,10 @@ void main() {
           expect(
             tester
                 .widget<ListTile>(
-                  find.byKey(const ValueKey('settings-nav-schedule')),
+                  find.descendant(
+                    of: find.byKey(const ValueKey('settings-nav-schedule')),
+                    matching: find.byType(ListTile),
+                  ),
                 )
                 .selected,
             isTrue,
@@ -441,7 +499,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<ListTile>(find.byKey(const ValueKey('settings-nav-schedule')))
+          .widget<ListTile>(
+            find.descendant(
+              of: find.byKey(const ValueKey('settings-nav-schedule')),
+              matching: find.byType(ListTile),
+            ),
+          )
           .selected,
       isTrue,
     );
@@ -687,7 +750,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<DropdownButton<String>>(
+          .widget<StarBridgeCompactSelect<String>>(
             find.byKey(const ValueKey('settings-category')),
           )
           .value,
@@ -716,6 +779,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await enterCommunitySection(tester);
       await tester.tap(find.byKey(const ValueKey('community-section-manage')));
       await tester.pumpAndSettle();
       await select(tester, 'profile');

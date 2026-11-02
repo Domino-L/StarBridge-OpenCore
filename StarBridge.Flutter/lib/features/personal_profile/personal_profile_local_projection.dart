@@ -12,10 +12,45 @@ PersonalProfileSnapshot projectLocalProfile(
   String draftDisplayName = '',
   String? accountAvatarImageData,
   bool legacyAccount = false,
+  bool accountCallSign = false,
   Map<String, String> timeZones = const {},
+  bool readOnly = false,
 }) {
   final remoteAvailable =
       remote.availability == PersonalProfileAvailability.available;
+  if (!legacyAccount &&
+      remoteAvailable &&
+      remote.presentation != null &&
+      content != null) {
+    final origins = remote.presentation!.origins;
+    bool authoritative(String group) => origins[group] != 'unknown';
+    content = {...content}; // Never rewrite local storage during projection.
+    for (final entry in const {
+      'introduction': 'introduction',
+      'avatarStyle': 'avatarStyle',
+      'wallpaper': 'wallpaperId',
+      'playStyle': 'playStyle',
+      'schedule': 'schedule',
+    }.entries) {
+      if (authoritative(entry.key)) content.remove(entry.value);
+    }
+    if (authoritative('layout')) {
+      content['modules'] = [
+        for (final module in remote.moduleLayout)
+          {
+            'id': module.moduleId,
+            'span': module.size.span,
+            'isVisible': module.isVisible,
+            'position': module.position,
+            if (module.favoriteShipIds != null)
+              'favoriteShipIds': module.favoriteShipIds,
+          },
+      ];
+      content['favoriteShipIds'] = ProfileFavoriteModules.selections(
+        remote.moduleLayout,
+      );
+    }
+  }
   // Earlier S2 builds materialized empty defaults while skipping Relay reads.
   // Recover only those empty defaults in memory; an explicit new save records
   // clear intent. Never rewrite the prior file or replace nonempty local edits.
@@ -45,20 +80,15 @@ PersonalProfileSnapshot projectLocalProfile(
   }
   final needsCreation = content == null && !remoteAvailable;
   final available = hangar != null && hangar.revision > 0;
-  final currentModels =
-      hangar?.ships.map((s) => s.modelKey).toSet() ?? <String>{};
   final retainedChoices = [
     if (available)
-      for (final ship in hangar.formerShips)
-        projectProfileShip(ship)
-            .withFormerOwnership(!currentModels.contains(ship.modelKey)),
+      for (final ship in hangar.formerInstances)
+        projectProfileShip(ship).withFormerOwnership(true),
   ];
   final choices = [
     if (available)
       for (final ship in hangar.ships) projectProfileShip(ship),
-    if (available)
-      for (final ship in hangar.formerModels)
-        projectProfileShip(ship).withFormerOwnership(true),
+    ...retainedChoices,
   ];
   final ids = needsCreation
       ? const <String>[]
@@ -176,12 +206,17 @@ PersonalProfileSnapshot projectLocalProfile(
   final style = (content?['playStyle'] as Map?)?.cast<String, Object?>();
   final schedule = (content?['schedule'] as Map?)?.cast<String, Object?>();
   return PersonalProfileSnapshot.available(
-    callSign:
-        content?['callSign'] as String? ??
-        (remoteAvailable ? remote.callSign : draftDisplayName),
+    cachedAtUtc: readOnly ? savedAt : null,
+    presentation: remoteAvailable ? remote.presentation : null,
+    callSign: accountCallSign && remoteAvailable
+        ? remote.callSign
+        : content?['callSign'] as String? ??
+              (remoteAvailable ? remote.callSign : draftDisplayName),
     about: content?['introduction'] as String? ?? remote.about,
     avatarStyle: content?['avatarStyle'] as int? ?? remote.avatarStyle,
-    avatarImageData: accountAvatarImageData ?? remote.avatarImageData,
+    avatarImageData: legacyAccount
+        ? accountAvatarImageData ?? remote.avatarImageData
+        : remote.avatarImageData ?? accountAvatarImageData,
     wallpaperId: content?['wallpaperId'] as String? ?? remote.wallpaperId,
     gameHandle: remote.gameHandle,
     visibility: remote.visibility,
@@ -208,13 +243,14 @@ PersonalProfileSnapshot projectLocalProfile(
     favoriteShips: List.unmodifiable(favorites),
     hangarSummary: summary,
     moduleLayout: ProfileFavoriteModules.materialize(layout, ids),
-    allowEditing: !remoteAvailable || remote.allowEditing,
+    allowEditing: !readOnly && (!remoteAvailable || remote.allowEditing),
     local: PersonalProfileLocalView(
       choices: List.unmodifiable(choices),
       retainedChoices: List.unmodifiable(retainedChoices),
       favoriteShipIds: ids == null ? null : List.unmodifiable(ids),
       hangarAvailable: available,
       remoteAvailable: remoteAvailable,
+      accountCallSign: accountCallSign,
       needsCreation: needsCreation,
       savedAt: savedAt,
       partial: hangar?.partial ?? false,
@@ -262,6 +298,7 @@ PersonalProfileShipSummary projectProfileShip(
 ) => PersonalProfileShipSummary(
   identity: PersonalProfileShipIdentity(
     runtimeId: ship.id,
+    nickname: ship.nickname,
     catalogId: ship.catalogId,
     englishName: ship.title,
     simplifiedChineseName: ship.cn ?? ship.title,

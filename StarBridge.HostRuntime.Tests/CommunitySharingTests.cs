@@ -12,6 +12,7 @@ internal static class CommunitySharingTests
 {
     internal static async Task Verify()
     {
+        await CommunityReadJournalTests.Verify();
         await CommunityMemberSharingTests.Verify();
         var owner = new BridgeAccountContext("test", "privacy.invalid", "fixture-owner");
         var joined = DateTimeOffset.UtcNow;
@@ -92,8 +93,14 @@ internal static class CommunitySharingTests
             var request = BridgeEnvelope.Request("privacy.communityTargets", Guid.NewGuid().ToString("N"), 1,
                 new { schemaVersion = 1 }, owner);
             Check((await bridge.DispatchAsync(request, default)).Response.Error is null && reads == 1, "target read bridge is wired");
+            var offline = new CommunitySharingDispatcher(() => current, (_, _, _) =>
+                Task.FromException<CommunitySharingTargets>(new HttpRequestException("synthetic offline Relay")));
+            Check((await offline.DispatchAsync(request, default)).Response.Error?.Code ==
+                "privacy_publication.community_scopes_unavailable", "offline Relay must return a feature error, not terminate the Host lease");
+            Check((await bridge.DispatchAsync(request, default)).Response.Error is null,
+                "valid reads still work after an unavailable sharing source");
             current = (owner with { Subject = "other" }, 2);
-            Check((await bridge.DispatchAsync(request, default)).Response.Error?.Code == "privacy_publication.account_changed" && reads == 1,
+            Check((await bridge.DispatchAsync(request, default)).Response.Error?.Code == "privacy_publication.account_changed" && reads == 2,
                 "stale target read never crosses account boundary");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }

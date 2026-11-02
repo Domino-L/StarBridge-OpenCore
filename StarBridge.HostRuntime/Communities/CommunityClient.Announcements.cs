@@ -15,39 +15,45 @@ internal sealed partial class CommunityClient
         string PublishedAt, string UpdatedAt, string? ArchivedAt, string? WithdrawnAt,
         AnnouncementPerson Author, AnnouncementPerson Editor);
     private sealed record AnnouncementTarget(string Code, string Scope, long TimelineRevision,
-        AnnouncementRecord Record, DateTimeOffset Expires);
+        AnnouncementRecord Record, DateTimeOffset Expires, bool OfficialFleet = false);
     private readonly ConcurrentDictionary<string, AnnouncementTarget> _announcementTargets = new();
     private static readonly JsonSerializerOptions AnnouncementJson = new(JsonSerializerDefaults.Web)
-        { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private const int AnnouncementChunkBytes = 192 * 1024;
 
     internal Task<object> ReadAnnouncementsAsync(string bearer, JsonElement body, string scope, Action current, CancellationToken token) =>
         GuardWorkspace(async () =>
         {
-            Validate(body, "targetRef", "offset", "expectedRevision");
+            var publicationToken = token; var operationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            Validate(body, "targetRef", "offset", "expectedRevision", "authorIdentitySchemaVersion", "observeAnnouncementRefs");
             var reference = Text(body, "targetRef", 32);
             var offset = Number(body, "offset", 0, 100);
             long? expected = body.TryGetProperty("expectedRevision", out var requested) && requested.ValueKind != JsonValueKind.Null
                 ? AnnouncementRevision(body, "expectedRevision") : null;
             if (offset > 0 && expected is null) throw Invalid();
             current();
-        var target = ResolveForRead(reference, scope, allowWpfS2: true);
-            var path = "/api/fleets/announcements?fleetCode=" + Uri.EscapeDataString(target.Code)
+            var target = ResolveForRead(reference, scope, allowWpfS2: true);
+            using var operation = target.OfficialFleet ? CancellationTokenSource.CreateLinkedTokenSource(token) : null;
+            operation?.CancelAfter(TimeSpan.FromSeconds(12)); if (operation is not null) token = operation.Token;
+            var withAuthors = OfficialAuthorOptIn(body, target, "observeAnnouncementRefs");
+            var path = CommunicationPath(target, "/announcements?fleetCode=") + Uri.EscapeDataString(target.Code)
                 + "&view=client&offset=" + offset.ToString(CultureInfo.InvariantCulture)
                 + (expected is null ? "" : "&expectedRevision=" + expected.Value.ToString(CultureInfo.InvariantCulture));
-            var root = target.WpfS2ViewerId is not null
+            var authors = withAuthors ? await ReadOfficialAnnouncementAuthors(bearer, target, body, scope, offset, expected, token) : null;
+            var root = authors is not null ? authors.Page : target.WpfS2ViewerId is not null
                 ? await WpfS2AnnouncementPage(bearer, target, offset, expected, null, token)
                 : await AnnouncementJsonAsync(bearer, path, token, 400 * 1024);
             current(); token.ThrowIfCancellationRequested();
             CheckAnnouncementRoot(root, target.Code, target.WpfS2ViewerId is null ? 2 : 1);
             var revision = AnnouncementRevision(root, "revision");
             if (expected is not null && revision != expected || Number(root, "offset", 0, 100) != offset) throw Invalid();
-            var canManage = root.GetProperty("canManage").GetBoolean();
+            var canManage = !target.OfficialFleet && root.GetProperty("canManage").GetBoolean();
             var total = Number(root, "totalHistoryCount", 0, 100);
             var next = root.GetProperty("next").ValueKind == JsonValueKind.Null ? (int?)null : Number(root, "next", 0, 100);
             var refreshedAt = Timestamp(root, "refreshedAt") ?? throw Invalid();
             var active = root.GetProperty("current").ValueKind == JsonValueKind.Null ? null : Announcement(root.GetProperty("current"), target.Code, false);
             var history = Rows(root, "history", 20).Select(row => Announcement(row, target.Code, false)).ToArray();
+            if (target.OfficialFleet) { active = active is null ? null : NeutralOfficialAnnouncement(active); history = history.Select(NeutralOfficialAnnouncement).ToArray(); }
             if (offset > total || history.Length != Math.Min(20, total - offset)
                 || next != (offset + history.Length < total ? offset + history.Length : null)
                 || active is not null && (active.State != "published" || total > 99)
@@ -68,44 +74,70 @@ internal sealed partial class CommunityClient
                 if (!string.IsNullOrWhiteSpace(person.AccountId) && person.AccountId != "legacy")
                 {
                     var memberId = "account:" + person.AccountId;
-                    memberRef = members.FirstOrDefault(p => p.Value.MemberId == memberId).Key
-                        ?? _memberTargets.FirstOrDefault(p => p.Value.MemberId == memberId && p.Value.Code == target.Code
-                            && p.Value.Scope == scope && p.Value.Expires > DateTimeOffset.UtcNow).Key
-                        ?? Guid.NewGuid().ToString("N");
+                    memberRef = MemberReferenceFor(memberId, target.Code, scope)!;
                     members[memberRef] = new(memberId, target.Code, scope, DateTimeOffset.UtcNow.AddMinutes(5));
                 }
-                return new { memberRef, callsign = person.Callsign, gameId = person.GameId, roleTitle = person.RoleTitle,
-                    roleColor = person.RoleColor, hasAvatar = person.HasAvatar };
+                return new
+                {
+                    memberRef,
+                    callsign = person.Callsign,
+                    gameId = person.GameId,
+                    roleTitle = person.RoleTitle,
+                    roleColor = person.RoleColor,
+                    hasAvatar = person.HasAvatar
+                };
             }
             object View(AnnouncementRecord item)
             {
                 var id = _announcementTargets.FirstOrDefault(p => p.Value.Code == target.Code && p.Value.Scope == scope
-                    && p.Value.TimelineRevision == revision && p.Value.Record == item && p.Value.Expires > DateTimeOffset.UtcNow).Key
+                    && p.Value.TimelineRevision == revision && p.Value.Record == item && (target.OfficialFleet || p.Value.Expires > DateTimeOffset.UtcNow)).Key
                     ?? Guid.NewGuid().ToString("N");
-                pending[id] = new(target.Code, scope, revision, item, DateTimeOffset.UtcNow.AddMinutes(5));
-                return new { announcementRef = id, title = item.Title, content = item.Content, state = item.State, revision = item.Revision,
-                    publishedAt = item.PublishedAt, updatedAt = item.UpdatedAt, archivedAt = item.ArchivedAt, withdrawnAt = item.WithdrawnAt,
-                    author = Person(item.Author), editor = Person(item.Editor) };
+                pending[id] = new(target.Code, scope, revision, item, (target.OfficialFleet ? _targetClock.GetUtcNow() : DateTimeOffset.UtcNow).AddMinutes(5), target.OfficialFleet);
+                return new
+                {
+                    announcementRef = id,
+                    title = item.Title,
+                    content = item.Content,
+                    state = item.State,
+                    revision = item.Revision,
+                    publishedAt = item.PublishedAt,
+                    updatedAt = item.UpdatedAt,
+                    archivedAt = item.ArchivedAt,
+                    withdrawnAt = item.WithdrawnAt,
+                    author = Person(item.Author),
+                    editor = Person(item.Editor)
+                };
             }
             var activeView = active is null ? null : View(active);
             var historyViews = history.Select(View).ToArray();
-            foreach (var old in _announcementTargets.Where(p => p.Value.Expires <= DateTimeOffset.UtcNow).ToArray()) _announcementTargets.TryRemove(old.Key, out _);
-            foreach (var old in _memberTargets.Where(p => p.Value.Expires <= DateTimeOffset.UtcNow).ToArray()) _memberTargets.TryRemove(old.Key, out _);
-            if (_announcementTargets.Count + pending.Count(p => !_announcementTargets.ContainsKey(p.Key)) > 4000
-                || _memberTargets.Count + members.Count(p => !_memberTargets.ContainsKey(p.Key)) > 10000)
+            foreach (var old in _announcementTargets.Where(p => !p.Value.OfficialFleet && p.Value.Expires <= DateTimeOffset.UtcNow).ToArray()) _announcementTargets.TryRemove(old.Key, out _);
+            if (target.OfficialFleet) TrimOfficialAnnouncementAddresses(target, scope, pending.Keys.ToHashSet(StringComparer.Ordinal));
+            if (_announcementTargets.Count + pending.Count(p => !_announcementTargets.ContainsKey(p.Key)) > 4000)
                 throw new AccountBridgeHostException("communities.refreshRequired");
             current(); token.ThrowIfCancellationRequested();
+            PublishMemberTargets(members);
             foreach (var pair in pending) _announcementTargets[pair.Key] = pair.Value;
-            foreach (var pair in members) _memberTargets[pair.Key] = pair.Value;
             RenewTarget(reference, target, token);
-            return new { schemaVersion = 1, targetRef = reference, revision, canManage, current = activeView, history = historyViews,
-                offset, next, totalHistoryCount = total, refreshedAt };
+            object result = new
+            {
+                schemaVersion = 1,
+                targetRef = reference,
+                revision,
+                canManage,
+                current = activeView,
+                history = historyViews,
+                offset,
+                next,
+                totalHistoryCount = total,
+                refreshedAt
+            };
+            return authors is null ? result : CompleteOfficialAnnouncementAuthors(result, authors, pending, scope, current, publicationToken, operationStarted, reference);
         });
 
     internal Task<object> ReadAnnouncementDetailAsync(string bearer, JsonElement body, string scope, Action current, CancellationToken token) =>
         GuardWorkspace(async () =>
         {
-            Validate(body, "targetRef", "announcementRef", "offset", "version");
+            Validate(body, "targetRef", "announcementRef", "offset", "version", "authorIdentitySchemaVersion", "expectedAuthorIdentityVersion", "expectedEditorIdentityVersion");
             var reference = Text(body, "targetRef", 32);
             var announcementRef = Text(body, "announcementRef", 32);
             var offset = Number(body, "offset", 0, 1600 * 1024);
@@ -115,30 +147,46 @@ internal sealed partial class CommunityClient
             current();
             var target = Resolve(reference, scope, allowWpfS2: true);
             if (!_announcementTargets.TryGetValue(announcementRef, out var entry) || entry.Code != target.Code
-                || entry.Scope != scope || entry.Expires <= DateTimeOffset.UtcNow)
+                || entry.Scope != scope || entry.Expires <= (target.OfficialFleet ? _targetClock.GetUtcNow() : DateTimeOffset.UtcNow))
                 throw new AccountBridgeHostException("communities.refreshRequired");
+            if (OfficialAuthorDetailOptIn(body, target, announcements: true))
+                return await ReadOfficialAnnouncementAuthorDetail(bearer, body, reference, announcementRef, target, entry, scope, offset, version, current, token);
             var root = target.WpfS2ViewerId is not null
                 ? await WpfS2AnnouncementPage(bearer, target, 0, entry.TimelineRevision, entry.Record.Id, token)
-                : await AnnouncementJsonAsync(bearer, "/api/fleets/announcements?fleetCode=" + Uri.EscapeDataString(target.Code)
+                : await AnnouncementJsonAsync(bearer, CommunicationPath(target, "/announcements?fleetCode=") + Uri.EscapeDataString(target.Code)
                 + "&view=detail&announcementId=" + Uri.EscapeDataString(entry.Record.Id)
                 + "&expectedRevision=" + entry.TimelineRevision.ToString(CultureInfo.InvariantCulture), token, 1600 * 1024);
             current(); token.ThrowIfCancellationRequested();
             CheckAnnouncementRoot(root, target.Code, target.WpfS2ViewerId is null ? 2 : 1);
             if (AnnouncementRevision(root, "revision") != entry.TimelineRevision) throw Invalid();
-            var canManage = root.GetProperty("canManage").GetBoolean();
+            var canManage = !target.OfficialFleet && root.GetProperty("canManage").GetBoolean();
             var detail = Announcement(root.GetProperty("entry"), target.Code, true);
+            if (target.OfficialFleet) detail = NeutralOfficialAnnouncement(detail);
             if ((detail with { Author = detail.Author with { Avatar = null }, Editor = detail.Editor with { Avatar = null } }) != entry.Record)
                 throw new AccountBridgeHostException("communities.announcementsChanged");
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(new { authorAvatarImageData = detail.Author.Avatar,
-                editorAvatarImageData = detail.Editor.Avatar }, AnnouncementJson);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                authorAvatarImageData = detail.Author.Avatar,
+                editorAvatarImageData = detail.Editor.Avatar
+            }, AnnouncementJson);
             if (bytes.Length > 1600 * 1024 || offset >= bytes.Length) throw Invalid();
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (version is not null && version != hash) throw new AccountBridgeHostException("communities.announcementsChanged");
             var size = Math.Min(AnnouncementChunkBytes, bytes.Length - offset);
             int? next = offset + size < bytes.Length ? offset + size : null;
             current(); token.ThrowIfCancellationRequested();
-            return new { schemaVersion = 1, targetRef = reference, announcementRef, canManage, offset, next,
-                totalBytes = bytes.Length, version = hash, data = Convert.ToBase64String(bytes, offset, size) };
+            return new
+            {
+                schemaVersion = 1,
+                targetRef = reference,
+                announcementRef,
+                canManage,
+                offset,
+                next,
+                totalBytes = bytes.Length,
+                version = hash,
+                data = Convert.ToBase64String(bytes, offset, size)
+            };
         });
 
     private async Task<JsonElement> AnnouncementJsonAsync(string bearer, string path, CancellationToken token, int maximum)
@@ -197,9 +245,12 @@ internal sealed partial class CommunityClient
         var bytes = Convert.FromBase64String(source);
         var mime = bytes.AsSpan() switch
         {
-            [137, 80, 78, 71, 13, 10, 26, 10, ..] => "image/png", [255, 216, 255, ..] => "image/jpeg",
-            [66, 77, ..] => "image/bmp", [71, 73, 70, 56, 55 or 57, 97, ..] => "image/gif",
-            [82, 73, 70, 70, _, _, _, _, 87, 69, 66, 80, ..] => "image/webp", _ => null
+            [137, 80, 78, 71, 13, 10, 26, 10, ..] => "image/png",
+            [255, 216, 255, ..] => "image/jpeg",
+            [66, 77, ..] => "image/bmp",
+            [71, 73, 70, 56, 55 or 57, 97, ..] => "image/gif",
+            [82, 73, 70, 70, _, _, _, _, 87, 69, 66, 80, ..] => "image/webp",
+            _ => null
         };
         return mime is null ? throw Invalid() : ChatAvatar("data:" + mime + ";base64," + source);
     }

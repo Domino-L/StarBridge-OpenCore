@@ -17,12 +17,19 @@ using Color = System.Windows.Media.Color;
 
 namespace StarBridge.Desktop;
 
-public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChanged
+public sealed partial class OverlayViewModel : System.ComponentModel.INotifyPropertyChanged
 {
-    // One receipt per active source/window; no announcement text survives a
-    // permission clear. Empty/transient snapshots do not create a new notice.
+    // One receipt per active channel; the app-run record of shown announcements
+    // (hashes only; no text survives a permission clear) is checked as well.
+    // Empty/transient snapshots do not create a new notice.
     private string? _communityNoticeChannel;
     private string? _communityNoticeReceipt;
+    private OverlayAppearanceActivity _noticeAppearanceActivity;
+    private readonly List<(string Source, OverlayAppearanceActivity Activity)> _chatAppearanceActivities = [];
+    // Optional appearance metadata only. Content and source keys remain in the model.
+    internal IReadOnlyList<OverlayAppearanceActivity> CommunicationAppearanceActivities =>
+        _chatAppearanceActivities.Select(item => item.Activity).Append(_noticeAppearanceActivity)
+            .Where(activity => activity.Sequence > 0).ToArray();
     private const double EventNotificationSlideDistance = 420;
     private const int ChatBarrageLaneCount = 12;
     private const int ChatMessageListHistoryCapacity = 100;
@@ -101,6 +108,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private Visibility _overviewLocationsHorizontalVisibility = Visibility.Collapsed;
     private Visibility _overviewLocationsVerticalVisibility = Visibility.Collapsed;
     private IReadOnlyList<OverlayOverviewLocationCount> _overviewTopLocations = [];
+    private OverlayOverviewFacts? _overviewFacts;
     private IReadOnlyList<OverlayOverviewLocationCount> _overviewVisibleLocations = [];
     private string _overviewLocationPlaceholder = "";
     private string _overviewLocationPlaceholderMetric = "";
@@ -188,11 +196,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void InitializeTimers()
     {
-        _rosterRotationTimer.Tick += (_, _) =>
-        {
-            _rosterRotationCursor.Advance();
-            RefreshMembersFromAuthorizedRoster();
-        };
+        _rosterRotationTimer.Tick += (_, _) => AdvanceMemberPage();
         _timer.Tick += (_, _) =>
         {
             if (_noticeSecondsRemaining > 0)
@@ -321,6 +325,12 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         get => _overviewTopLocations;
         private set => SetProperty(ref _overviewTopLocations, value);
+    }
+
+    public OverlayOverviewFacts? OverviewFacts
+    {
+        get => _overviewFacts;
+        private set => SetProperty(ref _overviewFacts, value);
     }
 
     public IReadOnlyList<OverlayOverviewLocationCount> OverviewVisibleLocations
@@ -789,6 +799,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 _pendingCommunicationEvents.Clear();
                 _noticeSecondsRemaining = 0;
                 _lastCommandNoticeSignature = "";
+                _noticeAppearanceActivity = default;
                 FleetNoticeTitle = "";
                 FleetNotice = "";
                 _timer.Stop();
@@ -809,10 +820,12 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         _authorizedRoster = roster;
         _rosterSelectionSettings = rosterSelectionSettings.Normalize();
         var effectiveSceneContext = sceneContext ?? OverlaySceneContext.Fleet(settings.ScenePreference);
-        _rosterRotationCursor.ApplyContext(_rosterSelectionSettings, effectiveSceneContext.Kind);
+        if (_rosterRotationCursor.ApplyContext(_rosterSelectionSettings, effectiveSceneContext.Kind))
+            _memberPaging.Reset();
         _rosterDisplaySettings = settings;
         _rosterLanguage = language;
         _rosterLocalShard = localShard;
+        _observeMemberChanges = true;
 
         RefreshCore(
             roster.Members,
@@ -867,9 +880,13 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             OverlayDisplaySettings.NormalizeCommunicationEventDuration(settings.CommunicationEventDurationSeconds));
         if (!_showNotice)
         {
+            _noticeAppearanceActivity = default;
             _pendingCommunicationEvents.Clear();
             _noticeSecondsRemaining = 0;
             _lastCommandNoticeSignature = "";
+            // Dropped before it showed: turning notices back on may show it; the app-run record
+            // still holds back an announcement that reached the screen.
+            _communityNoticeReceipt = null;
             _timer.Stop();
             OnChanged(nameof(NotificationVisibility));
         }
@@ -932,8 +949,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _communityNoticeChannel = sceneContext.ChatChannelId;
             _communityNoticeReceipt = null;
         }
+        var shownKey = validCommunityNotice && modules is not null ? AnnouncementKey(modules.ScopeKey, sceneContext.ChatChannelId!) : null;
         if (_showNotice && modules?.Notice.Available != false && !nextNoticeSignature.Equals(_lastCommandNoticeSignature, StringComparison.Ordinal))
         {
+            var hasNoticeBaseline = _lastCommandNoticeSignature.Length > 0;
             if (sceneContext.Kind == OverlaySceneKind.Community && _lastCommandNoticeSignature.Length > 0)
             {
                 _pendingCommunicationEvents.Clear();
@@ -945,9 +964,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             {
                 var receipt = communityNotice ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                     System.Text.Encoding.UTF8.GetBytes(nextNoticeSignature))) : null;
-                if (!communityNotice || receipt != _communityNoticeReceipt)
+                if (!communityNotice || receipt != _communityNoticeReceipt && !AnnouncementShown(shownKey, receipt!))
                 {
-                    QueueCommunicationEvent(nextNoticeTitle, nextNoticeText);
+                    QueueCommunicationEvent(nextNoticeTitle, nextNoticeText, hasNoticeBaseline, shownKey, receipt);
                     if (communityNotice) _communityNoticeReceipt = receipt;
                 }
             }
@@ -974,19 +993,19 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         var source = _rosterDisplaySettings.HideSelfMember
             ? new OverlayAuthorizedRoster(_authorizedRoster.Members.Where(player => !player.IsSelf))
             : _authorizedRoster;
-        var projection = OverlayRosterPlanner.Project(
-            source,
-            _rosterSelectionSettings,
-            new OverlayRosterViewport(
-                _memberPanelHeight,
-                _rosterLocalShard,
-                null,
-                _rosterRotationCursor.Page));
+        var viewport = new OverlayRosterViewport(
+            _memberPanelHeight,
+            _rosterLocalShard,
+            null,
+            _rosterRotationCursor.Page);
+        var projection = OverlayRosterPlanner.Project(source, _rosterSelectionSettings, viewport);
         var shouldRotate =
             _rosterSelectionSettings.OverflowMode == OverlayRosterOverflowMode.Rotate &&
             projection.HiddenOnlineCount + projection.HiddenOfflineCount > 0;
-        _rosterRotationTimer.Interval = TimeSpan.FromSeconds(
-            _rosterSelectionSettings.RotationIntervalSeconds);
+        // Setting Interval restarts a running DispatcherTimer; frequent roster
+        // refreshes must not keep postponing the next page.
+        var interval = TimeSpan.FromSeconds(_rosterSelectionSettings.RotationIntervalSeconds);
+        if (!_memberPageHeld && _rosterRotationTimer.Interval != interval) _rosterRotationTimer.Interval = interval;
         if (shouldRotate)
         {
             _rosterRotationTimer.Start();
@@ -996,16 +1015,27 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _rosterRotationTimer.Stop();
         }
 
-        foreach (var player in source.Resolve(projection))
+        var visible = source.Resolve(projection);
+        var now = DateTimeOffset.UtcNow;
+        ObserveMemberPaging(source, projection, viewport, visible, shouldRotate, now);
+        for (var index = 0; index < visible.Count; index++)
         {
+            var player = visible[index];
             var online = PlayerPresence.IsOnline(player.SharedPresence);
+            var key = OverlayMemberPagingTracker.KeyOf(player);
             Members.Add(new OverlayMemberRow(
                 FormatMemberName(player, _rosterDisplaySettings.MemberNameMode),
                 player.RealtimeStateUnknown ? zh ? "未知" : "Unknown" : player.SharedPresenceText,
                 player.SharedShipDisplayText,
                 LocalizeMemberLocation(player, _rosterLanguage),
                 online ? StatusPalette.SuccessBrush : StatusPalette.DisabledBrush,
-                player.SharedLocationToolTip));
+                player.SharedLocationToolTip)
+            {
+                Key = key,
+                Presence = player.RealtimeStateUnknown ? null : player.SharedPresence,
+                Group = index < projection.Groups.Count ? projection.Groups[index] : null,
+                CueStartedAtUtc = _memberPaging.CueStartedAt(key, now)
+            });
         }
 
         if (projection.ShowOverflowSummary)
@@ -1040,18 +1070,21 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OnChanged(nameof(Members));
     }
 
-    public void QueueCommunicationEvent(string title, string detail)
+    public void QueueCommunicationEvent(string title, string detail) => QueueCommunicationEvent(title, detail, true);
+
+    private void QueueCommunicationEvent(string title, string detail, bool newActivity, string? shownKey = null, string? receipt = null)
     {
         if (!_showNotice || string.IsNullOrWhiteSpace(title))
         {
             return;
         }
 
-        var pending = new PendingCommunicationEvent(title.Trim(), detail?.Trim() ?? "");
+        var pending = new PendingCommunicationEvent(title.Trim(), detail?.Trim() ?? "",
+            newActivity ? OverlayAppearanceActivity.Create(DateTimeOffset.UtcNow) : default, shownKey, receipt);
         if ((_noticeSecondsRemaining > 0 &&
              FleetNoticeTitle.Equals(pending.Title, StringComparison.Ordinal) &&
              FleetNotice.Equals(pending.Detail, StringComparison.Ordinal)) ||
-            _pendingCommunicationEvents.Contains(pending))
+            _pendingCommunicationEvents.Any(item => item.Title == pending.Title && item.Detail == pending.Detail))
         {
             return;
         }
@@ -1072,11 +1105,13 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private Guid? _liveCommunicationEvent;
 
-    internal bool TryShowLiveCommunicationEvent(Guid id, string title, string detail)
+    internal bool TryShowLiveCommunicationEvent(Guid id, string title, string detail, int minimumSeconds = 0)
     {
-        // Do not queue a time-sensitive reminder behind older room/communication content.
-        if (!_showNotice || _noticeSecondsRemaining > 0 || _pendingCommunicationEvents.Count != 0) return false;
-        ShowCommunicationEvent(new PendingCommunicationEvent(title, detail));
+        // A time-sensitive reminder outranks queued communication events; it never waits behind them.
+        if (!_showNotice || _liveCommunicationEvent is not null && _noticeSecondsRemaining > 0 || !YieldSlotToLiveReminder()) return false;
+        ShowCommunicationEvent(new PendingCommunicationEvent(title, detail, OverlayAppearanceActivity.Create(DateTimeOffset.UtcNow)));
+        _noticeSecondsRemaining = Math.Max(_noticeSecondsRemaining, minimumSeconds);
+        OnChanged(nameof(NoticeTimerLabel));
         _liveCommunicationEvent = id;
         return true;
     }
@@ -1085,6 +1120,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     {
         if (_liveCommunicationEvent != id) return;
         _liveCommunicationEvent = null;
+        _noticeAppearanceActivity = default;
         _noticeSecondsRemaining = 0;
         FleetNoticeTitle = "";
         FleetNotice = "";
@@ -1094,10 +1130,14 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void ShowCommunicationEvent(PendingCommunicationEvent communicationEvent)
     {
+        // Retain original admission time when an older queued notice becomes visible.
+        _noticeAppearanceActivity = communicationEvent.AppearanceActivity;
         _liveCommunicationEvent = null;
         FleetNoticeTitle = communicationEvent.Title;
         FleetNotice = communicationEvent.Detail;
         _noticeSecondsRemaining = _communicationEventDurationSeconds;
+        _announcementAwaitingScreen = communicationEvent.ShownKey is { } key
+            ? (key, communicationEvent.Receipt!, communicationEvent.Title, communicationEvent.Detail) : null;
         _timer.Start();
         OnChanged(nameof(NoticeTimerLabel));
         OnChanged(nameof(NotificationVisibility));
@@ -1111,8 +1151,15 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return false;
         }
 
-        ShowCommunicationEvent(_pendingCommunicationEvents.Dequeue());
-        return true;
+        // Another overlay may have put the same announcement on screen while this one waited.
+        while (_pendingCommunicationEvents.TryDequeue(out var next))
+        {
+            if (next.ShownKey is { } key && AnnouncementShown(key, next.Receipt!)) continue;
+            ShowCommunicationEvent(next);
+            return true;
+        }
+        OnChanged(nameof(NotificationVisibility));
+        return false;
     }
 
     private void RefreshChatMessages(
@@ -1175,10 +1222,31 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         var latest = sourceKeys.ToDictionary(key => key, key => allMessages.Where(m => (m.SourceKey ?? m.ChannelId) == key)
             .Select(m => m.Sequence).DefaultIfEmpty(0).Max(), StringComparer.Ordinal);
         // Revoke visible AND queued messages before another animation tick.
-        foreach (var row in ChatMessages.Where(row => !sourceKeys.Contains(row.ChatSourceKey)).ToArray()) ChatMessages.Remove(row);
+        foreach (var row in ChatMessages.Where(row => row.ChatSourceKey != DirectMessageRowKey && !sourceKeys.Contains(row.ChatSourceKey)).ToArray()) ChatMessages.Remove(row);
+        _chatAppearanceActivities.RemoveAll(item => !sourceKeys.Contains(item.Source));
         var pending = _pendingChatMessages.Where(p => sourceKeys.Contains(p.Message.SourceKey ?? p.Message.ChannelId)).ToArray();
         _pendingChatMessages.Clear();
-        foreach (var item in pending) _pendingChatMessages.Enqueue(item);
+        // Only an actual Host refresh can supply or renew a known author.
+        // Preserve reception time, text and queue order, including messages not
+        // present in this bounded refresh window.
+        var refreshed = allMessages.ToDictionary(message => (message.SourceKey ?? message.ChannelId, message.Sequence));
+        foreach (var item in pending)
+        {
+            var message = item.Message;
+            if (refreshed.TryGetValue((message.SourceKey ?? message.ChannelId, message.Sequence), out var update))
+                message = message with { SenderCallsign = update.SenderCallsign, SenderGameId = update.SenderGameId,
+                    SenderColor = update.SenderColor, AuthorValidUntil = update.AuthorValidUntil };
+            _pendingChatMessages.Enqueue(item with { Message = message });
+        }
+        foreach (var row in ChatMessages)
+            if (row.ChatSequence is { } sequence && refreshed.TryGetValue((row.ChatSourceKey, sequence), out var update))
+            {
+                update = update.WithoutExpiredAuthor(DateTimeOffset.Now);
+                row.ChatAuthorValidUntil = update.AuthorValidUntil;
+                row.ChatAnonymousTitle = ChatTitleFor(update with { SenderCallsign = "", SenderGameId = "" }, settings, zh);
+                row.RefreshChatAuthor(ChatTitleFor(update, settings, zh), ParseChatAccentBrush(update.SenderColor));
+            }
+        ExpireChatAuthors(DateTimeOffset.Now);
         foreach (var key in _chatLastSequences.Keys.Where(key => !sourceKeys.Contains(key)).ToArray()) _chatLastSequences.Remove(key);
         var newlyAdmitted = sourceKeys.Where(key => !_chatLastSequences.ContainsKey(key)).ToHashSet(StringComparer.Ordinal);
         var visibleMessages = allMessages
@@ -1188,6 +1256,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         if (resetBaseline)
         {
+            _chatAppearanceActivities.Clear();
             ChatMessages.Clear();
             _pendingChatMessages.Clear();
             _chatChannelId = channelId;
@@ -1205,16 +1274,18 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return;
         }
 
+        var newMessages = visibleMessages.Where(message => !newlyAdmitted.Contains(message.SourceKey ?? message.ChannelId) &&
+            message.Sequence > _chatLastSequences.GetValueOrDefault(message.SourceKey ?? message.ChannelId)).ToArray();
         if (_chatDisplayMode == OverlayChatDisplayMode.MessageList)
         {
+            foreach (var message in newMessages) RecordChatAppearanceActivity(message);
             foreach (var (key, sequence) in latest) _chatLastSequences[key] = Math.Max(_chatLastSequences.GetValueOrDefault(key), sequence);
             PopulateChatHistory(visibleMessages, settings, zh);
             RefreshEventNotificationTimer();
             return;
         }
 
-        foreach (var message in visibleMessages.Where(message => !newlyAdmitted.Contains(message.SourceKey ?? message.ChannelId) &&
-            message.Sequence > _chatLastSequences.GetValueOrDefault(message.SourceKey ?? message.ChannelId)))
+        foreach (var message in newMessages)
         {
             QueueOrShowChatMessage(message, settings, zh);
         }
@@ -1228,13 +1299,17 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OverlayDisplaySettings settings,
         bool zh)
     {
-        ChatMessages.Clear();
-        foreach (var message in messages.TakeLast(ChatMessageListHistoryCapacity))
+        var existing = ChatMessages.Where(row => row.ChatSequence is not null)
+            .ToDictionary(row => (row.ChatSourceKey, row.ChatSequence!.Value));
+        var rows = messages.TakeLast(ChatMessageListHistoryCapacity).Select(message =>
+            existing.TryGetValue((message.SourceKey ?? message.ChannelId, message.Sequence), out var row)
+                ? row : CreateChatRow(message, settings, zh, DateTimeOffset.MaxValue)).ToArray();
+        if (!ChatMessages.SequenceEqual(rows))
         {
-            ChatMessages.Add(CreateChatRow(message, settings, zh, DateTimeOffset.MaxValue));
+            ChatMessages.Clear();
+            foreach (var row in rows) ChatMessages.Add(row);
+            ChatPulse++;
         }
-
-        ChatPulse++;
         OnChanged(nameof(ChatVisibility));
     }
 
@@ -1264,11 +1339,12 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         bool zh,
         DateTimeOffset now)
     {
-        var row = CreateChatRow(message, settings, zh, now.AddSeconds(_chatDurationSeconds));
+        RecordChatAppearanceActivity(message);
+        var row = CreateChatRow(message, settings, zh, now.AddSeconds(_chatDurationSeconds), now);
         if (_chatDisplayMode == OverlayChatDisplayMode.FullScreenBarrage)
         {
             var lane = ResolveAvailableChatBarrageLane();
-            if (_animationFrameRate == OverlayAnimationFrameRate.Off)
+            if (_animationFrameRate == OverlayAnimationFrameRate.Off && !PreserveBarrageMotion)
             {
                 row.SetBarrageLane(lane);
             }
@@ -1287,6 +1363,14 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OnChanged(nameof(ChatVisibility));
     }
 
+    private void RecordChatAppearanceActivity(OverlayChatMessage message)
+    {
+        // A bounded recent observation window, not a reaction queue. Consumers admit
+        // only current-time activity and consume hidden/static observations immediately.
+        if (_chatAppearanceActivities.Count >= MaximumPendingChatMessages) _chatAppearanceActivities.RemoveAt(0);
+        _chatAppearanceActivities.Add((message.SourceKey ?? message.ChannelId, OverlayAppearanceActivity.Create(message.CreatedAt)));
+    }
+
     public void ApplyChatBarrageViewportWidth(double viewportWidth)
     {
         if (double.IsFinite(viewportWidth) && viewportWidth > 0)
@@ -1294,6 +1378,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             _chatBarrageViewportWidth = viewportWidth;
         }
     }
+
+    // Temporary presentation policy, only enabled by the appearance preview.
+    // Decorative Off and the functional reading movement are separate concerns.
+    internal bool PreserveBarrageMotion { get; set; }
+    internal OverlayAnimationFrameRate PreviewBarrageFrameRate { get; set; } = OverlayAnimationFrameRate.Fps60;
 
     private double ResolveChatBarrageDuration(
         OverlayEventNotificationRow row,
@@ -1335,7 +1424,25 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         OverlayChatMessage message,
         OverlayDisplaySettings settings,
         bool zh,
-        DateTimeOffset expiresAt)
+        DateTimeOffset expiresAt,
+        DateTimeOffset? now = null)
+    {
+        message = message.WithoutExpiredAuthor(now ?? DateTimeOffset.Now);
+        var title = ChatTitleFor(message, settings, zh);
+        var timestamp = settings.ChatShowTimestamp
+            ? CommunicationTimeFormatter.Format(message.CreatedAt)
+            : "";
+        return new OverlayEventNotificationRow(
+            title, message.Text, timestamp, ParseChatAccentBrush(message.SenderColor),
+            expiresAt, OverlayEventNotificationTypes.None)
+        {
+            ChatSourceKey = message.SourceKey ?? message.ChannelId, ChatSequence = message.Sequence,
+            ChatAuthorValidUntil = message.AuthorValidUntil,
+            ChatAnonymousTitle = ChatTitleFor(message with { SenderCallsign = "", SenderGameId = "" }, settings, zh)
+        };
+    }
+
+    private static string ChatTitleFor(OverlayChatMessage message, OverlayDisplaySettings settings, bool zh)
     {
         var sender = message.IsSystem
             ? zh ? "系统" : "SYSTEM"
@@ -1344,19 +1451,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         {
             sender = $"{message.SourceLabel} · {sender}";
         }
-        var title = settings.ChatShowSender
+        return settings.ChatShowSender
             ? sender
             : message.SourceLabel ?? (zh ? "通讯消息" : "COMMS MESSAGE");
-        var timestamp = settings.ChatShowTimestamp
-            ? CommunicationTimeFormatter.Format(message.CreatedAt)
-            : "";
-        return new OverlayEventNotificationRow(
-            title,
-            message.Text,
-            timestamp,
-            ParseChatAccentBrush(message.SenderColor),
-            expiresAt,
-            OverlayEventNotificationTypes.None) { ChatSourceKey = message.SourceKey ?? message.ChannelId };
     }
 
     private static string FormatChatSender(OverlayChatMessage message)
@@ -1389,7 +1486,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         _lastModules = null;
         if (!preserveAnnouncementReceipt) { _communityNoticeChannel = null; _communityNoticeReceipt = null; }
         _rosterRotationTimer.Stop();
+        ResetMemberPaging();
         _liveCommunicationEvent = null;
+        _noticeAppearanceActivity = default;
         ResetChatState();
         if (preserveDeviceLocalEvents)
             RemoveEventNotifications(row => !row.IsDeviceLocal, pending => !pending.IsDeviceLocal);
@@ -1427,6 +1526,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void ResetChatState()
     {
+        _chatAppearanceActivities.Clear();
         var changed = ChatMessages.Count > 0 || _pendingChatMessages.Count > 0 || _chatInitialized;
         ChatMessages.Clear();
         _pendingChatMessages.Clear();
@@ -1499,8 +1599,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         RefreshEventNotificationRetentionSettings();
         CompleteEventNotificationMotionWhenDisabled(DateTimeOffset.Now);
         PromotePendingEventNotifications(DateTimeOffset.Now);
-        var nextPlayerStates = BuildGameEventPlayerStates(players, settings.MemberNameMode, localShard);
-        var nextFleetState = BuildGameEventFleetState(players, localShard);
+        var nextPlayerStates = BuildGameEventPlayerStates(players, settings.MemberNameMode, localShard, sceneContext.SharedFieldsOnly);
+        var nextFleetState = BuildGameEventFleetState(nextPlayerStates, previousDominantRegion: null);
         var sceneKind = sceneContext.Kind;
         var sceneChanged = _gameEventSnapshotSceneKind.HasValue &&
                            _gameEventSnapshotSceneKind.Value != sceneKind;
@@ -1553,6 +1653,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             return;
         }
 
+        // Only diff what is known: a refresh that briefly lacks server data
+        // must not read as a leave followed by a rejoin.
+        nextPlayerStates = CarryKnownServerState(nextPlayerStates, localShard);
+        nextFleetState = BuildGameEventFleetState(nextPlayerStates, _gameEventFleetState.DominantServerRegion);
+
         if (sceneContext.IsLocalOnly)
         {
             foreach (var player in players.Where(player => player.IsSelf))
@@ -1570,7 +1675,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         }
 
         QueueLocalServerSummaryIfNeeded(players, localShard, eventTypes, zh, sceneContext.Kind);
-        QueueFleetSummaryEvents(_gameEventFleetState, nextFleetState, eventTypes, zh, sceneContext.Kind);
+        QueueFleetSummaryEvents(_gameEventFleetState, nextFleetState, HasRealPresenceTransition(nextPlayerStates),
+            eventTypes, zh, sceneContext.Kind);
         foreach (var player in players)
         {
             var key = ResolvePlayerEventKey(player);
@@ -1589,7 +1695,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     private Dictionary<string, OverlayGameEventPlayerState> BuildGameEventPlayerStates(
         IReadOnlyCollection<PlayerRow> players,
         OverlayMemberNameMode memberNameMode,
-        string localShard)
+        string localShard,
+        bool sharedFieldsOnly = false)
     {
         var hasLocalShard = !string.IsNullOrWhiteSpace(localShard);
         var states = new Dictionary<string, OverlayGameEventPlayerState>(StringComparer.OrdinalIgnoreCase);
@@ -1600,7 +1707,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 key,
                 FormatMemberName(player, memberNameMode),
                 IsGamePresence(player),
-                TryGetOverlayPlayerServerRegion(player, localShard),
+                TryGetOverlayPlayerServerRegion(player, localShard, sharedFieldsOnly),
                 hasLocalShard && IsPlayerOnLocalServer(player, localShard),
                 player.IsSelf,
                 IsSyncPausedLiveStatus(player.LiveStatus),
@@ -1614,13 +1721,68 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
     }
 
     private static OverlayGameEventFleetState BuildGameEventFleetState(
-        IReadOnlyCollection<PlayerRow> players,
-        string? localShard)
+        IReadOnlyDictionary<string, OverlayGameEventPlayerState> states,
+        string? previousDominantRegion)
     {
+        var groups = states.Values
+            .Where(state => state.Online && !string.IsNullOrWhiteSpace(state.ServerRegion))
+            .GroupBy(state => state.ServerRegion!, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (Region: group.First().ServerRegion!, Count: group.Count()))
+            .OrderByDescending(group => group.Count)
+            .ThenBy(group => group.Region, StringComparer.CurrentCulture)
+            .ToArray();
+        string? dominant;
+        if (groups.Length == 0)
+        {
+            // No region evidence is unknown, not a change of primary server.
+            dominant = previousDominantRegion;
+        }
+        else
+        {
+            // A tie keeps the announced region; only a clear new lead moves it.
+            var held = groups.FirstOrDefault(group =>
+                string.Equals(group.Region, previousDominantRegion, StringComparison.OrdinalIgnoreCase));
+            dominant = held.Region is not null && held.Count == groups[0].Count
+                ? previousDominantRegion
+                : groups[0].Region;
+        }
+
         return new OverlayGameEventFleetState(
-            players.Count(IsGamePresence),
-            players.Count,
-            ResolveDominantServerRegion(players, localShard));
+            states.Values.Count(state => state.Online),
+            states.Count,
+            dominant);
+    }
+
+    private Dictionary<string, OverlayGameEventPlayerState> CarryKnownServerState(
+        Dictionary<string, OverlayGameEventPlayerState> next,
+        string localShard)
+    {
+        var localShardKnown = !string.IsNullOrWhiteSpace(localShard);
+        foreach (var (key, state) in next.ToArray())
+        {
+            if (!_gameEventPlayerStates.TryGetValue(key, out var previous) || !previous.Online || !state.Online)
+            {
+                continue;
+            }
+
+            // While a member stays in game, a missing region or an unknown local
+            // shard keeps the last known server facts. Leaving the game still
+            // ends them through the presence transition.
+            var regionMissing = string.IsNullOrWhiteSpace(state.ServerRegion) &&
+                                !string.IsNullOrWhiteSpace(previous.ServerRegion);
+            if (!regionMissing && localShardKnown)
+            {
+                continue;
+            }
+
+            next[key] = state with
+            {
+                ServerRegion = regionMissing ? previous.ServerRegion : state.ServerRegion,
+                SameServer = previous.SameServer
+            };
+        }
+
+        return next;
     }
 
     private void ReplaceGameEventSnapshot(
@@ -1635,7 +1797,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         }
 
         _gameEventFleetState = fleetState;
-        _lastGameEventLocalShard = localShard ?? "";
+        // An empty shard is a gap, not a server exit; keep the last known one.
+        if (!string.IsNullOrWhiteSpace(localShard))
+        {
+            _lastGameEventLocalShard = localShard;
+        }
     }
 
     private void QueueLocalServerSummaryIfNeeded(
@@ -1645,14 +1811,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         bool zh,
         OverlaySceneKind sceneKind)
     {
+        // Once per server: entering one, or moving to another. Returning to the
+        // same shard after a data gap is not a new arrival.
         if (!ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.SameServer) ||
-            !string.IsNullOrWhiteSpace(_lastGameEventLocalShard) ||
-            string.IsNullOrWhiteSpace(localShard))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(localShard))
+            string.IsNullOrWhiteSpace(localShard) ||
+            string.Equals(_lastGameEventLocalShard, localShard, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -1662,10 +1825,13 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             !InformationOverlayServerEvidence.CanReportPeerCount(true,
                 FleetServerRelationship.IsRecognizedShard(localShard), peers.Length,
                 peers.Count(player => FleetServerRelationship.IsRecognizedShard(player.ServerShard)))) return;
-        var sameServerCount = players.Count(player =>
-            !player.IsSelf &&
-            IsGamePresence(player) &&
-            IsPlayerOnLocalServer(player, localShard));
+        // Outside rooms the summary counts only members who share server events;
+        // a shard shown in the overview does not authorize a notification about it.
+        var counted = sceneKind == OverlaySceneKind.PartyRoom
+            ? peers
+            : peers.Where(player => PlayerEventSharingSettings.FromWireValue(player.SharedEventTypes).HasFlag(PlayerSharedEventTypes.Server)).ToArray();
+        if (sceneKind != OverlaySceneKind.PartyRoom && counted.Length == 0) return;
+        var sameServerCount = counted.Count(player => IsPlayerOnLocalServer(player, localShard));
         QueueEventNotification(
             OverlayEventNotificationTypes.SameServer,
             zh ? "同服概况" : "Same server",
@@ -1843,14 +2009,23 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                 : ("Member offline", $"{displayName} is offline");
     }
 
+    // A member present in both snapshots really entered or left the game. Roster
+    // rows that are missing from one refresh, and sync pauses, are not that.
+    private bool HasRealPresenceTransition(IReadOnlyDictionary<string, OverlayGameEventPlayerState> next) =>
+        next.Any(pair => _gameEventPlayerStates.TryGetValue(pair.Key, out var previous) &&
+                         !previous.SyncPaused && !pair.Value.SyncPaused &&
+                         previous.Online != pair.Value.Online);
+
     private void QueueFleetSummaryEvents(
         OverlayGameEventFleetState previous,
         OverlayGameEventFleetState next,
+        bool presenceChanged,
         OverlayEventNotificationTypes eventTypes,
         bool zh,
         OverlaySceneKind sceneKind)
     {
         if (previous.MemberCount > 0 &&
+            presenceChanged &&
             previous.OnlineCount != next.OnlineCount &&
             ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.OnlineSummary))
         {
@@ -2261,6 +2436,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void TickEventNotifications(DateTimeOffset now)
     {
+        // Capture before advancing: the last entering row may become settled
+        // this tick, but its exact final opacity/offset still needs publication.
+        var hadAnimatingNotification = EventNotifications.Any(notification => notification.IsAnimating);
         var changed = PrunePendingEventNotifications(now);
         var slideOffset = ResolveEventNotificationSlideOffset();
         foreach (var notification in EventNotifications)
@@ -2293,7 +2471,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
         var promoted = removed && PromotePendingEventNotifications(now);
 
-        if (changed || removed || promoted || EventNotifications.Any(notification => notification.IsAnimating))
+        if (changed || removed || promoted || hadAnimatingNotification || EventNotifications.Any(notification => notification.IsAnimating))
         {
             EventNotificationAnimationFrame++;
         }
@@ -2308,8 +2486,10 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
 
     private void TickChatMessages(DateTimeOffset now)
     {
+        ExpireChatAuthors(now);
         if (_chatDisplayMode != OverlayChatDisplayMode.FullScreenBarrage)
         {
+            RefreshEventNotificationTimer();
             return;
         }
 
@@ -2319,7 +2499,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         for (var index = ChatMessages.Count - 1; index >= 0; index--)
         {
             var message = ChatMessages[index];
-            var completed = _animationFrameRate == OverlayAnimationFrameRate.Off
+            var completed = _animationFrameRate == OverlayAnimationFrameRate.Off && !PreserveBarrageMotion
                 ? message.ExpiresAt <= now
                 : message.AdvanceBarrage(now);
             if (completed)
@@ -2351,6 +2531,19 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         RefreshEventNotificationTimer();
     }
 
+    private void ExpireChatAuthors(DateTimeOffset now)
+    {
+        var changed = false;
+        foreach (var row in ChatMessages)
+        {
+            if (row.ChatAuthorValidUntil is not { } until || now < until) continue;
+            row.RefreshChatAuthor(row.ChatAnonymousTitle, ParseChatAccentBrush(""));
+            row.ChatAuthorValidUntil = null;
+            changed = true;
+        }
+        if (changed) ChatAnimationFrame++;
+    }
+
     private double ResolveChatSlideOffset()
     {
         return _chatSide == OverlayChatSide.Left
@@ -2379,7 +2572,8 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         if (_pendingEventNotifications.Count > 0 ||
             EventNotifications.Any(notification => !notification.IsExiting &&
                 (notification.ExpiresAt < DateTimeOffset.MaxValue || _eventValidity.TryGetValue(notification, out _))) ||
-            ChatMessages.Any(message => !message.IsExiting && message.ExpiresAt < DateTimeOffset.MaxValue))
+            ChatMessages.Any(message => !message.IsExiting &&
+                (message.ExpiresAt < DateTimeOffset.MaxValue || message.ChatAuthorValidUntil is not null)))
         {
             _eventNotificationTimer.Interval = EventNotificationIdleInterval;
             _eventNotificationTimer.Start();
@@ -2462,7 +2656,9 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         Func<IReadOnlyList<PlayerRow>, string>? CurrentDetail = null,
         bool IsDeviceLocal = false);
 
-    private sealed record PendingCommunicationEvent(string Title, string Detail);
+    // ShownKey/Receipt mark an announcement; it counts as shown only once it reaches the slot.
+    private sealed record PendingCommunicationEvent(string Title, string Detail, OverlayAppearanceActivity AppearanceActivity,
+        string? ShownKey = null, string? Receipt = null);
 
     private static bool IsGamePresence(PlayerRow player) =>
         player.Presence == PlayerPresenceKind.InGame;
@@ -2552,21 +2748,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             OnlineBrush = BrushFromRgb(247, 245, 240);
             OfflineBrush = BrushFromArgb(107, 174, 181, 189);
             SetCrosshairBrushes(235, 247, 255, 255, 240, 0);
-            return;
-        }
-
-        if (theme == OverlayVisualTheme.LagrangeWeave)
-        {
-            PanelBackgroundBrush = BrushFromArgb(218, 8, 11, 19);
-            PanelBorderBrush = BrushFromRgb(86, 101, 121);
-            TitleBrush = BrushFromRgb(174, 186, 201);
-            TextBrush = BrushFromRgb(229, 235, 241);
-            MutedBrush = BrushFromRgb(135, 147, 163);
-            AlertBrush = BrushFromRgb(240, 167, 107);
-            IconBackgroundBrush = BrushFromArgb(148, 28, 23, 22);
-            OnlineBrush = BrushFromRgb(130, 197, 162);
-            OfflineBrush = BrushFromRgb(135, 147, 163);
-            SetCrosshairBrushes(240, 167, 107, 255, 240, 207);
             return;
         }
 
@@ -2866,6 +3047,7 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
             : Visibility.Collapsed;
         PartyOverviewVisibility = Visibility.Collapsed;
         OverviewTopLocations = overview.TopLocations;
+        OverviewFacts = overview.Facts;
         ApplyOverviewPanelLayout(
             settings.SquadStatusDisplayMode,
             _overviewPanelWidth,
@@ -2899,11 +3081,6 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
         return zh
             ? $"{GameServerRegionPresentation.ResolveRegion(primary.Value.Region, zh)} · {primary.Value.Count.ToString(CultureInfo.InvariantCulture)}人"
             : $"{GameServerRegionPresentation.ResolveRegion(primary.Value.Region, zh)} · {primary.Value.Count.ToString(CultureInfo.InvariantCulture)}";
-    }
-
-    private static string? ResolveDominantServerRegion(IReadOnlyCollection<PlayerRow> players, string? localShard)
-    {
-        return ResolveDominantServerGroup(players, localShard)?.Region;
     }
 
     private static (string Region, int Count)? ResolveDominantServerGroup(IReadOnlyCollection<PlayerRow> players, string? localShard)
@@ -2968,10 +3145,11 @@ public sealed class OverlayViewModel : System.ComponentModel.INotifyPropertyChan
                playerShard.Equals(localShard, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? TryGetOverlayPlayerServerRegion(PlayerRow player, string? localShard)
+    private static string? TryGetOverlayPlayerServerRegion(PlayerRow player, string? localShard, bool sharedFieldsOnly = false)
     {
         var localRegion = NormalizeOverlayServerRegion(MapOverlayGameServerRegion(localShard));
-        if (player.IsSelf && !string.IsNullOrWhiteSpace(localRegion))
+        // A privacy-projected source (the main fleet) keeps the viewer's own row as shared.
+        if (player.IsSelf && !sharedFieldsOnly && !string.IsNullOrWhiteSpace(localRegion))
         {
             return localRegion;
         }
@@ -3101,7 +3279,14 @@ public sealed record OverlayMemberRow(
     string Ship,
     string Location,
     System.Windows.Media.Brush StatusBrush,
-    string LocationToolTip);
+    string LocationToolTip)
+{
+    // Member rows only; summary and empty rows leave these unset.
+    internal string? Key { get; init; }
+    internal PlayerPresenceKind? Presence { get; init; }
+    internal OverlayRosterGroup? Group { get; init; }
+    internal DateTimeOffset? CueStartedAtUtc { get; init; }
+}
 
 internal enum OverlayLocationMergePhase
 {
@@ -3113,6 +3298,16 @@ internal enum OverlayLocationMergePhase
 public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyPropertyChanged
 {
     internal string ChatSourceKey { get; init; } = "";
+    internal long? ChatSequence { get; init; }
+    internal DateTimeOffset? ChatAuthorValidUntil { get; set; }
+    internal string ChatAnonymousTitle { get; set; } = "";
+
+    // Author projection changes never renew or restart this card's playback.
+    internal void RefreshChatAuthor(string title, Brush accent)
+    {
+        if (_title != title) { _title = title; OnChanged(nameof(Title)); }
+        if (_accentBrush.ToString() != accent.ToString()) { _accentBrush = accent; OnChanged(nameof(AccentBrush)); }
+    }
     private const double EnterDurationMs = 430;
     private const double ExitDurationMs = 320;
 
@@ -3183,6 +3378,7 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
     internal OverlayLocationMergePhase MergePhase { get; private set; }
 
     internal DateTimeOffset MergeUpdatedAt { get; private set; }
+    internal OverlayAppearanceActivity AppearanceActivity { get; private set; }
 
     internal void ConfigureMerge(
         string? mergeKey,
@@ -3192,6 +3388,7 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
         MergeKey = mergeKey;
         MergePhase = mergePhase;
         MergeUpdatedAt = updatedAt;
+        AppearanceActivity = OverlayAppearanceActivity.Create(updatedAt);
     }
 
     internal void MergeContent(
@@ -3210,6 +3407,7 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
         MergePhase = mergePhase;
         MergeUpdatedAt = updatedAt;
         ExpiresAt = expiresAt;
+        AppearanceActivity = OverlayAppearanceActivity.Create(updatedAt);
         OnChanged(nameof(Title));
         OnChanged(nameof(Detail));
         OnChanged(nameof(Timestamp));

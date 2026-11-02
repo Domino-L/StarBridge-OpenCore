@@ -21,6 +21,15 @@ internal sealed class RoomOverlaySession(Func<DateTimeOffset>? clock = null)
     internal event Action? ContentChanged;
     internal event Action<BridgeAccountContext, long, string?>? MembershipConfirmed;
 
+    // Membership is account/session scoped and outlives the display payload.
+    // Only an authenticated directory/leave or lifecycle clear changes it.
+    internal bool HasConfirmedMembership(BridgeAccountContext owner, long generation)
+    {
+        lock (_gate)
+            return _confirmedMembership is { Room: not null } confirmed &&
+                confirmed.Owner == owner && confirmed.Generation == generation;
+    }
+
     // A missing/expired display payload is not evidence of leaving a room.
     // This supplies switch intent only; it never extends display authority.
     internal (bool Known, string? Room) ReadPresetTrigger(BridgeAccountContext? owner, long generation)
@@ -129,6 +138,7 @@ internal sealed class RoomOverlaySession(Func<DateTimeOffset>? clock = null)
                     member.Callsign, member.GameId, member.IsHost, OverlayPresence(member.PresenceText),
                     member.LocationText, member.ShipText, member.ServerRegion)
                     { PreferenceKey = OverlayMemberIdentity.FromAccountId(member.AccountId), IsSelf = member.IsSelf,
+                        ServerShard = StarBridge.Core.Presence.PublicShardId.IsValid(member.ShardText) ? member.ShardText.Trim() : null,
                         LocationHiddenReason = member.LocationHiddenReason,
                         ArrivalPendingConfirmation = member.ArrivalPendingConfirmation,
                         ArrivalTargetCode = member.ArrivalTargetCode }).ToArray()),

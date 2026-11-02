@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/account/account_module.dart';
+import 'package:starbridge_flutter/features/account/account_models.dart';
+import 'package:starbridge_flutter/features/account/account_port.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_feature.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
@@ -12,7 +14,60 @@ import 'package:starbridge_flutter/shared/ships/ship_reviewed_display.dart';
 import 'hangar_reader_test.dart' as fixtures;
 
 void main() {
-  testWidgets('local inventory can be prepared before the page is mounted', (tester) async {
+  testWidgets(
+    'network-outage destination reads retained inventory without opening scanner',
+    (tester) async {
+      final adapter = InMemoryAccountAdapter(
+        initial: AccountHostSnapshot(
+          generation: 7,
+          sessionState: AccountSessionState.credentialTemporarilyUnavailable,
+          profileFreshness: AccountProfileFreshness.cached,
+          profile: const AccountProfile(displayName: 'Retained Pilot'),
+          cachedAt: DateTime.utc(2026),
+          retainedReadId: '1234567890abcdef1234567890abcdef',
+          identity: const AccountIdentityProjection.unavailable(),
+          compatibility: const AccountCompatibilityProjection.unavailable(),
+          localeOptions: const [],
+          timeZoneOptions: const [],
+        ),
+      );
+      final account = createAccountModule(adapter);
+      await account.initialize();
+      addTearDown(account.dispose);
+      final port = _Port();
+      final feature = createHangarFeature(
+        account,
+        () => throw StateError('Offline must not open scanner'),
+        localFactory: () =>
+            throw StateError('Offline must not open online writer'),
+        retainedFactory: (id) {
+          expect(id, '1234567890abcdef1234567890abcdef');
+          return port;
+        },
+      );
+      await tester.pumpWidget(
+        fixtures.app(Builder(builder: feature.buildDestination)),
+      );
+      port.reads.single.complete(
+        const LocalHangarSnapshot(
+          revision: 1,
+          ships: [LocalHangarShip(id: 'retained', title: 'Retained Own Ship')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Retained Own Ship'), findsOneWidget);
+      expect(find.byKey(const Key('local-hangar-read')), findsNothing);
+      expect(account.projection.value.isSignedIn, isFalse);
+      await adapter.execute(const LogoutAccount());
+      await account.refresh();
+      await tester.pumpAndSettle();
+      expect(find.text('Retained Own Ship'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets('local inventory can be prepared before the page is mounted', (
+    tester,
+  ) async {
     final account = createAccountModule(
       InMemoryAccountAdapter.forReview(AccountReviewState.signedIn),
     );
@@ -34,7 +89,9 @@ void main() {
     await feature.prefetch!();
     expect(port.reads, hasLength(1));
     for (var i = 0; i < 5; i++) {
-      await tester.pumpWidget(fixtures.app(Builder(builder: feature.buildDestination)));
+      await tester.pumpWidget(
+        fixtures.app(Builder(builder: feature.buildDestination)),
+      );
       expect(find.text('正在读取本机机库…'), findsNothing);
       await tester.pumpWidget(fixtures.app(const SizedBox()));
     }

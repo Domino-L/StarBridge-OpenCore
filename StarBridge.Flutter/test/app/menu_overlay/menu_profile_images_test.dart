@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:starbridge_flutter/shared/remote_image_loader.dart';
+
+import '../../support/remote_image_fixture.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_profiles_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_profile_view.dart';
@@ -50,6 +54,8 @@ class ImageResponse extends Stream<List<int>> implements HttpClientResponse {
   final int status;
   final int? declaredLength;
   @override
+  final HttpHeaders headers = _ImageHeaders();
+  @override
   int get statusCode => status;
   @override
   int get contentLength => declaredLength ?? bytes.length;
@@ -67,6 +73,13 @@ class ImageResponse extends Stream<List<int>> implements HttpClientResponse {
   );
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _ImageHeaders extends Fake implements HttpHeaders {
+  @override
+  List<String>? operator [](String name) => null;
+  @override
+  String? value(String name) => null;
 }
 
 Future<void> until(bool Function() condition) async {
@@ -141,7 +154,12 @@ void main() {
       final client = ImageClient()..status = 500;
       var now = DateTime.utc(2026);
       await HttpOverrides.runZoned(() async {
-        final images = MenuProfileImages(now: () => now);
+        final mode = ImageMode();
+        addTearDown(mode.dispose);
+        final images = MenuProfileImages(
+          now: () => now,
+          remoteImages: RemoteImageLoader(mode: mode, now: () => now),
+        );
         addTearDown(images.dispose);
         const url = 'https://cdn.example.test/logo.png';
         final first = images.load(url), duplicate = images.load(url);
@@ -175,7 +193,11 @@ void main() {
   test('invalid or local sources are never downloaded', () async {
     final client = ImageClient();
     await HttpOverrides.runZoned(() async {
-      final images = MenuProfileImages();
+      final originalMode = ImageMode();
+      addTearDown(originalMode.dispose);
+      final images = MenuProfileImages(
+        remoteImages: RemoteImageLoader(mode: originalMode),
+      );
       addTearDown(images.dispose);
       for (final source in [
         'http://cdn.example.test/logo',
@@ -203,7 +225,11 @@ void main() {
         mode == 'stream-size' ? List.filled(600000, 0) : [0, 1, 2],
       );
       await HttpOverrides.runZoned(() async {
-        final images = MenuProfileImages();
+        final mode = ImageMode();
+        addTearDown(mode.dispose);
+        final images = MenuProfileImages(
+          remoteImages: RemoteImageLoader(mode: mode),
+        );
         addTearDown(images.dispose);
         expect(await images.load('https://cdn.example.test/logo.png'), isNull);
       }, createHttpClient: (_) => client);
@@ -214,18 +240,24 @@ void main() {
       final client = ImageClient();
       await HttpOverrides.runZoned(() async {
         final views = <Map<String, Object?>>[], ports = <ProfilePort>[];
-        final session = MenuProfilesSession(() {
-          final p = ProfilePort();
-          ports.add(p);
-          p.pending.complete(
-            ports.length == 1
-                ? fixtureProfile
-                : const PersonalProfileSnapshot.unavailable(
-                    failureKey: 'profile.visitor.notVisible',
-                  ),
-          );
-          return p;
-        }, views.add);
+        final mode = ImageMode();
+        addTearDown(mode.dispose);
+        final session = MenuProfilesSession(
+          () {
+            final p = ProfilePort();
+            ports.add(p);
+            p.pending.complete(
+              ports.length == 1
+                  ? fixtureProfile
+                  : const PersonalProfileSnapshot.unavailable(
+                      failureKey: 'profile.visitor.notVisible',
+                    ),
+            );
+            return p;
+          },
+          views.add,
+          createImages: () => RemoteImageLoader(mode: mode),
+        );
         addTearDown(session.dispose);
         session.open(
           'p1',
@@ -259,12 +291,18 @@ void main() {
     final client = ImageClient();
     await HttpOverrides.runZoned(() async {
       final views = <Map<String, Object?>>[], ports = <ProfilePort>[];
-      final session = MenuProfilesSession(() {
-        final p = ProfilePort();
-        ports.add(p);
-        p.pending.complete(fixtureProfile);
-        return p;
-      }, views.add);
+      final mode = ImageMode();
+      addTearDown(mode.dispose);
+      final session = MenuProfilesSession(
+        () {
+          final p = ProfilePort();
+          ports.add(p);
+          p.pending.complete(fixtureProfile);
+          return p;
+        },
+        views.add,
+        createImages: () => RemoteImageLoader(mode: mode),
+      );
       addTearDown(session.dispose);
       session.open(
         'p1',

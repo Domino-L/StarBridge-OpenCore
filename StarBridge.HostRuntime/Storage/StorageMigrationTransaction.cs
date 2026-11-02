@@ -46,10 +46,21 @@ internal sealed class StorageMigrationTransaction(string bootstrap)
     internal string Recover(CancellationToken cancellation = default)
     {
         using var lease = Lock();
-        using var activity = StorageActivityLease.AcquireMigration(_bootstrap);
         cancellation.ThrowIfCancellationRequested();
         var state = Read();
         var current = StorageRootLocator.Read(_bootstrap);
+        // A completed journal is durable history, not pending migration work.
+        // The journal lease still serializes helpers and validates control paths.
+        // Read-only confirmation can coexist with a retiring process's writer;
+        // the new Host must acquire its own writer lease before opening stores.
+        if (state.Phase == "committed" && Equal(current, state.Destination))
+        {
+            if (!Directory.Exists(current)) throw new IOException("Committed destination unavailable.");
+            return "committed";
+        }
+        using var activity = StorageActivityLease.AcquireMigration(_bootstrap);
+        cancellation.ThrowIfCancellationRequested();
+        current = StorageRootLocator.Read(_bootstrap);
         if (Equal(current, state.Destination))
         {
             // A pointer may have switched before the final journal write. Do not

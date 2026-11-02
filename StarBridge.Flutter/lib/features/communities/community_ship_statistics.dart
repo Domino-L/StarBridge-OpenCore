@@ -5,7 +5,10 @@ import '../../shared/ships/ship_catalog_display.dart';
 
 /// Read-only presentation of one complete, authorized WPF-style inventory.
 class CommunityShipStatistics implements CommunityFleetSummary {
-  CommunityShipStatistics(Iterable<CommunitySharedShip> source)
+  /// The unfiltered query's revision when this was read.
+  final String? revision;
+
+  CommunityShipStatistics(Iterable<CommunitySharedShip> source, {this.revision})
     : ships = List.unmodifiable(source) {
     for (final ship in ships) {
       sizes.update(size(ship), (n) => n + 1, ifAbsent: () => 1);
@@ -220,5 +223,5 @@ Future<CommunityShipStatistics> readCommunityShipStatistics(
     );
   }
   if (ships.length != total) throw const CommunityFailure('dataInvalid');
-  return CommunityShipStatistics(ships);
+  return CommunityShipStatistics(ships, revision: revision);
 }

@@ -15,7 +15,10 @@ class MenuScreenshotSettingsCard extends StatelessWidget {
         section: 'screenshot',
         read: (settings) => MenuScreenshotPreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuScreenshotEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuScreenshotEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

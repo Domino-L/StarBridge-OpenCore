@@ -7,6 +7,7 @@ import 'package:starbridge_flutter/design_system/style_registry.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/settings/friend_sharing_setting.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 
 import 'friend_sharing_controller_test.dart' show Harness;
 
@@ -51,7 +52,11 @@ void main() {
         expect(tester.takeException(), isNull);
         final control = find.byKey(const Key('friend-sharing-ship'));
         await tester.ensureVisible(control);
-        await tester.tap(control);
+        await tester.tap(
+          find
+              .ancestor(of: control, matching: find.byType(StarBridgeSwitch))
+              .first,
+        );
         await tester.pumpAndSettle();
         expect(h.writes.length, 1);
         expect(h.writes.single.payload['fields'], 8);

@@ -1,7 +1,11 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import 'communities_module.dart';
 import 'community_gameplay_tags.dart';
 import 'community_logo.dart';
@@ -45,14 +49,14 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
       3.0,
     );
     final highlight = _hovered || _focused;
-    final accent = row.recruiting ? colors.success : colors.accent;
+    final accent = row.recruiting ? colors.success : colors.stateAccent;
     final member = const {'owner', 'member'}.contains(row.relationship);
     final primary = row.actions
         .where((a) => a == 'join' || a == 'apply')
         .firstOrNull;
     final modeColor = row.joinMode == 'application'
         ? colors.warning
-        : colors.accent;
+        : colors.stateAccent;
     final scaleParts = row.memberScale.isEmpty
         ? <String>[]
         : t('option.scale.${row.memberScale}').split(' · ');
@@ -63,12 +67,13 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
         StandardIcon(icon, size: 15, color: colors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
-          child: Tooltip(
+          child: StarBridgeTooltip(
             message: label,
             child: Text(
               _summary(label),
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              overflow: TextOverflow.fade,
+              softWrap: false,
               style: secondary,
             ),
           ),
@@ -81,13 +86,18 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CommunityLogo(data: row.logo, size: 52, framed: false),
+          CommunityLogo(
+            data: row.logo,
+            size: 52,
+            framed: false,
+            downloadedBy: row,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Tooltip(
+                StarBridgeTooltip(
                   message: row.name,
                   child: Text(
                     _summary(row.name),
@@ -100,9 +110,14 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  t('relation.${row.relationship}'),
+                  t(
+                    row.displayOnly
+                        ? 'cachedMembershipUnknown'
+                        : 'relation.${row.relationship}',
+                  ),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: secondary?.copyWith(
                     color: member ? colors.success : colors.textSecondary,
                   ),
@@ -122,7 +137,8 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                         ? '${row.memberCount}'
                         : scaleParts.first,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
                     style: theme.titleLarge?.copyWith(
                       color: colors.accent,
                       fontWeight: FontWeight.w600,
@@ -156,7 +172,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              t('mode.${row.joinMode}'),
+              t(row.displayOnly ? 'cachedReadOnly' : 'mode.${row.joinMode}'),
               style: secondary?.copyWith(
                 color: modeColor,
                 fontWeight: FontWeight.w600,
@@ -231,7 +247,8 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                   Text(
                     '${t('filter.targets')} · ${row.recruitingTarget.isEmpty ? t('card.notSpecified') : communityRecruitingTarget(row.recruitingTarget, t)}',
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
                     style: secondary,
                   ),
                   const SizedBox(height: 3),
@@ -254,38 +271,45 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
         Expanded(
           child: Align(
             alignment: AlignmentDirectional.centerStart,
-            child: TextButton(
-              onPressed: widget.onDetails,
+            child: StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: ValueKey('community-card-details-${row.key}'),
+              onActivate: widget.onDetails == null
+                  ? null
+                  : (_) => widget.onDetails!(),
               child: Text(
                 t('card.details'),
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
               ),
             ),
           ),
         ),
         const SizedBox(width: 8),
-        FilledButton(
-          key: ValueKey('community-card-primary-${row.key}'),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(126, 44),
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-          ),
-          onPressed: primary != null
-              ? widget.onAction == null
-                    ? null
-                    : () => widget.onAction!(primary)
-              : member || row.relationship == 'pending'
-              ? widget.onDetails
-              : null,
-          child: Text(
-            primary != null
-                ? t('action.$primary')
-                : member
-                ? t('relation.member')
-                : row.relationship == 'pending'
-                ? t('card.application')
-                : t('mode.${row.joinMode}'),
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 126, minHeight: 44),
+          child: StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: ValueKey('community-card-primary-${row.key}'),
+            onActivate: primary != null
+                ? widget.onAction == null
+                      ? null
+                      : (_) => widget.onAction!(primary)
+                : member || row.relationship == 'pending'
+                ? (widget.onDetails == null ? null : (_) => widget.onDetails!())
+                : null,
+            child: Text(
+              row.displayOnly
+                  ? t('cachedReadOnly')
+                  : primary != null
+                  ? t('action.$primary')
+                  : member
+                  ? t('relation.member')
+                  : row.relationship == 'pending'
+                  ? t('card.application')
+                  : t('mode.${row.joinMode}'),
+            ),
           ),
         ),
       ],
@@ -314,63 +338,72 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
               color: highlight ? accent : tokens.surfaces.panel.border,
             ),
           ),
-          child: InkWell(
-            key: ValueKey('community-card-open-${row.key}'),
-            borderRadius: radius,
-            onTap: widget.onDetails,
-            onHover: (value) => setState(() => _hovered = value),
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
             onFocusChange: (value) => setState(() => _focused = value),
-            hoverColor: accent.withValues(alpha: .025),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  header,
-                  if (widget.horizontal) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 146 * scale,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                metadata,
-                                const SizedBox(height: 8),
-                                activity,
-                                const SizedBox(height: 8),
-                                tags,
-                                const SizedBox(height: 8),
-                                description,
-                              ],
-                            ),
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit: (_) => setState(() => _hovered = false),
+              child: StarBridgeActionRow(
+                baseRadius: 10,
+                controlKey: ValueKey('community-card-open-${row.key}'),
+                onActivate: widget.onDetails == null
+                    ? null
+                    : (_, _) => widget.onDetails!(),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      header,
+                      if (widget.horizontal) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 146 * scale,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    metadata,
+                                    const SizedBox(height: 8),
+                                    activity,
+                                    const SizedBox(height: 8),
+                                    tags,
+                                    const SizedBox(height: 8),
+                                    description,
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 24),
+                              Expanded(flex: 2, child: recruitment),
+                            ],
                           ),
-                          const SizedBox(width: 24),
-                          Expanded(flex: 2, child: recruitment),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    footer,
-                  ] else ...[
-                    const SizedBox(height: 10),
-                    metadata,
-                    const SizedBox(height: 10),
-                    activity,
-                    const SizedBox(height: 12),
-                    tags,
-                    const SizedBox(height: 8),
-                    description,
-                    const SizedBox(height: 12),
-                    recruitment,
-                    const Spacer(),
-                    footer,
-                  ],
-                ],
+                        ),
+                        const Spacer(),
+                        footer,
+                      ] else ...[
+                        const SizedBox(height: 10),
+                        metadata,
+                        const SizedBox(height: 10),
+                        activity,
+                        const SizedBox(height: 12),
+                        tags,
+                        const SizedBox(height: 8),
+                        description,
+                        const SizedBox(height: 12),
+                        recruitment,
+                        const Spacer(),
+                        footer,
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),

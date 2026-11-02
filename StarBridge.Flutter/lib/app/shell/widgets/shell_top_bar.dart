@@ -2,13 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../design_system/appearance/appearance_scope.dart';
+import '../../../design_system/tokens/color_tokens.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
+import '../../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../../design_system/interaction/starbridge_page_motion.dart';
 import '../../../platform/window/window_chrome_port.dart';
 import '../../feature_registry.dart';
 import '../../localization/app_strings.dart';
 import '../chrome/shell_chrome_port.dart';
 import '../chrome/shell_chrome_projection.dart';
 import '../shell_layout_mode.dart';
+import '../shell_navigation_controller.dart';
 import 'overlay_scene_selector.dart';
 import 'top_bar_actions.dart';
 import 'window_controls.dart';
@@ -26,6 +31,8 @@ class ShellTopBar extends StatelessWidget {
     required this.onAccountLogout,
     required this.onAccountIssueAction,
     required this.windowChrome,
+    this.interaction = NavigationInteraction.keyboard,
+    this.sharingIndicator,
     super.key,
   });
 
@@ -40,6 +47,8 @@ class ShellTopBar extends StatelessWidget {
   final VoidCallback onAccountLogout;
   final VoidCallback onAccountIssueAction;
   final WindowChromePort windowChrome;
+  final Widget? sharingIndicator;
+  final NavigationInteraction interaction;
 
   @override
   Widget build(BuildContext context) {
@@ -56,91 +65,101 @@ class ShellTopBar extends StatelessWidget {
           ),
         ),
       ),
-      child: Row(
-        textDirection: TextDirection.ltr,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) => Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onPanStart: (_) => unawaited(windowChrome.beginDrag()),
-                      onDoubleTap: () =>
-                          unawaited(windowChrome.toggleMaximize()),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: tokens.space.lg,
-                        ),
-                        child: Align(
-                          alignment: AlignmentDirectional.centerStart,
-                          child: AnimatedSwitcher(
-                            duration: tokens.motion.pointerMicro,
-                            switchInCurve: tokens.motion.enterCurve,
-                            switchOutCurve: tokens.motion.exitCurve,
-                            layoutBuilder: (currentChild, previousChildren) {
-                              return Stack(
-                                alignment: Alignment.centerLeft,
-                                children: [...previousChildren, ?currentChild],
-                              );
-                            },
-                            child: Column(
-                              key: ValueKey(selected.route),
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  strings.text(selected.labelKey),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium,
+          const AppearanceSurfaceBackdrop(role: SurfaceRole.chrome),
+          Row(
+            textDirection: TextDirection.ltr,
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanStart: (_) =>
+                              unawaited(windowChrome.beginDrag()),
+                          onDoubleTap: () =>
+                              unawaited(windowChrome.toggleMaximize()),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: tokens.space.lg,
+                            ),
+                            child: Align(
+                              alignment: AlignmentDirectional.centerStart,
+                              child: StarBridgeInteractionRegion(
+                                child: StarBridgePageSwitcher(
+                                  key: const ValueKey('shell-title-switcher'),
+                                  instant:
+                                      interaction ==
+                                      NavigationInteraction.keyboard,
+                                  child: Column(
+                                    key: ValueKey(selected.route),
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        strings.text(selected.labelKey),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.fade,
+                                        softWrap: false,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium,
+                                      ),
+                                      Text(
+                                        strings.text(selected.descriptionKey),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.fade,
+                                        softWrap: false,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                Text(
-                                  strings.text(selected.descriptionKey),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: (constraints.maxWidth - 160).clamp(
-                        tokens.density.controlHeight,
-                        double.infinity,
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: (constraints.maxWidth - 160).clamp(
+                            tokens.density.controlHeight,
+                            double.infinity,
+                          ),
+                        ),
+                        child: OverlaySceneSelector(
+                          projection: projection.overlay,
+                          port: shellChrome,
+                          mode: mode,
+                        ),
                       ),
-                    ),
-                    child: OverlaySceneSelector(
-                      projection: projection.overlay,
-                      port: shellChrome,
-                      mode: mode,
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              const TopBarDivider(),
+              TopBarActions(
+                descriptors: topBarDestinations,
+                accountMenuDestinations: accountMenuDestinations,
+                projection: projection,
+                mode: mode,
+                onSelect: onSelect,
+                onAccountLogin: onAccountLogin,
+                onAccountLogout: onAccountLogout,
+                onAccountIssueAction: onAccountIssueAction,
+                sharingIndicator: sharingIndicator,
+              ),
+              SizedBox(width: tokens.space.xs),
+              WindowControls(windowChrome: windowChrome),
+            ],
           ),
-          SizedBox(width: tokens.space.xs),
-          TopBarActions(
-            descriptors: topBarDestinations,
-            accountMenuDestinations: accountMenuDestinations,
-            projection: projection,
-            mode: mode,
-            onSelect: onSelect,
-            onAccountLogin: onAccountLogin,
-            onAccountLogout: onAccountLogout,
-            onAccountIssueAction: onAccountIssueAction,
-          ),
-          SizedBox(width: tokens.space.xs),
-          WindowControls(windowChrome: windowChrome),
         ],
       ),
     );

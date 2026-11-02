@@ -316,6 +316,14 @@ internal static class PartyRoomReaderTests
         Check(directory.Rooms[0].Tags.Select(tag => tag.Text).SequenceEqual(new[] {
             "救援与支援 · 护航安保 · 货运护航", "新手友好" }), "Reuse WPF paths, legacy aliases and context labels; deduplicate and omit unknown IDs.");
         var current = PartyRoomReader.Parse(Wire("two", Room("one"), Room("two")));
+        var identifiedWire = System.Text.Json.Nodes.JsonNode.Parse(Wire("two", Room("two")))!;
+        identifiedWire["viewerAccountId"] = "private-member";
+        var identified = PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(identifiedWire));
+        Check(identified.ViewerAccountId == "private-member", "Authenticated Relay viewer survives Host parsing.");
+        Check(!BridgePayload.From(identified).GetRawText().Contains("viewerAccountId"), "Viewer ID stays inside Host.");
+        identifiedWire["viewerAccountId"] = "different-member";
+        try { PartyRoomReader.Parse(JsonSerializer.SerializeToUtf8Bytes(identifiedWire)); throw new Exception("Contradictory viewer accepted."); }
+        catch (AccountBridgeHostException error) { Check(error.Code == "party_rooms.data_invalid", "Viewer must match current membership."); }
         Check(current.Rooms.Length == 1 && current.Rooms[0].RoomId == "two", "Joined users cannot browse other rooms.");
         Check(current.Rooms[0].Members[0].GameId == "Citizen_CN", "Joined Handle casing must survive.");
         Check(current.Rooms.Single().RoomCode == "private-code", "Room code is available only for the authoritative current room.");

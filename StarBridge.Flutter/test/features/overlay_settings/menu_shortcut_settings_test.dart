@@ -54,8 +54,8 @@ void main() {
     await show(tester, port);
     expect(find.text('F9'), findsOneWidget);
     expect(tester.widget<FilledButton>(save).onPressed, isNull);
-    await tester.tap(find.byType(SwitchListTile).first);
-    await tester.tap(find.byType(SwitchListTile).last);
+    await tester.tap(find.byKey(const Key('overlay-hotkey-enabled')));
+    await tester.tap(find.byKey(const Key('menu-shortcut-close')));
     await tester.pump();
     expect(port.writes, isEmpty);
     expect(find.textContaining('尚未保存'), findsOneWidget);

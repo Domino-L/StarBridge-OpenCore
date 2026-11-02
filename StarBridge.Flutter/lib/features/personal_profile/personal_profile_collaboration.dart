@@ -104,15 +104,38 @@ abstract final class ProfileCollaboration {
     },
   };
   static int limit(String group) => group == 'roles' ? 5 : 3;
-  static List<PersonalProfileTagValue>? tags(Object? raw, String group) =>
-      raw == null
-      ? null
-      : [for (final id in (raw as List).cast<String>()) options[group]![id]!];
+  static List<PersonalProfileTagValue>? tags(Object? raw, String group) {
+    if (raw == null) return null;
+    if (raw is! List ||
+        raw.length > 8 ||
+        raw.toSet().length != raw.length ||
+        raw.any(
+          (id) =>
+              id is! String ||
+              id.trim().isEmpty ||
+              id.length > 80 ||
+              RegExp(r'[\x00-\x1f\x7f-\x9f]').hasMatch(id),
+        )) {
+      throw const FormatException('Invalid stored profile labels');
+    }
+    return [
+      for (final id in raw.cast<String>())
+        options[group]![id] ??
+            PersonalProfileTagValue(
+              labelKey: '',
+              displayLabel: id,
+              category: PersonalProfileTagCategory.ship,
+            ),
+    ];
+  }
 
   static List<String> ids(List<PersonalProfileTagValue> tags, String group) =>
       {for (final tag in tags) _id(tag, group)}.toList();
 
   static String _id(PersonalProfileTagValue tag, String group) {
+    if (tag.labelKey.isEmpty && tag.displayLabel != null) {
+      return tag.displayLabel!;
+    }
     const aliases = {
       'profile.role.expeditionCommander': 'fleet-command',
       'profile.role.pilot': 'pilot',
@@ -138,11 +161,21 @@ abstract final class ProfileCollaboration {
     return tag.displayLabel ?? tag.labelKey;
   }
 
-  static bool validGroup(List<String>? ids, String group) =>
+  static bool validGroup(
+    List<String>? ids,
+    String group, {
+    List<String> retained = const [],
+  }) =>
       ids == null ||
-      (ids.length <= limit(group) &&
+      (ids.length <= 8 &&
           ids.toSet().length == ids.length &&
-          ids.every(options[group]!.containsKey));
+          (ids.every(retained.contains) ||
+              (ids.length <= limit(group) &&
+                  ids.every(
+                    (id) =>
+                        options[group]!.containsKey(id) ||
+                        retained.contains(id),
+                  ))));
 
   static List<PersonalProfileAvailabilityWindow> windows(Object? raw) => [
     for (final w in (raw as List).cast<Map>())

@@ -2,6 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -10,9 +17,12 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_editor_state.dart';
 import 'overlay_workspace_controls.dart';
 import 'overlay_workspace_editor_tools.dart';
+import 'overlay_workspace_gesture_save.dart';
 import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_layout_geometry.dart';
 import 'overlay_workspace_module.dart';
+import 'overlay_workspace_models.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class OverlayWorkspaceFullscreenButton extends StatelessWidget {
   const OverlayWorkspaceFullscreenButton({
@@ -23,15 +33,22 @@ class OverlayWorkspaceFullscreenButton extends StatelessWidget {
   final OverlayWorkspaceModule module;
   final OverlayWorkspaceEditorState editor;
 
-  Future<void> _open(BuildContext context) async {
+  Future<void> _open(BuildContext context, InteractionSource source) async {
     if (editor.fullscreenOpening) return;
     editor.change(() => editor.fullscreenOpening = true);
     final navigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
     final failureText = _copy(context, 'overlay.editor.windowFailed');
+    final failureSnack = starBridgeSnackBarFromContext(
+      context,
+      starBridgeTimedSnackBar(content: Text(failureText)),
+      source: source,
+    );
+    final data = resolveStarBridgeInteraction(context);
+    final link = InteractionScope.linkOf(context);
     void failed() {
       if (messenger.mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(failureText)));
+        messenger.showSnackBar(failureSnack);
       }
     }
 
@@ -47,8 +64,30 @@ class OverlayWorkspaceFullscreenButton extends StatelessWidget {
           fullscreenDialog: true,
           transitionDuration: Duration.zero,
           reverseTransitionDuration: Duration.zero,
-          pageBuilder: (_, _, _) =>
-              OverlayWorkspaceFullscreenEditor(module: module, editor: editor),
+          pageBuilder: (routeContext, _, _) {
+            final body = starBridgeInitialReadViewport(
+              routeContext,
+              source: source,
+              child: OverlayWorkspaceFullscreenEditor(
+                module: module,
+                editor: editor,
+                initialSource: source,
+              ),
+            );
+            final themed = Builder(
+              builder: (context) {
+                final current = InteractionScope.of(context);
+                return StarBridgeInteractionConfiguration(
+                  suite: current.suite,
+                  reduceMotion: current.reduceMotion,
+                  child: body,
+                );
+              },
+            );
+            return link == null
+                ? InteractionScope(data: data, child: themed)
+                : InteractionScope.follow(link, child: themed);
+          },
         ),
       );
     } on Object {
@@ -68,14 +107,17 @@ class OverlayWorkspaceFullscreenButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: editor,
-    builder: (context, _) => OutlinedButton.icon(
-      key: const Key('overlay-enter-fullscreen'),
-      onPressed: editor.fullscreenOpening ? null : () => _open(context),
-      icon: const StarBridgeIcon(
+    builder: (context, _) => StarBridgeActionButton(
+      controlKey: const Key('overlay-enter-fullscreen'),
+      onActivate: editor.fullscreenOpening
+          ? null
+          : (source) => unawaited(
+              runStarBridgeActivation(source, () => _open(context, source)),
+            ),
+      child: _commandLabel(
         StarBridgeIconSemantic.windowMaximize,
-        size: 16,
+        _copy(context, 'overlay.editor.fullscreen'),
       ),
-      label: Text(_copy(context, 'overlay.editor.fullscreen')),
     ),
   );
 }
@@ -84,10 +126,12 @@ class OverlayWorkspaceFullscreenEditor extends StatefulWidget {
   const OverlayWorkspaceFullscreenEditor({
     required this.module,
     required this.editor,
+    this.initialSource = InteractionSource.programmatic,
     super.key,
   });
   final OverlayWorkspaceModule module;
   final OverlayWorkspaceEditorState editor;
+  final InteractionSource initialSource;
   @override
   State<OverlayWorkspaceFullscreenEditor> createState() =>
       _FullscreenEditorState();
@@ -96,18 +140,30 @@ class OverlayWorkspaceFullscreenEditor extends StatefulWidget {
 class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
   bool _leaving = false;
   bool _canPop = false;
+  late InteractionSource _pendingSource = widget.initialSource;
 
   void _commitInput() {
     FocusManager.instance.primaryFocus?.unfocus();
     FocusManager.instance.applyFocusChangesIfNeeded();
   }
 
-  Future<void> _save() async {
+  Future<void> _save(InteractionSource source) async {
     _commitInput();
-    await widget.module.save();
+    final current = widget.module.projection.value;
+    if (!current.available || current.busy || !current.dirty) return;
+    _pendingSource = source;
+    await runStarBridgeActivation(source, widget.module.save);
   }
 
-  Future<void> _runRuntimeAction(OverlayWorkspaceProjection projection) async {
+  Future<void> _runRuntimeAction(
+    OverlayWorkspaceProjection projection,
+    InteractionSource source,
+  ) async {
+    _pendingSource = source;
+    await runStarBridgeActivation(source, () => _runtimeAction(projection));
+  }
+
+  Future<void> _runtimeAction(OverlayWorkspaceProjection projection) async {
     _commitInput();
     final language = Localizations.localeOf(context).toLanguageTag();
     switch (projection.runtime.windowState) {
@@ -128,12 +184,12 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
     }
   }
 
-  Future<void> _leave() async {
+  Future<void> _leave(InteractionSource source) async {
     if (_leaving) return;
     setState(() => _leaving = true);
     try {
       _commitInput();
-      await widget.module.editorWindow.exit();
+      await runStarBridgeActivation(source, widget.module.editorWindow.exit);
       if (!mounted) return;
       setState(() => _canPop = true);
       // PopScope must rebuild before handling the programmatic exit.
@@ -143,7 +199,7 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
     } on Object {
       if (mounted) {
         setState(() => _leaving = false);
-        _showError(context);
+        _showError(context, source);
       }
     }
   }
@@ -155,11 +211,11 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
     final key = event.logicalKey;
     final keyboard = HardwareKeyboard.instance;
     if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.f11) {
-      unawaited(_leave());
+      unawaited(_leave(InteractionSource.keyboard));
       return KeyEventResult.handled;
     }
     if (keyboard.isControlPressed && key == LogicalKeyboardKey.keyS) {
-      unawaited(_save());
+      unawaited(_save(InteractionSource.keyboard));
       return KeyEventResult.handled;
     }
     final focused = FocusManager.instance.primaryFocus?.context;
@@ -235,25 +291,25 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
           runSpacing: tokens.space.xs,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            OutlinedButton.icon(
-              key: const Key('overlay-exit-fullscreen'),
-              onPressed: _leaving ? null : _leave,
-              icon: const StarBridgeIcon(
-                StarBridgeIconSemantic.windowRestore,
-                size: 16,
-              ),
-              label: Text(_copy(context, 'overlay.editor.exit')),
-            ),
-            FilledButton.icon(
-              key: const Key('overlay-fullscreen-runtime-action'),
-              onPressed: projection.busy
+            StarBridgeActionButton(
+              controlKey: const Key('overlay-exit-fullscreen'),
+              onActivate: _leaving
                   ? null
-                  : () => _runRuntimeAction(projection),
-              icon: const StarBridgeIcon(
-                StarBridgeIconSemantic.overlay,
-                size: 16,
+                  : (source) => unawaited(_leave(source)),
+              child: _commandLabel(
+                StarBridgeIconSemantic.windowRestore,
+                _copy(context, 'overlay.editor.exit'),
               ),
-              label: Text(
+            ),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('overlay-fullscreen-runtime-action'),
+              onActivate: projection.busy
+                  ? null
+                  : (source) =>
+                        unawaited(_runRuntimeAction(projection, source)),
+              child: _commandLabel(
+                StarBridgeIconSemantic.overlay,
                 _copy(context, switch (projection.runtime.windowState) {
                   'open' || 'suppressed' => 'overlay.runtime.closeAction',
                   'opening' => 'overlay.runtime.cancelOpenAction',
@@ -265,9 +321,10 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
             ),
             ListenableBuilder(
               listenable: widget.editor,
-              builder: (context, _) => TextButton(
-                key: const Key('overlay-toggle-tools'),
-                onPressed: () => widget.editor.change(
+              builder: (context, _) => StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('overlay-toggle-tools'),
+                onActivate: (_) => widget.editor.change(
                   () =>
                       widget.editor.toolsVisible = !widget.editor.toolsVisible,
                 ),
@@ -281,47 +338,79 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
                 ),
               ),
             ),
-            IconButton(
-              tooltip: _copy(context, 'overlay.workspace.undo'),
-              onPressed: widget.module.canUndo && !projection.busy
-                  ? widget.module.undo
+            StarBridgeIconAction(
+              controlKey: const Key('overlay-fullscreen-undo'),
+              label: _copy(context, 'overlay.workspace.undo'),
+              onActivate: widget.module.canUndo && !projection.busy
+                  ? (_) => widget.module.undo()
                   : null,
               icon: const StarBridgeIcon(StarBridgeIconSemantic.undo),
             ),
-            IconButton(
-              tooltip: _copy(context, 'overlay.workspace.redo'),
-              onPressed: widget.module.canRedo && !projection.busy
-                  ? widget.module.redo
+            StarBridgeIconAction(
+              controlKey: const Key('overlay-fullscreen-redo'),
+              label: _copy(context, 'overlay.workspace.redo'),
+              onActivate: widget.module.canRedo && !projection.busy
+                  ? (_) => widget.module.redo()
                   : null,
               icon: const StarBridgeIcon(StarBridgeIconSemantic.redo),
             ),
-            FilledButton(
-              key: const Key('overlay-fullscreen-save'),
-              onPressed: projection.available && !projection.busy
-                  ? _save
-                  : null,
-              child: Text(_copy(context, 'overlay.workspace.save')),
-            ),
-            TextButton(
-              key: const Key('overlay-fullscreen-discard'),
-              onPressed: projection.dirty && !projection.busy
-                  ? widget.module.discardChanges
-                  : null,
-              child: Text(_copy(context, 'overlay.workspace.discard')),
-            ),
+            // Layout changes save on their own, as on the settings page.
             Text(
               _copy(
                 context,
-                projection.dirty
-                    ? 'overlay.workspace.dirty'
-                    : 'overlay.workspace.saved',
+                !projection.dirty
+                    ? 'overlay.workspace.saved'
+                    : projection.failure == null
+                    ? 'overlay.workspace.saving'
+                    : 'overlay.workspace.saveFailed',
               ),
-              style: Theme.of(context).textTheme.bodySmall,
+              key: const Key('overlay-fullscreen-save-status'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: projection.dirty && projection.failure != null
+                    ? context.tokens.colors.warning
+                    : null,
+              ),
             ),
             if (projection.busy)
-              const SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              Builder(
+                builder: (context) {
+                  final data = resolveStarBridgeInteraction(context);
+                  return InteractionScope(
+                    data: data.copyWith(
+                      reduceMotion:
+                          data.reduceMotion ||
+                          _pendingSource == InteractionSource.keyboard,
+                    ),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: SuiteBusyFrame(
+                        busy: true,
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: SuiteBusyLabel(
+                            _copy(
+                              context,
+                              projection.operation ==
+                                      OverlayWorkspaceOperation.saving
+                                  ? 'overlay.workspace.saving'
+                                  : switch (projection.runtimeOperation) {
+                                      OverlayRuntimeOperation.opening =>
+                                        'overlay.runtime.opening',
+                                      OverlayRuntimeOperation.closing =>
+                                        'overlay.runtime.closing',
+                                      OverlayRuntimeOperation.retrying =>
+                                        'overlay.runtime.retrying',
+                                      OverlayRuntimeOperation.reading =>
+                                        'overlay.runtime.checking',
+                                      _ => 'overlay.loading',
+                                    },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
           ],
         ),
@@ -332,121 +421,151 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return PopScope(
-      canPop: _canPop,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_leave());
-      },
-      child: Scaffold(
-        key: const Key('overlay-fullscreen-editor'),
-        backgroundColor: tokens.surfaces.ground.fill,
-        body: Focus(
-          autofocus: true,
-          onKeyEvent: _key,
-          child: ValueListenableBuilder(
-            valueListenable: widget.module.projection,
-            builder: (context, projection, _) => Stack(
-              fit: StackFit.expand,
-              children: [
-                if (projection.available)
-                  Positioned.fill(
-                    child: AbsorbPointer(
-                      absorbing: projection.busy,
-                      child: OverlayWorkspaceLayoutWorkbench(
-                        layout: projection.layout,
-                        settings: projection.settings!,
-                        appearances: projection.snapshot!.appearances,
-                        controller: widget.editor,
-                        previewIdentity: widget.module.previewIdentity,
-                        sources: projection.sources,
-                        sourceScenes: widget.module.sourceScenes,
-                        fullScreen: true,
-                        editorActions: _toolbar(context, projection),
-                        presetId: projection.snapshot!.activePresetId!,
-                        startupExtra: OverlayWorkspaceHotkeyCard(
-                          hotkey: projection.hotkey!,
-                          onBindingChanged: (value) =>
-                              widget.module.updateHotkey(binding: value),
-                          onEnabledChanged: (value) =>
-                              widget.module.updateHotkey(enabled: value),
+    return StarBridgeInteractionRegion(
+      child: PopScope(
+        canPop: _canPop,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_leave(InteractionSource.keyboard));
+        },
+        child: Scaffold(
+          key: const Key('overlay-fullscreen-editor'),
+          backgroundColor: tokens.surfaces.ground.fill,
+          body: OverlayWorkspaceGestureSave(
+            module: widget.module,
+            child: Focus(
+              autofocus: true,
+              onKeyEvent: _key,
+              child: ValueListenableBuilder(
+                valueListenable: widget.module.projection,
+                builder: (context, projection, _) => Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (projection.available)
+                      Positioned.fill(
+                        child: AbsorbPointer(
+                          absorbing: projection.busy,
+                          child: OverlayWorkspaceLayoutWorkbench(
+                            layout: projection.layout,
+                            settings: projection.settings!,
+                            editOwner: (widget.module, projection.snapshot),
+                            currentEditOwner: () => (
+                              widget.module,
+                              widget.module.projection.value.snapshot,
+                            ),
+                            appearances: projection.snapshot!.appearances,
+                            controller: widget.editor,
+                            previewIdentity: widget.module.previewIdentity,
+                            sources: projection.sources,
+                            sourceScenes: widget.module.sourceScenes,
+                            fullScreen: true,
+                            editorActions: _toolbar(context, projection),
+                            presetId: projection.snapshot!.activePresetId!,
+                            startupExtra: OverlayWorkspaceHotkeyCard(
+                              hotkey: projection.hotkey!,
+                              onBindingChanged: (value) =>
+                                  widget.module.updateHotkey(binding: value),
+                              onEnabledChanged: (value) =>
+                                  widget.module.updateHotkey(enabled: value),
+                              onRegisterHotKeyChanged: (value) => widget.module
+                                  .updateHotkey(registerHotKey: value),
+                              registrationFailures:
+                                  projection.runtime.hotkeyRegistrationFailures,
+                            ),
+                            onChanged: (item, coalesce) => widget.module
+                                .updateLayoutItem(item, coalesce: coalesce),
+                            onSettingChanged: widget.module.updateSetting,
+                            onExperiencePreset:
+                                widget.module.applyExperiencePreset,
+                            onEventNotificationPlacement:
+                                widget.module.updateEventNotificationPlacement,
+                            onEventNotificationGestureStart:
+                                widget.module.beginEventNotificationGesture,
+                            onEventNotificationGestureEnd:
+                                widget.module.endEventNotificationGesture,
+                          ),
                         ),
-                        onChanged: (item, coalesce) => widget.module
-                            .updateLayoutItem(item, coalesce: coalesce),
-                        onSettingChanged: widget.module.updateSetting,
-                        onExperiencePreset: widget.module.applyExperiencePreset,
-                        onEventNotificationPlacement:
-                            widget.module.updateEventNotificationPlacement,
-                        onEventNotificationGestureStart:
-                            widget.module.beginEventNotificationGesture,
-                        onEventNotificationGestureEnd:
-                            widget.module.endEventNotificationGesture,
+                      )
+                    else
+                      Center(
+                        child: Text(
+                          _copy(context, 'overlay.unavailable.title'),
+                        ),
+                      ),
+                    ListenableBuilder(
+                      listenable: widget.editor,
+                      builder: (context, _) => widget.editor.toolsVisible
+                          ? const SizedBox.shrink()
+                          : Positioned(
+                              left: 12,
+                              bottom: 36,
+                              child: Material(
+                                color: tokens.surfaces.floating.fill,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    StarBridgeActionButton(
+                                      kind: StarBridgeActionKind.quiet,
+                                      controlKey: const Key(
+                                        'overlay-exit-fullscreen',
+                                      ),
+                                      onActivate: _leaving
+                                          ? null
+                                          : (source) =>
+                                                unawaited(_leave(source)),
+                                      child: Text(
+                                        _copy(context, 'overlay.editor.exit'),
+                                      ),
+                                    ),
+                                    StarBridgeActionButton(
+                                      kind: StarBridgeActionKind.quiet,
+                                      controlKey: const Key(
+                                        'overlay-toggle-tools',
+                                      ),
+                                      onActivate: (_) => widget.editor.change(
+                                        () => widget.editor.toolsVisible = true,
+                                      ),
+                                      child: Text(
+                                        _copy(
+                                          context,
+                                          'overlay.editor.showTools',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                    Positioned(
+                      left: 16,
+                      bottom: 12,
+                      child: Text(
+                        _copy(context, 'overlay.editor.keys'),
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: tokens.colors.textSecondary),
                       ),
                     ),
-                  )
-                else
-                  Center(
-                    child: Text(_copy(context, 'overlay.unavailable.title')),
-                  ),
-                ListenableBuilder(
-                  listenable: widget.editor,
-                  builder: (context, _) => widget.editor.toolsVisible
-                      ? const SizedBox.shrink()
-                      : Positioned(
-                          left: 12,
-                          bottom: 36,
-                          child: Material(
-                            color: tokens.surfaces.floating.fill,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                TextButton(
-                                  onPressed: _leave,
-                                  child: Text(
-                                    _copy(context, 'overlay.editor.exit'),
-                                  ),
-                                ),
-                                TextButton(
-                                  key: const Key('overlay-toggle-tools'),
-                                  onPressed: () => widget.editor.change(
-                                    () => widget.editor.toolsVisible = true,
-                                  ),
-                                  child: Text(
-                                    _copy(context, 'overlay.editor.showTools'),
-                                  ),
-                                ),
-                              ],
+                    if (projection.failure != null)
+                      Positioned(
+                        left: 12,
+                        right: 12,
+                        bottom: 36,
+                        child: Material(
+                          color: tokens.colors.warningSoft,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              _copy(
+                                context,
+                                'overlay.error.${projection.failure!.name}',
+                              ),
                             ),
                           ),
                         ),
-                ),
-                Positioned(
-                  left: 16,
-                  bottom: 12,
-                  child: Text(
-                    _copy(context, 'overlay.editor.keys'),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: tokens.colors.textSecondary),
-                  ),
-                ),
-                if (projection.failure != null)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 36,
-                    child: Material(
-                      color: tokens.colors.warningSoft,
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          _copy(
-                            context,
-                            'overlay.error.${projection.failure!.name}',
-                          ),
-                        ),
                       ),
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -455,9 +574,19 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
   }
 }
 
-void _showError(BuildContext context) => ScaffoldMessenger.of(context)
-    .showSnackBar(
-      SnackBar(content: Text(_copy(context, 'overlay.editor.windowFailed'))),
+void _showError(BuildContext context, InteractionSource source) =>
+    showStarBridgeSnackBar(
+      context,
+      starBridgeTimedSnackBar(content: Text(_copy(context, 'overlay.editor.windowFailed'))),
+      source: source,
     );
+Widget _commandLabel(StarBridgeIconSemantic icon, String label) => Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    StarBridgeIcon(icon, size: 16),
+    const SizedBox(width: 8),
+    Flexible(child: Text(label)),
+  ],
+);
 String _copy(BuildContext context, String key) =>
     AppStrings.of(context).text(key);

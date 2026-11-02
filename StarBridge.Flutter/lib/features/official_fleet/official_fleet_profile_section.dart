@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/remote_image.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -7,17 +9,24 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'official_fleet_models.dart';
+import 'official_fleet_refresh_notice.dart';
 import 'official_fleet_profile_identity_source.dart';
 
 class OfficialFleetProfileSection extends StatelessWidget {
   const OfficialFleetProfileSection({
     required this.fleet,
     required this.observedAtUtc,
+    this.profileReadState = OfficialFleetProfileReadState.unknown,
+    this.profileObservedAtUtc,
+    this.isReading = false,
     super.key,
   });
 
   final OfficialFleetSummary fleet;
   final DateTime? observedAtUtc;
+  final OfficialFleetProfileReadState profileReadState;
+  final DateTime? profileObservedAtUtc;
+  final bool isReading;
 
   @override
   Widget build(BuildContext context) {
@@ -27,10 +36,25 @@ class OfficialFleetProfileSection extends StatelessWidget {
       key: const Key('official-fleet-profile'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        OfficialFleetRefreshNotice(
+          key: const Key('official-fleet-profile-read-notice'),
+          active: isReading,
+          refreshFailed:
+              profileReadState != OfficialFleetProfileReadState.available &&
+              profileReadState != OfficialFleetProfileReadState.deferred &&
+              profileReadState != OfficialFleetProfileReadState.unknown,
+          lastReadAtUtc: profileObservedAtUtc,
+          failureMessageKey:
+              profileReadState ==
+                      OfficialFleetProfileReadState.transientFailure &&
+                  profile != null
+              ? 'officialFleet.profile.syncFailed'
+              : 'officialFleet.profile.readFailed',
+        ),
         _ProfileIdentitySurface(fleet: fleet),
         SizedBox(height: tokens.space.md),
         if (profile == null)
-          const _ProfileDetailsUnavailable()
+          _ProfileDetailsUnavailable(isReading: isReading)
         else ...[
           _NarrativeSurface(profile: profile),
           if (profile.hasFocus ||
@@ -39,12 +63,13 @@ class OfficialFleetProfileSection extends StatelessWidget {
             SizedBox(height: tokens.space.md),
             _ProfileFacts(profile: profile),
           ],
-          SizedBox(height: tokens.space.md),
-          OfficialFleetProfileIdentitySource(
-            fleet: fleet,
-            observedAtUtc: observedAtUtc,
-          ),
         ],
+        SizedBox(height: tokens.space.md),
+        OfficialFleetProfileIdentitySource(
+          fleet: fleet,
+          observedAtUtc: observedAtUtc,
+          profileObservedAtUtc: profileObservedAtUtc,
+        ),
       ],
     );
   }
@@ -71,8 +96,9 @@ class _ProfileIdentitySurface extends StatelessWidget {
               SizedBox(
                 key: const Key('official-fleet-profile-banner'),
                 height: 156,
-                child: Image.network(
+                child: RemoteImage(
                   bannerUrl,
+                  kind: RemoteImageResourceKind.organization,
                   fit: BoxFit.cover,
                   alignment: Alignment.center,
                   errorBuilder: (_, _, _) => const SizedBox.shrink(),
@@ -192,10 +218,11 @@ class _ProfileLogo extends StatelessWidget {
         ),
         borderRadius: tokens.shape.medium,
       ),
-      child: fleet.logoUrl == null
+      child: fleet.displayLogoUrl == null
           ? fallback
-          : Image.network(
-              fleet.logoUrl!,
+          : RemoteImage(
+              fleet.displayLogoUrl!,
+              kind: RemoteImageResourceKind.organization,
               fit: BoxFit.cover,
               errorBuilder: (_, _, _) => fallback,
             ),
@@ -286,7 +313,8 @@ class _IdentityFact extends StatelessWidget {
 }
 
 class _ProfileDetailsUnavailable extends StatelessWidget {
-  const _ProfileDetailsUnavailable();
+  const _ProfileDetailsUnavailable({required this.isReading});
+  final bool isReading;
 
   @override
   Widget build(BuildContext context) {
@@ -308,12 +336,20 @@ class _ProfileDetailsUnavailable extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  strings.text('officialFleet.profile.unavailable.title'),
+                  strings.text(
+                    isReading
+                        ? 'officialFleet.profile.loading.title'
+                        : 'officialFleet.profile.unavailable.title',
+                  ),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 SizedBox(height: tokens.space.xs),
                 Text(
-                  strings.text('officialFleet.profile.unavailable.body'),
+                  strings.text(
+                    isReading
+                        ? 'officialFleet.profile.loading.body'
+                        : 'officialFleet.profile.unavailable.body',
+                  ),
                   style: Theme.of(context).textTheme.bodyMedium
                       ?.copyWith(color: tokens.colors.textSecondary),
                 ),

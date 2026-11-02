@@ -15,6 +15,7 @@ import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_panel.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_controller.dart';
+import 'package:starbridge_flutter/features/communities/community_chat_copy.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_port.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_send_port.dart';
 import 'package:starbridge_flutter/features/communities/example_communities.dart';
@@ -183,7 +184,7 @@ void main() {
       await tester.tap(button);
       await tester.pumpAndSettle();
       expect(find.byType(CommunityChatPanel), findsOneWidget);
-      await tester.tap(find.byTooltip('返回组织资料'));
+      await tester.tap(find.byKey(const Key('community-chat-back')));
       await tester.pumpAndSettle();
       expect(find.byType(CommunityChatPanel), findsNothing);
       expect(button, findsOneWidget);
@@ -240,7 +241,7 @@ void main() {
       addTearDown(example.close);
       const target = '00000000000000000000000000000002';
       await showChat(tester, example, targetRef: target);
-      await tester.tap(find.text('分享浮层预设'));
+      await tester.tap(find.text('分享浮层方案'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('示例浮层预设'));
       await tester.pumpAndSettle();
@@ -256,7 +257,7 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '查看详情并导入'));
       await tester.pumpAndSettle();
       expect((await example.readCommunityPresets()).presets, hasLength(1));
-      await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+      await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
       await tester.pumpAndSettle();
       expect((await example.readCommunityPresets()).presets, hasLength(2));
       expect(tester.takeException(), isNull);
@@ -322,7 +323,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(port.sends, hasLength(1));
-    await tester.tap(find.byTooltip('返回组织资料'));
+    await tester.tap(find.byKey(const Key('community-chat-back')));
     await tester.pumpAndSettle();
     expect(returned, false);
     await tester.tap(find.text('继续编辑'));
@@ -352,6 +353,31 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  for (final locale in AppStrings.supportedLocales) {
+    for (final error in ['rateLimited', 'dataInvalid', 'refreshRequired']) {
+      testWidgets(
+        'read receipt reason stays readable without a retry loop $locale $error',
+        (tester) async {
+          port.receipt = CommunityChatReadReceipt('rejected', error: error);
+          await showChat(tester, port, locale: locale, width: 420);
+          final copy = communityChatCopy[communityChatReceiptCopyKey(error)]!;
+          final text = locale.languageCode == 'en'
+              ? copy.$3
+              : locale.countryCode == 'TW'
+              ? copy.$2
+              : copy.$1;
+          expect(find.text(text), findsOneWidget);
+          expect(port.receipts, [12]);
+          await tester.pump(const Duration(seconds: 4));
+          await tester.pumpAndSettle();
+          expect(port.receipts, [12]);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
 
   testWidgets('hidden chat never marks messages read', (tester) async {
     await showChat(tester, port, visible: false);

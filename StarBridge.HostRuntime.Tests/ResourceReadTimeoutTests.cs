@@ -73,7 +73,7 @@ internal static class ResourceReadTimeoutTests
         var generation = fixture.Runtime.Generation;
         var failure = await fixture.Read(current.Response.AccountContext!);
         Equal(BridgeResponseStatuses.Error, failure.Response.Status, "HTTP deadline is not user cancellation");
-        Equal("personal_profile.read_unavailable", failure.Response.Error?.Code, "Local retryable read failure");
+        Equal("personal_profile.read_transient", failure.Response.Error?.Code, "Local retryable read failure");
         Equal(true, failure.Response.Error?.Retryable, "Timeout must allow retry");
         Equal(generation, fixture.Runtime.Generation, "Timeout changed account generation");
         Equal(0, failure.Events.Count, "Timeout published account invalidation");
@@ -118,7 +118,7 @@ internal static class ResourceReadTimeoutTests
         });
         var current = await fixture.Current();
         var result = await fixture.Read(current.Response.AccountContext!).AsTask().WaitAsync(TimeSpan.FromSeconds(55));
-        Equal("personal_profile.read_unavailable", result.Response.Error?.Code, "Read deadline did not end as retryable");
+        Equal("personal_profile.read_transient", result.Response.Error?.Code, "Read deadline did not end as retryable");
         Equal(true, result.Response.Error?.Retryable, "Read deadline lost retry action");
         Equal(1, fixture.ReadCalls, "Deadline automatically replayed a read");
         Equal(1, fixture.RefreshCalls, "Deadline refreshed credentials");

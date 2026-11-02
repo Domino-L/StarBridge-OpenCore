@@ -18,6 +18,13 @@ public sealed class LocalProfileException(string code) : Exception(code) { publi
 /// <summary>Explicit account-scoped presentation saves, with no legacy-file or remote writes.</summary>
 public sealed class LocalPersonalProfileStore(string root)
 {
+    internal Func<BridgeAccountContext, BridgeAccountContext>? ResolveOwner { get; set; }
+    private string ResolvedHash(BridgeAccountContext owner)
+    {
+        try { return OwnerHash(ResolveOwner?.Invoke(owner) ?? owner); }
+        catch (Privacy.LocalPrivacyException) { throw new LocalProfileException("profile_local.account_changed"); }
+    }
+    internal string ImportJournalDirectory => Path.Combine(Path.GetFullPath(root), "personal-profile-import-v1");
     private readonly string _directory = Path.Combine(Path.GetFullPath(root), "personal-profile-local-v1");
     private const int MaximumBytes = 64 * 1024;
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -28,10 +35,14 @@ public sealed class LocalPersonalProfileStore(string root)
 
     public LocalProfileSnapshot Read(BridgeAccountContext owner)
     {
-        var hash = OwnerHash(owner);
+        var hash = ResolvedHash(owner);
         try
         {
-            if (!CheckPath(_directory, true) || !CheckPath(PathFor(hash), false)) return new(0, null, null, null);
+            if (!CheckPath(_directory, true) || !CheckPath(PathFor(hash), false))
+            {
+                if (ResolvedHash(owner) != hash) throw new LocalProfileException("profile_local.account_changed");
+                return new(0, null, null, null);
+            }
             using var stream = new FileStream(PathFor(hash), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
             if (stream.Length is <= 0 or > MaximumBytes) throw new IOException();
             var bytes = new byte[(int)stream.Length];
@@ -45,6 +56,7 @@ public sealed class LocalPersonalProfileStore(string root)
                 file.Snapshot.SavedAt is null || file.Snapshot.SavedAt < DateTimeOffset.UnixEpoch ||
                 !Guid.TryParseExact(file.Snapshot.OperationId, "N", out _)) throw new IOException();
             Validate(file.Snapshot.Content);
+            if (ResolvedHash(owner) != hash) throw new LocalProfileException("profile_local.account_changed");
             return file.Snapshot;
         }
         catch (Exception e) when (StorageError(e) || e is LocalProfileException)
@@ -53,8 +65,18 @@ public sealed class LocalPersonalProfileStore(string root)
 
     public LocalProfileSnapshot Save(BridgeAccountContext owner, long expectedRevision, string operationId,
         LocalProfileContent content, Func<bool> canCommit)
+        => SaveCore(owner, expectedRevision, operationId, content, canCommit, false);
+
+    internal LocalProfileSnapshot SaveImported(BridgeAccountContext owner, long expectedRevision, string operationId,
+        LocalProfileContent content, Func<bool> canCommit)
+        => SaveCore(owner, expectedRevision, operationId, content, canCommit, true);
+
+    private LocalProfileSnapshot SaveCore(BridgeAccountContext owner, long expectedRevision, string operationId,
+        LocalProfileContent content, Func<bool> canCommit, bool selectedImport)
     {
-        var hash = OwnerHash(owner);
+        var hash = ResolvedHash(owner);
+        var originalCanCommit = canCommit;
+        canCommit = () => originalCanCommit() && ResolvedHash(owner) == hash;
         Validate(content);
         if (expectedRevision < 0 || expectedRevision == long.MaxValue || !Guid.TryParseExact(operationId, "N", out _))
             throw new LocalProfileException("profile_local.invalid_request");
@@ -75,6 +97,7 @@ public sealed class LocalPersonalProfileStore(string root)
             using var writeLock = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             current = Read(owner);
             CheckRevision(current, expectedRevision, operationId, content);
+            if (!selectedImport) LocalProfileCollaborationPolicy.ValidateEdit(content.PlayStyle, current.Content?.PlayStyle);
             if (!canCommit()) throw new LocalProfileException("profile_local.account_changed");
             if (current.OperationId == operationId) return current;
             var next = new LocalProfileSnapshot(expectedRevision + 1, DateTimeOffset.UtcNow, operationId, content);

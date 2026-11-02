@@ -1,15 +1,29 @@
 import '../../design_system/icons/standard_icon.dart';
 import '../../design_system/styles/member_role_style.dart';
+
 import 'dart:async';
+
 import 'community_visible_refresh.dart';
 
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import 'community_roles_controller.dart';
 import 'community_roles_port.dart';
 import 'community_roles_copy.dart';
 import 'community_editor_surface.dart';
+import '../common/social_read_activity.dart';
 
 class CommunityRolesDialog extends StatefulWidget {
   const CommunityRolesDialog({
@@ -27,14 +41,16 @@ class CommunityRolesDialog extends StatefulWidget {
   State<CommunityRolesDialog> createState() => CommunityRolesDialogState();
 }
 
-class CommunityRolesDialogState extends State<CommunityRolesDialog> with CommunityVisibleRefresh<CommunityRolesDialog> {
+class CommunityRolesDialogState extends State<CommunityRolesDialog>
+    with CommunityVisibleRefresh<CommunityRolesDialog> {
   @override
   Future<void> refreshVisibleCommunity() => model.refreshLease();
   @override
   Duration get communityRefreshInterval => const Duration(minutes: 2);
   late final model = CommunityRolesController(widget.port, widget.targetRef);
+  late final SocialReadActivityBinding _reading, _saving;
   final name = TextEditingController(), description = TextEditingController();
-  final confirmations = <Route<bool>>[];
+  final confirmations = <StarBridgeDialogRoute<bool>>[];
   String? shownKey, shownEdit;
   bool confirming = false;
   String t(String key) => rolesText(context, key);
@@ -42,6 +58,16 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _saving = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(_changed);
     unawaited(model.load());
   }
@@ -50,7 +76,7 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
     if (!mounted) return;
     if (model.invalidated) {
       for (final route in confirmations.toList()) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        retireStarBridgeDialog(route);
       }
       name.clear();
       description.clear();
@@ -60,14 +86,21 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
       shownKey = selected?.key;
       shownEdit = model.snapshot?.editRef;
       if (name.text != (selected?.name ?? '')) name.text = selected?.name ?? '';
-      if (description.text != (selected?.description ?? '')) description.text = selected?.description ?? '';
+      if (description.text != (selected?.description ?? '')) {
+        description.text = selected?.description ?? '';
+      }
     }
     setState(() {});
   }
 
   @override
   void dispose() {
+    for (final route in confirmations.toList()) {
+      retireStarBridgeDialog(route);
+    }
     model.removeListener(_changed);
+    _reading.dispose();
+    _saving.dispose();
     model.dispose();
     name.dispose();
     description.dispose();
@@ -77,26 +110,43 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
   Future<bool> _confirm(String title, String detail, String action) async {
     if (confirming) return false;
     setState(() => confirming = true);
-    final route = DialogRoute<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(detail),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    confirmations.add(route);
+    StarBridgeDialogRoute<bool>? route;
     try {
-      return await Navigator.of(context).push(route) == true &&
+      return await showStarBridgeDialog<bool>(
+                context,
+                useRootNavigator: false,
+                builder: (context) => AlertDialog(
+                  title: Text(title),
+                  content: Text(detail),
+                  actions: [
+                    StarBridgeActionButton(
+                      controlKey: const Key('roles-confirm-cancel'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: false,
+                      ),
+                      child: Text(rolesText(context, 'cancel')),
+                    ),
+                    StarBridgeActionButton(
+                      controlKey: const Key('roles-confirm-accept'),
+                      kind: StarBridgeActionKind.primary,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: true,
+                      ),
+                      child: Text(action),
+                    ),
+                  ],
+                ),
+                onRouteCreated: (opened) {
+                  route = opened;
+                  confirmations.add(opened);
+                },
+              ) ==
+              true &&
           mounted &&
           !model.invalidated;
     } finally {
@@ -121,7 +171,10 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
 
   Future<void> _close() async {
     if (await confirmLeave() && mounted && !widget.embedded) {
-      Navigator.pop(context);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+      );
     }
   }
 
@@ -164,27 +217,34 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
       for (final role in model.roles)
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: ListTile(
-            key: ValueKey('role-${role.key}'),
-            selected: role.key == model.selectedKey,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(6),
-              side: BorderSide(color: context.tokens.surfaces.panel.border),
+          child: StarBridgeActionRow(
+            controlKey: ValueKey('role-${role.key}'),
+            semanticLabel: role.name,
+            semanticSelected: role.key == model.selectedKey,
+            onActivate: busy ? null : (_, _) => model.select(role.key),
+            child: ListTile(
+              selected: role.key == model.selectedKey,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+                side: BorderSide(color: context.tokens.surfaces.panel.border),
+              ),
+              leading: StandardIcon(
+                role.system
+                    ? StandardIconSemantic.verifiedUser
+                    : StandardIconSemantic.badge,
+                color: _roleColor(role.color),
+              ),
+              title: Text(
+                role.name,
+                style: Theme.of(context).textTheme.bodyMedium,
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                softWrap: false,
+              ),
+              subtitle: Text(
+                '${role.system ? '${t('systemRole')} · ' : ''}${t('memberCount')}: ${role.memberCount}',
+              ),
             ),
-            leading: StandardIcon(
-              role.system ? StandardIconSemantic.verifiedUser : StandardIconSemantic.badge,
-              color: _roleColor(role.color),
-            ),
-            title: Text(
-              role.name,
-              style: Theme.of(context).textTheme.bodyMedium,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              '${role.system ? '${t('systemRole')} · ' : ''}${t('memberCount')}: ${role.memberCount}',
-            ),
-            onTap: busy ? null : () => model.select(role.key),
           ),
         ),
     ],
@@ -193,26 +253,35 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
     final role = model.selected;
     if (role == null) return const SizedBox.shrink();
     return ListView(
+      // Keep the floating input label and field-focus chrome within the
+      // existing editor viewport; no column or form ownership changes.
+      padding: const EdgeInsets.only(top: 8),
       children: [
-        TextField(
-          key: const ValueKey('role-name'),
-          style: Theme.of(context).textTheme.bodyMedium,
-          controller: name,
-          enabled: !busy,
-          maxLength: communityRoleNameLimit,
-          decoration: InputDecoration(labelText: t('roleName')),
-          onChanged: (value) => model.update(name: value),
+        StarBridgeFieldFrame(
+          builder: (_, focus) => TextField(
+            key: const ValueKey('role-name'),
+            focusNode: focus,
+            style: Theme.of(context).textTheme.bodyMedium,
+            controller: name,
+            enabled: !busy,
+            maxLength: communityRoleNameLimit,
+            decoration: InputDecoration(labelText: t('roleName')),
+            onChanged: (value) => model.update(name: value),
+          ),
         ),
         const SizedBox(height: 8),
-        TextField(
-          key: const ValueKey('role-description'),
-          style: Theme.of(context).textTheme.bodyMedium,
-          controller: description,
-          enabled: !busy,
-          maxLines: 2,
-          maxLength: communityRoleDescriptionLimit,
-          decoration: InputDecoration(labelText: t('roleDescription')),
-          onChanged: (value) => model.update(description: value),
+        StarBridgeFieldFrame(
+          builder: (_, focus) => TextField(
+            key: const ValueKey('role-description'),
+            focusNode: focus,
+            style: Theme.of(context).textTheme.bodyMedium,
+            controller: description,
+            enabled: !busy,
+            maxLines: 2,
+            maxLength: communityRoleDescriptionLimit,
+            decoration: InputDecoration(labelText: t('roleDescription')),
+            onChanged: (value) => model.update(description: value),
+          ),
         ),
         Text(t('roleColor')),
         Wrap(
@@ -229,18 +298,16 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
               '#C5D3DE',
               role.color,
             })
-              Semantics(
+              StarBridgeIconAction(
+                controlKey: ValueKey('role-color-$color'),
                 label: '${t('roleColor')} $color',
                 selected: role.color == color,
-                child: Tooltip(
-                  message: color,
-                  child: IconButton(
-                    onPressed: busy ? null : () => model.update(color: color),
-                    icon: StandardIcon(
-                      role.color == color ? StandardIconSemantic.checkCircle : StandardIconSemantic.circle,
-                      color: _roleColor(color),
-                    ),
-                  ),
+                onActivate: busy ? null : (_) => model.update(color: color),
+                icon: StandardIcon(
+                  role.color == color
+                      ? StandardIconSemantic.checkCircle
+                      : StandardIconSemantic.circle,
+                  color: _roleColor(color),
                 ),
               ),
           ],
@@ -258,18 +325,19 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
-          for (final id in group.value)
-            SwitchListTile(
-              key: ValueKey(id),
-              contentPadding: EdgeInsets.zero,
-              title: Text(t(id), style: Theme.of(context).textTheme.bodyMedium),
-              subtitle: id == 'broadcasts.publish'
-                  ? Text(t('broadcastUnavailable'))
-                  : null,
+          // Never shipped. Saved roles keep the id; nothing offers it.
+          for (final id in group.value.where((id) => id != 'broadcasts.publish'))
+            StarBridgeSwitch.tile(
+              controlKey: ValueKey(id),
+              label: t(id),
+              titleWidget: Text(
+                t(id),
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               value:
                   role.owner ||
                   role.permissions.any((value) => value.toLowerCase() == id),
-              onChanged: busy || role.owner || id == 'broadcasts.publish'
+              onChanged: busy || role.owner
                   ? null
                   : (value) => model.setPermission(id, value),
             ),
@@ -282,7 +350,11 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
   Widget build(BuildContext context) => PopScope(
     canPop: widget.embedded,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) unawaited(_close());
+      if (!didPop) {
+        unawaited(
+          runStarBridgeActivation<void>(InteractionSource.keyboard, _close),
+        );
+      }
     },
     child: CommunityEditorSurface(
       embedded: widget.embedded,
@@ -303,9 +375,12 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
                     ),
                   ),
                   if (!widget.embedded)
-                    IconButton(
-                      onPressed: model.submitting || confirming ? null : _close,
-                      tooltip: t('close'),
+                    StarBridgeIconAction(
+                      controlKey: const Key('roles-close'),
+                      onActivate: model.submitting || confirming
+                          ? null
+                          : (_) => _close(),
+                      label: t('close'),
                       icon: const StandardIcon(StandardIconSemantic.close),
                     ),
                 ],
@@ -320,46 +395,69 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed:
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-add'),
+                    onActivate:
                         busy ||
                             model.snapshot == null ||
                             model.roles.length >= 512
                         ? null
-                        : () => model.add(
+                        : (_) => model.add(
                             '${t('newName').characters.take(communityRoleNameLimit - '${model.roles.length + 1}'.length - 1)} ${model.roles.length + 1}',
                           ),
-                    icon: const StandardIcon(StandardIconSemantic.add),
-                    label: Text(t('newRole')),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StandardIcon(StandardIconSemantic.add),
+                        const SizedBox(width: 8),
+                        Text(t('newRole')),
+                      ],
+                    ),
                   ),
-                  OutlinedButton(
-                    onPressed:
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-copy'),
+                    onActivate:
                         busy || model.selected == null || model.selected!.owner
                         ? null
-                        : () => model.add(
+                        : (_) => model.add(
                             '${model.selected!.name.characters.take(communityRoleNameLimit - t('copySuffix').characters.length - 1)} ${t('copySuffix')}',
                             copySelected: true,
                           ),
                     child: Text(t('copyRole')),
                   ),
-                  OutlinedButton(
-                    onPressed:
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-delete'),
+                    tone: ActionTone.danger,
+                    onActivate:
                         busy ||
                             model.selected == null ||
                             model.selected!.system ||
                             model.selected!.owner
                         ? null
-                        : _delete,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.error,
-                    ),
+                        : (_) => _delete(),
                     child: Text(t('deleteRole')),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
               if (model.loading || model.submitting)
-                const LinearProgressIndicator(),
+                KeyedSubtree(
+                  key: ValueKey((
+                    model.submitting,
+                    model.submitting ? _saving.revision : _reading.revision,
+                  )),
+                  child: SocialReadActivity(
+                    key: ValueKey(
+                      model.submitting
+                          ? 'roles-save-activity'
+                          : 'roles-read-activity',
+                    ),
+                    source: model.submitting ? _saving.source : _reading.source,
+                    opening: !model.submitting && _reading.opening,
+                    label: t(model.submitting ? 'saving' : 'loading'),
+                    height: 4,
+                  ),
+                ),
               Expanded(
                 child: model.snapshot == null
                     ? Center(
@@ -414,28 +512,36 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog> with Communi
                           : 'clean',
                     ),
                   ),
-                  TextButton(
-                    onPressed:
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-reload'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate:
                         model.loading ||
                             model.submitting ||
                             confirming ||
                             model.invalidated
                         ? null
-                        : _reload,
+                        : (_) => _reload(),
                     child: Text(t('reloadRoles')),
                   ),
-                  TextButton(
-                    onPressed: busy || !model.dirty
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-discard'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: busy || !model.dirty
                         ? null
-                        : () {
+                        : (_) {
                             model.discard();
                             shownKey = null;
                             _changed();
                           },
                     child: Text(t('discard')),
                   ),
-                  FilledButton(
-                    onPressed: confirming || !model.canSave ? null : _save,
+                  StarBridgeActionButton(
+                    controlKey: const Key('roles-save'),
+                    kind: StarBridgeActionKind.primary,
+                    onActivate: confirming || !model.canSave
+                        ? null
+                        : (_) => _save(),
                     child: Text(t('save')),
                   ),
                 ],

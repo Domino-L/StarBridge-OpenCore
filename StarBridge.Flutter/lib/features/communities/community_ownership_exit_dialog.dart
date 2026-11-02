@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,17 @@ import '../../app/localization/app_strings.dart';
 import '../../app/shell/chrome/presence_color.dart';
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../common/user_avatar_menu.dart';
+import '../common/social_read_activity.dart';
 import 'community_ownership_exit_controller.dart';
 import 'community_ownership_exit_copy.dart';
 import 'community_ownership_exit_port.dart';
@@ -47,10 +58,18 @@ class _CommunityOwnershipExitDialogState
   String? organizationName;
   bool invalidated = false;
   String invalidationError = 'identityUnavailable';
+  late final SocialReadActivityBinding _directoryActivity;
+  SocialReadActivityBinding? _previewActivity, _submitActivity;
   String t(String key) => ownershipExitText(context, key);
   @override
   void initState() {
     super.initState();
+    _directoryActivity = SocialReadActivityBinding(
+      directory,
+      () => directory.busy,
+      initialRead: true,
+      phaseIdentity: () => directory.readEpoch,
+    );
     directory.addListener(_changed);
     subscriptions.add(widget.port.invalidations.listen((_) => _invalidate()));
     subscriptions.add(
@@ -115,7 +134,19 @@ class _CommunityOwnershipExitDialogState
       widget.port,
       widget.targetRef,
       member.memberRef,
-    )..addListener(_changed);
+    );
+    final next = confirmation!;
+    _previewActivity = SocialReadActivityBinding(
+      next,
+      () => next.loading,
+      initialRead: false,
+    );
+    _submitActivity = SocialReadActivityBinding(
+      next,
+      () => next.submitting,
+      initialRead: false,
+    );
+    next.addListener(_changed);
     unawaited(confirmation!.load());
     setState(() {});
   }
@@ -129,6 +160,7 @@ class _CommunityOwnershipExitDialogState
         invalidated) {
       return;
     }
+    _clearConfirmationActivity();
     model.removeListener(_changed);
     model.dispose();
     confirmation = null;
@@ -139,6 +171,8 @@ class _CommunityOwnershipExitDialogState
 
   @override
   void dispose() {
+    _directoryActivity.dispose();
+    _clearConfirmationActivity();
     for (final sub in subscriptions) {
       unawaited(sub.cancel());
     }
@@ -148,6 +182,12 @@ class _CommunityOwnershipExitDialogState
     confirmation?.dispose();
     search.dispose();
     super.dispose();
+  }
+
+  void _clearConfirmationActivity() {
+    _previewActivity?.dispose();
+    _submitActivity?.dispose();
+    _previewActivity = _submitActivity = null;
   }
 
   Widget _candidates() {
@@ -163,23 +203,44 @@ class _CommunityOwnershipExitDialogState
       children: [
         Text(t('help')),
         const SizedBox(height: 12),
-        TextField(
-          controller: search,
-          maxLength: 128,
-          enabled: !directory.busy && widget.port.ownershipExitAvailable,
-          onSubmitted: (value) => directory.load(search: value),
-          decoration: InputDecoration(
-            labelText: t('search'),
-            suffixIcon: IconButton(
-              tooltip: t('search'),
-              icon: const StandardIcon(StandardIconSemantic.search),
-              onPressed: directory.busy || !widget.port.ownershipExitAvailable
-                  ? null
-                  : () => directory.load(search: search.text),
+        StarBridgeFieldFrame(
+          builder: (_, focus) => TextField(
+            key: const Key('ownership-exit-search'),
+            focusNode: focus,
+            controller: search,
+            maxLength: 128,
+            enabled: !directory.busy && widget.port.ownershipExitAvailable,
+            onSubmitted: (value) => unawaited(
+              runStarBridgeActivation<void>(
+                InteractionSource.keyboard,
+                () => directory.load(search: value),
+              ),
+            ),
+            decoration: InputDecoration(
+              labelText: t('search'),
+              suffixIcon: StarBridgeIconAction(
+                controlKey: const Key('ownership-exit-search-submit'),
+                label: t('search'),
+                icon: const StandardIcon(StandardIconSemantic.search),
+                onActivate:
+                    directory.busy || !widget.port.ownershipExitAvailable
+                    ? null
+                    : (_) => directory.load(search: search.text),
+              ),
             ),
           ),
         ),
-        if (directory.busy) const LinearProgressIndicator(),
+        if (directory.busy)
+          KeyedSubtree(
+            key: ValueKey(_directoryActivity.revision),
+            child: SocialReadActivity(
+              key: const ValueKey('exit-directory-activity'),
+              source: _directoryActivity.source,
+              opening: _directoryActivity.opening,
+              label: t('activityDirectory'),
+              height: 4,
+            ),
+          ),
         if (directory.error != null)
           Text(
             t(directory.error!),
@@ -208,50 +269,68 @@ class _CommunityOwnershipExitDialogState
                 border: Border.all(color: context.tokens.surfaces.panel.border),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: ListTile(
-                onTap: () => _choose(page, member),
-                leading: UserAvatarMenu(
-                  name: member.displayName,
-                  avatarBytes: directory.image(member.memberRef),
-                  target: UserTarget.community(widget.targetRef, member.memberRef, query: member.gameName),
-                  actions: [
-                    AvatarMenuAction(t('choose'), () => _choose(page, member)),
-                  ],
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: CommunityWorkspaceImage(
-                      bytes: directory.image(member.memberRef),
-                      loading: directory.imageLoading(member.memberRef),
-                      loadFailed: directory.imageFailed(member.memberRef),
-                      icon: StandardIconSemantic.person,
+              child: StarBridgeActionRow(
+                controlKey: ValueKey('successor-action-${member.memberRef}'),
+                semanticLabel: '${t('choose')} · ${member.displayName}',
+                onActivate: (_, _) => _choose(page, member),
+                child: ListTile(
+                  leading: UserAvatarMenu(
+                    name: member.displayName,
+                    avatarBytes: directory.image(member.memberRef),
+                    target: UserTarget.community(
+                      widget.targetRef,
+                      member.memberRef,
+                      query: member.gameName,
+                    ),
+                    actions: [
+                      AvatarMenuAction(
+                        t('choose'),
+                        () => _choose(page, member),
+                      ),
+                    ],
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CommunityWorkspaceImage(
+                        bytes: directory.image(member.memberRef),
+                        loading: directory.imageLoading(member.memberRef),
+                        loadFailed: directory.imageFailed(member.memberRef),
+                        icon: StandardIconSemantic.person,
+                      ),
                     ),
                   ),
+                  title: Text(
+                    member.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.fade,
+                    softWrap: false,
+                  ),
+                  subtitle: _candidateDetails(member),
+                  trailing: const StandardIcon(
+                    StandardIconSemantic.chevronRight,
+                  ),
                 ),
-                title: Text(
-                  member.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: _candidateDetails(member),
-                trailing: const StandardIcon(StandardIconSemantic.chevronRight),
               ),
             ),
           Wrap(
             spacing: 8,
             children: [
-              TextButton(
-                onPressed: directory.busy || page.offset == 0
+              StarBridgeActionButton(
+                controlKey: const Key('ownership-exit-previous'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: directory.busy || page.offset == 0
                     ? null
-                    : () => directory.load(
+                    : (_) => directory.load(
                         offset: (page.offset - 20).clamp(0, page.matchedCount),
                       ),
                 child: Text(t('previous')),
               ),
-              TextButton(
-                onPressed: directory.busy || page.next == null
+              StarBridgeActionButton(
+                controlKey: const Key('ownership-exit-next'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: directory.busy || page.next == null
                     ? null
-                    : () => directory.load(offset: page.next!),
+                    : (_) => directory.load(offset: page.next!),
                 child: Text(t('next')),
               ),
             ],
@@ -273,7 +352,8 @@ class _CommunityOwnershipExitDialogState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (member.gameName.isNotEmpty && member.gameName != member.displayName)
-          Text(member.gameName, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(member.gameName, maxLines: 1, overflow: TextOverflow.fade,
+          softWrap: false),
         Wrap(
           spacing: 8,
           children: [
@@ -281,7 +361,8 @@ class _CommunityOwnershipExitDialogState
               Text(
                 member.roleTitle,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
               ),
             Text(
               key == 'paused'
@@ -299,11 +380,24 @@ class _CommunityOwnershipExitDialogState
 
   Widget _confirm(CommunityOwnershipExitController model) {
     final successor = model.snapshot?.successor;
+    final activity = model.loading ? _previewActivity! : _submitActivity!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (model.loading || model.submitting) const LinearProgressIndicator(),
+        if (model.loading || model.submitting)
+          KeyedSubtree(
+            key: ValueKey((model, model.loading, activity.revision)),
+            child: SocialReadActivity(
+              key: ValueKey(
+                model.loading ? 'exit-preview-activity' : 'exit-write-activity',
+              ),
+              source: activity.source,
+              opening: false,
+              label: t(model.loading ? 'activityPreview' : 'activitySending'),
+              height: 4,
+            ),
+          ),
         if (successor != null) ...[
           Text(
             successor.displayName,
@@ -341,7 +435,10 @@ class _CommunityOwnershipExitDialogState
     return PopScope(
       canPop: model?.submitting != true,
       child: AlertDialog(
-        icon: StandardIcon(StandardIconSemantic.logout, color: context.tokens.colors.warning),
+        icon: StandardIcon(
+          StandardIconSemantic.logout,
+          color: context.tokens.colors.warning,
+        ),
         title: Text(t(model == null ? 'choose' : 'title')),
         content: SizedBox(
           width: 520,
@@ -354,47 +451,59 @@ class _CommunityOwnershipExitDialogState
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: model?.submitting == true
+          StarBridgeActionButton(
+            controlKey: const Key('ownership-exit-cancel'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: model?.submitting == true
                 ? null
-                : () => Navigator.pop(context, false),
+                : (source) => dismissStarBridgeDialog(
+                    context,
+                    source: source,
+                    result: false,
+                  ),
             child: Text(t(closed ? 'close' : 'cancel')),
           ),
           if (!closed && model != null && !model.requiresRetryConfirmation)
-            TextButton(
-              onPressed: model.submitting ? null : _back,
+            StarBridgeActionButton(
+              controlKey: const Key('ownership-exit-back'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: model.submitting ? null : (_) => _back(),
               child: Text(t('back')),
             ),
           if (!closed &&
               (model?.error != null ||
                   directory.error != null ||
                   model?.requiresRetryConfirmation == true))
-            TextButton(
-              onPressed:
+            StarBridgeActionButton(
+              controlKey: const Key('ownership-exit-reload'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate:
                   model?.loading == true ||
                       model?.submitting == true ||
                       directory.busy
                   ? null
-                  : () => model != null
+                  : (_) => model != null
                         ? model.load()
                         : directory.load(search: search.text),
               child: Text(t('reload')),
             ),
           if (model != null)
-            FilledButton(
-              style: semanticActionStyle(
-                context,
-                ActionTone.warning,
-                emphasis: ActionEmphasis.filled,
-              ),
-              onPressed: closed || !model.canLeave
+            StarBridgeActionButton(
+              controlKey: const Key('ownership-exit-confirm'),
+              kind: StarBridgeActionKind.primary,
+              tone: ActionTone.warning,
+              onActivate: closed || !model.canLeave
                   ? null
-                  : () async {
+                  : (source) async {
                       await model.leave(
                         confirmUncertainRetry: model.requiresRetryConfirmation,
                       );
                       if (mounted && !invalidated && model.left) {
-                        Navigator.pop(this.context, true);
+                        dismissStarBridgeDialog(
+                          this.context,
+                          source: source,
+                          result: true,
+                        );
                       }
                     },
               child: Text(

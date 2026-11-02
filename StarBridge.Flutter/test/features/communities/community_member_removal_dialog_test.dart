@@ -99,7 +99,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         final id = '1'.padLeft(32, '0');
-        final action = find.byKey(ValueKey('remove-member-$id'));
+        final action = find.byKey(ValueKey<Object>('remove-member-$id'));
         await openMemberActions(tester, id);
         await tester.scrollUntilVisible(
           action,
@@ -108,13 +108,16 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(action.hitTestable(), findsOneWidget);
-        expect(find.byKey(ValueKey('assign-member-$id')), findsOneWidget);
+        expect(
+          find.byKey(ValueKey<Object>('assign-member-$id')),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await tester.tap(action);
         await tester.pumpAndSettle();
         await tester.tap(find.byType(FilledButton));
         await tester.pumpAndSettle();
-        expect(find.byKey(ValueKey('remove-member-$id')), findsNothing);
+        expect(find.byKey(ValueKey<Object>('remove-member-$id')), findsNothing);
         expect(
           (await port.readWorkspace(
             '00000000000000000000000000000002',
@@ -255,7 +258,9 @@ void main() {
           200,
           scrollable: find.byType(Scrollable).first,
         );
-        final action = find.byKey(ValueKey('remove-member-${'b' * 32}'));
+        final action = find.byKey(
+          ValueKey<Object>('remove-member-${'b' * 32}'),
+        );
         await openMemberActions(tester, 'b' * 32);
         final allowed = access == 'owner' || access == 'manager';
         expect(action, allowed ? findsOneWidget : findsNothing);
@@ -302,7 +307,7 @@ void main() {
     };
     await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
     await tester.pumpAndSettle();
-    final action = find.byKey(ValueKey('remove-member-${'b' * 32}'));
+    final action = find.byKey(ValueKey<Object>('remove-member-${'b' * 32}'));
     await openMemberActions(tester, 'b' * 32);
     await tester.scrollUntilVisible(
       action,
@@ -322,10 +327,7 @@ void main() {
       ),
       findsNothing,
     );
-    expect(
-      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
-      isNull,
-    );
+    expect(find.byType(CommunityMemberRemovalDialog), findsNothing);
     expect(port.writes, 0);
   });
   testWidgets('capture real removal confirmation', (tester) async {

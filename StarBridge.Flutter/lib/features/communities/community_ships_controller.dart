@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import 'communities_module.dart';
 import 'community_ships_port.dart';
+import 'community_ship_avatar_access.dart';
+import 'community_ship_statistics.dart';
 import 'community_workspace_port.dart';
 import 'community_avatar_cache.dart';
 
@@ -14,6 +16,7 @@ final class CommunityShipsController extends ChangeNotifier {
     this.targetRef, {
     CommunityShipQuery? initialQuery,
     this.mediaPort,
+    this.avatarAccess,
     CommunityAvatarCache? avatars,
     DateTime Function()? now,
   }) : query = initialQuery ?? CommunityShipQuery(),
@@ -35,6 +38,7 @@ final class CommunityShipsController extends ChangeNotifier {
   }
   final CommunityShipsPort port;
   final CommunityWorkspacePort? mediaPort;
+  final CommunityShipAvatarAccess? avatarAccess;
   final String targetRef;
   final DateTime Function() _now;
   DateTime? _lastSuccessfulRead;
@@ -55,11 +59,61 @@ final class CommunityShipsController extends ChangeNotifier {
   final CommunityAvatarCache avatars;
   final bool _ownsAvatars;
   final _avatarVersions = <String, String?>{};
+
+  /// Owners with an avatar across the whole inventory. The owner view and the
+  /// summary strip show people whose ships are not on the page read last.
+  final _inventoryOwners = <String, String?>{};
   late final StreamSubscription<void> _subscription;
   StreamSubscription<void>? _publicationSubscription;
   int _publicationVersion = 0;
   CommunityShipQuery query;
   CommunityShipsPage? page;
+
+  /// Every page read for the current query, in order. They outlive the panel
+  /// with this controller, so returning shows them all and not just the last.
+  List<CommunityShipsPage> get pages => List.unmodifiable(_pages);
+  final _pages = <CommunityShipsPage>[];
+
+  void _accumulate(CommunityShipsPage read) {
+    if (_pages.isEmpty ||
+        read.offset == 0 ||
+        read.query != _pages.last.query ||
+        read.targetRef != _pages.last.targetRef) {
+      _pages
+        ..clear()
+        ..add(read);
+      return;
+    }
+    final at = _pages.indexWhere((p) => p.offset == read.offset);
+    if (at >= 0) {
+      _pages[at] = read;
+    } else if (read.offset == _pages.last.next) {
+      _pages.add(read);
+    } else {
+      _pages
+        ..clear()
+        ..add(read);
+    }
+  }
+
+  /// The complete inventory, kept with the pages. The first page's revision
+  /// says on the next visit whether it must be read again.
+  CommunityShipStatistics? _statistics;
+  String? _statisticsCulture;
+  CommunityShipStatistics? get statistics => _statistics;
+  CommunityShipStatistics? statisticsFor(String culture) =>
+      _statisticsCulture == culture ? _statistics : null;
+  void holdStatistics(CommunityShipStatistics? value, String culture) {
+    _statistics = value;
+    _statisticsCulture = culture;
+  }
+
+  /// Presentation memory for the ships panel (user 2026-10-29, option D):
+  /// the chosen view and the ship open in the side column survive leaving
+  /// the tab, like the page itself.
+  String viewMode = 'cards';
+  String? selectedShipRef;
+  bool selectionIsDefault = false;
   String? error;
   bool busy = false, invalidated = false;
   bool refreshing = false;
@@ -70,15 +124,22 @@ final class CommunityShipsController extends ChangeNotifier {
   bool avatarLoading(String reference) => _pendingAvatars.contains(reference);
   Uint8List? avatar(String reference) => _avatars[reference];
   int _epoch = 0;
+
+  /// Retires a pending explicit scope refresh when an intervening read or invalidation wins.
+  int get readScopeRevision => _epoch;
   int? _mediaEpoch;
+  int _mediaReads = 0;
   bool _closed = false;
 
   void invalidate() {
     if (_closed) return;
     _epoch++;
     page = null;
+    _pages.clear();
+    _statistics = null;
     _avatars.clear();
     _avatarVersions.clear();
+    _inventoryOwners.clear();
     avatars.clear();
     _pendingAvatars.clear();
     _failedAvatars.clear();
@@ -106,9 +167,14 @@ final class CommunityShipsController extends ChangeNotifier {
     refreshing = false;
     query = selection ?? query;
     final expectedQuery = query;
+    // Loading a later page of the same query keeps the rows already on
+    // screen, so their owners' avatars stay too.
+    final sameQuery =
+        page != null && (selection == null || selection == page!.query);
     if (!keepPage) {
       page = null;
-      _avatars.clear();
+      // Another filter shows the same owners: keep what is drawn, no reread.
+      if (sameQuery && offset == 0) _avatars.clear();
     }
     _pendingAvatars.clear();
     mediaFailed = false;
@@ -130,6 +196,7 @@ final class CommunityShipsController extends ChangeNotifier {
         throw const CommunityFailure('dataInvalid');
       }
       page = result;
+      _accumulate(result);
       _lastSuccessfulRead = publicationVersion == _publicationVersion
           ? _now()
           : null;
@@ -141,6 +208,8 @@ final class CommunityShipsController extends ChangeNotifier {
       error = e is CommunityFailure ? e.code : 'unavailable';
       if (error != 'unavailable') {
         page = null;
+        _pages.clear();
+        _statistics = null;
         _avatars.clear();
       }
       _pendingAvatars.clear();
@@ -210,21 +279,31 @@ final class CommunityShipsController extends ChangeNotifier {
       final lastOffset = first.matchedCount == 0
           ? 0
           : ((first.matchedCount - 1) ~/ 20) * 20;
-      final offset = previous.offset.clamp(0, lastOffset);
-      final next = offset == 0
-          ? first
-          : await port.readShips(
-              targetRef,
-              query: expectedQuery,
-              offset: offset,
-              revision: first.revision,
-            );
-      if (!current()) return;
-      validate(next, offset, first.revision);
-      if (next.totalCount != first.totalCount ||
-          next.matchedCount != first.matchedCount) {
-        throw const CommunityFailure('shipsChanged');
+      final held = _pages.isEmpty ? previous.offset : _pages.last.offset;
+      final offset = held.clamp(0, lastOffset);
+      // The rows on screen stay until every page held has its new answer, so
+      // one list never mixes two revisions.
+      final fresh = [first];
+      while (fresh.last.offset < offset) {
+        final at = fresh.last.next!;
+        final next = await port.readShips(
+          targetRef,
+          query: expectedQuery,
+          offset: at,
+          revision: first.revision,
+        );
+        if (!current()) return;
+        validate(next, at, first.revision);
+        if (next.totalCount != first.totalCount ||
+            next.matchedCount != first.matchedCount) {
+          throw const CommunityFailure('shipsChanged');
+        }
+        fresh.add(next);
       }
+      final next = fresh.last;
+      _pages
+        ..clear()
+        ..addAll(fresh);
       page = next;
       _pendingAvatars.clear();
       mediaFailed = false;
@@ -235,6 +314,8 @@ final class CommunityShipsController extends ChangeNotifier {
       error = e is CommunityFailure ? e.code : 'unavailable';
       if (error != 'unavailable') {
         page = null;
+        _pages.clear();
+        _statistics = null;
         _avatars.clear();
       }
       _pendingAvatars.clear();
@@ -254,18 +335,54 @@ final class CommunityShipsController extends ChangeNotifier {
     }
   }
 
+  /// The complete inventory's owners, read while they are still authorized.
+  void showOwners(Iterable<CommunitySharedShip> ships) {
+    if (_closed) return;
+    _inventoryOwners
+      ..clear()
+      ..addAll({
+        for (final ship in ships)
+          if (ship.ownerHasAvatar) ship.ownerMemberRef: ship.ownerAvatarVersion,
+      });
+    final shown = page;
+    // A read in progress picks them up when its page arrives.
+    if (invalidated || busy || shown == null) return;
+    unawaited(_loadAvatars(shown, _epoch).catchError((Object _) {}));
+  }
+
   Future<void> _loadAvatars(CommunityShipsPage result, int epoch) async {
     _mediaEpoch = epoch;
+    _mediaReads++;
     try {
       await _readAvatars(result, epoch);
     } finally {
-      if (_mediaEpoch == epoch) _mediaEpoch = null;
+      // The inventory can start a read beside the page's own.
+      if (--_mediaReads == 0) _mediaEpoch = null;
     }
   }
 
   Future<void> _readAvatars(CommunityShipsPage result, int epoch) async {
+    final access = avatarAccess;
     final media = mediaPort;
-    if (media == null) return;
+    // Null configuration preserves the existing community adapter. An explicit
+    // empty access grants nothing and must never fall back to that adapter.
+    final CommunityShipAvatarReader? readAvatar = access == null
+        ? media == null
+              ? null
+              : (
+                  String target,
+                  String member, {
+                  required int offset,
+                  String? version,
+                }) => media.readMedia(
+                  target,
+                  'avatar',
+                  memberRef: member,
+                  offset: offset,
+                  version: version,
+                )
+        : access.read;
+    if (readAvatar == null) return;
     void current() {
       if (_closed || invalidated || epoch != _epoch) {
         throw const CommunityFailure('identityUnavailable');
@@ -273,14 +390,22 @@ final class CommunityShipsController extends ChangeNotifier {
     }
 
     current();
-    final references = result.ships
-        .where((s) => s.ownerHasAvatar)
-        .map((s) => s.ownerMemberRef)
-        .toSet();
+    // A later page joins the rows above it on screen, and a page is the newer
+    // answer for the owners it shows.
     final versions = {
-      for (final ship in result.ships)
-        ship.ownerMemberRef: ship.ownerAvatarVersion,
+      if (result.offset > 0) ..._avatarVersions,
+      ..._inventoryOwners,
     };
+    final onPage = <String>{};
+    for (final ship in result.ships) {
+      onPage.add(ship.ownerMemberRef);
+      if (ship.ownerHasAvatar) {
+        versions[ship.ownerMemberRef] = ship.ownerAvatarVersion;
+      } else {
+        versions.remove(ship.ownerMemberRef);
+      }
+    }
+    final references = versions.keys.toSet();
     _avatars.removeWhere((ref, _) => _avatarVersions[ref] != versions[ref]);
     _avatarVersions
       ..clear()
@@ -299,13 +424,8 @@ final class CommunityShipsController extends ChangeNotifier {
           ref,
           versions[ref],
           () => assembleCommunityMedia(
-            (offset, version) => media.readMedia(
-              targetRef,
-              'avatar',
-              memberRef: ref,
-              offset: offset,
-              version: version,
-            ),
+            (offset, version) =>
+                readAvatar(targetRef, ref, offset: offset, version: version),
             'avatar',
             memberRef: ref,
             checkCurrent: () {
@@ -320,7 +440,10 @@ final class CommunityShipsController extends ChangeNotifier {
         if (bytes != null) _avatars[ref] = bytes;
       } catch (e) {
         current();
-        if (e is CommunityFailure &&
+        // An owner off this page has no row to invalidate: the reference may
+        // simply have lapsed, and the page's own reads stay authoritative.
+        if (onPage.contains(ref) &&
+            e is CommunityFailure &&
             const {
               'notAllowed',
               'identityUnavailable',
@@ -328,7 +451,7 @@ final class CommunityShipsController extends ChangeNotifier {
             }.contains(e.code)) {
           rethrow;
         }
-        mediaFailed = true;
+        if (onPage.contains(ref)) mediaFailed = true;
         _failedAvatars.add(ref);
       } finally {
         if (!_closed && epoch == _epoch) _pendingAvatars.remove(ref);
@@ -359,6 +482,8 @@ final class CommunityShipsController extends ChangeNotifier {
     if (_ownsAvatars) avatars.dispose();
     _epoch++;
     page = null;
+    _pages.clear();
+    _statistics = null;
     _avatars.clear();
     _pendingAvatars.clear();
     unawaited(_subscription.cancel());

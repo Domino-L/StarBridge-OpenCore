@@ -8,6 +8,9 @@ using System.Text.Json;
 internal sealed class ScmProfileCacheStore
 {
     private const string CacheDirectoryName = "scm-profile-cache";
+    private const int MaximumBytes = 64 * 1024;
+    private const int MaximumTextCharacters = 8192;
+    private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 8 };
     private readonly string _cacheDirectory;
 
     internal ScmProfileCacheStore(string? configDirectory = null)
@@ -27,18 +30,26 @@ internal sealed class ScmProfileCacheStore
         try
         {
             var path = ResolvePath(route);
-            if (!File.Exists(path))
-            {
-                return null;
-            }
-
-            var cached = JsonSerializer.Deserialize<ScmCachedProfileContract>(File.ReadAllText(path));
+            CheckPath(path, directory: false);
+            // Readers retain the last complete file while a writer replaces it.
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (input.Length is <= 0 or > MaximumBytes) return null;
+            var bytes = new byte[(int)input.Length];
+            input.ReadExactly(bytes);
+            using var document = JsonDocument.Parse(bytes, DocumentOptions);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+                if (!names.Add(property.Name)) return null;
+            var cached = document.RootElement.Deserialize<ScmCachedProfileContract>();
             if (!IsForRoute(cached, route))
             {
                 return null;
             }
 
             _ = cached!.ToOfflineProfile();
+            CheckTextBudget(cached.Environment, cached.Authority, cached.Subject, cached.DisplayName,
+                cached.AvatarUrl, cached.Locale, cached.TimeZone);
             return cached;
         }
         catch (Exception exception) when (exception is IOException or
@@ -56,9 +67,12 @@ internal sealed class ScmProfileCacheStore
         {
             throw new InvalidOperationException("Cannot cache an SCM profile without an authenticated route.");
         }
+        if (cachedAtUtc == default) throw new InvalidDataException("Profile cache requires an observation time.");
 
+        CheckTextBudget(route.Environment, route.Authority, profile.Subject, profile.DisplayName,
+            profile.AvatarUrl, profile.Locale, profile.TimeZone);
         var normalized = profile.Normalize();
-        if (!normalized.Subject.Equals(route.Subject, StringComparison.OrdinalIgnoreCase))
+        if (!normalized.Subject.Equals(route.Subject, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("SCM profile subject does not match the active account route.");
         }
@@ -68,11 +82,31 @@ internal sealed class ScmProfileCacheStore
             route.Authority,
             normalized,
             cachedAtUtc);
-        Directory.CreateDirectory(_cacheDirectory);
         var destination = ResolvePath(route);
-        var temporary = destination + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(cached));
-        File.Move(temporary, destination, overwrite: true);
+        CheckPath(_cacheDirectory, directory: true);
+        Directory.CreateDirectory(_cacheDirectory);
+        using var writer = AcquireWriter(destination);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(cached);
+        if (bytes.Length > MaximumBytes) throw new InvalidDataException("Profile cache exceeds its byte budget.");
+        var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var created = false;
+        try
+        {
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write,
+                FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                created = true;
+                output.Write(bytes);
+                output.Flush(flushToDisk: true);
+            }
+            CheckPath(destination, directory: false);
+            if (File.Exists(destination)) File.Replace(temporary, destination, null);
+            else File.Move(temporary, destination);
+        }
+        finally
+        {
+            if (created) File.Delete(temporary);
+        }
     }
 
     internal bool Clear(AccountRouteIdentity route)
@@ -83,13 +117,22 @@ internal sealed class ScmProfileCacheStore
         }
 
         var path = ResolvePath(route);
-        if (!File.Exists(path))
+        CheckPath(_cacheDirectory, directory: true);
+        if (!Directory.Exists(_cacheDirectory)) return false;
+        using var writer = AcquireWriter(path);
+        var removed = DeleteIfPresent(path);
+        // Recover only this namespace's former fixed name and GUID operation files.
+        // The shared writer lease prevents deleting another current writer's data.
+        removed |= DeleteIfPresent(path + ".tmp");
+        var prefix = Path.GetFileName(path) + ".";
+        foreach (var candidate in Directory.EnumerateFiles(_cacheDirectory, prefix + "*.tmp"))
         {
-            return false;
+            var name = Path.GetFileName(candidate);
+            var operation = name[prefix.Length..^4];
+            if (operation.Length == 32 && Guid.TryParseExact(operation, "N", out _))
+                removed |= DeleteIfPresent(candidate);
         }
-
-        File.Delete(path);
-        return true;
+        return removed;
     }
 
     private string ResolvePath(AccountRouteIdentity route) =>
@@ -98,7 +141,49 @@ internal sealed class ScmProfileCacheStore
     private static bool IsForRoute(ScmCachedProfileContract? cached, AccountRouteIdentity route) =>
         cached is not null &&
         cached.SchemaVersion == ScmCachedProfileContract.CurrentSchemaVersion &&
-        cached.Environment.Equals(route.Environment, StringComparison.OrdinalIgnoreCase) &&
-        cached.Authority.Equals(route.Authority, StringComparison.OrdinalIgnoreCase) &&
-        cached.Subject.Equals(route.Subject, StringComparison.OrdinalIgnoreCase);
+        cached.CachedAtUtc != default &&
+        string.Equals(cached.Environment, route.Environment, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(cached.Authority, route.Authority, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(cached.Subject, route.Subject, StringComparison.Ordinal);
+
+    private static FileStream AcquireWriter(string path)
+    {
+        CheckPath(path, directory: false);
+        CheckPath(path + ".lock", directory: false);
+        // Fail fast: private disk contention must not queue a foreground network read.
+        return new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    }
+
+    private static bool DeleteIfPresent(string path)
+    {
+        CheckPath(path, directory: false);
+        if (!File.Exists(path)) return false;
+        File.Delete(path);
+        return true;
+    }
+
+    private static void CheckTextBudget(params string?[] values)
+    {
+        long characters = 0;
+        foreach (var value in values) characters += value?.Length ?? 0;
+        if (characters > MaximumTextCharacters) throw new InvalidDataException("Profile cache exceeds its text budget.");
+    }
+
+    private static void CheckPath(string path, bool directory)
+    {
+        var full = Path.GetFullPath(path);
+        for (var node = full; node is not null; node = Path.GetDirectoryName(node))
+        {
+            try
+            {
+                var attributes = File.GetAttributes(node);
+                var expectedDirectory = directory || !string.Equals(node, full, StringComparison.OrdinalIgnoreCase);
+                if ((attributes & FileAttributes.ReparsePoint) != 0 ||
+                    ((attributes & FileAttributes.Directory) != 0) != expectedDirectory)
+                    throw new IOException("Invalid profile cache path.");
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
+    }
 }

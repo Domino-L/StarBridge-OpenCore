@@ -10,6 +10,8 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import 'account_view_components.dart';
 import 'account_compatibility_card.dart';
 import 'legacy_profile_migration.dart';
+import 'legacy_profile_import_dialog.dart';
+import '../personal_profile/personal_profile_collaboration.dart';
 
 class LegacyProfileMigrationCard extends StatefulWidget {
   const LegacyProfileMigrationCard({required this.port, super.key});
@@ -50,15 +52,25 @@ class _LegacyProfileMigrationCardState
     } on Object {
       view = const LegacyProfileMigrationView('sourceUnavailable');
     }
+    // A pre-selection migration ticket can contain a whole-profile replacement.
+    // Never label or confirm it as a selected module import.
+    if ((view.state == 'previewed' || view.state == 'localApplyRequired') &&
+        (view.choices == null ||
+            (view.choices?.version == 2
+                ? view.presentation == null
+                : view.selectedContent == null))) {
+      view = const LegacyProfileMigrationView('previewRequired');
+    }
     if (!mounted) return;
     setState(() {
       _busy = false;
       _view = view;
-      if (view.state == 'previewed') {
+      if (view.state == 'previewed' || view.state == 'localApplyRequired') {
         _preview = view;
         _ownerConfirmed = false;
         _replaceExisting = false;
-      } else if (view.state != 'sourceUnavailable') {
+      } else if (view.state != 'sourceUnavailable' &&
+          view.state != 'localSaveUnavailable') {
         _preview = null;
       }
     });
@@ -73,13 +85,26 @@ class _LegacyProfileMigrationCardState
   );
 
   Future<void> _requestPreview() async {
+    final previous = _view.state == 'completed' ? _view.previewId : null;
     final credential = await showLegacyAccountCredentialDialog(
       context,
       forMigration: true,
     );
     if (!mounted || credential == null) return;
+    final selection = await showLegacyProfileImportDialog(context);
+    if (!mounted || selection == null) return;
     await _run(
-      () => widget.port.previewMigration(credential: credential),
+      () => widget.port.previewMigration(
+        credential: credential,
+        selection: LegacyProfileImportSelection(
+          modules: selection.modules,
+          replaceModules: selection.replaceModules,
+          useLegacyCallSign: selection.useLegacyCallSign,
+          useLegacyAvatar: selection.useLegacyAvatar,
+          previousCompletedPreviewId: previous,
+          replaceAllDisplayContent: selection.replaceAllDisplayContent,
+        ),
+      ),
       'previewLoading',
     );
   }
@@ -89,6 +114,14 @@ class _LegacyProfileMigrationCardState
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     String text(String key) => strings.text('migration.$key');
+    String tags(List<String> values, String group) => values.isEmpty
+        ? text('emptySelection')
+        : values
+              .map((value) {
+                final known = ProfileCollaboration.options[group]?[value];
+                return known == null ? value : strings.text(known.labelKey);
+              })
+              .join(' · ');
     final completed = _view.state == 'completed';
     final preview = _preview;
     final failure = !{
@@ -136,19 +169,70 @@ class _LegacyProfileMigrationCardState
               ),
               if (preview != null && !completed) ...[
                 SizedBox(height: tokens.space.md),
-                _summary(
-                  context,
-                  text('oldProfile'),
-                  preview.source!,
-                  preview.sourceGameId,
-                ),
+                if (preview.choices case final choices?) ...[
+                  if (choices.version == 2) ...[
+                    Text(text('selectFull')),
+                    Text(text('fullScope')),
+                    Text(
+                      '${text('selectCallSign')}：${preview.presentation!['callSign']}',
+                    ),
+                    Text(
+                      '${preview.presentation!['content'] is Map ? (preview.presentation!['content'] as Map)['introduction'] ?? '' : ''}',
+                    ),
+                  ],
+                  if (choices.selection.useLegacyCallSign)
+                    Text(
+                      '${text('selectCallSign')}：${preview.selectedContent!.callSign}',
+                    ),
+                  if (choices.selection.useLegacyAvatar ||
+                      choices.version == 2 && preview.avatarPreview != null)
+                    Text(text('selectAvatar')),
+                  if ((choices.selection.useLegacyAvatar ||
+                          choices.version == 2) &&
+                      preview.avatarPreview != null)
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: tokens.space.sm),
+                      child: Image.memory(
+                        preview.avatarPreview!,
+                        key: const Key('migration-avatar-preview'),
+                        width: 96,
+                        height: 96,
+                        fit: BoxFit.contain,
+                        semanticLabel: text('selectAvatar'),
+                        errorBuilder: (context, error, stack) =>
+                            Text(text('sourceAvatarUnavailable')),
+                      ),
+                    ),
+                  for (final id in choices.selection.modules)
+                    Text(
+                      '${text('module.$id')} · ${text('moduleSpan').replaceAll('{span}', '${preview.selectedContent!.modules[id]}')}${choices.selection.replaceModules.contains(id) ? ' · ${text('replaceModule')}' : ''}',
+                    ),
+                  if (preview.selectedContent?.skilledRoles
+                      case final roles?) ...[
+                    Text('${text('roles')}：${tags(roles, 'roles')}'),
+                    Text(
+                      '${text('support')}：${tags(preview.selectedContent!.supportCapabilities!, 'support')}',
+                    ),
+                    Text(
+                      '${text('interests')}：${tags(preview.selectedContent!.participationInterests!, 'interests')}',
+                    ),
+                  ],
+                  if (choices.needsReselection.isNotEmpty)
+                    Text(text('moduleSafety')),
+                  SizedBox(height: tokens.space.sm),
+                ],
                 if (preview.conflict) ...[
                   const Divider(),
-                  _summary(context, text('newProfile'), preview.target!, null),
                   CheckboxListTile(
                     key: const Key('migration-replace'),
                     contentPadding: EdgeInsets.zero,
-                    title: Text(text('replaceConsent')),
+                    title: Text(
+                      text(
+                        preview.choices?.version == 2
+                            ? 'fullReplaceConsent'
+                            : 'replaceConsent',
+                      ),
+                    ),
                     value: _replaceExisting,
                     onChanged: (value) =>
                         setState(() => _replaceExisting = value == true),
@@ -178,7 +262,13 @@ class _LegacyProfileMigrationCardState
                               (!preview.conflict || _replaceExisting)
                           ? _confirm
                           : null,
-                      child: Text(text('confirm')),
+                      child: Text(
+                        text(
+                          _view.state == 'localApplyRequired'
+                              ? 'applyLocal'
+                              : 'confirm',
+                        ),
+                      ),
                     ),
                     if (failure)
                       OutlinedButton(
@@ -199,7 +289,8 @@ class _LegacyProfileMigrationCardState
                     ),
                   ],
                 ),
-              ] else if (!completed) ...[
+              ] else if (!completed ||
+                  (_view.choices != null && _view.previewId != null)) ...[
                 SizedBox(height: tokens.space.md),
                 Wrap(
                   spacing: tokens.space.sm,
@@ -225,39 +316,6 @@ class _LegacyProfileMigrationCardState
           ],
         ),
       ),
-    );
-  }
-
-  Widget _summary(
-    BuildContext context,
-    String label,
-    LegacyProfileMigrationSummary summary,
-    String? handle,
-  ) {
-    final strings = AppStrings.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelLarge),
-        const SizedBox(height: 4),
-        Text(
-          '${summary.callSign}${handle?.isNotEmpty == true ? ' · @$handle' : ''}',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        if (summary.introduction.isNotEmpty) Text(summary.introduction),
-        Text(
-          strings
-              .text('migration.counts')
-              .replaceAll('{modules}', '${summary.modules}')
-              .replaceAll('{favorites}', '${summary.favorites}')
-              .replaceAll(
-                '{hours}',
-                summary.playTimeSeconds == null
-                    ? '—'
-                    : (summary.playTimeSeconds! / 3600).toStringAsFixed(1),
-              ),
-        ),
-      ],
     );
   }
 }

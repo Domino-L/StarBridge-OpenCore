@@ -13,12 +13,20 @@ internal sealed class ScmRealtimeClient(
     Action<long, ScmOAuthSession> sessionUpdated,
     Action<long, int> statusUpdated,
     Action<long, string?> forcedLogout,
-    Action<long, string, long, long> fleetBroadcastInvalidated) : IAsyncDisposable
+    Action<long, string, long, long> fleetBroadcastInvalidated,
+    Func<CancellationToken, Task<ScmWebSocketTicketResult>>? issueTicket = null,
+    Action<long>? disconnected = null,
+    Action<long>? marketplaceInvalidated = null,
+    Action<long, JsonElement>? tradeNotice = null,
+    Func<IScmChatTransport>? transportFactory = null,
+    Action<long>? inboxInvalidated = null) : IAsyncDisposable
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(10);
     private CancellationTokenSource? _lifetime;
     private Task? _runTask;
+    private Task _stopCompletion = Task.CompletedTask;
+    internal Task StopCompletion => _stopCompletion;
     private ScmOAuthSession? _session;
     private readonly object _fleetBroadcastScopeGate = new();
     private ScmFleetBroadcastScope? _fleetBroadcastScope;
@@ -45,6 +53,7 @@ internal sealed class ScmRealtimeClient(
 
     internal void Stop()
     {
+        var retiring = _runTask;
         _generation++;
         _lifetime?.Cancel();
         _lifetime?.Dispose();
@@ -56,6 +65,14 @@ internal sealed class ScmRealtimeClient(
             _fleetBroadcastScope = null;
             _fleetBroadcastScopeRevision++;
         }
+        if (retiring is not null)
+            _stopCompletion = Task.WhenAll(_stopCompletion, ObserveStopAsync(retiring));
+    }
+
+    private static async Task ObserveStopAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
     }
 
     internal void SetFleetBroadcastScope(ScmFleetBroadcastScope? scope)
@@ -77,32 +94,59 @@ internal sealed class ScmRealtimeClient(
         var attempt = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
+            var probePhase = SessionProbePhase.Ticket;
+            var probeStatus = 0;
+            var connected = false;
             try
             {
                 var session = _session ?? throw new InvalidOperationException("SCM session is unavailable.");
-                var result = await oauthClient.IssueWebSocketTicketAsync(session, cancellationToken);
+                var result = issueTicket is null
+                    ? await oauthClient.IssueWebSocketTicketAsync(session, cancellationToken)
+                    : await issueTicket(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 _session = result.ActiveSession;
                 sessionUpdated(generation, result.ActiveSession);
-                using var socket = new ClientWebSocket();
+                await using var transport = transportFactory?.Invoke() ?? new ClientWebSocketChatTransport(realtime: true);
                 var endpoint = TicketUri(options.WebSocketEndpoint, result.Ticket.Ticket);
-                await socket.ConnectAsync(endpoint, cancellationToken);
+                using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                connectTimeout.CancelAfter(AckTimeout);
+                probePhase = SessionProbePhase.Connect;
+                try { await transport.ConnectAsync(endpoint, connectTimeout.Token); connected = true; }
+                catch
+                {
+                    probeStatus = (int)((transport as ClientWebSocketChatTransport)?.HttpStatusCode ?? 0);
+                    throw;
+                }
+                probeStatus = (int)((transport as ClientWebSocketChatTransport)?.HttpStatusCode ?? 0);
+                ScmSessionProbeDiagnostics.Realtime(probePhase, options.WebSocketEndpoint, probeStatus, attempt + 1, null);
+                probePhase = SessionProbePhase.Heartbeat;
                 attempt = 0;
-                await HeartbeatLoopAsync(socket, generation, cancellationToken);
+                // Reconcile events missed while disconnected, including the initial connection.
+                marketplaceInvalidated?.Invoke(generation);
+                // This socket is the StarBridge relay (/infra/ws/starbridge). It accepts only
+                // member-online-heartbeat, fleet-broadcast-(un)subscribe and ping, and closes on anything
+                // else before the first heartbeat registers the device. Never send message-subscribe
+                // here (hotfix 10-29); the inbox stays on its periodic REST read.
+                await HeartbeatLoopAsync(transport, generation, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
             catch (Exception exception) when (exception is WebSocketException or HttpRequestException
-                                               or TimeoutException or InvalidOperationException)
+                                               or TimeoutException or InvalidOperationException or JsonException
+                                               or OperationCanceledException)
             {
+                ScmSessionProbeDiagnostics.Realtime(probePhase, options.WebSocketEndpoint, probeStatus, attempt + 1, exception);
                 ScmAuthDiagnostics.Write(
                     _session?.CorrelationId ?? "realtime",
                     "presence-websocket",
                     "reconnecting",
                     $"exceptionType={exception.GetType().Name} attempt={attempt + 1}");
             }
+            // Failed ticket/connect attempts are not additional disconnects.
+            // Otherwise each retry would trigger another full marketplace read.
+            finally { if (connected) disconnected?.Invoke(generation); }
 
             attempt++;
             var delaySeconds = Math.Min(30, 2 * Math.Pow(1.5, Math.Max(0, attempt - 1)));
@@ -111,7 +155,7 @@ internal sealed class ScmRealtimeClient(
     }
 
     private async Task HeartbeatLoopAsync(
-        ClientWebSocket socket,
+        IScmChatTransport socket,
         long generation,
         CancellationToken cancellationToken)
     {
@@ -130,7 +174,7 @@ internal sealed class ScmRealtimeClient(
         var nextHeartbeatAt = DateTimeOffset.MinValue;
         try
         {
-            while (socket.State == WebSocketState.Open && !connectionToken.IsCancellationRequested)
+            while (!connectionToken.IsCancellationRequested)
             {
                 (activeBroadcastScope, activeBroadcastScopeRevision) =
                     await SynchronizeFleetBroadcastSubscriptionAsync(
@@ -138,6 +182,11 @@ internal sealed class ScmRealtimeClient(
                         activeBroadcastScope,
                         activeBroadcastScopeRevision,
                         connectionToken);
+                if (receiveTask.IsCompleted)
+                {
+                    await receiveTask;
+                    throw new WebSocketException("SCM Presence receiver stopped.");
+                }
                 if (DateTimeOffset.UtcNow < nextHeartbeatAt)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(1), connectionToken);
@@ -150,7 +199,7 @@ internal sealed class ScmRealtimeClient(
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     deviceId
                 });
-                await socket.SendAsync(payload, WebSocketMessageType.Text, true, connectionToken);
+                await socket.SendAsync(Encoding.UTF8.GetString(payload), connectionToken);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(connectionToken);
                 timeout.CancelAfter(AckTimeout);
                 try
@@ -178,27 +227,46 @@ internal sealed class ScmRealtimeClient(
     }
 
     private async Task ReceiveLoopAsync(
-        ClientWebSocket socket,
+        IScmChatTransport socket,
         long generation,
         ChannelWriter<int> acknowledgements,
         CancellationToken cancellationToken)
     {
-        var buffer = new byte[4096];
-        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var result = await socket.ReceiveAsync(buffer, cancellationToken);
-            if (result.MessageType == WebSocketMessageType.Close)
-            {
-                throw new WebSocketException("SCM Presence connection closed.");
-            }
-            if (!result.EndOfMessage)
-            {
-                throw new InvalidOperationException("SCM Presence message exceeds the supported size.");
-            }
-            using var document = JsonDocument.Parse(buffer.AsMemory(0, result.Count));
+            var text = await socket.ReceiveAsync(cancellationToken);
+            if (text is null) throw new WebSocketException("SCM Presence connection closed.");
+            if (Encoding.UTF8.GetByteCount(text) > 65536) { DiscardFrame(); continue; }
+            JsonDocument document;
+            try { document = JsonDocument.Parse(text); }
+            catch (JsonException) { DiscardFrame(); continue; }
+            using var frame = document;
             var root = document.RootElement;
-            if (!root.TryGetProperty("type", out var type))
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String)
             {
+                continue;
+            }
+            if (type.GetString() == "new-message")
+            {
+                if (TryNotice(root, out var notice)) tradeNotice?.Invoke(generation, notice);
+                else DiscardFrame();
+                continue;
+            }
+            // The initial unread frame is the subscription acknowledgement. No payload
+            // identifiers or counts cross the bridge; REST remains authoritative.
+            if (type.GetString() == "unread-count-update")
+            {
+                if (_session?.Capabilities.Contains("profile.read", StringComparer.Ordinal) == true &&
+                    TryContent(root, out var unread) && unread.TryGetProperty("total", out var count) &&
+                    count.ValueKind == JsonValueKind.Number && count.TryGetInt64(out var total) && total >= 0)
+                    inboxInvalidated?.Invoke(generation);
+                continue;
+            }
+            if (type.GetString() == "transaction-event")
+            {
+                // Only invalidate. The authenticated REST read supplies current roles and state.
+                marketplaceInvalidated?.Invoke(generation);
                 continue;
             }
             if (type.GetString() == "member-status-update" &&
@@ -242,8 +310,46 @@ internal sealed class ScmRealtimeClient(
         }
     }
 
+    // Never log payloads, identifiers or parser exceptions from an untrusted notice.
+    private static void DiscardFrame() =>
+        ScmAuthDiagnostics.Write("realtime", "presence-websocket", "frame-discarded", "invalidFrame=true");
+
+    private static bool TryNotice(JsonElement root, out JsonElement notice)
+    {
+        notice = default;
+        try
+        {
+            if (!TryContent(root, out var content) ||
+                !content.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.Number ||
+                !id.TryGetInt64(out var number) || number <= 0 ||
+                !content.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.Number ||
+                !type.TryGetInt32(out var kind)) return false;
+            if (kind == 1 && (!content.TryGetProperty("subType", out var subType) ||
+                subType.ValueKind != JsonValueKind.Number || !subType.TryGetInt32(out _))) return false;
+            notice = content.Clone();
+            return true;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static bool TryContent(JsonElement root, out JsonElement content)
+    {
+        content = default;
+        try
+        {
+            if (!root.TryGetProperty("content", out content)) return false;
+            if (content.ValueKind == JsonValueKind.String)
+            {
+                using var parsed = JsonDocument.Parse(content.GetString()!);
+                content = parsed.RootElement.Clone();
+            }
+            return content.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException) { return false; }
+    }
+
     private async Task<(ScmFleetBroadcastScope? Scope, long Revision)> SynchronizeFleetBroadcastSubscriptionAsync(
-        ClientWebSocket socket,
+        IScmChatTransport socket,
         ScmFleetBroadcastScope? activeScope,
         long activeRevision,
         CancellationToken cancellationToken)
@@ -282,7 +388,7 @@ internal sealed class ScmRealtimeClient(
     }
 
     private static Task SendFleetBroadcastSubscriptionAsync(
-        ClientWebSocket socket,
+        IScmChatTransport socket,
         string type,
         ScmFleetBroadcastScope scope,
         CancellationToken cancellationToken)
@@ -292,7 +398,7 @@ internal sealed class ScmRealtimeClient(
             type,
             content = new { scopeType = scope.ScopeType, scopeId = scope.ScopeId }
         });
-        return socket.SendAsync(payload, WebSocketMessageType.Text, true, cancellationToken);
+        return socket.SendAsync(Encoding.UTF8.GetString(payload), cancellationToken);
     }
 
     private static Uri TicketUri(Uri endpoint, string ticket)
@@ -307,6 +413,6 @@ internal sealed class ScmRealtimeClient(
     public ValueTask DisposeAsync()
     {
         Stop();
-        return ValueTask.CompletedTask;
+        return new(StopCompletion);
     }
 }

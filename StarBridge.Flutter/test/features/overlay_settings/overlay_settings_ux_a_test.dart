@@ -22,6 +22,7 @@ OverlayWorkspaceSettings settings([Map<String, Object?> changes = const {}]) =>
           OverlayWorkspaceFieldKind.number =>
             f.field == 'chatMaxVisibleCount' ? f.minimum.round() : f.minimum,
           OverlayWorkspaceFieldKind.color => '#FFFFFF',
+          OverlayWorkspaceFieldKind.hotkey => '',
           OverlayWorkspaceFieldKind.eventTypes => 0,
           OverlayWorkspaceFieldKind.eventDurations => <String, Object?>{
             for (final entry in overlayDurationFields) entry.$1: 0,

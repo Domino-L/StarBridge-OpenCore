@@ -11,6 +11,49 @@ import '../features/settings/local_privacy_page_test.dart'
     show app, PublishingPrivacy, viewport;
 
 void main() {
+  const locales = [
+    (Locale('zh', 'CN'), '网络问题', '网络连接中断或服务器暂时不可用，恢复后自动继续共享。', '实时共享已暂停'),
+    (Locale('zh', 'TW'), '網路問題', '網路連線中斷或伺服器暫時無法使用，恢復後自動繼續分享。', '即時共享已暫停'),
+    (
+      Locale('en'),
+      'Network problem',
+      'The connection or server is temporarily unavailable. Sharing resumes automatically.',
+      'Live sharing is paused',
+    ),
+  ];
+  for (final (locale, title, body, paused) in locales) {
+    testWidgets('network recovery and manual pause copy in $locale', (
+      tester,
+    ) async {
+      final status = ValueNotifier<String?>('network');
+      addTearDown(status.dispose);
+      await tester.pumpWidget(
+        app(
+          SharingStatusNotice(status: status, onOpenSettings: () {}),
+          locale: locale,
+        ),
+      );
+      for (final issue in [
+        'network',
+        'server',
+        'timeout',
+        'rateLimited',
+        'reconnecting',
+      ]) {
+        status.value = issue;
+        await tester.pumpAndSettle();
+        expect(find.text(title), findsOneWidget);
+        expect(find.text(body), findsOneWidget);
+        expect(find.text(paused), findsNothing);
+      }
+      status.value = 'paused';
+      await tester.pumpAndSettle();
+      expect(find.text(paused), findsOneWidget);
+      expect(find.text(title), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
   testWidgets('global retry reapplies saved scope without saving settings', (
     tester,
   ) async {
@@ -57,7 +100,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 31));
     await tester.pumpAndSettle();
-    expect(find.text('正在恢复实时共享'), findsOneWidget);
+    expect(find.text('共享服务异常'), findsOneWidget);
     expect(find.text('实时共享未生效'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     monitor.dispose();

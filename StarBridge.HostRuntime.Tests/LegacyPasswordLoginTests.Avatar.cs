@@ -42,7 +42,7 @@ internal static partial class LegacyPasswordLoginTests
         using var scm = CreateHost(client, new ScmOAuthSession("scm-development", "synthetic", "Synthetic",
             "synthetic-bearer", DateTimeOffset.UtcNow.AddMinutes(5), []));
         try { await scm.UpdateAvatarAsync(scm.CurrentContext!, payload, default); throw new Exception("SCM must not use legacy avatar transport"); }
-        catch (AccountBridgeHostException error) { Check(error.Code == "account.avatar_managed_by_scm", "SCM authority stays separate"); }
+        catch (AccountBridgeHostException error) { Check(error.Code == "account.avatar_managed_by_scm", "SCM users use their RSI avatar and cannot upload a custom one"); }
         Check(transport.Posts == 2, "SCM does not fall back to old account writes");
     }
 

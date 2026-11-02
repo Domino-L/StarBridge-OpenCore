@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 final class TypographyTokens {
   const TypographyTokens({
     required this.uiFamily,
+    this.titleFamily,
+    this.latinUiWidthAxis,
     required this.simplifiedChineseFamily,
     required this.traditionalChineseFamily,
     required this.systemFallbacks,
@@ -27,6 +29,11 @@ final class TypographyTokens {
   });
 
   final String uiFamily;
+  final String? titleFamily;
+
+  /// Width axis for the UI family when a locale's text is all Latin. Chinese
+  /// text only sets digits and names in the UI family, so it keeps full width.
+  final double? latinUiWidthAxis;
   final String simplifiedChineseFamily;
   final String traditionalChineseFamily;
   final List<String> systemFallbacks;
@@ -48,6 +55,19 @@ final class TypographyTokens {
   final double displayTracking;
   final double bodyHeight;
 
+  /// Titles use [titleFamily] when a style sets one, otherwise the UI family.
+  String get headingFamily => titleFamily ?? uiFamily;
+
+  /// The families used before QualityPass ⑧, for surfaces that keep them.
+  TypographyTokens withClassicFamilies() => withFamilies(
+    ui: 'Source Sans 3',
+    simplifiedChinese: simplifiedChineseFamily,
+    traditionalChinese: traditionalChineseFamily,
+    system: systemFallbacks,
+    mono: 'Source Code Pro',
+    monoFallback: const ['Cascadia Mono', 'Consolas'],
+  );
+
   List<String> fallbacksFor(Locale locale) {
     if (locale.languageCode.toLowerCase() != 'zh') {
       return List.unmodifiable(systemFallbacks);
@@ -68,6 +88,8 @@ final class TypographyTokens {
   TypographyTokens scaled(double factor) {
     return TypographyTokens(
       uiFamily: uiFamily,
+      titleFamily: titleFamily,
+      latinUiWidthAxis: latinUiWidthAxis,
       simplifiedChineseFamily: simplifiedChineseFamily,
       traditionalChineseFamily: traditionalChineseFamily,
       systemFallbacks: systemFallbacks,

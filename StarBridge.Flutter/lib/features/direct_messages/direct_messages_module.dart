@@ -1,177 +1,26 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../communities/community_invitation_attachment.dart';
-import '../common/chat_room_invitation.dart';
+import 'direct_conversation_memory.dart';
+import 'direct_messages_contract.dart';
+import 'direct_message_receive_polling.dart';
+import 'direct_message_directory_comparison.dart';
+import 'direct_message_send_queue.dart';
+import 'direct_message_selected_row.dart';
 
-String? conversationPresence(String state, Object? value) =>
-    state == 'friend' &&
-        const {'online', 'away', 'inGame', 'offline'}.contains(value)
-    ? value as String
-    : null;
-
-final class Conversation {
-  const Conversation(
-    this.ref,
-    this.name,
-    this.preview,
-    this.time,
-    this.unread,
-    this.state, {
-    this.avatar,
-    this.conversationKey,
-    this.gameId = '',
-    this.presence,
-  });
-  final String ref, name, preview, state;
-  final String? avatar;
-  final String? conversationKey;
-  final String gameId;
-  final String? presence;
-  final DateTime time;
-  final int unread;
-  bool get request =>
-      state == 'request_incoming' || state == 'request_outgoing';
-  Conversation withoutPresence() => presence == null
-      ? this
-      : Conversation(
-          ref,
-          name,
-          preview,
-          time,
-          unread,
-          state,
-          avatar: avatar,
-          conversationKey: conversationKey,
-          gameId: gameId,
-        );
-}
-
-final class DirectMessage {
-  const DirectMessage(
-    this.sequence,
-    this.id,
-    this.incoming,
-    this.text,
-    this.time,
-    this.attachment, {
-    this.communityInvitation,
-    this.roomInvitation,
-  });
-  final int sequence;
-  final String id, text;
-  final bool incoming;
-  final DateTime time;
-  final String? attachment;
-  final CommunityInvitationAttachment? communityInvitation;
-  final ChatRoomInvitation? roomInvitation;
-}
-
-final class DirectPage {
-  const DirectPage(
-    this.ref,
-    this.messages,
-    this.oldest,
-    this.latest,
-    this.hasOlder,
-    this.state, {
-    this.canSend = false,
-    this.localHistoryUnavailable = false,
-  });
-  final String ref, state;
-  final List<DirectMessage> messages;
-  final int oldest, latest;
-  final bool hasOlder;
-  final bool canSend;
-  final bool localHistoryUnavailable;
-}
-
-final class DirectSendResult {
-  const DirectSendResult(this.status, {this.error, this.message});
-  final String status;
-  final String? error;
-  final DirectMessage? message;
-}
-
-/// A receipt alone is insufficient: it must identify this exact outgoing text.
-bool confirmedDirectSend(DirectSendResult result, String id, String text) {
-  final message = result.message;
-  return const {'sent', 'duplicate', 'request_sent'}.contains(result.status) &&
-      message != null &&
-      message.id == id &&
-      !message.incoming &&
-      message.text == text &&
-      message.sequence > 0 &&
-      message.attachment == null;
-}
-
-abstract interface class DirectMessageSender {
-  bool get supportsSending;
-  Future<DirectSendResult> send(
-    String ref,
-    String text,
-    String clientMessageId,
-  );
-}
-
-abstract interface class DirectMessagesPort {
-  Stream<void> get invalidations;
-  Future<List<Conversation>> directory();
-  Future<DirectPage> history(String ref, {int before = 0, int after = 0});
-  void cancel();
-  Future<void> close();
-}
-
-abstract interface class DirectMessageActivityPort {
-  Stream<void> get changes;
-}
-
-abstract interface class DirectMessageActivityHealthPort {
-  bool get activityHealthy;
-}
-
-final class DirectReadReceipt {
-  const DirectReadReceipt(this.through, this.unread);
-  final int through, unread;
-}
-
-abstract interface class DirectReadReceiptPort {
-  bool get supportsReadReceipts;
-  Future<DirectReadReceipt> markRead(String ref, int through);
-}
-
-abstract interface class DirectViewerAvatarPort {
-  String? get viewerAvatar;
-}
-
-final class DirectReadFailure implements Exception {
-  const DirectReadFailure(this.code);
-  final String code;
-}
-
-final class UnavailableDirectMessages implements DirectMessagesPort {
-  @override
-  Stream<void> get invalidations => const Stream.empty();
-  @override
-  Future<List<Conversation>> directory() async =>
-      throw const DirectReadFailure('unavailable');
-  @override
-  Future<DirectPage> history(
-    String ref, {
-    int before = 0,
-    int after = 0,
-  }) async => throw const DirectReadFailure('unavailable');
-  @override
-  void cancel() {}
-  @override
-  Future<void> close() async {}
-}
+export 'direct_messages_contract.dart';
+export 'direct_message_send_queue.dart'
+    show DirectMessageSendQueue, DirectOutgoing, DirectOutgoingState;
+export 'direct_message_receive_polling.dart'
+    show DirectMessageReceiveLease, DirectMessageReceiveResult;
 
 /// Shared conversation state. Only a visible viewport may request a read receipt.
 final class DirectMessagesModule extends ChangeNotifier {
-  DirectMessagesModule(this.port) {
+  DirectMessagesModule(
+    this.port, {
+    this.sendRetryDelays = DirectMessageSendQueue.defaultRetryDelays,
+  }) {
     addListener(_drainActivity);
     if (port is DirectMessageActivityPort) {
       _activity = (port as DirectMessageActivityPort).changes.listen((_) {
@@ -179,42 +28,99 @@ final class DirectMessagesModule extends ChangeNotifier {
         _drainActivity();
       });
     }
+    if (port is DirectMessageDirectoryActivityPort) {
+      _directoryActivity = (port as DirectMessageDirectoryActivityPort)
+          .directoryChanges
+          .listen((_) => _drainActivity(directory: true));
+    }
     _subscription = port.invalidations.listen((_) {
-      _epoch++;
-      _activityPending = false;
-      port.cancel();
-      selected = null;
-      rows = [];
-      messages = [];
-      error = null;
-      readError = null;
-      busy = false;
-      loaded = false;
-      requests = false;
-      clearDraft();
-      notifyListeners();
+      _discardReadContext();
       unawaited(refresh());
     });
   }
+
+  void _discardReadContext({String? failure}) {
+    if (_disposed) return;
+    _epoch++;
+    _receivePolling?.invalidate();
+    _activityPending = false;
+    port.cancel();
+    selected = null;
+    rows = [];
+    messages = [];
+    error = failure;
+    directoryError = null;
+    historySyncError = null;
+    lastDirectorySyncUtc = null;
+    readError = null;
+    busy = false;
+    loaded = false;
+    requests = false;
+    directoryRefreshing = false;
+    _directoryRefreshToken = null;
+    scrollOffset = 0;
+    hasOlder = false;
+    hasNewer = false;
+    _readRef = null;
+    _readThrough = 0;
+    _readAttempt = null;
+    _readFailures = 0;
+    _readRetry?.cancel();
+    _readRetry = null;
+    state = 'none';
+    clearDraft();
+    // Account/session boundary: queued sends never move to another context,
+    // and no conversation's history or draft survives into it.
+    outbox.clear();
+    _memory.clear();
+    notifyListeners();
+  }
+
   final DirectMessagesPort port;
+  DirectMessageReceivePolling? _receivePolling;
+  DirectMessageReceiveLease observeVisibleReception(bool Function() visible) {
+    final receiver = port;
+    if (!_disposed && receiver is DirectMessageReceptionPort) {
+      return (receiver as DirectMessageReceptionPort).observeVisibleReception(
+        visible,
+      );
+    }
+    final polling = _receivePolling ??= DirectMessageReceivePolling(
+      read: receive,
+      isHealthy: () => directMessageReceptionHealthy(port),
+    );
+    if (_disposed) polling.dispose();
+    return polling.observe(visible);
+  }
+
   double scrollOffset = 0;
-  StreamSubscription<void>? _activity;
+  StreamSubscription<void>? _activity, _directoryActivity;
   bool get supportsSending =>
       port is DirectMessageSender &&
       (port as DirectMessageSender).supportsSending;
-  bool canSend = false, sending = false;
+  bool canSend = false;
   String draft = '';
   String? sendStatus;
   Timer? _confirmedSendHint;
-  String? _pendingId, _pendingText;
   int draftRevision = 0;
-  bool get awaitingConfirmation => _pendingId != null;
-  bool get hasDraft => draft.isNotEmpty || awaitingConfirmation;
+
+  /// The user's own messages until history returns them (2026-10-21 "A2").
+  late final outbox = DirectMessageSendQueue(
+    sender: () =>
+        _disposed || !supportsSending ? null : port as DirectMessageSender,
+    changed: () {
+      if (!_disposed) notifyListeners();
+    },
+    onResult: _sendFinished,
+    retryDelays: sendRetryDelays,
+  );
+  final List<Duration> sendRetryDelays;
+  List<DirectOutgoing> get outgoing => outbox.forConversation(selected);
+  bool get hasDraft => draft.isNotEmpty;
   bool get readyToSend =>
       supportsSending &&
       canSend &&
       !busy &&
-      !awaitingConfirmation &&
       draft.trim().isNotEmpty &&
       draft.trim().length <= 1000;
   void editDraft(String value) {
@@ -233,68 +139,53 @@ final class DirectMessagesModule extends ChangeNotifier {
     draft = '';
     draftRevision++;
     sendStatus = null;
-    _pendingId = null;
-    _pendingText = null;
     canSend = false;
-    sending = false;
   }
 
+  /// A2: the message appears at once and the composer clears for the next
+  /// one. Delivery, order and bounded retries belong to [outbox].
   Future<void> send() async {
-    if (_disposed || selected == null || !readyToSend) return;
-    final epoch = ++_epoch, ref = selected!.ref;
+    final target = selected;
+    if (_disposed || target == null || !readyToSend) return;
     final text = draft.trim();
-    final random = Random.secure();
-    final id = List.generate(
-      16,
-      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-    _pendingId = id;
-    _pendingText = text;
-    sending = true;
-    busy = true;
+    draft = '';
+    draftRevision++;
     _confirmedSendHint?.cancel();
     _confirmedSendHint = null;
-    sendStatus = 'sending';
-    notifyListeners();
-    DirectSendResult result;
-    try {
-      result = await (port as DirectMessageSender).send(ref, text, id);
-    } catch (_) {
-      result = const DirectSendResult('unknown');
+    sendStatus = null;
+    outbox.enqueue(target, text);
+  }
+
+  void retrySend(String id) => outbox.retry(id);
+
+  /// B1: the live connection came back; queued messages go out now.
+  void connectionRestored() => outbox.connectionRestored();
+
+  void _sendFinished(DirectOutgoing message, DirectSendResult result) {
+    if (_disposed) return;
+    final current = selected != null && message.belongsTo(selected!);
+    if (result.status != 'rejected') {
+      // Fetch the server copy; the outbox drops its own once history has it.
+      _activityPending = true;
+      _drainActivity();
+      if (current && result.status == 'request_sent') {
+        _showConfirmedSendHint('request_sent');
+      }
+      return;
     }
-    if (_disposed || epoch != _epoch) return;
-    sending = false;
-    busy = false;
-    if (confirmedDirectSend(result, id, text)) {
-      clearDraft();
-      final confirmedStatus = result.status == 'request_sent'
-          ? 'request_sent'
-          : 'sent';
-      sendStatus = confirmedStatus;
-      // Reload latest instead of advancing past messages that arrived during POST.
-      await load();
-      if (!_disposed && selected?.ref == ref && sendStatus == confirmedStatus) {
-        _showConfirmedSendHint(confirmedStatus);
-      }
-    } else if (result.status == 'rejected') {
-      _pendingId = null;
-      _pendingText = null;
-      sendStatus = result.error ?? 'rejected';
-      if (const {
-        'forbidden',
-        'request_pending',
-        'identity_unavailable',
-        'target_changed',
-      }.contains(sendStatus)) {
-        canSend = false;
-      }
-      notifyListeners();
-      if (sendStatus == 'target_changed') {
-        await _renewRejectedSendTarget(epoch, ref);
-      }
-    } else {
-      sendStatus = 'outcome_unknown';
-      notifyListeners();
+    if (!current) return;
+    sendStatus = result.error ?? 'rejected';
+    if (const {
+      'forbidden',
+      'request_pending',
+      'identity_unavailable',
+      'target_changed',
+    }.contains(sendStatus)) {
+      canSend = false;
+    }
+    notifyListeners();
+    if (sendStatus == 'target_changed') {
+      unawaited(_renewRejectedSendTarget(_epoch, message.ref));
     }
   }
 
@@ -319,6 +210,8 @@ final class DirectMessagesModule extends ChangeNotifier {
       if (matches.length != 1 || matches.single.ref == rejectedRef) return;
       rows = List.unmodifiable(directory);
       selected = matches.single;
+      // Failed messages stay failed; a user retry goes to the renewed target.
+      outbox.renewReference(matches.single);
       messages = [];
       hasOlder = false;
       hasNewer = false;
@@ -357,6 +250,7 @@ final class DirectMessagesModule extends ChangeNotifier {
       port is DirectReadReceiptPort &&
       (port as DirectReadReceiptPort).supportsReadReceipts;
   bool _markingRead = false;
+  int _directoryReadRevision = 0;
   String? _readRef, _readAttempt;
   int _readThrough = 0;
   String? readError;
@@ -368,9 +262,9 @@ final class DirectMessagesModule extends ChangeNotifier {
     final target = selected;
     if (_disposed ||
         busy ||
-        sending ||
         _markingRead ||
         _receiving ||
+        hasNewer ||
         target == null ||
         !supportsReadReceipts ||
         through <= 0 ||
@@ -379,6 +273,7 @@ final class DirectMessagesModule extends ChangeNotifier {
     }
     if (_readRef == target.ref && through <= _readThrough) return;
     final epoch = _epoch;
+    final directoryRevision = _directoryReadRevision;
     final attempt = '$epoch:${target.ref}:$through';
     if (_readAttempt == attempt) return;
     _readAttempt = attempt;
@@ -389,7 +284,12 @@ final class DirectMessagesModule extends ChangeNotifier {
         target.ref,
         through,
       );
-      if (_disposed || epoch != _epoch || selected?.ref != target.ref) return;
+      if (_disposed ||
+          epoch != _epoch ||
+          directoryRevision != _directoryReadRevision ||
+          selected?.ref != target.ref) {
+        return;
+      }
       if (receipt.through < through || receipt.unread < 0) {
         throw const DirectReadFailure('data_invalid');
       }
@@ -420,9 +320,14 @@ final class DirectMessagesModule extends ChangeNotifier {
       );
       selected = update(selected!);
     } catch (e) {
-      if (!_disposed && epoch == _epoch) {
-        readError = _failure(e);
-        if (readError == 'unavailable' && _readFailures < 3) {
+      if (!_disposed &&
+          epoch == _epoch &&
+          directoryRevision == _directoryReadRevision) {
+        final failure = _failure(e);
+        // Reopening revalidates even a fully read conversation; with nothing
+        // unread a failed receipt is no sync problem to show (DL-139).
+        if ((selected?.unread ?? 0) > 0) readError = failure;
+        if (failure == 'unavailable' && _readFailures < 3) {
           _readFailures++;
           _readRetry?.cancel();
           _readRetry = Timer(Duration(seconds: 1 << _readFailures), () {
@@ -453,6 +358,11 @@ final class DirectMessagesModule extends ChangeNotifier {
       hasOlder = false,
       hasNewer = false;
   String? error;
+  String? directoryError;
+  String? historySyncError;
+  DateTime? lastDirectorySyncUtc;
+  bool directoryRefreshing = false;
+  Object? _directoryRefreshToken;
   String state = 'none';
   List<Conversation> rows = [];
   List<DirectMessage> messages = [];
@@ -460,7 +370,32 @@ final class DirectMessagesModule extends ChangeNotifier {
   List<Conversation> get visible =>
       rows.where((row) => row.request == requests).toList();
   Future<void> refresh({bool retainDirectory = false}) async {
-    if (_disposed || sending) return;
+    if (_disposed || busy) return;
+    // A directory refresh is independent of the current history and composer.
+    // Reuse the same incremental path used by live activity; never retry a send.
+    if (loaded) {
+      if (_receiving) return;
+      final refreshToken = Object();
+      _directoryRefreshToken = refreshToken;
+      _readRef = null;
+      _readThrough = 0;
+      _readAttempt = null;
+      _readRetry?.cancel();
+      _readFailures = 0;
+      readError = null;
+      directoryRefreshing = true;
+      notifyListeners();
+      try {
+        await receive(directoryOnly: true, freshDirectory: true);
+      } finally {
+        if (!_disposed && identical(_directoryRefreshToken, refreshToken)) {
+          _directoryRefreshToken = null;
+          directoryRefreshing = false;
+          notifyListeners();
+        }
+      }
+      return;
+    }
     clearDraft();
     final epoch = ++_epoch;
     port.cancel();
@@ -473,6 +408,8 @@ final class DirectMessagesModule extends ChangeNotifier {
     scrollOffset = 0;
     messages = [];
     error = null;
+    directoryError = null;
+    historySyncError = null;
     readError = null;
     notifyListeners();
     try {
@@ -480,6 +417,7 @@ final class DirectMessagesModule extends ChangeNotifier {
       if (_disposed || epoch != _epoch) return;
       rows = List.unmodifiable(value);
       loaded = true;
+      lastDirectorySyncUtc = DateTime.now().toUtc();
     } catch (e) {
       if (!_disposed && epoch == _epoch) error = _failure(e);
     }
@@ -492,7 +430,7 @@ final class DirectMessagesModule extends ChangeNotifier {
   /// Open only a Host-issued friend chat reference. Account invalidation clears
   /// it normally; the server still decides current history/send permission.
   Future<void> openFriend(Conversation friend) async {
-    if (_disposed || sending) return;
+    if (_disposed) return;
     if (selected?.ref == friend.ref) return;
     // Opening a verified target supersedes any background directory read.
     rows = [friend];
@@ -507,8 +445,13 @@ final class DirectMessagesModule extends ChangeNotifier {
     back();
   }
 
+  // DL-06: recent history and drafts per conversation, display only.
+  final _memory = DirectConversationMemory();
+  void _keepSelected() =>
+      _memory.keep(selected?.conversationKey, draft: draft, messages: messages);
+
   void back() {
-    if (sending) return;
+    _keepSelected();
     clearDraft();
     _epoch++;
     port.cancel();
@@ -516,6 +459,7 @@ final class DirectMessagesModule extends ChangeNotifier {
     messages = [];
     busy = false;
     error = null;
+    historySyncError = null;
     readError = null;
     hasOlder = false;
     hasNewer = false;
@@ -523,9 +467,11 @@ final class DirectMessagesModule extends ChangeNotifier {
   }
 
   Future<void> open(Conversation row) async {
-    if (!rows.contains(row) || _disposed || sending) return;
+    if (!rows.contains(row) || _disposed) return;
     if (selected?.ref == row.ref) return;
+    _keepSelected();
     clearDraft();
+    draft = _memory.draft(row.conversationKey);
     scrollOffset = 0;
     // A new viewport must confirm its visible cursor again. A previous visit's
     // acknowledgement cannot suppress reconciliation of a refreshed directory.
@@ -537,7 +483,9 @@ final class DirectMessagesModule extends ChangeNotifier {
     _epoch++;
     port.cancel();
     selected = row;
-    messages = [];
+    // Shown until the latest page replaces it; never a cursor or permission.
+    messages = _memory.history(row.conversationKey);
+    historySyncError = null;
     hasOlder = false;
     hasNewer = false;
     busy = false;
@@ -548,77 +496,114 @@ final class DirectMessagesModule extends ChangeNotifier {
   bool _receiving = false;
   bool _activityPending = false;
 
-  void _drainActivity() {
-    if (_disposed ||
-        _receiving ||
-        _markingRead ||
-        busy ||
-        sending ||
-        !_activityPending) {
-      return;
+  bool _directoryPending = false;
+  void _drainActivity({bool directory = false}) {
+    if (directory) _directoryPending = true;
+    if (_disposed || _receiving || busy) return;
+    if (_activityPending && !_markingRead) {
+      _activityPending = _directoryPending = false;
+      unawaited(receive());
+    } else if (_directoryPending && !_activityPending) {
+      // Another conversation changed the directory; keep the open history.
+      _directoryPending = false;
+      unawaited(receive(directoryOnly: true));
     }
-    _activityPending = false;
-    unawaited(receive());
   }
 
   /// Incremental receipt must not clear a draft or put the composer in loading.
-  Future<void> receive({bool directoryOnly = false}) async {
-    if (_receiving || _markingRead || _disposed || busy || sending) return;
+  Future<DirectMessageReceiveResult> receive({
+    bool directoryOnly = false,
+    bool freshDirectory = false,
+  }) async {
+    if (_receiving || (_markingRead && !directoryOnly) || _disposed || busy) {
+      return DirectMessageReceiveResult.skipped;
+    }
     _receiving = true;
-    final epoch = _epoch;
+    final epoch = _epoch, beforeRows = rows, beforeMessages = messages;
+    final before = (selected?.ref, state, canSend, hasOlder, hasNewer);
+    var failed = false;
     try {
-      // The detached desktop surface shows history and directory together.
-      // Fetch authoritative unread counts for every row, even with a selected
-      // conversation; receiving a message is not a read acknowledgement.
+      // Directory/unread authority remains independent of history and receipts.
       if (loaded) {
         try {
-          final value = await port.directory();
-          if (_disposed || epoch != _epoch) return;
-          rows = List.unmodifiable(value);
-          final current = selected;
-          if (current != null) selected = current.withoutPresence();
-          for (final row in rows) {
-            if (current != null &&
-                (row.ref == current.ref ||
-                    (current.conversationKey?.isNotEmpty == true &&
-                        row.conversationKey == current.conversationKey))) {
-              // Friend-card and recent-chat capabilities are independently
-              // issued. Match their scoped identity, but retain the selected
-              // capability so an existing history cursor remains valid.
-              selected = Conversation(
-                current.ref,
-                row.name,
-                row.preview,
-                row.time,
-                row.unread,
-                row.state,
-                avatar: row.avatar,
-                conversationKey: row.conversationKey,
-                gameId: row.gameId,
-                presence: row.presence,
-              );
-              break;
-            }
+          _directoryReadRevision++;
+          final reader = port;
+          final value =
+              !freshDirectory && reader is DirectMessageDirectoryUpdatesPort
+              ? await (reader as DirectMessageDirectoryUpdatesPort)
+                    .receiveDirectory()
+              : await port.directory();
+          if (_disposed || epoch != _epoch) {
+            return DirectMessageReceiveResult.invalidated;
           }
+          rows = List.unmodifiable(value);
+          directoryError = null;
+          lastDirectorySyncUtc = DateTime.now().toUtc();
+          selected = refreshSelectedFromDirectory(selected, rows);
+          // The directory is the unread authority: nothing left to sync.
+          if (selected?.unread == 0) readError = null;
           notifyListeners();
-        } catch (_) {
-          // A directory failure must not stop an independently available history.
-          // Nor can an old snapshot keep claiming the peer is currently online.
+        } catch (e) {
+          if (!_disposed &&
+              epoch == _epoch &&
+              const {
+                'forbidden',
+                'identity_unavailable',
+                'target_changed',
+              }.contains(_failure(e))) {
+            _discardReadContext(failure: _failure(e));
+            return DirectMessageReceiveResult.invalidated;
+          }
+          failed = true;
+          // Transient directory failure must not stop independently available
+          // history or keep claiming a peer's former live presence.
           if (!_disposed && epoch == _epoch) {
+            directoryError = _failure(e);
             rows = List.unmodifiable(rows.map((row) => row.withoutPresence()));
             selected = selected?.withoutPresence();
             notifyListeners();
           }
         }
       }
-      if (_disposed || epoch != _epoch) return;
-      if (selected != null && !directoryOnly) {
-        await load(newer: true, quiet: true);
+      if (_disposed || epoch != _epoch) {
+        return DirectMessageReceiveResult.invalidated;
       }
+      if (selected != null && !directoryOnly) {
+        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        for (var page = 0; page < 10; page++) {
+          final previous = messages.lastOrNull?.sequence ?? 0;
+          final historySucceeded = await _loadHistory(newer: true, quiet: true);
+          if (_disposed || epoch != _epoch) {
+            return DirectMessageReceiveResult.invalidated;
+          }
+          failed = failed || !historySucceeded;
+          if (!historySucceeded || !hasNewer) break;
+          if ((messages.lastOrNull?.sequence ?? 0) <= previous) {
+            historySyncError = 'data_invalid';
+            failed = true;
+            break;
+          }
+          if (DateTime.now().isAfter(deadline)) break;
+        }
+      }
+      if (_disposed || epoch != _epoch) {
+        return DirectMessageReceiveResult.invalidated;
+      }
+      if (failed) return DirectMessageReceiveResult.failed;
+      final unchanged =
+          sameDirectMessageDirectory(beforeRows, rows) &&
+          listEquals(beforeMessages, messages) &&
+          before == (selected?.ref, state, canSend, hasOlder, hasNewer);
+      return unchanged
+          ? DirectMessageReceiveResult.unchanged
+          : DirectMessageReceiveResult.changed;
     } catch (_) {
-      // Keep the last confirmed directory during a transient background failure.
+      return _disposed || epoch != _epoch
+          ? DirectMessageReceiveResult.invalidated
+          : DirectMessageReceiveResult.failed;
     } finally {
       _receiving = false;
+      if (!_disposed && epoch == _epoch) notifyListeners();
       _drainActivity();
     }
   }
@@ -629,10 +614,25 @@ final class DirectMessagesModule extends ChangeNotifier {
     bool quiet = false,
     bool recoverTarget = true,
   }) async {
-    if (_disposed || busy || sending || selected == null) return;
-    if (older && !hasOlder) return;
+    await _loadHistory(
+      older: older,
+      newer: newer,
+      quiet: quiet,
+      recoverTarget: recoverTarget,
+    );
+  }
+
+  Future<bool> _loadHistory({
+    bool older = false,
+    bool newer = false,
+    bool quiet = false,
+    bool recoverTarget = true,
+  }) async {
+    if (_disposed || busy || selected == null) return false;
+    if (older && !hasOlder) return false;
     final target = selected!;
     final epoch = quiet ? _epoch : ++_epoch;
+    var succeeded = false;
     final before = older && messages.isNotEmpty ? messages.first.sequence : 0;
     final after = newer && messages.isNotEmpty ? messages.last.sequence : 0;
     if (!quiet) {
@@ -646,26 +646,31 @@ final class DirectMessagesModule extends ChangeNotifier {
     }
     try {
       final page = await port.history(target.ref, before: before, after: after);
-      if (_disposed || epoch != _epoch) return;
+      if (_disposed || epoch != _epoch) return false;
       if (page.ref != target.ref ||
           page.messages.any(
             (m) => (before > 0 && m.sequence >= before) || m.sequence <= after,
           )) {
         throw const DirectReadFailure('data_invalid');
       }
-      final merged = before > 0
+      var merged = before > 0
           ? [...page.messages, ...messages]
           : after > 0
           ? [...messages, ...page.messages]
           : page.messages;
-      if (merged.length > 1000) throw const DirectReadFailure('limit');
+      final trimmed = (after > 0 || before > 0) && merged.length > 1000;
+      if (!trimmed && merged.length > 1000) {
+        throw const DirectReadFailure('limit');
+      }
       if (merged.map((m) => m.id).toSet().length != merged.length ||
           merged.map((m) => m.sequence).toSet().length != merged.length) {
         throw const DirectReadFailure('data_invalid');
       }
+      if (trimmed) {
+        merged = before > 0 ? merged.sublist(0, 1000) : merged.sublist(merged.length - 1000);
+      }
       messages = List.unmodifiable(merged);
-      // History is also authoritative for the latest visible summary. Do not
-      // invent unread counts: those belong to the directory/read receipt.
+      // History advances the summary; directory/receipts own unread counts.
       final latest = messages.lastOrNull;
       if (latest != null) {
         Conversation advance(Conversation row) =>
@@ -687,7 +692,9 @@ final class DirectMessagesModule extends ChangeNotifier {
         selected = advance(selected!);
       }
       error = null;
+      if (!older) historySyncError = null;
       if (after == 0) hasOlder = page.hasOlder;
+      if (trimmed && after > 0) hasOlder = true;
       hasNewer = page.latest > (messages.lastOrNull?.sequence ?? 0);
       state = page.state;
       canSend =
@@ -699,31 +706,21 @@ final class DirectMessagesModule extends ChangeNotifier {
             'request_incoming',
             'request_outgoing',
           }.contains(state);
-      if (_pendingId != null &&
-          messages.any(
-            (m) =>
-                m.id == _pendingId &&
-                !m.incoming &&
-                m.text == _pendingText &&
-                m.attachment == null,
-          )) {
-        final permission = canSend;
-        clearDraft();
-        canSend = permission;
-        _showConfirmedSendHint('sent');
-      }
+      // History now carries these sends: drop their local copies (A2).
+      outbox.reconcile(messages);
+      succeeded = true;
     } catch (e) {
       if (!_disposed && epoch == _epoch) {
         // Capabilities expire independently of the conversation. Reacquire only
         // a unique, Host-issued target with the same scoped identity, and retry
         // the read once without carrying cursors across capabilities. Never
         // retry a send or discard the user's draft as part of read recovery.
-        if (recoverTarget &&
+        if (!older && recoverTarget &&
             _failure(e) == 'target_changed' &&
             target.conversationKey?.isNotEmpty == true) {
           try {
             final directory = await port.directory();
-            if (_disposed || epoch != _epoch) return;
+            if (_disposed || epoch != _epoch) return false;
             final matches = directory
                 .where((row) => row.conversationKey == target.conversationKey)
                 .toList();
@@ -739,13 +736,12 @@ final class DirectMessagesModule extends ChangeNotifier {
               _readThrough = 0;
               _readAttempt = null;
               busy = false;
-              await load(quiet: quiet, recoverTarget: false);
-              return;
+              return await _loadHistory(quiet: quiet, recoverTarget: false);
             }
           } catch (_) {
             // Preserve the original identity failure if renewal is unavailable.
           }
-          if (_disposed || epoch != _epoch) return;
+          if (_disposed || epoch != _epoch) return false;
         }
         // A transient background failure cannot revoke a confirmed permission.
         // Explicit permission/identity failures still clear inaccessible data.
@@ -755,13 +751,16 @@ final class DirectMessagesModule extends ChangeNotifier {
               'identity_unavailable',
               'target_changed',
             }.contains(_failure(e))) {
-          return;
+          historySyncError = _failure(e);
+          notifyListeners();
+          return false;
         }
+        historySyncError = null;
         error = _failure(e);
         canSend = false;
         if (error == 'forbidden' ||
             error == 'identity_unavailable' ||
-            error == 'target_changed') {
+            (error == 'target_changed' && !older)) {
           messages = [];
           hasOlder = false;
           hasNewer = false;
@@ -772,18 +771,22 @@ final class DirectMessagesModule extends ChangeNotifier {
       if (!quiet) busy = false;
       notifyListeners();
     }
+    return succeeded && !_disposed && epoch == _epoch;
   }
 
   String _failure(Object e) => e is DirectReadFailure ? e.code : 'unavailable';
   @override
   void dispose() {
+    _receivePolling?.dispose();
     _readRetry?.cancel();
     _confirmedSendHint?.cancel();
+    outbox.dispose();
     _disposed = true;
     _epoch++;
     port.cancel();
     unawaited(_subscription.cancel());
     unawaited(_activity?.cancel());
+    unawaited(_directoryActivity?.cancel());
     unawaited(port.close());
     super.dispose();
   }

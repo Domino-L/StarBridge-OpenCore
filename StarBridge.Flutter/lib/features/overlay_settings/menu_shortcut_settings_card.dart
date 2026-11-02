@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+
 import 'overlay_settings_help.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -10,6 +13,7 @@ import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_hotkey_card.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_settings_command_feedback.dart';
 
 class MenuShortcutSettingsCard extends StatefulWidget {
   const MenuShortcutSettingsCard({
@@ -99,76 +103,91 @@ class _MenuShortcutSettingsCardState extends State<MenuShortcutSettingsCard> {
     _ => 'unavailable',
   };
   @override
-  Widget build(BuildContext context) {
-    String t(String key) => AppStrings.of(context).text('menu.shortcut.$key');
-    final error = _error == 'menuPreferences.revision_conflict'
-        ? 'changed'
-        : _stateKey(_error.replaceFirst('menuHotkey.', ''));
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (!widget.embedded)
-          Text(t('title'), style: Theme.of(context).textTheme.titleMedium),
-        SizedBox(height: context.tokens.space.sm),
-        OverlaySettingsHelp(t('hint')),
-        if (_saved != null) ...[
-          SizedBox(height: context.tokens.space.md),
-          AbsorbPointer(
-            absorbing: _busy,
-            child: ExcludeFocus(
-              excluding: _busy,
-              child: OverlayWorkspaceHotkeyCard(
-                embedded: widget.embedded,
-                hotkey: OverlayWorkspaceHotkey(
-                  binding: _binding,
-                  enabled: _enabled,
-                  runtimeState: _dirty ? 'pending' : _saved!.state,
+  Widget build(BuildContext context) => OverlaySettingsCommandFeedback(
+    owner: widget.port,
+    builder: (context, run, source) {
+      String t(String key) => AppStrings.of(context).text('menu.shortcut.$key');
+      final error = _error == 'menuPreferences.revision_conflict'
+          ? 'changed'
+          : _stateKey(_error.replaceFirst('menuHotkey.', ''));
+      final content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!widget.embedded)
+            Text(t('title'), style: Theme.of(context).textTheme.titleMedium),
+          SizedBox(height: context.tokens.space.sm),
+          OverlaySettingsHelp(t('hint')),
+          if (_saved != null) ...[
+            SizedBox(height: context.tokens.space.md),
+            AbsorbPointer(
+              absorbing: _busy,
+              child: ExcludeFocus(
+                excluding: _busy,
+                child: OverlayWorkspaceHotkeyCard(
+                  embedded: widget.embedded,
+                  hotkey: OverlayWorkspaceHotkey(
+                    binding: _binding,
+                    enabled: _enabled,
+                    runtimeState: _dirty ? 'pending' : _saved!.state,
+                  ),
+                  defaultBinding: 'Alt+M',
+                  enabledLabel: t('enabled'),
+                  onBindingChanged: (v) => _change(() => _binding = v),
+                  onEnabledChanged: (v) => _change(() => _enabled = v),
                 ),
-                defaultBinding: 'Alt+M',
-                enabledLabel: t('enabled'),
-                onBindingChanged: (v) => _change(() => _binding = v),
-                onEnabledChanged: (v) => _change(() => _enabled = v),
               ),
             ),
-          ),
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(t('close')),
-              value: _close,
-              onChanged: _busy ? null : (v) => _change(() => _close = v),
+            Material(
+              type: MaterialType.transparency,
+              child: StarBridgeSwitch.tile(
+                controlKey: const Key('menu-shortcut-close'),
+                label: t('close'),
+                value: _close,
+                onChanged: _busy ? null : (v) => _change(() => _close = v),
+              ),
             ),
-          ),
-          Text(
-            t(_dirty ? 'dirty' : _stateKey(_saved!.state)),
-            key: const Key('menu-shortcut-state'),
-          ),
-        ],
-        if (_error.isNotEmpty)
-          Text(t(error), key: const Key('menu-shortcut-error')),
-        SizedBox(height: context.tokens.space.sm),
-        Wrap(
-          spacing: context.tokens.space.sm,
-          children: [
-            FilledButton(
-              key: const Key('menu-shortcut-save'),
-              onPressed: _saved == null || _busy || !_dirty
-                  ? null
-                  : () => _load(save: true),
-              child: Text(t(_busy ? 'busy' : 'save')),
-            ),
-            TextButton(
-              key: const Key('menu-shortcut-reload'),
-              onPressed: _busy ? null : _load,
-              child: Text(t('reload')),
+            Text(
+              t(_dirty ? 'dirty' : _stateKey(_saved!.state)),
+              key: const Key('menu-shortcut-state'),
             ),
           ],
-        ),
-      ],
-    );
-    return widget.embedded
-        ? content
-        : StarBridgeSurface(role: SurfaceRole.panel, child: content);
-  }
+          if (_error.isNotEmpty)
+            Text(t(error), key: const Key('menu-shortcut-error')),
+          SizedBox(height: context.tokens.space.sm),
+          Wrap(
+            spacing: context.tokens.space.sm,
+            children: [
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.primary,
+                controlKey: const Key('menu-shortcut-save'),
+                // Material's nested AnimatedTheme must not delay the live
+                // palette of the busy label while reduced motion changes.
+                nativeStyle: _busy
+                    ? const ButtonStyle(animationDuration: Duration.zero)
+                    : null,
+                onActivate: _saved == null || _busy || !_dirty
+                    ? null
+                    : (origin) => run(origin, () => _load(save: true)),
+                child: _busy
+                    ? OverlaySettingsCommandWait(
+                        label: t('busy'),
+                        source: source(),
+                      )
+                    : Text(t('save')),
+              ),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('menu-shortcut-reload'),
+                onActivate: _busy ? null : (origin) => run(origin, _load),
+                child: Text(t('reload')),
+              ),
+            ],
+          ),
+        ],
+      );
+      return widget.embedded
+          ? content
+          : StarBridgeSurface(role: SurfaceRole.panel, child: content);
+    },
+  );
 }

@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import '../../app/legal/cig_fankit_notice.dart';
 import '../../app/legal/starbridge_third_party_licenses.dart';
 import '../../app/localization/app_strings.dart';
-import '../../design_system/brand/starbridge_app_icon.dart';
-import '../../design_system/brand/scm_brand_mark.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -16,6 +19,14 @@ import 'help_support_feedback_content.dart';
 import 'settings_entry_dialog.dart';
 import 'help_support_port.dart';
 import 'help_support_live_content.dart';
+import 'daily_support_port.dart';
+import 'help_support_header.dart';
+import 'help_support_action.dart';
+import 'help_support_disclosure.dart';
+import 'help_support_topic_transition.dart';
+import '../onboarding/first_use_setup_entry.dart';
+import '../onboarding/onboarding_copy.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 enum HelpSupportTopic { gameLog, notices, updates, feedback }
 
@@ -23,11 +34,13 @@ class HelpSupportSettingsPage extends StatefulWidget {
   const HelpSupportSettingsPage({
     this.initialTopic = HelpSupportTopic.gameLog,
     this.port,
+    this.dailySupport,
     super.key,
   });
 
   final HelpSupportTopic initialTopic;
   final HelpSupportPort? port;
+  final DailySupportPort? dailySupport;
 
   @override
   State<HelpSupportSettingsPage> createState() =>
@@ -36,6 +49,8 @@ class HelpSupportSettingsPage extends StatefulWidget {
 
 class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
   late HelpSupportTopic _selected;
+  bool _topicInstant = false;
+  InteractionSource _topicSource = InteractionSource.programmatic;
   final _feedbackContact = TextEditingController();
   final _feedbackMessage = TextEditingController();
 
@@ -70,8 +85,23 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _HelpHeader(onOpenScm: widget.port == null ? null : _openScm),
+              HelpSupportHeader(
+                onOpenScm: widget.port == null ? null : _openScm,
+                dailySupport: widget.dailySupport,
+              ),
               SizedBox(height: tokens.space.lg),
+              if (FirstUseSetupEntry.of(context) case final open?)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: HelpSupportAction(
+                    controlKey: const Key('first-use-setup-entry'),
+                    onActivate: (_) => open(context),
+                    child: Text(
+                      OnboardingCopy(Localizations.localeOf(context))
+                          .text('entry'),
+                    ),
+                  ),
+                ),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final wide = constraints.maxWidth >= 860;
@@ -113,11 +143,17 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
     );
   }
 
-  void _select(HelpSupportTopic topic) {
-    if (topic != _selected) setState(() => _selected = topic);
+  void _select(HelpSupportTopic topic, InteractionSource source) {
+    if (topic != _selected) {
+      setState(() {
+        _selected = topic;
+        _topicInstant = source != InteractionSource.pointer;
+        _topicSource = source;
+      });
+    }
   }
 
-  Future<void> _openScm() async {
+  Future<void> _openScm(InteractionSource source) async {
     try {
       final result = await widget.port!.read('helpSupport.openScm');
       if (result['schemaVersion'] != 1 || result['opened'] != true) {
@@ -125,85 +161,48 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
       }
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+      showStarBridgeSnackBar(
+        context,
+        starBridgeTimedSnackBar(
           content: Text(AppStrings.of(context).text('help.scm.openFailed')),
         ),
+        source: source,
       );
     }
   }
 
-  Widget _topicContent() => AnimatedSwitcher(
-    duration: const Duration(milliseconds: 130),
-    switchInCurve: Curves.easeOut,
-    switchOutCurve: Curves.easeIn,
-    child: switch (_selected) {
-      HelpSupportTopic.gameLog => const _GameLogHelp(
-        key: Key('help-topic-game-log'),
+  Widget _topicContent() => starBridgeInitialReadViewport(
+    context,
+    source: resolveStarBridgeInitialReadSource(context, _topicSource),
+    child: AnimatedSwitcher(
+      duration: const Duration(milliseconds: 130),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, animation) => HelpSupportTopicTransition(
+        animation: animation,
+        instant: _topicInstant,
+        child: child,
       ),
-      HelpSupportTopic.notices => const _NoticesHelp(
-        key: Key('help-topic-notices'),
-      ),
-      HelpSupportTopic.updates => _UpdatesHelp(
-        key: Key('help-topic-updates'),
-        port: widget.port,
-      ),
-      HelpSupportTopic.feedback => _FeedbackHelp(
-        key: Key('help-topic-feedback'),
-        port: widget.port,
-        contact: _feedbackContact,
-        message: _feedbackMessage,
-      ),
-    },
+      child: switch (_selected) {
+        HelpSupportTopic.gameLog => const _GameLogHelp(
+          key: Key('help-topic-game-log'),
+        ),
+        HelpSupportTopic.notices => const _NoticesHelp(
+          key: Key('help-topic-notices'),
+        ),
+        HelpSupportTopic.updates => _UpdatesHelp(
+          key: Key('help-topic-updates'),
+          port: widget.port,
+        ),
+        HelpSupportTopic.feedback => _FeedbackHelp(
+          key: Key('help-topic-feedback'),
+          port: widget.port,
+          contact: _feedbackContact,
+          message: _feedbackMessage,
+        ),
+      },
+    ),
   );
-}
-
-class _HelpHeader extends StatelessWidget {
-  const _HelpHeader({this.onOpenScm});
-  final VoidCallback? onOpenScm;
-
-  @override
-  Widget build(BuildContext context) {
-    final strings = AppStrings.of(context);
-    final tokens = context.tokens;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: tokens.space.md,
-          runSpacing: tokens.space.sm,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            const StarBridgeAppIcon(size: 58),
-            Tooltip(
-              message: 'SCM · scm.flowcld.com',
-              child: TextButton(
-                key: const Key('help-scm-team'),
-                onPressed: onOpenScm,
-                child: const ScmBrandMark(),
-              ),
-            ),
-          ],
-        ),
-        SizedBox(height: tokens.space.md),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              strings.text('help.title'),
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            SizedBox(height: tokens.space.xxs),
-            Text(
-              strings.text('help.description'),
-              style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: tokens.colors.textSecondary),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
 }
 
 class _TopicNavigation extends StatelessWidget {
@@ -214,7 +213,7 @@ class _TopicNavigation extends StatelessWidget {
   });
 
   final HelpSupportTopic selected;
-  final ValueChanged<HelpSupportTopic> onSelect;
+  final void Function(HelpSupportTopic, InteractionSource) onSelect;
   final bool vertical;
 
   @override
@@ -224,7 +223,7 @@ class _TopicNavigation extends StatelessWidget {
         _TopicButton(
           topic: topic,
           selected: selected == topic,
-          onPressed: () => onSelect(topic),
+          onPressed: (source) => onSelect(topic, source),
         ),
     ];
     if (vertical) {
@@ -256,7 +255,7 @@ class _TopicButton extends StatelessWidget {
 
   final HelpSupportTopic topic;
   final bool selected;
-  final VoidCallback onPressed;
+  final ValueChanged<InteractionSource> onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -281,46 +280,51 @@ class _TopicButton extends StatelessWidget {
             width: tokens.stroke.regular,
           ),
         ),
-        child: InkWell(
-          key: Key('help-topic-button-${topic.name}'),
-          onTap: onPressed,
-          borderRadius: tokens.shape.small,
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: tokens.space.sm,
-              vertical: tokens.space.sm,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                StarBridgeIcon(
-                  metadata.icon,
-                  size: tokens.icons.medium,
-                  color: selected
-                      ? tokens.colors.accent
-                      : tokens.colors.textSecondary,
-                ),
-                SizedBox(width: tokens.space.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        strings.text(metadata.titleKey),
-                        style: Theme.of(context).textTheme.labelLarge
-                            ?.copyWith(color: foreground),
-                      ),
-                      SizedBox(height: tokens.space.xxs),
-                      Text(
-                        strings.text(metadata.descriptionKey),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
+        child: StarBridgeActionRow(
+          controlKey: Key('help-topic-button-${topic.name}'),
+          onActivate: (_, source) => onPressed(source),
+          baseRadius: tokens.shape.radiusSmall,
+          semanticSelected: selected,
+          semanticLabel:
+              '${strings.text(metadata.titleKey)}. ${strings.text(metadata.descriptionKey)}',
+          child: ExcludeSemantics(
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: tokens.space.sm,
+                vertical: tokens.space.sm,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StarBridgeIcon(
+                    metadata.icon,
+                    size: tokens.icons.medium,
+                    color: selected
+                        ? tokens.colors.accent
+                        : tokens.colors.textSecondary,
                   ),
-                ),
-              ],
+                  SizedBox(width: tokens.space.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          strings.text(metadata.titleKey),
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(color: foreground),
+                        ),
+                        SizedBox(height: tokens.space.xxs),
+                        Text(
+                          strings.text(metadata.descriptionKey),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -388,7 +392,7 @@ class _GameLogHelp extends StatelessWidget {
         ),
         SizedBox(height: tokens.space.sm),
         for (var index = 0; index < _categories.length; index++) ...[
-          _DisclosureCard(
+          HelpSupportDisclosureCard(
             key: Key('help-log-category-$index'),
             titleKey: _categories[index].$1,
             bodyKey: _categories[index].$2,
@@ -433,7 +437,7 @@ class _NoticesHelp extends StatelessWidget {
         ),
         SizedBox(height: tokens.space.md),
         for (var index = 0; index < _sections.length; index++) ...[
-          _DisclosureCard(
+          HelpSupportDisclosureCard(
             key: Key('help-legal-section-$index'),
             titleKey: _sections[index].$1,
             bodyKey: _sections[index].$2,
@@ -495,11 +499,12 @@ class _NoticesHelp extends StatelessWidget {
                     ?.copyWith(color: tokens.colors.textSecondary, height: 1.5),
               ),
               SizedBox(height: tokens.space.md),
-              OutlinedButton.icon(
-                key: const Key('help-open-third-party-licenses'),
-                onPressed: () => StarBridgeThirdPartyLicenses.show(context),
-                icon: const StarBridgeIcon(StarBridgeIconSemantic.legalNotice),
-                label: Text(strings.text('help.legal.licenses.open')),
+              HelpSupportAction(
+                kind: StarBridgeActionKind.secondary,
+                controlKey: const Key('help-open-third-party-licenses'),
+                onActivate: (_) => StarBridgeThirdPartyLicenses.show(context),
+                icon: StarBridgeIconSemantic.legalNotice,
+                child: Text(strings.text('help.legal.licenses.open')),
               ),
             ],
           ),
@@ -533,16 +538,17 @@ class _UpdatesHelp extends StatelessWidget {
         SizedBox(height: tokens.space.md),
         HelpSupportReadCard(name: 'applicationUpdates.check', port: port),
         SizedBox(height: tokens.space.md),
-        OutlinedButton.icon(
-          key: const Key('help-check-updates'),
-          onPressed:
+        HelpSupportAction(
+          kind: StarBridgeActionKind.secondary,
+          controlKey: const Key('help-check-updates'),
+          onActivate:
               SettingsEntryOverrides.of(context)['application-updates'] == null
               ? null
-              : () => SettingsEntryOverrides.of(
+              : (_) => SettingsEntryOverrides.of(
                   context,
                 )['application-updates']!(context),
-          icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-          label: Text(strings.text('help.version.check')),
+          icon: StarBridgeIconSemantic.refresh,
+          child: Text(strings.text('help.version.check')),
         ),
         SizedBox(height: tokens.space.md),
         HelpSupportReadCard(name: 'helpSupport.history', port: port),
@@ -688,79 +694,6 @@ class _InformationCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DisclosureCard extends StatelessWidget {
-  const _DisclosureCard({
-    required this.titleKey,
-    required this.bodyKey,
-    required this.accent,
-    this.initiallyExpanded = false,
-    super.key,
-  });
-
-  final String titleKey;
-  final String bodyKey;
-  final Color accent;
-  final bool initiallyExpanded;
-
-  @override
-  Widget build(BuildContext context) {
-    final strings = AppStrings.of(context);
-    final tokens = context.tokens;
-    return StarBridgeSurface(
-      role: SurfaceRole.panel,
-      padding: EdgeInsets.zero,
-      child: Material(
-        color: Colors.transparent,
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            initiallyExpanded: initiallyExpanded,
-            tilePadding: EdgeInsets.symmetric(
-              horizontal: tokens.space.md,
-              vertical: tokens.space.xxs,
-            ),
-            childrenPadding: EdgeInsetsDirectional.fromSTEB(
-              tokens.space.md,
-              0,
-              tokens.space.md,
-              tokens.space.md,
-            ),
-            leading: Container(
-              width: 4,
-              height: 30,
-              decoration: BoxDecoration(
-                color: accent,
-                borderRadius: tokens.shape.small,
-              ),
-            ),
-            title: Text(
-              strings.text(titleKey),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            trailing: StarBridgeIcon(
-              StarBridgeIconSemantic.menuDown,
-              size: tokens.icons.small,
-              color: tokens.colors.textSecondary,
-            ),
-            children: [
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  strings.text(bodyKey),
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: tokens.colors.textSecondary,
-                    height: 1.55,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

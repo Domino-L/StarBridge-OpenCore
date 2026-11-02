@@ -9,6 +9,44 @@ using StarBridge.NativeBridge;
 
 internal static class PrivacyPublicationTests
 {
+    public static async Task RejectedBackoff()
+    {
+        var diagnostic = new List<(string stage, string code, int? status)>();
+        using (var writer = new PrivacyRelayWriter(new Uri("https://privacy.invalid"))) {
+            writer.PublicationDiagnostic = (stage, code, status, _) => diagnostic.Add((stage, code, status));
+            using var known = new HttpResponseMessage(HttpStatusCode.BadRequest) {
+                Content = JsonContent.Create(new { code = "SCM_IDENTITY_UNAVAILABLE", secret = "fixture-private-value" }) };
+            await writer.RecordPublicationErrorAsync(known, default);
+            using var unknown = new HttpResponseMessage(HttpStatusCode.NotFound) {
+                Content = JsonContent.Create(new { code = "fixture-private-value" }) };
+            await writer.RecordPublicationErrorAsync(unknown, default);
+            Require(diagnostic.SequenceEqual(new[] { ("publication-http", "scm_identity_unavailable", (int?)400),
+                ("publication-http", "unclassified", (int?)404) }), "Diagnostic emits only a bounded status and known safe code");
+        }
+        foreach (var httpStatus in new[] { HttpStatusCode.BadRequest, HttpStatusCode.NotFound }) {
+            using var fixture = new Fixture();
+            var store = new LocalPrivacyStore(fixture.Root);
+            var clock = new SharingTestClock();
+            var positiveCalls = 0;
+            using var publisher = new PrivacyPublication(store, () => Input, (_, data, _) => {
+                if (data.GetProperty("online").GetBoolean()) {
+                    positiveCalls++;
+                    return Task.FromException(new AccountBridgeHostException("privacy_publication.unavailable", httpStatus: httpStatus));
+                }
+                return Task.CompletedTask;
+            }, startTimer: false, timeProvider: clock);
+            store.Save(Owner, 0, Guid.NewGuid().ToString("N"), Settings, () => true);
+            await publisher.ApplyAsync(Owner, 1, 1, default);
+            Require(publisher.Status.ErrorCode == "privacy_publication.rejected", "400 and 404 must be labelled rejected");
+            var calls = positiveCalls;
+            await publisher.TickAsync();
+            await publisher.TickAsync();
+            Require(positiveCalls == calls, "Rejected publication must respect the long retry deadline");
+            clock.Advance(60);
+            await publisher.TickAsync();
+            Require(positiveCalls > calls, "Long retry must eventually attempt publication again");
+        }
+    }
     private static readonly BridgeAccountContext Owner = new("test", "privacy.invalid", "OwnerMixed");
     private static PrivacyPublicationInput Input => new(Owner, 1, "Handle_Mixed", true, "EPTU",
         new(new("connected", "US", "pub_use1b_00000_001"), new("confirmed", "Orison"),
@@ -119,6 +157,7 @@ internal static class PrivacyPublicationTests
 
     public static async Task Lifecycle()
     {
+        var clock = new SharingTestClock();
         using var fixture = new Fixture();
         var store = new LocalPrivacyStore(fixture.Root);
         var current = Input;
@@ -127,15 +166,20 @@ internal static class PrivacyPublicationTests
         using var publisher = new PrivacyPublication(store, () => current, (_, data, _) => {
             sent.Add(data.Clone());
             return fail ? Task.FromException(new HttpRequestException()) : Task.CompletedTask;
-        }, startTimer: false);
+        }, startTimer: false, timeProvider: clock);
+        var changes = 0;
+        publisher.StatusChanged += () => changes++;
         store.Save(Owner, 0, Guid.NewGuid().ToString("N"), Settings, () => true);
         await publisher.TickAsync();
         Require(sent.Count == 0, "Existing local save is not consent to publish.");
+        Require(changes == 0, "An unchanged inactive status raises no change notification.");
         current = current with { IdentityConfirmed = false };
         Require((await publisher.ApplyAsync(Owner, 1, 1, default)).State == "identityRequired" && sent.Count == 0,
             "Unconfirmed identity cannot begin sharing.");
         current = Input;
+        var beforeApply = changes;
         Require((await publisher.ApplyAsync(Owner, 1, 1, default)).State == "applied", "Explicit apply acknowledges revision.");
+        Require(changes > beforeApply, "A status change notifies the client so the status light need not poll.");
         store.Save(Owner, 1, Guid.NewGuid().ToString("N"), Settings with { PublicationEnabled = false }, () => true);
         await publisher.TickAsync();
         Require(publisher.Status.State == "withdrawn" && !sent[^1].GetProperty("online").GetBoolean(), "Saved off clears live state.");
@@ -145,13 +189,16 @@ internal static class PrivacyPublicationTests
         await publisher.ApplyAsync(Owner, 1, 3, default);
         Require(publisher.Status.AppliedRevision == 3, "Explicit confirmation restores the current saved revision.");
         fail = true;
-        Require(!await publisher.StopAsync(default) && publisher.Status.State == "withdrawalPending", "Failed withdrawal is not success.");
+        Require(!await publisher.StopAsync(default, explicitRequest: true) && publisher.Status.State == "withdrawalPending", "Failed manual withdrawal is not success.");
         fail = false;
+        clock.Advance(60);
         await publisher.TickAsync();
         Require(publisher.Status.State == "withdrawn" && !sent[^1].GetProperty("online").GetBoolean(), "Reconnect retries only withdrawal.");
         var count = sent.Count;
+        var idleChanges = changes;
         await publisher.TickAsync();
         Require(sent.Count == count, "Stopped sharing is not restored by timer.");
+        Require(changes == idleChanges, "An idle tick without a status change raises no notification.");
         await publisher.ApplyAsync(Owner, 1, 3, default);
         current = Input with { Owner = Owner with { Subject = "Other" }, Generation = 2 };
         publisher.Invalidate();
@@ -193,13 +240,14 @@ internal static class PrivacyPublicationTests
         var sent = new List<JsonElement>();
         bool rejectOnline = false;
         bool rejectClear = false;
+        var clock = new SharingTestClock();
         using var publisher = new PrivacyPublication(store, () => Input, (_, data, _) => {
             sent.Add(data.Clone());
             var online = data.GetProperty("online").GetBoolean();
             return (online && rejectOnline) || (!online && rejectClear)
                 ? Task.FromException(new AccountBridgeHostException("privacy_publication.response_invalid"))
                 : Task.CompletedTask;
-        }, startTimer: false);
+        }, startTimer: false, timeProvider: clock);
         await publisher.StopAsync(default);
         Require(sent.Count == 0, "Inactive shutdown cannot write remote state.");
         await publisher.StopAsync(default, explicitRequest: true);
@@ -207,14 +255,20 @@ internal static class PrivacyPublicationTests
         store.Save(Owner, 0, Guid.NewGuid().ToString("N"), Settings, () => true);
         rejectOnline = rejectClear = true;
         await publisher.ApplyAsync(Owner, 1, 1, default);
-        Require(sent.Count == 3 && publisher.Status.State == "withdrawalPending", "Uncertain acknowledgement triggers a compensating clear.");
+        Require(sent.Count == 3 && publisher.Status.State == "reconnecting" && store.HasPublicationConsent(Owner), "Uncertain acknowledgement triggers a compensating clear without revoking consent.");
         rejectOnline = rejectClear = false;
         await publisher.TickAsync();
-        Require(!sent[^1].GetProperty("online").GetBoolean() && publisher.Status.State == "withdrawn", "Reconnect never restores uncertain publication.");
+        Require(!sent[^1].GetProperty("online").GetBoolean() && publisher.Status.State == "reconnecting" &&
+            publisher.Status.ErrorCode == "privacy_publication.response_invalid", "Cleanup retains the publication failure, never a manual pause.");
         var count = sent.Count;
         await publisher.TickAsync();
-        Require(sent.Count == count, "Explicit apply is required after failed publication.");
-        await publisher.ApplyAsync(Owner, 1, 1, default);
+        Require(sent.Count == count, "Receipt failure must respect long retry backoff.");
+        clock.Advance(60);
+        await publisher.TickAsync();
+        Require(!publisher.ClearPending && !sent[^1].GetProperty("online").GetBoolean(),
+            "The first retry deadline clears before positive recovery.");
+        await publisher.TickAsync();
+        Require(publisher.Status.State == "applied", "Receipt failure recovers without user action.");
         var file = Directory.GetFiles(Path.Combine(fixture.Root, "privacy-local-v1"), "*.json").Single();
         File.WriteAllText(file, "invalid fixture policy");
         await publisher.TickAsync();

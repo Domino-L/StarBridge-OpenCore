@@ -58,7 +58,7 @@ int main() {
   RegisterClass(&wc);
   int failures = 0;
   // Eight alternating normal/maximized cycles catch state leakage while
-  // keeping the COM taskbar integration test well inside CI time limits.
+  // keeping the window integration test well inside CI time limits.
   for (int i = 0; i < 8; ++i) {
     const auto hwnd = CreateWindow(wc.lpszClassName, L"Isolated editor regression",
       WS_OVERLAPPEDWINDOW, 70, 80, 800, 600, nullptr, nullptr, wc.hInstance, nullptr);
@@ -76,9 +76,25 @@ int main() {
       GetWindowRect(hwnd, &actual);
       MONITORINFO monitor{sizeof(MONITORINFO)};
       GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
-      if (entered && !EqualRect(&actual, &monitor.rcMonitor)) {
+      // One row short of the monitor: covering all of it makes Windows treat
+      // the editor as a full-screen app and turn on Do Not Disturb.
+      RECT expected = monitor.rcMonitor;
+      expected.bottom -= 1;
+      if (entered && !EqualRect(&actual, &expected)) {
         ++failures; std::cout << "FAIL|monitor-bounds|" << i << std::endl;
       }
+      const auto topmost = [hwnd] {
+        return (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+      };
+      editor.OnActivate(true);
+      if (entered && !topmost()) {
+        ++failures; std::cout << "FAIL|active-above-taskbar|" << i << std::endl;
+      }
+      editor.OnActivate(false);
+      if (entered && topmost()) {
+        ++failures; std::cout << "FAIL|inactive-not-topmost|" << i << std::endl;
+      }
+      editor.OnActivate(true);
       active_during_restore = false;
       expect_maximized_restore = before.showCmd == SW_SHOWMAXIMIZED;
       saw_restored_during_restore = false;
@@ -104,6 +120,9 @@ int main() {
                   << "|saw-restored=" << saw_restored_during_restore
                   << "|saw-maximized-after=" << saw_maximized_after_restore
                   << std::endl;
+      }
+      if ((GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0) {
+        ++failures; std::cout << "FAIL|exit-topmost|" << i << std::endl;
       }
       WINDOWPLACEMENT after{sizeof(WINDOWPLACEMENT)};
       GetWindowPlacement(hwnd, &after);

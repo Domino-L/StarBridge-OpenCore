@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../design_system/icons/icon_semantic.dart';
 import '../../../design_system/icons/starbridge_icon.dart';
+import '../../../design_system/interaction/starbridge_caption_action.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
 import '../../../platform/window/window_chrome_port.dart';
 import '../../localization/app_strings.dart';
@@ -65,9 +66,9 @@ class _WindowControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return IconButton(
-      onPressed: onPressed,
-      tooltip: tooltip,
+    return StarBridgeCaptionAction(
+      onActivate: (_) => onPressed(),
+      label: tooltip,
       style: ButtonStyle(
         minimumSize: WidgetStatePropertyAll(
           Size(

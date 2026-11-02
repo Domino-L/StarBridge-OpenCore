@@ -1,12 +1,20 @@
 import 'dart:math' as math;
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/styles/overlay_preview_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_menu_anchor.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import 'overlay_preview_background.dart';
 import 'overlay_menu_trigger.dart';
@@ -14,6 +22,7 @@ import 'overlay_workspace_module.dart';
 import 'overlay_workspace_editor_state.dart';
 import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_layout_geometry.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class OverlayWorkspacePreviewStage extends StatefulWidget {
   const OverlayWorkspacePreviewStage({
@@ -37,11 +46,29 @@ class _PreviewStageState extends State<OverlayWorkspacePreviewStage> {
   String _background = 'grid';
   Uint8List? _image;
   Size _viewport = Size.zero;
+  int _pickEpoch = 0;
+  ValueGetter<InteractionSource> _pickSource = () =>
+      InteractionSource.programmatic;
 
   @override
   void initState() {
     super.initState();
     widget.editor.addListener(_focusSelected);
+  }
+
+  @override
+  void didUpdateWidget(OverlayWorkspacePreviewStage old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.editor, widget.editor)) {
+      old.editor.removeListener(_focusSelected);
+      widget.editor.addListener(_focusSelected);
+    }
+    if (!identical(old.module, widget.module) ||
+        !identical(old.editor, widget.editor)) {
+      ++_pickEpoch;
+      _picking = false;
+      _pickSource = () => InteractionSource.programmatic;
+    }
   }
 
   @override
@@ -86,32 +113,71 @@ class _PreviewStageState extends State<OverlayWorkspacePreviewStage> {
     );
   }
 
-  Future<void> _selectBackground(String value) async {
-    if (value != 'image') {
-      setState(() => _background = value);
-      return;
-    }
-    setState(() => _picking = true);
-    try {
-      final bytes = await pickOverlayPreviewBackground();
-      if (mounted && bytes != null) {
-        setState(() {
-          _image = bytes;
-          _background = 'image';
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_copy(context, 'overlay.preview.imageFailed')),
+  Future<void> _selectBackground(String value, InteractionSource source) =>
+      runStarBridgeActivation(source, () async {
+        if (_picking) return;
+        if (value != 'image') {
+          setState(() => _background = value);
+          return;
+        }
+        final owner = widget.module, editor = widget.editor;
+        final epoch = ++_pickEpoch;
+        bool current() =>
+            mounted &&
+            epoch == _pickEpoch &&
+            identical(owner, widget.module) &&
+            identical(editor, widget.editor);
+        _pickSource = captureStarBridgeActivationSource();
+        setState(() => _picking = true);
+        try {
+          final bytes = await pickOverlayPreviewBackground();
+          if (current() && bytes != null) {
+            setState(() {
+              _image = bytes;
+              _background = 'image';
+            });
+          }
+        } catch (_) {
+          if (mounted && current()) {
+            showStarBridgeSnackBar(
+              context,
+              starBridgeTimedSnackBar(
+                content: Text(_copy(context, 'overlay.preview.imageFailed')),
+              ),
+              source: source,
+            );
+          }
+        } finally {
+          if (current()) setState(() => _picking = false);
+        }
+      });
+
+  Widget _waitingForImage() => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion ||
+                _pickSource() == InteractionSource.keyboard,
+          ),
+          child: Semantics(
+            liveRegion: true,
+            child: SuiteBusyFrame(
+              busy: true,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: SuiteBusyLabel(
+                  _copy(context, 'overlay.workspace.working'),
+                ),
+              ),
+            ),
           ),
         );
-      }
-    } finally {
-      if (mounted) setState(() => _picking = false);
-    }
-  }
+      },
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -150,34 +216,49 @@ class _PreviewStageState extends State<OverlayWorkspacePreviewStage> {
                   _copy(context, 'overlay.preview.stageTitle'),
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
-                Material(
-                  type: MaterialType.transparency,
-                  child: PopupMenuButton<String>(
-                    key: const Key('overlay-preview-background'),
-                    enabled: !_picking,
-                    tooltip: _copy(context, 'overlay.preview.background'),
-                    onSelected: _selectBackground,
-                    itemBuilder: (context) => [
-                      for (final value in ['grid', 'space', 'image'])
-                        PopupMenuItem(
-                          value: value,
-                          child: Text(
-                            _copy(context, 'overlay.preview.background.$value'),
-                          ),
+                StarBridgeMenuAnchor(
+                  enabled: !_picking,
+                  retainExitContent: !_picking,
+                  semanticLabel:
+                      '${_copy(context, 'overlay.preview.background')} · ${_copy(context, 'overlay.preview.background.$_background')}',
+                  entries: [
+                    for (final value in ['grid', 'space', 'image'])
+                      StarBridgeMenuEntry(
+                        id: 'overlay-preview-background-$value',
+                        label: _copy(
+                          context,
+                          'overlay.preview.background.$value',
                         ),
-                    ],
-                    child: OverlayMenuTrigger(
-                      enabled: !_picking,
-                      label: _copy(
-                        context,
-                        'overlay.preview.background.$_background',
+                        selected: value == _background,
+                        onActivate: _picking
+                            ? null
+                            : (source) =>
+                                  unawaited(_selectBackground(value, source)),
+                        child: Text(
+                          _copy(context, 'overlay.preview.background.$value'),
+                        ),
+                      ),
+                  ],
+                  builder: (_, _, focus, toggle) => StarBridgeActionRow(
+                    controlKey: const Key('overlay-preview-background'),
+                    focusNode: focus,
+                    onActivate: _picking ? null : (_, source) => toggle(source),
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: OverlayMenuTrigger(
+                        enabled: !_picking,
+                        label: _copy(
+                          context,
+                          'overlay.preview.background.$_background',
+                        ),
                       ),
                     ),
                   ),
                 ),
-                OutlinedButton(
-                  key: const Key('overlay-preview-zoom'),
-                  onPressed: () {
+                if (_picking) _waitingForImage(),
+                StarBridgeActionButton(
+                  controlKey: const Key('overlay-preview-zoom'),
+                  onActivate: (_) {
                     setState(() => _actualSize = !_actualSize);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) _focusSelected();

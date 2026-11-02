@@ -187,6 +187,8 @@ public sealed record PartyRoomDirectoryResponse(
     DateTimeOffset ServerTime)
 {
     public bool SupportsHostTransfer { get; init; }
+    public bool SupportsMembershipKeepalive { get; init; }
+    public string? ViewerMembershipToken { get; init; }
     public PartyRoomInvitationSnapshot[] ReceivedInvitations { get; init; } = [];
 
     public PartyRoomInvitationSnapshot[] SentInvitations { get; init; } = [];

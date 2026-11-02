@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../features/account/account_models.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 
 /// Bounded, read-only preparation after the shell and account are ready.
 /// One job at a time; foreground actions never await this queue.
@@ -12,7 +13,9 @@ final class SessionWarmup {
     required this.jobs,
     this.continueWork,
     this.workChanges,
-  }) {
+    this.cancelWork,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now {
     account.addListener(_changed);
     workChanges?.addListener(wake);
   }
@@ -23,6 +26,8 @@ final class SessionWarmup {
   /// change can wake it again without replaying the startup jobs.
   final Future<bool> Function()? continueWork;
   final Listenable? workChanges;
+  final VoidCallback? cancelWork;
+  final DateTime Function() _now;
   bool _drained = false;
   int _workRevision = 0;
   Timer? _timer;
@@ -47,6 +52,7 @@ final class SessionWarmup {
         ? (account.value.generation, account.value.sessionState)
         : null;
     if (_identity != identity) {
+      cancelWork?.call();
       _identity = identity;
       _epoch++;
       _next = 0;
@@ -64,13 +70,19 @@ final class SessionWarmup {
   }
 
   void setForeground(bool value) {
+    if (_closed) return;
     _foreground = value;
-    if (!value) _timer?.cancel();
+    if (!value) {
+      _timer?.cancel();
+      cancelWork?.call();
+    }
     if (value) wake();
   }
 
   void deferForInteraction() {
-    _deferredUntil = DateTime.now().add(const Duration(milliseconds: 800));
+    if (_closed) return;
+    cancelWork?.call();
+    _deferredUntil = _now().add(const Duration(milliseconds: 800));
     _timer?.cancel();
     wake();
   }
@@ -86,12 +98,12 @@ final class SessionWarmup {
         (_timer?.isActive ?? false)) {
       return;
     }
-    final remaining = _deferredUntil?.difference(DateTime.now());
+    final remaining = _deferredUntil?.difference(_now());
     final delay =
         remaining != null && remaining > const Duration(milliseconds: 300)
         ? remaining
         : const Duration(milliseconds: 300);
-    _timer = Timer(delay, _run);
+    _timer = Timer(delay, () => backgroundLoadingRead(_run));
   }
 
   Future<void> _run() async {
@@ -129,7 +141,9 @@ final class SessionWarmup {
   }
 
   void dispose() {
+    if (_closed) return;
     _closed = true;
+    cancelWork?.call();
     _epoch++;
     _timer?.cancel();
     account.removeListener(_changed);

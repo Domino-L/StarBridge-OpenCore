@@ -15,7 +15,10 @@ class MenuRestoreSettingsCard extends StatelessWidget {
         section: 'restore',
         read: (settings) => MenuRestorePreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuRestoreEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuRestoreEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

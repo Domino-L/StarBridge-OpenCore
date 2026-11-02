@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_source_binding_field.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_preset_name.dart';
 import 'overlay_workspace_module.dart';
 
 class OverlayPresetSettingsDialog extends StatefulWidget {
@@ -24,7 +31,9 @@ class OverlayPresetSettingsDialog extends StatefulWidget {
 
 class _OverlayPresetSettingsDialogState
     extends State<OverlayPresetSettingsDialog> {
-  late final _name = TextEditingController(text: widget.preset.name);
+  late final _name = TextEditingController(
+    text: widget.preset.shownName(AppStrings.of(context)),
+  );
   late var _binding = widget.preset.sources!.binding;
   late var _autoSwitch = widget.preset.sources!.autoSwitch;
   late final int? _revision;
@@ -54,14 +63,18 @@ class _OverlayPresetSettingsDialogState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _name,
+              StarBridgeFieldFrame(
                 enabled: !_saving,
-                maxLength: 24,
-                decoration: InputDecoration(
-                  labelText: copy('overlay.workspace.presetName'),
+                builder: (context, focus) => TextField(
+                  controller: _name,
+                  focusNode: focus,
+                  enabled: !_saving,
+                  maxLength: 24,
+                  decoration: InputDecoration(
+                    labelText: copy('overlay.workspace.presetName'),
+                  ),
+                  onChanged: (_) => setState(() => _failed = false),
                 ),
-                onChanged: (_) => setState(() => _failed = false),
               ),
               SizedBox(height: context.tokens.space.md),
               OverlaySourceBindingField(
@@ -73,32 +86,20 @@ class _OverlayPresetSettingsDialogState
                     : (value) => setState(() {
                         _binding = value;
                         _failed = false;
-                        if (value.mode != OverlaySourceMode.room &&
-                            value.mode != OverlaySourceMode.community) {
-                          _autoSwitch = false;
-                        }
+                        if (!value.isConcrete) _autoSwitch = false;
                       }),
               ),
               SizedBox(height: context.tokens.space.md),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(copy('overlay.source.autoSwitch')),
-                subtitle: Text(
-                  copy(
-                    _binding.mode == OverlaySourceMode.room ||
-                            _binding.mode == OverlaySourceMode.community
-                        ? 'overlay.source.autoSwitchHelp'
-                        : 'overlay.source.autoSwitchRequiresBinding',
-                  ),
+              StarBridgeSwitch.tile(
+                key: const Key('overlay-preset-auto-switch'),
+                label: copy('overlay.source.autoSwitch'),
+                subtitle: copy(
+                  _binding.isConcrete
+                      ? 'overlay.source.autoSwitchHelp'
+                      : 'overlay.source.autoSwitchRequiresBinding',
                 ),
-                value:
-                    _autoSwitch &&
-                    (_binding.mode == OverlaySourceMode.room ||
-                        _binding.mode == OverlaySourceMode.community),
-                onChanged:
-                    _saving ||
-                        (_binding.mode != OverlaySourceMode.room &&
-                            _binding.mode != OverlaySourceMode.community)
+                value: _autoSwitch && _binding.isConcrete,
+                onChanged: _saving || !_binding.isConcrete
                     ? null
                     : (value) => setState(() => _autoSwitch = value),
               ),
@@ -114,13 +115,18 @@ class _OverlayPresetSettingsDialogState
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _saving ? null : () => Navigator.pop(context),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: _saving
+                ? null
+                : (source) =>
+                      dismissStarBridgeDialog<void>(context, source: source),
             child: Text(copy('overlay.workspace.cancel')),
           ),
-          FilledButton(
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
             key: const Key('overlay-preset-settings-save'),
-            onPressed: _saving || _name.text.trim().isEmpty ? null : _save,
+            onActivate: _saving || _name.text.trim().isEmpty ? null : _save,
             child: Text(copy('overlay.source.save')),
           ),
         ],
@@ -128,7 +134,7 @@ class _OverlayPresetSettingsDialogState
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save(InteractionSource source) async {
     final projection = widget.module.projection.value;
     if (projection.busy || projection.snapshot?.sourcePresetsEnabled != true) {
       return;
@@ -153,21 +159,37 @@ class _OverlayPresetSettingsDialogState
     setState(() => _saving = true);
     if (conflicts.isNotEmpty) {
       final copy = AppStrings.of(context).text;
-      final confirmed = await showDialog<bool>(
-        context: context,
+      final confirmed = await showStarBridgeDialog<bool>(
+        context,
+        source: source,
         builder: (context) => AlertDialog(
           title: Text(copy('overlay.source.presetSettings')),
           content: Text(
-            copy('overlay.source.replaceAutoSwitch')
-                .replaceAll('{name}', conflicts.single.name),
+            copy('overlay.source.replaceAutoSwitch').replaceAll(
+              '{name}',
+              conflicts.single.shownName(AppStrings.of(context)),
+            ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              onActivate: (source) => dismissStarBridgeDialog(
+                context,
+                source: source,
+                result: false,
+              ),
               child: Text(copy('overlay.workspace.cancel')),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              onActivate: (activation) {
+                source = activation;
+                dismissStarBridgeDialog(
+                  context,
+                  source: activation,
+                  result: true,
+                );
+              },
               child: Text(copy('overlay.source.replace')),
             ),
           ],
@@ -181,7 +203,7 @@ class _OverlayPresetSettingsDialogState
     }
     final saved = await widget.module.configurePreset(
       widget.preset.id,
-      _name.text.trim(),
+      widget.preset.savedName(_name.text.trim(), AppStrings.of(context)),
       _binding,
       _autoSwitch,
       replaceAutoSwitchPresetId: conflicts.firstOrNull?.id,
@@ -189,7 +211,7 @@ class _OverlayPresetSettingsDialogState
     );
     if (!mounted) return;
     if (saved) {
-      Navigator.pop(context);
+      dismissStarBridgeDialog<void>(context, source: source);
     } else {
       setState(() {
         _saving = false;

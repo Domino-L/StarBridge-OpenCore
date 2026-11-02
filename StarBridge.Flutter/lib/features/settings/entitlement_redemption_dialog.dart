@@ -2,52 +2,67 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../account/account_models.dart';
+import 'help_support_action.dart';
+import 'help_support_waiting.dart';
 
 Future<void> showLegacyEntitlementRedemptionDialog(
   BuildContext context,
   ValueListenable<AccountProjection> account,
   BridgeClientSession? session,
-) => showDialog<void>(
-  context: context,
-  builder: (_) => ValueListenableBuilder<AccountProjection>(
-    valueListenable: account,
-    builder: (context, owner, _) => EntitlementRedemptionDialog(
-      key: ValueKey((owner.generation, owner.sessionState)),
-      supported:
-          owner.isLegacyAccount &&
-          session != null &&
-          session.hostCapabilities.contains('account.redeemLegacyEntitlements'),
-      redeem: (code) async {
-        if (session == null ||
-            !owner.isLegacyAccount ||
-            session.activeGeneration != owner.generation) {
-          return 'sessionChanged';
-        }
-        final current = await session.request(
-          'account.getCurrent',
-          payload: const {'schemaVersion': 1},
-        );
-        if (current.accountContext == null ||
-            current.payload['state'] != 'legacySignedIn' ||
-            current.sessionGeneration != owner.generation ||
-            account.value.generation != owner.generation) {
-          return 'sessionChanged';
-        }
-        final result = await session.request(
-          'account.redeemLegacyEntitlements',
-          accountContext: current.accountContext,
-          payload: {'schemaVersion': 1, 'code': code},
-          timeout: const Duration(seconds: 50),
-        );
-        if (session.activeGeneration != owner.generation ||
-            account.value.generation != owner.generation) {
-          return 'sessionChanged';
-        }
-        if (result.payload['schemaVersion'] != 1) return 'uncertain';
-        return result.payload['outcome'] as String? ?? 'uncertain';
-      },
+) => showStarBridgeDialog<void>(
+  context,
+  traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+  builder: (_) => Semantics(
+    scopesRoute: true,
+    explicitChildNodes: true,
+    child: SafeArea(
+      child: ValueListenableBuilder<AccountProjection>(
+        valueListenable: account,
+        builder: (context, owner, _) => EntitlementRedemptionDialog(
+          key: ValueKey((owner.generation, owner.sessionState)),
+          supported:
+              owner.isLegacyAccount &&
+              session != null &&
+              session.hostCapabilities.contains(
+                'account.redeemLegacyEntitlements',
+              ),
+          redeem: (code) async {
+            if (session == null ||
+                !owner.isLegacyAccount ||
+                session.activeGeneration != owner.generation) {
+              return 'sessionChanged';
+            }
+            final current = await session.request(
+              'account.getCurrent',
+              payload: const {'schemaVersion': 1},
+            );
+            if (current.accountContext == null ||
+                current.payload['state'] != 'legacySignedIn' ||
+                current.sessionGeneration != owner.generation ||
+                account.value.generation != owner.generation) {
+              return 'sessionChanged';
+            }
+            final result = await session.request(
+              'account.redeemLegacyEntitlements',
+              accountContext: current.accountContext,
+              payload: {'schemaVersion': 1, 'code': code},
+              timeout: const Duration(seconds: 50),
+            );
+            if (session.activeGeneration != owner.generation ||
+                account.value.generation != owner.generation) {
+              return 'sessionChanged';
+            }
+            if (result.payload['schemaVersion'] != 1) return 'uncertain';
+            return result.payload['outcome'] as String? ?? 'uncertain';
+          },
+        ),
+      ),
     ),
   ),
 );
@@ -70,6 +85,7 @@ class _EntitlementRedemptionDialogState
   final _code = TextEditingController();
   bool _busy = false;
   String? _outcome;
+  InteractionSource _source = InteractionSource.programmatic;
   @override
   void dispose() {
     _code.dispose();
@@ -168,43 +184,57 @@ class _EntitlementRedemptionDialogState
             ),
             if (widget.supported) ...[
               const SizedBox(height: 12),
-              TextField(
-                controller: _code,
-                maxLength: 4096,
+              StarBridgeFieldFrame(
                 enabled: !_busy && _outcome != 'uncertain',
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  labelText: copy('兑换码', '兌換碼', 'Redemption code'),
-                  counterText: '',
+                builder: (_, focus) => TextField(
+                  focusNode: focus,
+                  controller: _code,
+                  maxLength: 4096,
+                  enabled: !_busy && _outcome != 'uncertain',
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    labelText: copy('兑换码', '兌換碼', 'Redemption code'),
+                    counterText: '',
+                  ),
+                  onChanged: (_) => setState(() {}),
                 ),
-                onChanged: (_) => setState(() {}),
               ),
             ],
             if (_busy)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: LinearProgressIndicator(),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: HelpSupportWaiting(
+                  label: copy('正在兑换…', '正在兌換…', 'Redeeming…'),
+                  source: _source,
+                ),
               ),
             if (message != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: Text(message),
+                child: Semantics(liveRegion: true, child: Text(message)),
               ),
           ],
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+        HelpSupportAction(
+          controlKey: const Key('redemption-close'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(copy('关闭', '關閉', 'Close')),
         ),
         if (widget.supported)
-          FilledButton(
-            onPressed:
+          HelpSupportAction(
+            controlKey: const Key('redemption-submit'),
+            kind: StarBridgeActionKind.primary,
+            onActivate:
                 _busy || _code.text.trim().isEmpty || _outcome == 'uncertain'
                 ? null
-                : _submit,
+                : (source) {
+                    _source = source;
+                    _submit();
+                  },
             child: Text(copy('兑换', '兌換', 'Redeem')),
           ),
       ],

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../design_system/icons/icon_semantic.dart';
 import '../../../design_system/icons/starbridge_icon.dart';
+import '../../../design_system/interaction/starbridge_action_button.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
 import '../../localization/app_strings.dart';
 
@@ -36,6 +37,7 @@ class SharingStatusNotice extends StatelessWidget {
   Widget _buildNotice(BuildContext context, String issue) {
     final tokens = context.tokens;
     final strings = AppStrings.of(context);
+    final messageIssue = _recoveringIssues.contains(issue) ? 'network' : issue;
     final informational =
         issue == 'identity' ||
         issue == 'paused' ||
@@ -44,20 +46,35 @@ class SharingStatusNotice extends StatelessWidget {
     final foreground = informational
         ? tokens.colors.info
         : tokens.colors.warning;
-    final settingsAction = TextButton(
-      key: const Key('sharing-status-settings'),
-      onPressed: onOpenSettings,
+    final settingsAction = StarBridgeActionButton(
+      controlKey: const Key('sharing-status-settings'),
+      kind: StarBridgeActionKind.quiet,
+      onActivate: (_) => onOpenSettings(),
       child: Text(strings.text('privacy.notice.settings')),
     );
+    final showRetry =
+        onRetry != null &&
+        (_recoveringIssues.contains(issue) ||
+            const {
+              'waiting',
+              'failed',
+              'statusRead',
+              'permission',
+              'contract',
+              'rejected',
+              'service',
+            }.contains(issue));
+    // The provider owns admission. Evaluate it once under the original issue
+    // gate; a null result must remain a visible but disabled action.
+    final retry = showRetry ? onRetry!() : null;
     final action = Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (onRetry != null &&
-            (_recoveringIssues.contains(issue) ||
-                const {'waiting', 'failed', 'statusRead'}.contains(issue)))
-          TextButton(
-            key: const Key('sharing-status-retry'),
-            onPressed: onRetry!(),
+        if (showRetry)
+          StarBridgeActionButton(
+            controlKey: const Key('sharing-status-retry'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: retry == null ? null : (_) => retry(),
             child: Text(strings.text('privacy.notice.retry')),
           ),
         settingsAction,
@@ -105,7 +122,7 @@ class SharingStatusNotice extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        strings.text('privacy.notice.$issue.title'),
+                        strings.text('privacy.notice.$messageIssue.title'),
                         style: Theme.of(context).textTheme.labelMedium
                             ?.copyWith(
                               color: foreground,
@@ -113,7 +130,7 @@ class SharingStatusNotice extends StatelessWidget {
                             ),
                       ),
                       Text(
-                        strings.text('privacy.notice.$issue.body'),
+                        strings.text('privacy.notice.$messageIssue.body'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],

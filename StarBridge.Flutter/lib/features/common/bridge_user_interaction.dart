@@ -84,11 +84,14 @@ final class BridgeUserInteraction implements UserInteractionPort {
       return PersonalProfileSnapshot.unavailable(
         failureKey: switch (error.code) {
           'profile.visitor_not_visible' => 'profile.visitor.notVisible',
+          'profile.visitor_identity_unavailable' ||
+          'profile.visitor_unavailable' => 'profile.visitor.identityUnavailable',
           'users.targetChanged' ||
           'communities.refreshRequired' => 'profile.visitor.refreshSource',
           'account.reauthorization_required' =>
             'profile.visitor.accountRequired',
           'bridge.timeout' => 'profile.visitor.readTimeout',
+          'profile.visitor_rate_limited' => 'profile.visitor.rateLimited',
           _ => 'profile.error.unavailable',
         },
       );

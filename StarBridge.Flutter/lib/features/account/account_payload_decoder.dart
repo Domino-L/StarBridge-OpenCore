@@ -1,8 +1,74 @@
 import '../../platform/bridge/bridge_envelope.dart';
+import '../../shared/bounded_inline_avatar.dart';
 import 'account_models.dart';
 
 /// Validates host account payloads without owning transport or session state.
 abstract final class AccountPayloadDecoder {
+  /// Presentation only. This never produces an authenticated account context.
+  static ({
+    AccountProfile profile,
+    DateTime cachedAt,
+    String? readId,
+    String? previousReadId,
+  })?
+  retainedDisplay(BridgeEnvelope envelope, AccountSessionState state) {
+    final retained = envelope.payload['retainedDisplay'];
+    if (retained == null) return null;
+    if (state != AccountSessionState.credentialTemporarilyUnavailable ||
+        envelope.accountContext != null ||
+        retained is! Map<String, Object?> ||
+        retained.keys.any(
+          (key) => !const {
+            'displayName',
+            'cachedAtUtc',
+            'readId',
+            'previousReadId',
+            'avatarImageData',
+            'avatarCachedAtUtc',
+          }.contains(key),
+        ) ||
+        retained['displayName'] is! String ||
+        retained['cachedAtUtc'] is! String) {
+      throw const BridgeFormatException('Invalid retained account display.');
+    }
+    final name = retained['displayName']! as String;
+    final at = DateTime.tryParse(retained['cachedAtUtc']! as String);
+    if (name.trim().isEmpty ||
+        name.length > 256 ||
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(name) ||
+        at == null ||
+        !at.isUtc ||
+        !at.isAfter(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)) ||
+        at.isAfter(DateTime.now().toUtc().add(const Duration(minutes: 5)))) {
+      throw const BridgeFormatException('Invalid retained account display.');
+    }
+    final readId = retained['readId'];
+    if (retained.containsKey('readId') &&
+        (readId is! String || !RegExp(r'^[a-f0-9]{32}$').hasMatch(readId))) {
+      throw const BridgeFormatException('Invalid retained read selection.');
+    }
+    final previousReadId = retained['previousReadId'];
+    if (retained.containsKey('previousReadId') &&
+        (readId == null ||
+            previousReadId is! String ||
+            !RegExp(r'^[a-f0-9]{32}$').hasMatch(previousReadId) ||
+            previousReadId == readId)) {
+      throw const BridgeFormatException('Invalid retained display continuity.');
+    }
+    return (
+      profile: AccountProfile(
+        displayName: name,
+        avatarImageData:
+            inlineAvatarObservedAt(retained['avatarCachedAtUtc']) == null
+            ? null
+            : boundedInlineAvatar(retained['avatarImageData']),
+      ),
+      cachedAt: at,
+      readId: readId as String?,
+      previousReadId: previousReadId as String?,
+    );
+  }
+
   static void requireSchema(Map<String, Object?> payload) =>
       _requireSchema(payload);
 
@@ -53,7 +119,10 @@ abstract final class AccountPayloadDecoder {
     );
   }
 
-  static AccountProfilePayload profile(Map<String, Object?> payload) {
+  static AccountProfilePayload profile(
+    Map<String, Object?> payload, {
+    bool allowDirectoryOmission = false,
+  }) {
     _requireSchema(payload);
     final profile = _requiredMap(payload, 'profile');
     final source = _requiredString(payload, 'source');
@@ -66,8 +135,22 @@ abstract final class AccountPayloadDecoder {
     final cachedAt = cachedAtText == null
         ? null
         : DateTime.tryParse(cachedAtText);
+    final observedText = payload['observedAtUtc'];
+    final observedAt = observedText is String
+        ? DateTime.tryParse(observedText)
+        : null;
+    if (observedText != null && observedAt == null) {
+      throw const BridgeFormatException('Invalid profile observation time.');
+    }
     if (freshness == AccountProfileFreshness.cached && cachedAt == null) {
       throw const BridgeFormatException('Cached profile requires cachedAtUtc.');
+    }
+    if (freshness == AccountProfileFreshness.cached &&
+        observedAt != null &&
+        observedAt != cachedAt) {
+      throw const BridgeFormatException(
+        'Cached observation must keep its original synchronization time.',
+      );
     }
     final email = _optionalString(profile, 'email');
     if (freshness == AccountProfileFreshness.cached && email != null) {
@@ -78,11 +161,70 @@ abstract final class AccountPayloadDecoder {
         ? _requiredStringList(policy, 'availableActions')
         : const <String>[];
     final localeOptions = _requiredStringList(policy, 'locales');
-    final rawTimeZones = policy['timeZones'];
+    final timeZones = _profileTimeZones(policy['timeZones']);
+    final included = policy['directoryIncluded'];
+    if (included != null && included is! bool ||
+        policy.containsKey('directoryIncluded') && included == null) {
+      throw const BridgeFormatException('Invalid directory inclusion flag.');
+    }
+    final directoryIncluded = included != false;
+    if (!directoryIncluded &&
+        (!allowDirectoryOmission ||
+            freshness != AccountProfileFreshness.live ||
+            timeZones.isNotEmpty)) {
+      throw const BridgeFormatException(
+        'Directory omission requires a live confirmation.',
+      );
+    }
+    return AccountProfilePayload(
+      profile: AccountProfile(
+        displayName: _optionalString(profile, 'displayName'),
+        avatarUrl: _optionalString(profile, 'avatarUrl'),
+        email: email,
+        locale: _optionalString(profile, 'locale'),
+        timeZone: _optionalString(profile, 'timeZone'),
+      ),
+      freshness: freshness,
+      cachedAt: cachedAt,
+      observedAt: observedAt,
+      localeOptions: localeOptions,
+      timeZoneOptions: timeZones,
+      directoryIncluded: directoryIncluded,
+      supportsPreferenceWrite: actions.contains('profile.patchPreferences'),
+      supportsCacheClear: actions.contains('profile.clearLocalCache'),
+    );
+  }
+
+  static ({List<AccountTimeZoneOption> options, bool allowsWrite})
+  profileDirectory(Map<String, Object?> payload) {
+    _requireSchema(payload);
+    final options = _profileTimeZones(payload['timeZones']);
+    if (options.isEmpty) {
+      throw const BridgeFormatException('Empty profile directory.');
+    }
+    return (
+      options: options,
+      allowsWrite: _requiredStringList(
+        payload,
+        'availableActions',
+      ).contains('profile.patchPreferences'),
+    );
+  }
+
+  static String? displayCallSign(Object? value) =>
+      value is String &&
+          value.isNotEmpty &&
+          value.length <= 32 &&
+          value == value.trim() &&
+          !RegExp(r'[\x00-\x1f\x7f-\x9f]').hasMatch(value)
+      ? value
+      : null;
+
+  static List<AccountTimeZoneOption> _profileTimeZones(Object? rawTimeZones) {
     if (rawTimeZones is! List) {
       throw const BridgeFormatException('timeZones must be a list.');
     }
-    final timeZones = rawTimeZones
+    return rawTimeZones
         .map((item) {
           if (item is! Map) {
             throw const BridgeFormatException(
@@ -97,21 +239,6 @@ abstract final class AccountPayloadDecoder {
           );
         })
         .toList(growable: false);
-    return AccountProfilePayload(
-      profile: AccountProfile(
-        displayName: _optionalString(profile, 'displayName'),
-        avatarUrl: _optionalString(profile, 'avatarUrl'),
-        email: email,
-        locale: _optionalString(profile, 'locale'),
-        timeZone: _optionalString(profile, 'timeZone'),
-      ),
-      freshness: freshness,
-      cachedAt: cachedAt,
-      localeOptions: localeOptions,
-      timeZoneOptions: timeZones,
-      supportsPreferenceWrite: actions.contains('profile.patchPreferences'),
-      supportsCacheClear: actions.contains('profile.clearLocalCache'),
-    );
   }
 
   static AccountIdentityProjection identity(Map<String, Object?> payload) {
@@ -120,6 +247,8 @@ abstract final class AccountPayloadDecoder {
       'match' => AccountIdentityState.match,
       'mismatch' => AccountIdentityState.mismatch,
       'awaitingGameIdentity' => AccountIdentityState.awaitingGameIdentity,
+      'verificationRequired' => AccountIdentityState.verificationRequired,
+      'verificationPending' => AccountIdentityState.verificationPending,
       'reverifyRequired' => AccountIdentityState.reverifyRequired,
       'revoked' => AccountIdentityState.revoked,
       'unknown' => AccountIdentityState.unknown,
@@ -159,15 +288,19 @@ final class AccountProfilePayload {
     required this.timeZoneOptions,
     required this.supportsPreferenceWrite,
     required this.supportsCacheClear,
+    this.observedAt,
+    this.directoryIncluded = true,
   });
 
   final AccountProfile profile;
   final AccountProfileFreshness freshness;
   final DateTime? cachedAt;
+  final DateTime? observedAt;
   final List<String> localeOptions;
   final List<AccountTimeZoneOption> timeZoneOptions;
   final bool supportsPreferenceWrite;
   final bool supportsCacheClear;
+  final bool directoryIncluded;
 }
 
 void _requireSchema(Map<String, Object?> payload) {

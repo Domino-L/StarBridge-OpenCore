@@ -13,6 +13,7 @@ import 'package:starbridge_flutter/features/settings/notification_settings_model
 import 'package:starbridge_flutter/features/settings/notification_settings_module.dart';
 import 'package:starbridge_flutter/features/settings/notification_settings_page.dart';
 import 'package:starbridge_flutter/features/settings/notification_settings_channels.dart';
+import 'package:starbridge_flutter/features/settings/notification_settings_comparison.dart';
 
 void main() {
   for (final width in [390.0, 1200.0]) {
@@ -72,6 +73,209 @@ void main() {
       },
     );
   }
+  testWidgets('trade alerts sit under Windows, default on, follow the master', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var value =
+        InMemoryNotificationSettingsAdapter.forReview().current.settings!;
+    value = value.copyWith(
+      channels: value.channels.copyWith(windowsDesktopEnabled: true),
+    );
+    expect(value.channels.tradeWindowsEnabled, isTrue);
+    await tester.pumpWidget(
+      _app(
+        StatefulBuilder(
+          builder: (context, setState) => SingleChildScrollView(
+            child: NotificationChannelPanel(
+              settings: value,
+              enabled: true,
+              onSave: (next) async {
+                setState(() => value = next);
+                return true;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final master = find.byKey(const Key('notification-channel-windows'));
+    final trade = find.byKey(const Key('notification-channel-trade'));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('notification-desktop-child')),
+        matching: trade,
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('交易提醒'), findsOneWidget);
+    expect(find.text('默认开启'), findsOneWidget);
+    expect(
+      tester.getTopLeft(trade).dy,
+      greaterThan(
+        tester
+            .getTopLeft(
+              find.byKey(const Key('notification-channel-direct-message')),
+            )
+            .dy,
+      ),
+    );
+    expect(tester.widget<Switch>(trade).value, isTrue);
+    await tester.tap(trade);
+    await tester.pumpAndSettle();
+    expect(value.channels.tradeWindowsEnabled, isFalse);
+    await tester.tap(trade);
+    await tester.pumpAndSettle();
+    await tester.tap(master);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(trade).onChanged, isNull);
+    expect(tester.widget<Switch>(trade).value, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+  for (final (dm, trade) in [(true, false), (false, true), (false, false)]) {
+    testWidgets('local mode shows only available child rows: dm=$dm trade=$trade', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final review =
+          InMemoryNotificationSettingsAdapter.forReview().current.settings!;
+      final value = NotificationSettingsValue(
+        localInAppOnly: true,
+        desktopDeliveryAvailable: true,
+        directMessageDeliveryAvailable: dm,
+        tradeDeliveryAvailable: trade,
+        channels: review.channels,
+        sourceRules: review.sourceRules,
+        previewMode: review.previewMode,
+        playerActivity: review.playerActivity,
+        continuousPlay: review.continuousPlay,
+      );
+      await tester.pumpWidget(
+        _app(
+          SingleChildScrollView(
+            child: NotificationChannelPanel(
+              settings: value,
+              enabled: true,
+              onSave: (_) async => true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('notification-channel-direct-message')),
+        dm ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.byKey(const Key('notification-channel-trade')),
+        trade ? findsOneWidget : findsNothing,
+      );
+      // No empty child container when neither row is available.
+      expect(
+        find.byKey(const Key('notification-desktop-child')),
+        dm || trade ? findsOneWidget : findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+  testWidgets('trade alerts keep an off choice across the master and touch nothing else', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var value =
+        InMemoryNotificationSettingsAdapter.forReview().current.settings!;
+    value = value.copyWith(
+      channels: value.channels.copyWith(windowsDesktopEnabled: true),
+    );
+    final before = value;
+    await tester.pumpWidget(
+      _app(
+        StatefulBuilder(
+          builder: (context, setState) => SingleChildScrollView(
+            child: NotificationChannelPanel(
+              settings: value,
+              enabled: true,
+              onSave: (next) async {
+                setState(() => value = next);
+                return true;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final master = find.byKey(const Key('notification-channel-windows'));
+    final trade = find.byKey(const Key('notification-channel-trade'));
+    await tester.tap(trade);
+    await tester.pumpAndSettle();
+    expect(
+      sameNotificationSettings(
+        value,
+        before.copyWith(
+          channels: before.channels.copyWith(tradeWindowsEnabled: false),
+        ),
+      ),
+      isTrue,
+      reason: 'only the trade field changes',
+    );
+    await tester.tap(master);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(trade).value, isFalse);
+    await tester.tap(master);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(trade).onChanged, isNotNull);
+    expect(tester.widget<Switch>(trade).value, isFalse);
+    expect(value.channels.tradeWindowsEnabled, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('Windows switch is marked recommended only while off', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var value =
+        InMemoryNotificationSettingsAdapter.forReview().current.settings!;
+    value = value.copyWith(
+      channels: value.channels.copyWith(windowsDesktopEnabled: false),
+    );
+    await tester.pumpWidget(
+      _app(
+        StatefulBuilder(
+          builder: (context, setState) => SingleChildScrollView(
+            child: NotificationChannelPanel(
+              settings: value,
+              enabled: true,
+              onSave: (next) async {
+                setState(() => value = next);
+                return true;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final badge = find.byKey(const Key('notification-recommended'));
+    expect(badge, findsOneWidget);
+    expect(find.text('推荐开启'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('notification-channel-windows')));
+    await tester.pumpAndSettle();
+    expect(value.channels.windowsDesktopEnabled, isTrue);
+    expect(badge, findsNothing);
+  });
   testWidgets('renders a user-facing notification workspace and test alert', (
     tester,
   ) async {

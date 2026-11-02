@@ -202,6 +202,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.12.2"
+  starbridge_interaction:
+    dependency: "direct main"
+    description:
+      path: "packages/starbridge_interaction"
+      relative: true
+    source: path
+    version: "0.1.0"
   stream_channel:
     dependency: transitive
     description:
@@ -316,4 +323,4 @@ packages:
     version: "1.1.1"
 sdks:
   dart: ">=3.13.2 <4.0.0"
-  flutter: ">=3.44.0"
+  flutter: ">=3.47.0"

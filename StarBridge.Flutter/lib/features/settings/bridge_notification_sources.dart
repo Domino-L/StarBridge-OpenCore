@@ -58,6 +58,10 @@ class BridgeNotificationSources implements NotificationSourcesPort {
   NotificationSourcesValue? _value;
   int _epoch = 0;
   int? _generation;
+  int _schemaVersion = 1;
+  bool get _supportsV2 =>
+      session.hostCapabilities.contains('notificationPolicies.readV2') &&
+      session.hostCapabilities.contains('notificationPolicies.saveV2');
   bool _closed = false;
   @override
   Stream<void> get invalidations => _invalidations.stream;
@@ -78,13 +82,17 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     if (!hasRelayAccount(account)) {
       throw const BridgeClientException('account.signed_out');
     }
+    final version = _supportsV2 ? 2 : 1;
     final response = await session.request(
-      'notificationPolicies.read',
+      version == 2
+          ? 'notificationPolicies.readV2'
+          : 'notificationPolicies.read',
       accountContext: account.accountContext,
-      payload: const {'schemaVersion': 1},
+      payload: {'schemaVersion': version},
     );
     _check(epoch, account.sessionGeneration);
-    final value = parse(response.payload);
+    final value = parse(response.payload, schemaVersion: version);
+    _schemaVersion = version;
     _owner = account.accountContext;
     _generation = account.sessionGeneration;
     _pending.clear();
@@ -100,6 +108,7 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     if (!identical(original, _value) ||
         _owner == null ||
         _generation == null ||
+        _schemaVersion == 2 && !_supportsV2 ||
         modes.length != original.sources.length ||
         original.sources.any((s) => !modes.containsKey(s.sourceRef))) {
       throw const BridgeClientException('notificationPolicies.stale_editor');
@@ -120,28 +129,41 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     );
     notificationSourceDeliveryEpoch(session).value++;
     final response = await session.request(
-      'notificationPolicies.save',
+      _schemaVersion == 2
+          ? 'notificationPolicies.saveV2'
+          : 'notificationPolicies.save',
       accountContext: _owner,
       payload: {
-        'schemaVersion': 1,
+        'schemaVersion': _schemaVersion,
         'expectedRevision': original.revision,
         'operationId': operation,
         'rules': rules,
       },
     );
     _check(epoch, generation);
-    final next = parse(response.payload);
+    final next = parse(response.payload, schemaVersion: _schemaVersion);
     if (next.revision != original.revision + 1 ||
         response.payload['operationId'] != operation ||
         keys.any((key) => next.modes[key] != modes[key])) {
       throw const BridgeFormatException('Invalid source rule receipt.');
     }
-    _value = next;
+    final codes = {
+      for (final source in original.sources)
+        source.sourceRef: source.organizationCode,
+    };
+    final held = NotificationSourcesValue(next.revision, [
+      for (final source in next.sources)
+        source.copyWith(organizationCode: codes[source.sourceRef]),
+    ]);
+    _value = held;
     _pending.clear();
-    return next;
+    return held;
   }
 
-  static NotificationSourcesValue parse(Map<String, Object?> body) {
+  static NotificationSourcesValue parse(
+    Map<String, Object?> body, {
+    int schemaVersion = 1,
+  }) {
     NotificationSourceMode mode(Object? value) =>
         NotificationSourceMode.values.firstWhere(
           (m) => m.name == value,
@@ -149,11 +171,12 @@ class BridgeNotificationSources implements NotificationSourcesPort {
               throw const BridgeFormatException('Invalid source mode.'),
         );
     final revision = body['revision'], raw = body['sources'];
-    if (body['schemaVersion'] != 1 ||
+    if ((schemaVersion != 1 && schemaVersion != 2) ||
+        body['schemaVersion'] != schemaVersion ||
         revision is! int ||
         revision < 0 ||
         raw is! List ||
-        raw.length > 64) {
+        raw.length > (schemaVersion == 2 ? 65 : 64)) {
       throw const BridgeFormatException('Invalid source rules.');
     }
     final sources = <NotificationSourceRule>[
@@ -175,26 +198,40 @@ class BridgeNotificationSources implements NotificationSourcesPort {
         ),
     ];
     final seen = <String>{};
+    var communities = 0, officials = 0;
     for (final row in raw) {
+      final official =
+          schemaVersion == 2 && row is Map && row['kind'] == 'officialFleet';
       if (row is! Map ||
           row['sourceRef'] is! String ||
-          !RegExp(r'^organization:[a-f0-9]{64}$')
-              .hasMatch(row['sourceRef'] as String) ||
+          !RegExp(
+            official
+                ? r'^officialFleet:[a-f0-9]{64}$'
+                : r'^organization:[a-f0-9]{64}$',
+          ).hasMatch(row['sourceRef'] as String) ||
           !seen.add(row['sourceRef'] as String) ||
-          row['kind'] != 'community' ||
+          (!official && row['kind'] != 'community') ||
           row['displayName'] is! String ||
           (row['displayName'] as String).trim().isEmpty ||
-          (row['logoImageData'] != null && row['logoImageData'] is! String)) {
+          (row['logoImageData'] != null && row['logoImageData'] is! String) ||
+          (row['organizationCode'] != null &&
+              row['organizationCode'] is! String)) {
         throw const BridgeFormatException('Invalid organization source.');
+      }
+      if (official ? ++officials > 1 : ++communities > 64) {
+        throw const BridgeFormatException('Invalid organization source bound.');
       }
       sources.add(
         NotificationSourceRule(
           sourceRef: row['sourceRef'] as String,
-          kind: NotificationSourceKind.community,
+          kind: official
+              ? NotificationSourceKind.officialFleet
+              : NotificationSourceKind.community,
           displayName: row['displayName'] as String,
           contextLabel: '',
           mode: mode(row['mode']),
           logoImageData: row['logoImageData'] as String?,
+          organizationCode: row['organizationCode'] as String?,
         ),
       );
     }

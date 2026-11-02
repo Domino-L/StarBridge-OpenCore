@@ -53,11 +53,21 @@ internal static class PartyRoomChatTests
         Check(ScmAccountBridgeHost.ProjectRoomChat(page, "mixed_cn").Chat!.Messages.Single().IsSelf, "Verified Handle identifies self regardless of casing.");
         Check(!ScmAccountBridgeHost.ProjectRoomChat(page, "呼号").Chat!.Messages.Single().IsSelf, "Editable callsign must never identify self.");
         Check(!ScmAccountBridgeHost.ProjectRoomChat(page, "").Chat!.Messages.Single().IsSelf, "Missing identity is not self.");
+        Check(ScmAccountBridgeHost.ProjectRoomChat(page, "", "private-account").Chat!.Messages.Single().IsSelf,
+            "Authenticated business subject identifies self without a game Handle.");
+        Check(!ScmAccountBridgeHost.ProjectRoomChat(page, "mixed_cn", "different-account").Chat!.Messages.Single().IsSelf,
+            "Matching Handle cannot override another authenticated account.");
+        var noSender = page with { Chat = page.Chat! with {
+            Messages = page.Chat.Messages.Select(m => m with { SenderAccountId = null }).ToArray() } };
+        Check(!ScmAccountBridgeHost.ProjectRoomChat(noSender, "mixed_cn", "private-account").Chat!.Messages.Single().IsSelf,
+            "Identity-aware projection does not guess a missing sender from the Handle.");
         var system = page with { Chat = page.Chat with { Messages = [page.Chat.Messages[0] with { Kind = "system" }] } };
         Check(!ScmAccountBridgeHost.ProjectRoomChat(system, "mixed_cn").Chat!.Messages.Single().IsSelf, "System events are not player bubbles.");
         Check(!BridgePayload.From(page).GetRawText().Contains("private-"), "Chat strips internal sender IDs and raw avatar data.");
         var sent = await reader.ExecuteAsync("test-bearer", Command("chatSend", new { roomId = "one", text = "测试文本" }), default);
         Check(ScmAccountBridgeHost.ProjectRoomChat(sent, "").Message!.IsSelf, "Authenticated send acknowledgement belongs to this viewer.");
+        Check(!ScmAccountBridgeHost.ProjectRoomChat(sent, "mixed_cn", "different-account").Message!.IsSelf,
+            "An identity-aware acknowledgement cannot mark a different sender as self.");
         Check(sent.Status == "sent" && sent.Message!.Sequence == 7 && calls.SequenceEqual(new[] { "GET", "GET", "GET", "POST" }), "Check membership before private reads and one message write.");
         foreach (var invalid in new[] {
             Command("chatSend", new { roomId = "one", text = new string('x', 301) }),

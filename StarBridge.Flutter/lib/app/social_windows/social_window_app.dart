@@ -1,5 +1,12 @@
+import '../../design_system/interaction/faded_name_tip.dart';
 import 'dart:async';
+import 'dart:io';
+
+import '../diagnostics/loading_diagnostics.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
 import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -8,18 +15,36 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../localization/app_strings.dart';
 import 'window_presentation.dart';
+import 'window_opening_source.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../features/common/social_read_activity.dart';
 import '../routing/open_destination_intent.dart';
 import '../../platform/window/native_viewport_visibility.dart';
 import '../../features/direct_messages/direct_messages_module.dart';
 import '../../features/direct_messages/direct_messages_page.dart';
+import '../../features/marketplace/marketplace_chat_controller.dart';
+import '../composition/trade_chat_composition.dart';
 import '../../features/notifications/notification_inbox_page.dart';
 import 'social_window_codec.dart';
 import 'social_window_frame.dart';
 import 'social_window_ports.dart';
 
 void runSocialWindow(String kind) {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(SocialWindowApp(kind: kind));
+  final surface = switch (kind) {
+    'messages' => LoadingAuxiliarySurface.messages,
+    'notifications' => LoadingAuxiliarySurface.notifications,
+    _ => null,
+  };
+  if (surface == null) {
+    WidgetsFlutterBinding.ensureInitialized();
+    runApp(SocialWindowApp(kind: kind));
+    return;
+  }
+  LoadingDiagnostics.runAuxiliary(
+    Platform.environment,
+    surface,
+    () => runApp(SocialWindowApp(kind: kind)),
+  );
 }
 
 class SocialWindowApp extends StatefulWidget {
@@ -35,11 +60,17 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
   );
   Map _view = const {};
   WindowPresentation _presentation = const WindowPresentation();
+  InteractionSource _openingSource = InteractionSource.programmatic;
   int _opening = 0, _revision = -1, _targetVersion = -1;
   bool _active = false, _maximized = false, _failed = false;
+  bool _hasSnapshot = false;
   WindowMessagesPort? _port;
   DirectMessagesModule? _messages;
   WindowInboxController? _inbox;
+  // 0.7.2 G9: 交易消息 through the primary engine.
+  WindowTradeChatPort? _tradePort;
+  MarketplaceChatController? _trade;
+  int _tradeRequest = 0;
   Conversation? _target;
   String? _reportedRef;
   void _reportViewport() {
@@ -58,6 +89,9 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
     super.initState();
     channel.setMethodCallHandler((call) async {
       if (call.method == 'snapshot') _accept(call.arguments);
+      if (call.method == 'activityHealth') {
+        _port?.acceptActivityHealth(call.arguments);
+      }
       if (call.method == 'windowState' && mounted && call.arguments is bool) {
         setState(() => _maximized = call.arguments as bool);
       }
@@ -75,7 +109,7 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
     try {
       _accept(await channel.invokeMethod<Object?>('ready'));
     } catch (_) {
-      if (mounted) setState(() => _failed = true);
+      if (mounted && !_hasSnapshot) setState(() => _failed = true);
     }
   }
 
@@ -114,8 +148,26 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
     }
     final view = jsonDecode(payload['view'] as String);
     if (view is! Map || view['scope'] is! String) return;
+    if (opening > _opening && opening > 0) {
+      final surface = switch (widget.kind) {
+        'messages' => LoadingAuxiliarySurface.messages,
+        'notifications' => LoadingAuxiliarySurface.notifications,
+        _ => null,
+      };
+      if (surface != null) {
+        LoadingMetrics.current?.route(surface.route);
+        LoadingMetrics.current?.auxiliaryOpening(
+          surface,
+          LoadingAuxiliaryPhase.snapshot,
+          opening,
+        );
+      }
+    }
     final changed = view['scope'] != _view['scope'];
     setState(() {
+      if (opening != _opening) {
+        _openingSource = decodeWindowOpeningSource(payload['openingSource']);
+      }
       _opening = opening;
       _revision = revision;
       _view = view;
@@ -124,8 +176,13 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
       if (changed) {
         _messages?.dispose();
         _inbox?.dispose();
+        _trade?.dispose();
+        unawaited(_tradePort?.close());
         _messages = null;
         _inbox = null;
+        _trade = null;
+        _tradePort = null;
+        _tradeRequest = 0;
         _target = null;
         _targetVersion = -1;
         _reportedRef = null;
@@ -136,6 +193,10 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
           _port = WindowMessagesPort(request, () => _view);
           _messages = DirectMessagesModule(_port!);
           _messages!.addListener(_reportViewport);
+          if (view['tradeChat'] == true) {
+            _tradePort = WindowTradeChatPort(request);
+            _trade = MarketplaceChatController(_tradePort!);
+          }
         } else {
           _inbox = WindowInboxController(request);
         }
@@ -146,7 +207,26 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
             ? decodeConversation(view['target'] as Map)
             : null;
       }
+      _hasSnapshot = true;
     });
+    _tradePort?.accept(view['tradePushes']);
+    if (view['tradeRequest']
+        case {'serial': final int serial, 'ref': final String ref}
+        when serial > _tradeRequest && _trade != null) {
+      _tradeRequest = serial;
+      final request = view['tradeRequest'] as Map;
+      _trade!.requestOpen(
+        ref,
+        attach: request['orderId'] is int && request['label'] is String
+            ? MarketChatAttachment(
+                request['orderId'] as int,
+                request['label'] as String,
+              )
+            : null,
+      );
+    }
+    _port?.bindActivityWindow(_opening, view['scope'] as String);
+    _port?.acceptActivityHealth(payload['activityHealth']);
     if (!changed) _pulse();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && opening == _opening) {
@@ -191,11 +271,18 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
     channel.setMethodCallHandler(null);
     _messages?.dispose();
     _inbox?.dispose();
+    _trade?.dispose();
+    unawaited(_tradePort?.close());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    builder: (context, child) => FadedNameTip(child: StarBridgeInteractionConfiguration(
+      suite: _presentation.interactionSuite,
+      reduceMotion: _presentation.reduceMotion,
+      child: child!,
+    )),
     scrollBehavior: const StarBridgeScrollBehavior(),
     debugShowCheckedModeBanner: false,
     locale: _presentation.locale,
@@ -207,81 +294,104 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
       GlobalCupertinoLocalizations.delegate,
     ],
     theme: _presentation.theme,
-    home: SocialWindowFrame(
-      title: widget.kind == 'messages' ? '聊天' : '通知',
-      maximized: _maximized,
-      control: (c) => unawaited(_notify('windowControl', c)),
-      child: Actions(
-        actions: {
-          OpenDestinationIntent: CallbackAction<OpenDestinationIntent>(
-            onInvoke: (i) {
-              unawaited(_navigate(i.route));
-              return null;
-            },
+    home: Builder(
+      builder: (context) => starBridgeInitialReadViewport(
+        context,
+        source: _openingSource,
+        child: SocialWindowFrame(
+          title: AppStrings.of(context).text(
+            widget.kind == 'messages'
+                ? 'socialWindow.chatTitle'
+                : 'navigation.notifications',
           ),
-        },
-        child: NativeViewportScope(
-          active: _active,
-          child: TickerMode(
-            enabled: _active,
-            child: Column(
-              children: [
-                if (_failed)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('暂时无法完成操作，请重新打开窗口核对。'),
-                  ),
-                Expanded(
-                  child: _messages != null
-                      ? DirectMessagesPage(
-                          key: ValueKey(_view['scope']),
-                          createPort: () => _port!,
-                          sharedModule: _messages,
-                          openProfile: _view['openProfile'] == true
-                              ? (target) {
-                                  unawaited(
-                                    _request(
-                                      _view['scope'] as String,
-                                      'profile',
-                                      {'ref': target.ref},
-                                    ).catchError((_) => null),
-                                  );
-                                }
-                              : null,
-                          initialConversation: _target,
-                          openCommunityInvite: _view['openInvite'] == true
-                              ? (_, code) async {
-                                  await _request(
-                                    _view['scope'] as String,
-                                    'openInvite',
-                                    {'code': code},
-                                  );
-                                }
-                              : null,
-                          sendCommunityInvite: _view['sendInvite'] == true
-                              ? (_, chat) async {
-                                  final ref = chat.selected?.ref;
-                                  if (ref != null) {
-                                    await _request(
-                                      _view['scope'] as String,
-                                      'sendInvite',
-                                      {'ref': ref},
-                                    );
-                                  }
-                                }
-                              : null,
-                          onBack: () => unawaited(_navigate('/friends')),
-                        )
-                      : _inbox != null
-                      ? NotificationInboxPage(
-                          key: ValueKey(_view['scope']),
-                          controller: _inbox!,
-                          openSafety: () =>
-                              unawaited(_navigate('/account-safety')),
-                        )
-                      : const Center(child: CircularProgressIndicator()),
+          maximized: _maximized,
+          control: (c) => unawaited(_notify('windowControl', c)),
+          child: Actions(
+            actions: {
+              OpenDestinationIntent: CallbackAction<OpenDestinationIntent>(
+                onInvoke: (i) {
+                  unawaited(_navigate(i.route));
+                  return null;
+                },
+              ),
+            },
+            child: NativeViewportScope(
+              active: _active,
+              child: TickerMode(
+                enabled: _active,
+                child: Column(
+                  children: [
+                    if (_failed)
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(
+                          AppStrings.of(context)
+                              .text('socialWindow.actionFailed'),
+                        ),
+                      ),
+                    Expanded(
+                      child: _messages != null
+                          ? withTradeChat(
+                              _trade,
+                              DirectMessagesPage(
+                                key: ValueKey(_view['scope']),
+                                createPort: () => _port!,
+                                sharedModule: _messages,
+                                openProfile: _view['openProfile'] == true
+                                    ? (target) {
+                                        unawaited(
+                                          _request(
+                                            _view['scope'] as String,
+                                            'profile',
+                                            {'ref': target.ref},
+                                          ).catchError((_) => null),
+                                        );
+                                      }
+                                    : null,
+                                initialConversation: _target,
+                                openCommunityInvite: _view['openInvite'] == true
+                                    ? (_, code) async {
+                                        await _request(
+                                          _view['scope'] as String,
+                                          'openInvite',
+                                          {'code': code},
+                                        );
+                                      }
+                                    : null,
+                                sendCommunityInvite: _view['sendInvite'] == true
+                                    ? (_, chat) async {
+                                        final ref = chat.selected?.ref;
+                                        if (ref != null) {
+                                          await _request(
+                                            _view['scope'] as String,
+                                            'sendInvite',
+                                            {'ref': ref},
+                                          );
+                                        }
+                                      }
+                                    : null,
+                                onBack: () => unawaited(_navigate('/friends')),
+                              ),
+                            )
+                          : _inbox != null
+                          ? NotificationInboxPage(
+                              key: ValueKey(_view['scope']),
+                              controller: _inbox!,
+                              openSafety: () =>
+                                  unawaited(_navigate('/account-safety')),
+                            )
+                          : Center(
+                              child: SocialReadActivity(
+                                source: InteractionSource.programmatic,
+                                opening: false,
+                                label: AppStrings.of(context)
+                                    .text('direct.loading'),
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

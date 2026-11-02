@@ -250,7 +250,10 @@ void main() {
       pending.complete(data());
       await t.pumpAndSettle();
       expect(find.text('社区组织成员'), findsOneWidget);
-      expect(find.byType(DropdownButtonFormField<int>), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) => w is DropdownButtonFormField<int>),
+        findsOneWidget,
+      );
       expect(t.takeException(), isNull);
     },
   );

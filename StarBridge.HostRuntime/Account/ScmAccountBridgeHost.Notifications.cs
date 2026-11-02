@@ -20,7 +20,7 @@ internal sealed partial class ScmAccountBridgeHost : ICommunityNotificationReade
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var result = await SendRelayRequestAsync(session, (active, ct) => active.Legacy is {} legacy
             ? client.ReadWpfS2NotificationsAsync(active.AccessToken, FriendScope(owner, generation), legacy.AccountId, Current, ct)
-            : throw new AccountBridgeHostException("communities.notificationsUnavailable"), token);
+            : client.ReadScmNotificationsWithOfficialAsync(active.AccessToken, FriendScope(owner, generation), Current, ct), token);
         Current(); _session = result.ActiveSession.Scm;
         return result.Result;
     }

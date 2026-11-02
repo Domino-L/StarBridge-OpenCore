@@ -26,16 +26,18 @@ public sealed class HangarReaderDispatcher(
     {
         lock (_sync)
         {
+            HangarAccountIdentity? observedOwner = null;
             try
             {
                 BridgeEnvelopeValidator.ValidateWireShape(request);
                 BridgeEnvelopeValidator.RequireCurrentVersion(request);
                 var account = currentIdentity();
+                observedOwner = account;
                 if (request.MessageType != BridgeMessageTypes.Request || account is null ||
                     request.AccountContext != account.Account || request.SessionGeneration != account.Generation)
                 { Stop("accountChanged"); return Error(request, "hangar.account_changed"); }
                 var body = request.Payload;
-                if (body.GetRawText().Length > 600 * 1024 || body.GetProperty("schemaVersion").GetInt32() != 1)
+                if (body.GetRawText().Length > (request.Name == "hangarReader.save" ? 1024 : 600) * 1024 || body.GetProperty("schemaVersion").GetInt32() != 1)
                     return Error(request, "hangar.invalid_observation");
                 if (request.Name == "hangarReader.inventory")
                 {
@@ -49,6 +51,34 @@ public sealed class HangarReaderDispatcher(
                     if (offset < 0 || offset > (former ? saved.FormerShips?.Count ?? 0 : saved.Ships.Count))
                         return Error(request, "hangar.invalid_observation");
                     return InventoryView(request, saved, offset, former);
+                }
+                if (request.Name == "hangarReader.favorite")
+                {
+                    if (store is null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
+                    var fields = body.EnumerateObject().Select(p => p.Name).ToArray();
+                    if (fields.Distinct().Count() != fields.Length || fields.Any(f => f is not
+                        ("schemaVersion" or "operationId" or "expectedRevision" or "shipId" or "favorite")))
+                        return Error(request, "hangar.invalid_observation");
+                    var saved = store.SetFavorite(account.Account, body.GetProperty("expectedRevision").GetInt64(),
+                        body.GetProperty("operationId").GetString()!, body.GetProperty("shipId").GetString()!,
+                        body.GetProperty("favorite").GetBoolean(),
+                        () => !cancellationToken.IsCancellationRequested && currentIdentity() == account);
+                    if (currentIdentity() != account) return Error(request, "hangar.account_changed");
+                    return InventoryView(request, saved, 0);
+                }
+                if (request.Name == "hangarReader.personalData")
+                {
+                    if (store is null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
+                    var fields = body.EnumerateObject().Select(p => p.Name).ToArray();
+                    if (body.GetRawText().Length > 64 * 1024 || fields.Distinct().Count() != fields.Length ||
+                        fields.Any(f => f is not ("schemaVersion" or "operationId" or "expectedRevision" or "shipId" or "nickname" or "notes")))
+                        return Error(request, "hangar.invalid_observation");
+                    var saved = store.SavePersonalData(account.Account, body.GetProperty("expectedRevision").GetInt64(),
+                        body.GetProperty("operationId").GetString()!, body.GetProperty("shipId").GetString()!,
+                        body.GetProperty("nickname").GetString(), body.GetProperty("notes").GetString(),
+                        () => !cancellationToken.IsCancellationRequested && currentIdentity() == account);
+                    if (currentIdentity() != account) return Error(request, "hangar.account_changed");
+                    return InventoryView(request, saved, 0);
                 }
                 if (request.Name == "hangarReader.browserProfile")
                 {
@@ -77,6 +107,29 @@ public sealed class HangarReaderDispatcher(
                 { Stop("accountChanged"); return View(request, "accountChanged"); }
                 if (request.Name == "hangarReader.cancel")
                 { Stop("cancelled"); return View(request, "cancelled"); }
+                if (request.Name == "hangarReader.removals")
+                {
+                    if (store is null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
+                    if (!CanSave()) return Error(request, "hangar.operation_expired");
+                    var fields = body.EnumerateObject().Select(p => p.Name).ToArray();
+                    if (fields.Distinct().Count() != fields.Length || fields.Any(f => f is not
+                        ("schemaVersion" or "operationId" or "expectedRevision" or "offset")))
+                        return Error(request, "hangar.invalid_observation");
+                    var snapshot = _scan.Snapshot;
+                    var groups = store.PreviewRemovals(account.Account, body.GetProperty("expectedRevision").GetInt64(),
+                        snapshot.Ships, snapshot.State == HangarScanState.NeedsReview);
+                    if (currentIdentity() != account) return Error(request, "hangar.account_changed");
+                    // Page candidate IDs, not groups: a single pledge may itself
+                    // contain thousands of identical ships. Bound every response.
+                    var rows = groups.SelectMany(g => g.ShipIds.Select(id => new { groupId = g.GroupId,
+                        requiredCount = g.RequiredCount, groupSize = g.ShipIds.Count, shipId = id })).ToArray();
+                    var offset = body.TryGetProperty("offset", out var start) ? start.GetInt32() : 0;
+                    if (offset < 0 || offset > rows.Length) return Error(request, "hangar.invalid_observation");
+                    return new(BridgeEnvelope.Response(request, new { schemaVersion = 1,
+                        operationId = _operation, revision = body.GetProperty("expectedRevision").GetInt64(), total = rows.Length,
+                        nextOffset = offset + 200 < rows.Length ? (int?)(offset + 200) : null,
+                        rows = rows.Skip(offset).Take(200).ToArray() }), []);
+                }
                 if (request.Name == "hangarReader.save")
                 {
                     if (store is null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
@@ -84,13 +137,15 @@ public sealed class HangarReaderDispatcher(
                     // Only the frozen Host result is saved. Client-supplied ships/owners are rejected.
                     var fields = body.EnumerateObject().Select(p => p.Name).ToArray();
                     if (fields.Distinct().Count() != fields.Length ||
-                        fields.Any(f => f is not ("schemaVersion" or "operationId" or "expectedRevision" or "confirmEmpty")))
+                        fields.Any(f => f is not ("schemaVersion" or "operationId" or "expectedRevision" or "confirmEmpty" or "removedShipIds")))
                         return Error(request, "hangar.invalid_observation");
                     var snapshot = _scan.Snapshot;
+                    var removed = body.TryGetProperty("removedShipIds", out var selection)
+                        ? selection.EnumerateArray().Select(id => id.GetString()!).ToArray() : [];
                     var saved = store.Save(account.Account, body.GetProperty("expectedRevision").GetInt64(),
                         _operation!, snapshot.Ships, snapshot.State == HangarScanState.NeedsReview,
                         body.TryGetProperty("confirmEmpty", out var clear) && clear.GetBoolean(),
-                        () => !cancellationToken.IsCancellationRequested && currentIdentity() == account && CanSave());
+                        () => !cancellationToken.IsCancellationRequested && currentIdentity() == account && CanSave(), removed);
                     if (currentIdentity() != account) return Error(request, "hangar.account_changed");
                     return InventoryView(request, saved, 0);
                 }
@@ -157,7 +212,13 @@ public sealed class HangarReaderDispatcher(
                 _scan.Observe((ulong)_observations, parsed);
                 return View(request, Phase());
             }
-            catch (LocalHangarStoreException error) { return Error(request, error.Code); }
+            catch (LocalHangarStoreException error)
+            {
+                if (observedOwner is null || currentIdentity() != observedOwner)
+                { Stop("accountChanged"); return Error(request, "hangar.account_changed"); }
+                // Never promote a failed write into a replay instruction.
+                return Error(request, error.Code, request.Name == "hangarReader.inventory" && error.Code == "hangar.storage_busy");
+            }
             catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or
                 FormatException or OverflowException or BridgeProtocolException)
             { Stop("failed"); return Error(request, "hangar.invalid_observation"); }
@@ -175,11 +236,12 @@ public sealed class HangarReaderDispatcher(
         (snapshot.State == HangarScanState.Complete ||
          snapshot.State == HangarScanState.NeedsReview && snapshot.Ships.Count > 0);
 
-    private static BridgeDispatchBatch InventoryView(BridgeEnvelope request, LocalHangarSnapshot snapshot, int offset, bool former = false)
+    internal static BridgeDispatchBatch InventoryView(BridgeEnvelope request, LocalHangarSnapshot snapshot, int offset, bool former = false)
     {
         var ships = former ? snapshot.FormerShips ?? [] : snapshot.Ships;
         return new(BridgeEnvelope.Response(request, new {
             schemaVersion = 1, revision = snapshot.Revision, savedAt = snapshot.SavedAt,
+            inventorySavedAt = snapshot.InventorySavedAt ?? snapshot.SavedAt,
             operationId = snapshot.OperationId, partial = snapshot.Partial, total = ships.Count,
             former, formerTotal = snapshot.FormerShips?.Count ?? 0,
             nextOffset = offset + 200 < ships.Count ? (int?)(offset + 200) : null,
@@ -201,8 +263,8 @@ public sealed class HangarReaderDispatcher(
             canSave = CanSave()
         }), []);
     }
-    private static BridgeDispatchBatch Error(BridgeEnvelope request, string code) =>
-        new(BridgeEnvelope.ErrorResponse(request, new(code, "Hangar reading is unavailable.")), []);
+    private static BridgeDispatchBatch Error(BridgeEnvelope request, string code, bool retryable = false) =>
+        new(BridgeEnvelope.ErrorResponse(request, new(code, "Hangar reading is unavailable.", retryable)), []);
     private void Stop(string reason) { _stopped = reason; _verifiedScan = null; _guard?.Cancel(); _scan?.Cancel(); }
     public void Dispose() { lock (_sync) { Stop("cancelled"); _scan = null; _owner = null; } }
 }

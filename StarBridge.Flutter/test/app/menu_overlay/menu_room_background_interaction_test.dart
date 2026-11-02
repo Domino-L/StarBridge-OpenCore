@@ -26,23 +26,26 @@ class SlowRoomPort extends RoomPort {
 }
 
 void main() {
-  testWidgets('account invalidation retires old member actions during refresh', (tester) async {
-    final port = SlowRoomPort();
-    final views = <Map<String, Object?>>[];
-    final session = MenuRoomsSession(port, views.add)..show(true);
-    await tester.pump();
-    final action = MenuFeatureView.parse(views.last).rows[2].buttons.single;
-    final pending = port.pendingRead = Completer<RoomReadResult>();
-    final refresh = session.refresh(silent: true);
-    port.changes.add(null);
-    session.act(action.key, '');
-    expect(port.calls, isEmpty);
-    pending.complete(const RoomReadResult(RoomReadState.unavailable));
-    await refresh;
-    await tester.pump();
-    expect(port.calls, isEmpty);
-    session.dispose();
-  });
+  testWidgets(
+    'account invalidation retires old member actions during refresh',
+    (tester) async {
+      final port = SlowRoomPort();
+      final views = <Map<String, Object?>>[];
+      final session = MenuRoomsSession(port, views.add)..show(true);
+      await tester.pump();
+      final action = MenuFeatureView.parse(views.last).rows[2].buttons.single;
+      final pending = port.pendingRead = Completer<RoomReadResult>();
+      final refresh = session.refresh(silent: true);
+      port.changes.add(null);
+      session.act(action.key, '');
+      expect(port.calls, isEmpty);
+      pending.complete(const RoomReadResult(RoomReadState.unavailable));
+      await refresh;
+      await tester.pump();
+      expect(port.calls, isEmpty);
+      session.dispose();
+    },
+  );
   testWidgets(
     'unchanged confirmation survives a background action-reference renewal',
     (tester) async {
@@ -61,6 +64,8 @@ void main() {
                   label: '移出房间',
                   confirm: '移出测试成员？',
                   input: null,
+                  role: 'removeMember',
+                  secret: false,
                   limit: 128,
                 ),
                 dispatch: (key, _) => calls.add(key),

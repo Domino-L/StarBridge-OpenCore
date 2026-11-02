@@ -1,9 +1,18 @@
+import 'dart:ui' show Locale;
+
 import '../../features/account/account_module.dart';
+import '../../shared/remote_image_loader.dart';
 import '../product_features.dart';
+import '../preferences/app_preferences_port.dart';
+import '../preferences/app_preferences.dart';
+
+import 'package:flutter/widgets.dart' show WidgetsBinding;
+
+import '../localization/app_strings.dart';
+import '../../platform/window/menu_interaction_presentation.dart';
 import '../../features/account/account_models.dart';
 import '../../features/personal_profile/personal_profile_module.dart';
-import '../../features/personal_profile/bridge_local_personal_profile.dart';
-import '../../features/personal_profile/bridge_personal_profile_adapter.dart';
+import 'personal_profile_bridge_composition.dart';
 import '../../features/hangar/bridge_local_hangar.dart';
 import '../../features/party_rooms/party_rooms_module.dart';
 import '../../features/overlay_settings/overlay_settings_module.dart';
@@ -18,6 +27,7 @@ import '../../platform/window/method_channel_menu_preview_window.dart';
 import 'overlay_preview_identity_adapter.dart';
 import '../../features/friends/bridge_friends_adapter.dart';
 import '../menu_overlay/menu_friends_session.dart';
+import '../menu_overlay/menu_holiday.dart';
 import '../menu_overlay/menu_comms_session.dart';
 import '../menu_overlay/menu_chat_archive.dart';
 import '../menu_overlay/menu_comms_invitations.dart';
@@ -42,6 +52,7 @@ import '../../platform/window/menu_notice.dart';
 import '../../platform/window/menu_recovery.dart';
 import '../../platform/window/menu_browser_resume.dart';
 import '../../platform/window/menu_screenshot_directory.dart';
+import '../../features/tools/exec_hangar_port.dart';
 
 OverlaySettingsModule composeOverlaySettings(
   OverlaySettingsPort port, {
@@ -51,12 +62,14 @@ OverlaySettingsModule composeOverlaySettings(
   required AccountModule account,
   required PersonalProfileModule profile,
   required PartyRoomsModule rooms,
+  AppPreferencesPort? applicationPreferences,
   CommunitiesModule Function()? menuCommunities,
   ManualPresenceController? Function()? menuPresence,
   GameLogView Function()? menuGame,
   MenuOpenLabels Function()? menuLabels,
   MenuAttentionSource Function()? menuAttention,
   MenuNoticeSource Function()? menuNotices,
+  RemoteImageLoader Function()? createRemoteImages,
 }) {
   int? settingsGeneration;
   BridgeMenuBrowserResume? resumeSettings;
@@ -92,6 +105,31 @@ OverlaySettingsModule composeOverlaySettings(
         ? null
         : MethodChannelMenuPreviewWindow(
             lifetime: menuLifetime,
+            interaction: applicationPreferences == null
+                ? null
+                : MenuInteractionFeed(
+                    changes: applicationPreferences.projection,
+                    read: () {
+                      final value =
+                          applicationPreferences.projection.value.effective;
+                      return MenuInteractionPresentation(
+                        language: value.locale.toLanguageTag(),
+                        holiday: menuHolidayId(
+                          enabled: value.holidayAppearance,
+                          now: DateTime.now(),
+                        ),
+                        style: MenuInteractionStyle.values.byName(
+                          value.interactionStyle.name,
+                        ),
+                        reduceMotion:
+                            value.motionPreference == MotionPreference.reduce,
+                      );
+                    },
+                  ),
+            execHangarProvider:
+                session?.hostCapabilities.contains('execHangar.read') == true
+                ? () => BridgeExecHangar(session!)
+                : null,
             screenshotDirectoryProvider:
                 session != null &&
                     const {
@@ -150,30 +188,50 @@ OverlaySettingsModule composeOverlaySettings(
               final org = scene?.targets
                   .where((item) => 'org:${item.code}' == scene.actualId)
                   .firstOrNull;
+              final locale =
+                  applicationPreferences?.projection.value.effective.locale ??
+                  WidgetsBinding.instance.platformDispatcher.locale;
+              final strings = AppStrings.resolve(locale);
               final name =
                   org?.name ??
                   (scene?.actualId == 'room' ? room?.title : null) ??
-                  '暂无协作场景';
+                  (scene?.actualId == 'fleet'
+                      ? scene?.fleetName ?? strings.text('overlay.source.fleet')
+                      : null) ??
+                  strings.text('menu.display.noScene');
               final valid =
                   game.visible &&
                   game.match == 'match' &&
                   game.state == 'identified';
               final active = valid && game.sessionState == 'ready';
+              final notInGame = strings.text('menu.display.notInGame');
               return [
                 name,
                 scene?.actualId == 'room' && room != null
-                    ? '${room.members.length} 人'
+                    ? strings
+                          .text('menu.display.memberCount')
+                          .replaceAll('{count}', '${room.members.length}')
                     : '—',
-                active ? game.shipDisplayName('zh', 'CN') ?? '暂无飞船信息' : '未进入游戏',
                 active
-                    ? game.locationDisplayName('zh', 'CN') ?? '暂无位置信息'
-                    : '未进入游戏',
+                    ? game.shipDisplayName(
+                            locale.languageCode,
+                            locale.countryCode,
+                          ) ??
+                          strings.text('menu.display.noShip')
+                    : notInGame,
+                active
+                    ? game.locationDisplayName(
+                            locale.languageCode,
+                            locale.countryCode,
+                          ) ??
+                          strings.text('menu.display.noLocation')
+                    : notInGame,
                 active
                     ? [game.serverRegion, game.serverShard]
                           .whereType<String>()
                           .where((v) => v.isNotEmpty)
                           .join(' · ')
-                    : '未进入游戏',
+                    : notInGame,
                 menuPresence?.call()?.snapshot.selfKey ?? 'presence.unknown',
               ];
             },
@@ -190,6 +248,13 @@ OverlaySettingsModule composeOverlaySettings(
                     'organizations': (publish) => MenuOrganizationsSession(
                       BridgeCommunities(session, ownAvatar: ownAvatar),
                       publish,
+                      locale: () =>
+                          applicationPreferences
+                              ?.projection
+                              .value
+                              .effective
+                              .locale ??
+                          const Locale('zh', 'CN'),
                       overview: menuCommunities == null
                           ? null
                           : CommunityOverviewReader(menuCommunities()),
@@ -197,6 +262,13 @@ OverlaySettingsModule composeOverlaySettings(
                     'rooms': (publish) => MenuRoomsSession(
                       BridgePartyRoomsAdapter(session),
                       publish,
+                      locale: () =>
+                          applicationPreferences
+                              ?.projection
+                              .value
+                              .effective
+                              .locale ??
+                          const Locale('zh', 'CN'),
                     ),
                     if (workspacePort != null)
                       'hud': (publish) => MenuHudSession(
@@ -211,6 +283,7 @@ OverlaySettingsModule composeOverlaySettings(
                     BridgeFriendsAdapter(session),
                     publish,
                     presence: menuPresence?.call(),
+                    identityChanges: account.projection,
                     identity: () {
                       final current = account.projection.value;
                       if (current.generation != session.activeGeneration ||
@@ -236,9 +309,17 @@ OverlaySettingsModule composeOverlaySettings(
                     publish,
                     archive: BridgeMenuChatArchive(session),
                     ownAvatar: ownAvatar,
+                    identityChanges: account.projection,
                     invitations: (publish) => MenuCommsInvitations(
                       BridgeCommunities(session),
                       publish,
+                      locale: () =>
+                          applicationPreferences
+                              ?.projection
+                              .value
+                              .effective
+                              .locale ??
+                          const Locale('zh', 'CN'),
                       createPrivacy: () => BridgeLocalPrivacy(session),
                     ),
                   ),
@@ -247,10 +328,10 @@ OverlaySettingsModule composeOverlaySettings(
                 : (publish) => MenuProfilesSession(
                     () => BridgeUserInteraction(session),
                     publish,
-                    createOwnPort: () => BridgeLocalPersonalProfile(
+                    createImages: createRemoteImages,
+                    createOwnPort: () => createBridgePersonalProfilePort(
                       session,
-                      remote: BridgePersonalProfileAdapter(session),
-                      hangar: () => BridgeLocalHangar(session),
+                      inventoryOrigin: HangarReadOrigin.menuProfile,
                     ),
                   ),
           ),
@@ -262,6 +343,14 @@ OverlaySettingsModule composeOverlaySettings(
         ? null
         : OverlaySceneController(BridgeOverlayScenes(session)),
     roster: session == null ? null : BridgeOverlayRoster(session),
+    // Runtime facts are pushed; these still warrant one read while watched.
+    languageChanges: applicationPreferences?.projection,
+    language: applicationPreferences == null
+        ? null
+        : () => applicationPreferences.projection.value.effective.locale,
+    hostInvalidations: session?.events
+        .where((event) => event.name == 'bootstrap.invalidated')
+        .map((_) {}),
   );
   if (session != null) {
     rooms.chat?.onPresetImported = () async {

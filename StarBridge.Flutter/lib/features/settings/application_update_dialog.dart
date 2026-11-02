@@ -1,12 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../app/routing/exit_application_intent.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import 'application_update_panel.dart';
 import 'application_update_status.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 final _announcedVersions = Expando<Set<String>>();
 Set<String> applicationUpdateShownVersions(BridgeClientSession session) =>
@@ -24,6 +31,7 @@ Future<void> showApplicationUpdateDialog(
   bool startupAnnouncement = false,
   bool Function()? isCurrent,
   void Function(VoidCallback dismiss)? onDismissReady,
+  InteractionSource? source,
 }) async {
   BridgeRequestOperation? checking;
   BridgeRequestOperation? preparing;
@@ -46,16 +54,20 @@ Future<void> showApplicationUpdateDialog(
       session.hostCapabilities.contains('applicationUpdates.handoff') &&
       Actions.maybeFind<ExitApplicationIntent>(context) != null;
   String? ticket;
+  InteractionSource? confirmedSource;
   try {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    final route = DialogRoute<String>(
-      context: context,
-      themes: InheritedTheme.capture(from: context, to: navigator.context),
+    ticket = await showStarBridgeDialog<String>(
+      context,
+      source: source,
       barrierDismissible: false,
+      onRouteCreated: (route) => onDismissReady?.call(() {
+        if (route.isActive) route.navigator?.removeRoute(route);
+      }),
       builder: (_) {
         return ApplicationUpdateDialog(
           initialStatus: initialStatus,
           startupAnnouncement: startupAnnouncement,
+          onInstallSource: (source) => confirmedSource = source,
           onAvailable: (version) {
             if (session != null) {
               applicationUpdateShownVersions(session).add(version);
@@ -109,10 +121,6 @@ Future<void> showApplicationUpdateDialog(
         );
       },
     );
-    onDismissReady?.call(() {
-      if (route.isActive) route.navigator?.removeRoute(route);
-    });
-    ticket = await navigator.push(route);
   } finally {
     // Teardown is not part of installation authorization. Stop delivery now;
     // do not hold the exit intent behind a subscription's asynchronous cleanup.
@@ -129,6 +137,7 @@ Future<void> showApplicationUpdateDialog(
   Actions.maybeInvoke(
     context,
     ExitApplicationIntent(
+      source: confirmedSource,
       beforeExit: () async {
         try {
           if (session.activeGeneration != generation ||
@@ -147,10 +156,11 @@ Future<void> showApplicationUpdateDialog(
           }
           return true;
         } on Object {
-          if (context.mounted) {
+          if (context.mounted && ScaffoldMessenger.maybeOf(context) != null) {
             final locale = AppStrings.of(context).locale;
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              SnackBar(
+            showStarBridgeSnackBar(
+              context,
+              starBridgeTimedSnackBar(
                 content: Text(
                   locale.languageCode == 'en'
                       ? 'Update could not start. The client remains open.'
@@ -160,6 +170,7 @@ Future<void> showApplicationUpdateDialog(
                       : '更新未能启动，客户端保持打开。',
                 ),
               ),
+              source: confirmedSource ?? source,
             );
           }
           return false;
@@ -179,6 +190,7 @@ class ApplicationUpdateDialog extends StatefulWidget {
     this.initialStatus,
     this.startupAnnouncement = false,
     this.onAvailable,
+    this.onInstallSource,
     super.key,
   });
   final ApplicationUpdateRead? read;
@@ -188,6 +200,9 @@ class ApplicationUpdateDialog extends StatefulWidget {
   final ApplicationUpdateStatus? initialStatus;
   final bool startupAnnouncement;
   final ValueChanged<String>? onAvailable;
+
+  /// Presentation origin only; does not authorize installation or own exit.
+  final ValueChanged<InteractionSource>? onInstallSource;
 
   /// Broadcast updates for the currently active prepare request only.
   final Stream<Map<String, dynamic>>? progress;
@@ -207,6 +222,7 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
   int _received = 0;
   int? _total;
   String _phase = 'downloading';
+  InteractionSource _source = InteractionSource.programmatic;
   @override
   void initState() {
     super.initState();
@@ -227,13 +243,14 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     super.dispose();
   }
 
-  Future<void> _prepare() async {
+  Future<void> _prepare(InteractionSource source) async {
     if (_state == 'downloading' ||
         _available == null ||
         widget.prepare == null) {
       return;
     }
     setState(() {
+      _source = source;
       _state = 'downloading';
       _ticket = null;
       _received = 0;
@@ -259,6 +276,15 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
         _ticket = reply['ticket'] as String;
         _state = 'ready';
       });
+    } on BridgeClientException catch (error) {
+      if (mounted && attempt == _preparation) {
+        setState(
+          () => _state =
+              error.code == 'applicationUpdates.installationVersionMismatch'
+              ? 'installation-version-mismatch'
+              : 'prepare-failed',
+        );
+      }
     } on Object {
       if (mounted && attempt == _preparation) {
         setState(() => _state = 'prepare-failed');
@@ -304,7 +330,8 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     });
   }
 
-  void _cancelDownload() {
+  void _cancelDownload(InteractionSource source) {
+    _source = source;
     _preparation++;
     unawaited(_progressSubscription?.cancel());
     _progressSubscription = null;
@@ -355,9 +382,10 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     _retry = Timer(Duration(seconds: delays[_attempt++]), _load);
   }
 
-  void _checkAgain() {
+  void _checkAgain(InteractionSource source) {
     _retry?.cancel();
     setState(() {
+      _source = source;
       _state = 'checking';
       _attempt = 0;
       _available = null;
@@ -440,9 +468,14 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
       ],
       'install': ['重启并安装', '重新啟動並安裝', 'Restart and install'],
       'prepare-failed': [
-        '更新未准备完成，当前版本保持不变。你可以重新下载。',
-        '更新未準備完成，目前版本保持不變。你可以重新下載。',
-        'The update could not be prepared. Your current version is unchanged. You can download again.',
+        '更新未准备完成，当前版本保持不变。请重试；若仍失败，请从官网下载正式安装包，关闭客户端后安装到原目录。无需先卸载或删除个人资料。',
+        '更新未準備完成，目前版本保持不變。請重試；若仍失敗，請從官網下載正式安裝程式，關閉用戶端後安裝至原目錄。無需先解除安裝或刪除個人資料。',
+        'The update could not be prepared. Your current version is unchanged. Try again. If it still fails, download the official installer, close the client, and install to the same location. Do not uninstall or delete personal data first.',
+      ],
+      'installation-version-mismatch': [
+        '安装登记与程序版本不一致，已停止更新。当前版本和个人资料未更改。请保存未完成的内容并关闭客户端，从官网下载正式安装包，安装到原目录。无需先卸载、删除个人资料或手动修改登记信息。',
+        '安裝登記與程式版本不一致，已停止更新。目前版本與個人資料未變更。請儲存未完成的內容並關閉用戶端，從官網下載正式安裝程式，安裝至原目錄。無需先解除安裝、刪除個人資料或手動修改登記資訊。',
+        'The installation registration does not match the program version. The update was stopped; your current version and personal data are unchanged. Save your work and close the client, then download the official installer and install to the same location. Do not uninstall, delete personal data, or manually edit the registration first.',
       ],
       'retrying': [
         '暂时无法检查更新，正在自动重试。',
@@ -459,6 +492,63 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     }[key]![index];
   }
 
+  Widget _statusContent(BuildContext context) => Column(
+    key: ValueKey(_state),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        t(
+          _state == 'available' && widget.prepare != null
+              ? 'available-installable'
+              : _state == 'downloading' && _phase != 'downloading'
+              ? 'verifying'
+              : _state,
+        ),
+      ),
+      if (_state == 'installation-version-mismatch') ...[
+        const SizedBox(height: 8),
+        const SelectableText(
+          'applicationUpdates.installationVersionMismatch',
+          key: Key('update-failure-code'),
+        ),
+      ],
+      if (_state == 'downloading' && _phase == 'downloading') ...[
+        const SizedBox(height: 12),
+        // Unknown size has no invented percentage or endless animation.
+        if (_total != null)
+          StarBridgeInteractionRegion(
+            child: Builder(
+              builder: (context) {
+                final data = InteractionScope.of(context);
+                final origin = resolveStarBridgeInitialReadSource(
+                  context,
+                  _source,
+                );
+                return InteractionScope(
+                  data: data.copyWith(
+                    reduceMotion:
+                        data.reduceMotion ||
+                        origin == InteractionSource.keyboard,
+                  ),
+                  child: SuiteProgressBar(
+                    value: _received / _total!,
+                    phase: ProgressPhase.running,
+                  ),
+                );
+              },
+            ),
+          ),
+        Text(
+          _total == null
+              ? '${(_received / 1048576).toStringAsFixed(1)} MB'
+              : '${(_received * 100 / _total!).floor()}% · '
+                    '${(_received / 1048576).toStringAsFixed(1)} / '
+                    '${(_total! / 1048576).toStringAsFixed(1)} MB',
+        ),
+      ],
+    ],
+  );
+
   @override
   Widget build(BuildContext context) => ApplicationUpdatePanel(
     key: const Key('application-update-dialog'),
@@ -469,55 +559,67 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     body: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          t(
-            _state == 'available' && widget.prepare != null
-                ? 'available-installable'
-                : _state == 'downloading' && _phase != 'downloading'
-                ? 'verifying'
-                : _state,
+        StarBridgeInteractionRegion(
+          child: Builder(
+            builder: (context) => SuiteContentSwitcher(
+              instant:
+                  resolveStarBridgeInitialReadSource(context, _source) ==
+                  InteractionSource.keyboard,
+              child: _statusContent(context),
+            ),
           ),
         ),
-        if (_state == 'downloading' && _phase == 'downloading') ...[
-          const SizedBox(height: 12),
-          // Unknown size has no invented percentage or endless animation.
-          if (_total != null)
-            LinearProgressIndicator(value: _received / _total!),
-          Text(
-            _total == null
-                ? '${(_received / 1048576).toStringAsFixed(1)} MB'
-                : '${(_received * 100 / _total!).floor()}% · '
-                      '${(_received / 1048576).toStringAsFixed(1)} / '
-                      '${(_total! / 1048576).toStringAsFixed(1)} MB',
-          ),
-        ],
-        if (_available != null) ...[
-          if (_notes?.isNotEmpty == true) UpdateReleaseNotes(_notes!),
-        ],
+        // Keep the notes mounted across state/progress changes, preserving selection.
+        if (_available != null && _notes?.isNotEmpty == true)
+          UpdateReleaseNotes(_notes!),
       ],
     ),
     actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
+      StarBridgeActionButton(
+        kind: StarBridgeActionKind.quiet,
+        controlKey: const Key('update-close'),
+        onActivate: (source) =>
+            dismissStarBridgeDialog<String>(context, source: source),
         child: Text(t(widget.startupAnnouncement ? 'later' : 'close')),
       ),
       if (_state == 'check-failed' ||
           _state == 'channel-unavailable' ||
           _state == 'verification-failed')
-        TextButton(onPressed: _checkAgain, child: Text(t('retry'))),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('update-retry'),
+          onActivate: _checkAgain,
+          child: Text(t('retry')),
+        ),
       if ((_state == 'available' ||
               _state == 'prepare-failed' ||
               _state == 'cancelled') &&
           widget.prepare != null)
-        FilledButton(onPressed: _prepare, child: Text(t('download'))),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('update-download'),
+          onActivate: (source) => unawaited(_prepare(source)),
+          child: Text(t('download')),
+        ),
       if (_state == 'downloading')
-        TextButton(
-          onPressed: _cancelDownload,
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('update-cancel'),
+          onActivate: _cancelDownload,
           child: Text(t('cancel-download')),
         ),
       if (_state == 'ready' && _ticket != null)
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_ticket),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('update-install'),
+          onActivate: (source) {
+            widget.onInstallSource?.call(source);
+            dismissStarBridgeDialog<String>(
+              context,
+              source: source,
+              result: _ticket,
+            );
+          },
           child: Text(t('install')),
         ),
     ],

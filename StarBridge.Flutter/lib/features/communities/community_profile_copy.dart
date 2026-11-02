@@ -4,6 +4,9 @@ import '../../app/localization/app_strings.dart';
 import 'community_creation_copy.dart';
 
 const communityProfileCopy = <String, (String, String, String)>{
+  'loading': ('正在读取组织资料…', '正在讀取組織資料…', 'Loading organization profile…'),
+  'loadingOptions': ('正在读取编辑选项…', '正在讀取編輯選項…', 'Loading editing options…'),
+  'loadingLogo': ('正在读取组织标志…', '正在讀取組織標誌…', 'Loading organization logo…'),
   'nameHint': (
     '支持各种语言，1–32 个字符。改名后将通知组织成员。',
     '支援各種語言，1–32 個字元。更名後將通知組織成員。',
@@ -190,6 +193,28 @@ const communityProfileCopy = <String, (String, String, String)>{
     'Images upload when you save changes.',
   ),
   'removeBanner': ('移除现有横幅', '移除現有橫幅', 'Remove current banner'),
+  'removeBackground': ('移除背景', '移除背景', 'Remove background'),
+  'wideImages': ('横幅和背景', '橫幅和背景', 'Banner and background'),
+  'wideImagesHint': (
+    '横幅显示在组织页顶部（4:1），背景铺满组织页（16:9）。图片在保存更改时上传。',
+    '橫幅顯示在組織頁頂部（4:1），背景鋪滿組織頁（16:9）。圖片在儲存變更時上傳。',
+    'The banner sits at the top of the organization page (4:1); the background fills the page (16:9). Images upload when you save changes.',
+  ),
+  'wideNoPermission': (
+    '需要“可编辑横幅和背景”权限。',
+    '需要「可編輯橫幅和背景」權限。',
+    'Requires the “Can edit banners and backgrounds” permission.',
+  ),
+  'banner': ('横幅', '橫幅', 'Banner'),
+  'background': ('背景', '背景', 'Background'),
+  'wideSet': ('已设置', '已設定', 'Set'),
+  'wideEmpty': ('未设置', '未設定', 'Not set'),
+  'wideReplace': ('保存后更换', '儲存後更換', 'Replaced when you save'),
+  'wideRemove': ('保存后移除', '儲存後移除', 'Removed when you save'),
+  'pickBanner': ('选择横幅图片', '選擇橫幅圖片', 'Choose banner image'),
+  'pickBackground': ('选择背景图片', '選擇背景圖片', 'Choose background image'),
+  'cropBanner': ('裁剪横幅', '裁剪橫幅', 'Crop banner'),
+  'cropBackground': ('裁剪背景', '裁剪背景', 'Crop background'),
   'recruitingEnabled': ('开启招募', '開啟招募', 'Recruiting'),
   'recruitingTarget': ('招募对象', '招募對象', 'Recruitment audience'),
   'recruitingNote': ('招募说明', '招募說明', 'Recruitment note'),

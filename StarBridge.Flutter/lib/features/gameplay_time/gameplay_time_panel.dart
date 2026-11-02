@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -6,7 +8,12 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/tokens/color_tokens.dart';
-import '../../platform/window/gameplay_log_picker.dart';
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import 'gameplay_time_controller.dart';
 
 String gameplayDuration(AppStrings strings, int seconds) => strings
@@ -15,13 +22,8 @@ String gameplayDuration(AppStrings strings, int seconds) => strings
     .replaceAll('{minutes}', '${seconds ~/ 60 % 60}');
 
 class GameplayTimePanel extends StatefulWidget {
-  const GameplayTimePanel({
-    required this.controller,
-    this.pickLog = pickGameplayLog,
-    super.key,
-  });
+  const GameplayTimePanel({required this.controller, super.key});
   final GameplayTimeController controller;
-  final Future<String?> Function() pickLog;
 
   @override
   State<GameplayTimePanel> createState() => _GameplayTimePanelState();
@@ -29,9 +31,11 @@ class GameplayTimePanel extends StatefulWidget {
 
 class _GameplayTimePanelState extends State<GameplayTimePanel> {
   bool _dialogOpen = false;
+  InteractionSource? _source;
 
-  Future<void> _reset() async {
+  Future<void> _reset(InteractionSource source) async {
     if (_dialogOpen) return;
+    _source = source;
     final controller = widget.controller;
     await controller.resetTime(() async {
       if (!mounted || controller != widget.controller || _dialogOpen) {
@@ -39,8 +43,9 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
       }
       _dialogOpen = true;
       try {
-        return await showDialog<bool>(
-              context: context,
+        return await showStarBridgeDialog<bool>(
+              context,
+              source: source,
               builder: (dialogContext) =>
                   ValueListenableBuilder<GameplayTimeView>(
                     valueListenable: controller,
@@ -52,8 +57,10 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
                           // The dialog can still rebuild during its exit animation.
                           // Only remove this route, never pop the page beneath it.
                           if (dialogContext.mounted &&
-                              route != null && route.isActive) {
-                            Navigator.of(dialogContext).removeRoute(route, false);
+                              route != null &&
+                              route.isActive) {
+                            Navigator.of(dialogContext)
+                                .removeRoute(route, false);
                           }
                         });
                         return const SizedBox.shrink();
@@ -65,17 +72,27 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
                         title: Text(text('title')),
                         content: Text(text('body')),
                         actions: [
-                          TextButton(
-                            onPressed: () =>
-                                Navigator.pop(dialogContext, false),
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            controlKey: const Key('gameplay-reset-keep'),
+                            onActivate: (source) =>
+                                dismissStarBridgeDialog<bool>(
+                                  dialogContext,
+                                  source: source,
+                                  result: false,
+                                ),
                             child: Text(text('keep')),
                           ),
-                          TextButton(
-                            key: const Key('gameplay-reset-confirm'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: context.tokens.colors.danger,
-                            ),
-                            onPressed: () => Navigator.pop(dialogContext, true),
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            tone: ActionTone.danger,
+                            controlKey: const Key('gameplay-reset-confirm'),
+                            onActivate: (source) =>
+                                dismissStarBridgeDialog<bool>(
+                                  dialogContext,
+                                  source: source,
+                                  result: true,
+                                ),
                             child: Text(text('action')),
                           ),
                         ],
@@ -90,23 +107,44 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
     });
   }
 
-  Future<void> _import() async {
+  Future<void> _import(InteractionSource source) async {
+    if (_dialogOpen) return;
+    _source = source;
     final controller = widget.controller;
-    await controller.importHistory(widget.pickLog);
-    if (!mounted || controller != widget.controller || _dialogOpen) return;
-    final preview = controller.value.preview;
-    if (preview == null) return;
     _dialogOpen = true;
+    GameplayHistoryPreview? preview;
     try {
-      await showDialog<void>(
-        context: context,
+      final operation = controller.importHistory();
+      if (controller.value.scanProgress != null) {
+        await showStarBridgeDialog<void>(
+          context,
+          source: source,
+          barrierDismissible: false,
+          builder: (_) =>
+              _HistoryScanDialog(controller: controller, source: source),
+        );
+      }
+      await operation;
+      if (!mounted || controller != widget.controller) return;
+      preview = controller.value.preview;
+      if (preview == null) return;
+      final readyPreview = preview;
+      await showStarBridgeDialog<void>(
+        context,
+        source: source,
         barrierDismissible: false,
-        builder: (_) =>
-            _HistoryDialog(controller: controller, preview: preview),
+        builder: (_) => _HistoryDialog(
+          controller: controller,
+          preview: readyPreview,
+          source: source,
+          onSourceChanged: (source) {
+            if (mounted && controller == widget.controller) _source = source;
+          },
+        ),
       );
     } finally {
       _dialogOpen = false;
-      controller.cancelPreview(preview);
+      if (preview != null) controller.cancelPreview(preview);
     }
   }
 
@@ -117,6 +155,7 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
     valueListenable: widget.controller,
     builder: (context, state, _) {
       if (!state.visible) return const SizedBox.shrink();
+      final controller = widget.controller;
       final tokens = context.tokens;
       final strings = AppStrings.of(context);
       String text(String key) => strings.text('gameplay.$key');
@@ -172,17 +211,26 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
             ),
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton(
-                key: const Key('gameplay-time-explanation'),
-                onPressed: () => showDialog<void>(
-                  context: context,
+              child: StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('gameplay-time-explanation'),
+                onActivate: (source) => showStarBridgeDialog<void>(
+                  context,
+                  source: source,
                   builder: (dialogContext) => AlertDialog(
                     scrollable: true,
                     title: Text(text('explanationTitle')),
                     content: Text(text('explanationBody')),
                     actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
+                      StarBridgeActionButton(
+                        kind: StarBridgeActionKind.quiet,
+                        controlKey: const Key(
+                          'gameplay-time-explanation-close',
+                        ),
+                        onActivate: (source) => dismissStarBridgeDialog<void>(
+                          dialogContext,
+                          source: source,
+                        ),
                         child: Text(
                           MaterialLocalizations.of(dialogContext)
                               .closeButtonLabel,
@@ -199,18 +247,36 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
               label: text('recordSwitch'),
               value: state.consent == 'allowed',
               controlKey: const Key('gameplay-time-record-switch'),
-              onChanged: enabled ? widget.controller.setAllowed : null,
+              onChanged: enabled
+                  ? (value) {
+                      _source = currentStarBridgeActivationSource;
+                      controller.setAllowed(value);
+                    }
+                  : null,
             ),
             if (state.historySupported)
               _GameplaySwitch(
                 label: text('profileSwitch'),
                 value: state.showOnProfile,
                 controlKey: const Key('gameplay-time-profile-switch'),
-                onChanged: enabled ? widget.controller.setVisibility : null,
+                onChanged: enabled
+                    ? (value) {
+                        _source = currentStarBridgeActivationSource;
+                        controller.setVisibility(value);
+                      }
+                    : null,
               ),
             if (state.busy && state.operation != 'resetConfirmation') ...[
               SizedBox(height: tokens.space.sm),
-              const LinearProgressIndicator(key: Key('gameplay-time-busy')),
+              _GameplayWaiting(
+                key: const Key('gameplay-time-busy'),
+                source:
+                    _source ??
+                    resolveStarBridgeInitialReadSource(
+                      context,
+                      InteractionSource.programmatic,
+                    ),
+              ),
               SizedBox(height: tokens.space.sm),
             ],
             Text(
@@ -240,18 +306,25 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
             if (error != null && error != 'unsupported')
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: TextButton(
-                  key: const Key('gameplay-time-retry'),
-                  onPressed: enabled ? widget.controller.retry : null,
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('gameplay-time-retry'),
+                  onActivate: enabled
+                      ? (source) {
+                          _source = source;
+                          controller.retry();
+                        }
+                      : null,
                   child: Text(text('retry')),
                 ),
               ),
             if (widget.controller.resetSupported) ...[
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: TextButton(
-                  key: const Key('gameplay-reset-open'),
-                  onPressed: enabled && state.resetState != 'pending'
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('gameplay-reset-open'),
+                  onActivate: enabled && state.resetState != 'pending'
                       ? _reset
                       : null,
                   child: Text(text('reset.action')),
@@ -287,9 +360,9 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
                 SizedBox(height: tokens.space.sm),
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: OutlinedButton(
-                    key: const Key('gameplay-history-import'),
-                    onPressed: enabled ? _import : null,
+                  child: StarBridgeActionButton(
+                    controlKey: const Key('gameplay-history-import'),
+                    onActivate: enabled ? _import : null,
                     child: Text(text('checkImport')),
                   ),
                 ),
@@ -315,28 +388,154 @@ class _GameplaySwitch extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(child: Text(label)),
-      SizedBox(width: context.tokens.space.sm),
-      Semantics(
-        label: label,
-        child: Switch(key: controlKey, value: value, onChanged: onChanged),
-      ),
-    ],
+  Widget build(BuildContext context) => StarBridgeSwitch.tile(
+    label: label,
+    value: value,
+    onChanged: onChanged,
+    controlKey: controlKey,
+    rowBuilder: (control) => Row(
+      children: [
+        Expanded(child: Text(label)),
+        SizedBox(width: context.tokens.space.sm),
+        control,
+      ],
+    ),
   );
 }
 
+class _HistoryScanDialog extends StatefulWidget {
+  const _HistoryScanDialog({required this.controller, required this.source});
+  final GameplayTimeController controller;
+  final InteractionSource source;
+  @override
+  State<_HistoryScanDialog> createState() => _HistoryScanDialogState();
+}
+
+class _HistoryScanDialogState extends State<_HistoryScanDialog> {
+  bool _closing = false;
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_changed);
+  }
+
+  void _changed() {
+    if (widget.controller.value.scanProgress == null && !_closing) {
+      _closing = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final route = ModalRoute.of(context);
+        if (route != null && route.isActive) {
+          Navigator.of(context).removeRoute(route);
+        }
+      });
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scan = widget.controller.value.scanProgress;
+    if (scan == null) return const SizedBox.shrink();
+    String text(String key) =>
+        AppStrings.of(context).text('gameplay.scan.$key');
+    final cancelling = scan.phase == 'cancelling';
+    final known = scan.phase == 'scanning' && scan.totalBytes > 0;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape):
+            widget.controller.cancelHistoryScan,
+      },
+      child: Focus(
+        autofocus: true,
+        child: PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) widget.controller.cancelHistoryScan();
+          },
+          child: AlertDialog(
+            key: const Key('gameplay-history-scan'),
+            scrollable: true,
+            title: Text(text('title')),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    text(scan.phase),
+                    key: const Key('gameplay-history-scan-phase'),
+                  ),
+                  SizedBox(height: context.tokens.space.md),
+                  _GameplayWaiting(
+                    source: widget.source,
+                    value: known ? scan.readBytes / scan.totalBytes : null,
+                  ),
+                  SizedBox(height: context.tokens.space.md),
+                  Text(
+                    text('files')
+                        .replaceAll('{done}', '${scan.processedFiles}')
+                        .replaceAll('{total}', '${scan.totalFiles}'),
+                    key: const Key('gameplay-history-scan-files'),
+                  ),
+                  if (known)
+                    Text(
+                      text('bytes')
+                          .replaceAll(
+                            '{read}',
+                            (scan.readBytes / 1048576).toStringAsFixed(1),
+                          )
+                          .replaceAll(
+                            '{total}',
+                            (scan.totalBytes / 1048576).toStringAsFixed(1),
+                          ),
+                    ),
+                  SizedBox(height: context.tokens.space.md),
+                  Text(text('notice')),
+                ],
+              ),
+            ),
+            actions: [
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('gameplay-history-scan-cancel'),
+                onActivate: cancelling
+                    ? null
+                    : (_) => widget.controller.cancelHistoryScan(),
+                child: Text(text(cancelling ? 'cancelling' : 'cancel')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryDialog extends StatefulWidget {
-  const _HistoryDialog({required this.controller, required this.preview});
+  const _HistoryDialog({
+    required this.controller,
+    required this.preview,
+    required this.source,
+    required this.onSourceChanged,
+  });
   final GameplayTimeController controller;
   final GameplayHistoryPreview preview;
+  final InteractionSource source;
+  final ValueChanged<InteractionSource> onSourceChanged;
   @override
   State<_HistoryDialog> createState() => _HistoryDialogState();
 }
 
 class _HistoryDialogState extends State<_HistoryDialog> {
   bool _closing = false;
+  late InteractionSource _source = widget.source;
   @override
   void initState() {
     super.initState();
@@ -409,23 +608,32 @@ class _HistoryDialogState extends State<_HistoryDialog> {
               ],
               if (state.busy) ...[
                 SizedBox(height: context.tokens.space.md),
-                const LinearProgressIndicator(),
+                _GameplayWaiting(source: _source),
                 Text(text('confirming')),
               ],
             ],
           ),
         ),
         actions: [
-          TextButton(
-            key: const Key('gameplay-history-cancel'),
-            onPressed: state.busy ? null : () => Navigator.of(context).pop(),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: const Key('gameplay-history-cancel'),
+            onActivate: state.busy
+                ? null
+                : (source) =>
+                      dismissStarBridgeDialog<void>(context, source: source),
             child: Text(text('cancel')),
           ),
-          FilledButton(
-            key: const Key('gameplay-history-confirm'),
-            onPressed: state.busy
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: const Key('gameplay-history-confirm'),
+            onActivate: state.busy
                 ? null
-                : () => widget.controller.confirmHistory(preview),
+                : (source) {
+                    _source = source;
+                    widget.onSourceChanged(source);
+                    widget.controller.confirmHistory(preview);
+                  },
             child: Text(
               text(state.historyError == null ? 'confirm' : 'retryConfirm'),
             ),
@@ -434,4 +642,25 @@ class _HistoryDialogState extends State<_HistoryDialog> {
       ),
     );
   }
+}
+
+class _GameplayWaiting extends StatelessWidget {
+  const _GameplayWaiting({required this.source, this.value, super.key});
+  final InteractionSource source;
+  final double? value;
+  @override
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion || source == InteractionSource.keyboard,
+          ),
+          child: SuiteProgressBar(value: value, phase: ProgressPhase.running),
+        );
+      },
+    ),
+  );
 }

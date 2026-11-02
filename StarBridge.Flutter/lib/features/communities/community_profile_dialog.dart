@@ -1,7 +1,7 @@
-import '../../design_system/icons/standard_icon.dart';
 import 'dart:async';
 
 import 'community_profile_form_sections.dart';
+import 'community_profile_dialog_presentation.dart';
 
 import 'community_visible_refresh.dart';
 
@@ -10,26 +10,35 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
-import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+
 import 'community_profile_controller.dart';
 import 'community_profile_port.dart';
 import 'community_profile_copy.dart';
 import 'community_creation_port.dart';
 import 'community_logo_port.dart';
 import 'community_logo_crop.dart';
+import 'community_profile_wide_images.dart';
+import 'community_wide_image_port.dart';
 import 'community_tag_picker.dart';
 import 'community_gameplay_tags.dart';
 import 'community_workspace_copy.dart' show workspaceDays;
 import 'community_workspace_port.dart';
 import 'communities_module.dart';
 import 'community_editor_surface.dart';
+import 'community_profile_editor_chrome.dart';
+import '../common/social_read_activity.dart';
 
 class CommunityProfileDialog extends StatefulWidget {
   const CommunityProfileDialog({
     required this.port,
     required this.targetRef,
     this.logoBytes,
+    this.bannerBytes,
+    this.backgroundBytes,
     this.embedded = false,
     this.onSaved,
     this.onNameConfirmed,
@@ -39,7 +48,7 @@ class CommunityProfileDialog extends StatefulWidget {
   });
   final CommunityProfilePort port;
   final String targetRef;
-  final Uint8List? logoBytes;
+  final Uint8List? logoBytes, bannerBytes, backgroundBytes;
   final bool embedded;
   final ValueChanged<Set<String>>? onSaved;
   final void Function(String code, String name)? onNameConfirmed;
@@ -58,12 +67,21 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
   @override
   Duration get communityRefreshInterval => const Duration(minutes: 2);
   late final model = CommunityProfileController(widget.port, widget.targetRef);
+  late final SocialReadActivityBinding _reading, _saving;
+  ValueGetter<InteractionSource>? _imageSource;
+  int _imageRevision = 0;
+  bool _observedLoading = false, _observedSubmitting = false;
+  bool _optionsBusy = false, _optionsOpening = false, _firstOptions = true;
+  int _optionsRevision = 0;
+  InteractionSource _optionsSource = InteractionSource.programmatic;
+  InteractionSource _logoSource = InteractionSource.programmatic;
+  bool _logoOpening = false;
   final form = GlobalKey<FormState>();
   final _scroll = ScrollController();
   final _anchors = List.generate(4, (_) => GlobalKey());
   bool _scrollUpdateQueued = false;
   bool _initialScrollDone = false;
-  final dialogs = <Route<dynamic>>[];
+  final dialogs = <StarBridgeDialogRoute<dynamic>>[];
   CommunityCreationOptions? options;
   CommunityEditingProfile? baseline;
   int section = 0, serial = 0;
@@ -80,6 +98,35 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
   bool get busy => model.locked || choosing || confirming;
   String t(String key) => profileText(context, key);
   Map<String, Object?> get fields => model.fields;
+  CommunityProfileDialogActivity get _activity =>
+      CommunityProfileDialogActivity(
+        model: model,
+        reading: _reading,
+        saving: _saving,
+        text: t,
+      );
+  Widget _readMarker(String key, {bool circular = false}) =>
+      _activity.readMarker(key, circular: circular);
+  Widget? get _footerActivity => _activity.footerActivity(
+    choosing: choosing,
+    dialogOpen: dialogs.isNotEmpty,
+    imageSource: _imageSource,
+    imageRevision: _imageRevision,
+  );
+  Widget? get _optionsActivity => _activity.optionsActivity(
+    busy: _optionsBusy,
+    revision: _optionsRevision,
+    dialogOpen: dialogs.isNotEmpty,
+    source: _optionsSource,
+    opening: _optionsOpening,
+  );
+  Widget get _logoActivity => _activity.logoActivity(
+    epoch: logoEpoch,
+    dialogOpen: dialogs.isNotEmpty,
+    source: _logoSource,
+    opening: _logoOpening,
+  );
+
   CommunityLogoPort? get images => widget.port is CommunityLogoPort
       ? widget.port as CommunityLogoPort
       : null;
@@ -89,6 +136,16 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
     section = widget.sectionIndex ?? 0;
     _scroll.addListener(_queueScrollSectionUpdate);
     serverLogoBytes = widget.logoBytes;
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _saving = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(changed);
     unawaited(model.load());
     unawaited(loadOptions());
@@ -152,6 +209,13 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
 
   Future<void> loadOptions() async {
     if (widget.port is! CommunityCreationPort) return;
+    final revision = ++_optionsRevision;
+    setState(() {
+      _optionsSource = captureStarBridgeActivationSource()();
+      _optionsOpening = _firstOptions;
+      _firstOptions = false;
+      _optionsBusy = true;
+    });
     try {
       final result = await (widget.port as CommunityCreationPort)
           .creationOptions();
@@ -163,14 +227,22 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
       }
     } catch (_) {
       if (mounted && !model.invalidated) setState(() => optionsFailed = true);
+    } finally {
+      if (mounted && revision == _optionsRevision) {
+        setState(() => _optionsBusy = false);
+      }
     }
   }
 
   void changed() {
     if (!mounted) return;
+    final readCompleted = _observedLoading && !model.loading;
+    final saveCompleted = _observedSubmitting && !model.submitting;
+    _observedLoading = model.loading;
+    _observedSubmitting = model.submitting;
     if (model.invalidated) {
       for (final route in dialogs.toList().reversed) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        retireStarBridgeDialog(route);
       }
       if (!widget.embedded) {
         final route = ModalRoute.of(context);
@@ -192,7 +264,17 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
           (old == null ||
               old.revision != baseline!.revision ||
               old.hasLogo != baseline!.hasLogo)) {
-        unawaited(refreshLogo(baseline!));
+        unawaited(
+          refreshLogo(
+            baseline!,
+            activitySource: saveCompleted
+                ? _saving.source
+                : readCompleted
+                ? _reading.source
+                : InteractionSource.programmatic,
+            opening: !saveCompleted && readCompleted && _reading.opening,
+          ),
+        );
       }
     }
     final data = model.changes['logoImageData'] as String?;
@@ -203,8 +285,14 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
     setState(() {});
   }
 
-  Future<void> refreshLogo(CommunityEditingProfile profile) async {
+  Future<void> refreshLogo(
+    CommunityEditingProfile profile, {
+    InteractionSource activitySource = InteractionSource.programmatic,
+    bool opening = false,
+  }) async {
     final current = ++logoEpoch;
+    _logoSource = activitySource;
+    _logoOpening = opening;
     serverLogoBytes = null;
     logoLoading = false;
     logoFailed = false;
@@ -254,34 +342,32 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
   }
 
   Future<T?> dialog<T>(Widget child) async {
-    final route = DialogRoute<T>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => child,
-    );
-    dialogs.add(route);
+    StarBridgeDialogRoute<T>? opened;
     try {
-      return await Navigator.of(context).push(route);
+      return await showStarBridgeDialog<T>(
+        context,
+        useRootNavigator: false,
+        barrierDismissible: false,
+        onRouteCreated: (route) {
+          opened = route;
+          dialogs.add(route);
+          if (choosing && mounted) setState(() {});
+        },
+        builder: (_) => child,
+      );
     } finally {
-      dialogs.remove(route);
+      dialogs.remove(opened);
+      if (choosing && mounted) setState(() {});
     }
   }
 
   Future<bool> confirm(String title, String body, String action) async {
     final result = await dialog<bool>(
-      AlertDialog(
-        title: Text(t(title)),
-        content: Text(t(body)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('continue')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(t(action)),
-          ),
-        ],
+      communityProfileConfirmation(
+        text: t,
+        title: title,
+        body: body,
+        action: action,
       ),
     );
     return mounted && !model.invalidated && result == true;
@@ -293,31 +379,7 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
     if (model.dirty) {
       confirming = true;
       final choice = await dialog<String>(
-        AlertDialog(
-          title: Text(t('leaveTitle')),
-          content: Text(
-            t(
-              model.needsRefresh
-                  ? model.error ?? 'outcomeUnknown'
-                  : 'leaveBody',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'stay'),
-              child: Text(t('continue')),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'discard'),
-              child: Text(t('discard')),
-            ),
-            if (!model.needsRefresh)
-              FilledButton(
-                onPressed: () => Navigator.pop(context, 'save'),
-                child: Text(t('save')),
-              ),
-          ],
-        ),
+        communityProfileLeaveConfirmation(text: t, model: model),
       );
       confirming = false;
       if (!mounted || model.invalidated || choice == null || choice == 'stay') {
@@ -333,7 +395,11 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
 
   Future<void> leave() async {
     if (await confirmLeave() && mounted && !widget.embedded) {
-      Navigator.pop(context, saved);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: saved,
+      );
     }
   }
 
@@ -496,6 +562,8 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
   Future<void> pickLogo() async {
     final port = images;
     if (busy || port == null || !port.canPickLogo) return;
+    _imageSource = captureStarBridgeActivationSource();
+    _imageRevision++;
     setState(() {
       choosing = true;
       localError = null;
@@ -520,6 +588,7 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
         }
       }
       if (mounted) setState(() => choosing = false);
+      _imageSource = null;
     }
   }
 
@@ -559,10 +628,16 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
 
   @override
   void dispose() {
+    for (final route in dialogs.toList().reversed) {
+      retireStarBridgeDialog(route);
+    }
+    dialogs.clear();
     _scroll.dispose();
     logoEpoch++;
     draftLogoBytes = serverLogoBytes = null;
     draftLogoData = null;
+    _reading.dispose();
+    _saving.dispose();
     model.removeListener(changed);
     model.dispose();
     super.dispose();
@@ -581,6 +656,22 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
       serverLogoBytes: serverLogoBytes,
       logoLoading: logoLoading,
       logoFailed: logoFailed,
+      logoLoadingIndicator: _logoActivity,
+      wideImages: CommunityProfileWideImages(
+        model: model,
+        port: widget.port is CommunityWideImagePort
+            ? widget.port as CommunityWideImagePort
+            : null,
+        busy: busy,
+        openDialog: dialog<String>,
+        onChoosing: (value) {
+          if (mounted) setState(() => choosing = value);
+        },
+        current: {
+          'banner': widget.bannerBytes,
+          'background': widget.backgroundBytes,
+        },
+      ),
       update: update,
       structureChanged: () => serial++,
       pickLogo: pickLogo,
@@ -595,7 +686,11 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
     return PopScope(
       canPop: widget.embedded,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(leave());
+        if (!didPop) {
+          unawaited(
+            runStarBridgeActivation<void>(InteractionSource.keyboard, leave),
+          );
+        }
       },
       child: CommunityEditorSurface(
         embedded: widget.embedded,
@@ -614,172 +709,50 @@ class CommunityProfileDialogState extends State<CommunityProfileDialog>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            t('editProfile'),
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                        if (!widget.embedded)
-                          IconButton(
-                            onPressed: model.submitting || choosing
-                                ? null
-                                : leave,
-                            tooltip: t('close'),
-                            icon: const StandardIcon(StandardIconSemantic.close),
-                          ),
-                      ],
+                    CommunityProfileEditorHeader(
+                      model: model,
+                      embedded: widget.embedded,
+                      choosing: choosing,
+                      optionsFailed: optionsFailed,
+                      localError: localError,
+                      onLeave: leave,
+                      onRetryOptions: loadOptions,
+                      loadingIndicator: _readMarker('profile-read-activity'),
+                      optionsActivity: _optionsActivity,
                     ),
-                    if (model.loading) const LinearProgressIndicator(),
-                    if (optionsFailed)
-                      Row(
-                        children: [
-                          Expanded(child: Text(t('optionsFailed'))),
-                          TextButton(
-                            onPressed: loadOptions,
-                            child: Text(t('reload')),
-                          ),
-                        ],
-                      ),
-                    if (localError != null || model.error != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(
-                          t(localError ?? model.error!),
-                          style: TextStyle(
-                            color: context.tokens.colors.warning,
-                          ),
-                        ),
-                      ),
                     if (model.profile == null)
-                      Expanded(
-                        child: Center(
-                          child: model.loading
-                              ? const CircularProgressIndicator()
-                              : TextButton(
-                                  onPressed: reload,
-                                  child: Text(t('reload')),
-                                ),
+                      communityProfileInitialRead(
+                        loading: model.loading,
+                        loadingIndicator: () => _readMarker(
+                          'profile-initial-activity',
+                          circular: true,
                         ),
+                        onRetry: reload,
+                        text: t,
                       )
-                    else ...[
-                      const SizedBox(height: 12),
-                      if (!widget.embedded)
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (var i = 0; i < 4; i++)
-                              ChoiceChip(
-                                label: Text(
-                                  t(
-                                    [
-                                      'basic',
-                                      'discovery',
-                                      'schedule',
-                                      'contacts',
-                                    ][i],
-                                  ),
-                                ),
-                                selected: section == i,
-                                onSelected:
-                                    choosing || confirming || model.submitting
-                                    ? null
-                                    : (_) => setState(() => section = i),
-                              ),
-                          ],
-                        ),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: Form(
-                          key: form,
-                          child: SingleChildScrollView(
-                            controller: widget.embedded ? _scroll : null,
-                            // Desktop scrollbars paint over the viewport. Keep
-                            // their hit area clear of switches and dropdowns.
-                            padding: widget.embedded
-                                ? const EdgeInsetsDirectional.only(end: 16)
-                                : null,
-                            key: widget.embedded
-                                ? const ValueKey('profile-continuous-scroll')
-                                : ValueKey('profile-section-$section'),
-                            child: widget.embedded
-                                ? Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      sections.continuousSection(
-                                        0,
-                                        _anchors[0],
-                                        sections.basic,
-                                      ),
-                                      if (model.profile!.canEditProfile) ...[
-                                        sections.continuousSection(
-                                          1,
-                                          _anchors[1],
-                                          sections.discovery,
-                                        ),
-                                        sections.continuousSection(
-                                          2,
-                                          _anchors[2],
-                                          sections.schedule,
-                                        ),
-                                        sections.continuousSection(
-                                          3,
-                                          _anchors[3],
-                                          sections.contacts,
-                                        ),
-                                      ],
-                                    ],
-                                  )
-                                : switch (section) {
-                                    0 => sections.basic,
-                                    1 => sections.discovery,
-                                    2 => sections.schedule,
-                                    _ => sections.contacts,
-                                  },
-                          ),
-                        ),
+                    else
+                      ...communityProfileFormContent(
+                        sections: sections,
+                        embedded: widget.embedded,
+                        section: section,
+                        form: form,
+                        scroll: _scroll,
+                        anchors: _anchors,
+                        onSectionChanged:
+                            choosing || confirming || model.submitting
+                            ? null
+                            : (index) => setState(() => section = index),
                       ),
-                    ],
                     const Divider(),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 12,
-                      runSpacing: 8,
-                      children: [
-                        Text(
-                          t(
-                            model.submitting
-                                ? 'saving'
-                                : model.dirty
-                                ? 'dirty'
-                                : model.outcome?.status == 'accepted'
-                                ? 'saved'
-                                : 'clean',
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: model.submitting || choosing
-                              ? null
-                              : reload,
-                          child: Text(t('reload')),
-                        ),
-                        TextButton(
-                          onPressed: !busy && model.dirty ? discard : null,
-                          child: Text(t('discard')),
-                        ),
-                        Tooltip(
-                          message: widget.embedded ? t('saveProfileDraft') : '',
-                          child: FilledButton(
-                            onPressed: !busy && model.canSave ? save : null,
-                            child: Text(t('save')),
-                          ),
-                        ),
-                      ],
+                    CommunityProfileEditorActions(
+                      model: model,
+                      busy: busy,
+                      choosing: choosing,
+                      embedded: widget.embedded,
+                      onReload: reload,
+                      onDiscard: discard,
+                      onSave: save,
+                      activity: _footerActivity,
                     ),
                   ],
                 ),

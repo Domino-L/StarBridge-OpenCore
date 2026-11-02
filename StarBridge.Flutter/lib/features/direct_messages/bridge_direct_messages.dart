@@ -15,7 +15,10 @@ final class BridgeDirectMessages
     implements
         DirectMessagesPort,
         DirectMessageActivityPort,
+        DirectMessageHintPort,
         DirectMessageActivityHealthPort,
+        DirectMessagePushHealthPort,
+        DirectMessageReadScopePort,
         DirectViewerAvatarPort,
         DirectMessageSender,
         DirectReadReceiptPort {
@@ -36,9 +39,44 @@ final class BridgeDirectMessages
   }
   final BridgeClientSession session;
   @override
-  Stream<void> get changes => socialActivityChanges(session);
+  DirectMessageReadScope? get readScope =>
+      _closed || session.isClosed || session.connectionModeChanging
+      ? null
+      : DirectMessageReadScope(
+          session,
+          session.activeGeneration,
+          session.connectionModeRevision,
+        );
+  @override
+  void Function() observeReadScope(void Function(bool hard) changed) {
+    void Function()? generation, mode;
+    try {
+      generation = session.observeGenerationChanges((_, _) => changed(true));
+      mode = session.registerConnectionModeNetworkWork(
+        ConnectionModeNetworkWork(
+          pause: () async => changed(session.isClosed),
+          reconcile: () async => changed(session.isClosed),
+        ),
+      );
+    } on BridgeDisconnectedException {
+      // A closed transport has no scope and cannot admit an offered read.
+    }
+    return () {
+      generation?.call();
+      mode?.call();
+    };
+  }
+
+  @override
+  Stream<void> get changes => directMessageActivityChanges(session)
+      .where((targets) => targets == null).map((_) {});
+  @override
+  Stream<List<String>> get hints => directMessageActivityChanges(session)
+      .where((targets) => targets != null).map((targets) => targets!);
   @override
   bool get activityHealthy => socialActivityHealthy(session);
+  @override
+  bool get pushHealthy => directMessagePushHealthy(session);
   final String? Function()? _ownAvatar;
   @override
   String? get viewerAvatar => _closed ? null : _ownAvatar?.call();

@@ -1,5 +1,10 @@
 namespace StarBridge.NativeBridge;
 
+public static class BridgeHostEventNames
+{
+    public const string RallyHotkey = "officialFleet.rallyHotkey";
+}
+
 public sealed record BridgeProtocolRange(int Minimum, int Maximum);
 
 public sealed record BridgeHelloRequest(
@@ -160,6 +165,7 @@ public static class BridgeRequestPolicy
         "host.getGamePresence",
         "host.shutdown",
         "account.getCurrent",
+        "onboarding.startup.read",
         "account.sendPasswordResetCode",
         "account.confirmPasswordReset",
         "account.loginLegacy",
@@ -191,6 +197,20 @@ public static class BridgeRequestPolicy
         "menuScreenshotDirectory.commitDraft",
         "notificationAudio.read",
         "playReminder.read",
+        "execHangar.read",
+        "execHangar.refresh",
+        "execHangar.save",
+        "execHangar.start",
+        "execHangar.continuous",
+        "execHangar.stop",
+        "execHangar.extend",
+        "execHangar.addHour",
+        "execHangar.restore",
+        "execHangar.preview",
+        "execHangar.test",
+        "execHangar.gameOverlay.read",
+        "execHangar.gameOverlay.pin",
+        "execHangar.gameOverlay.unpin",
         "playReminder.save",
         "notificationSettings.read",
         "notificationSettings.save",
@@ -198,6 +218,8 @@ public static class BridgeRequestPolicy
         "notificationSettings.testDesktop",
         "notificationSettings.clearDesktop",
         "notificationSettings.consumeActivation",
+        "notificationSettings.previewRally",
+        "notificationSettings.rallyAlerts",
         "notificationAudio.save",
         "notificationAudio.preview",
         "notificationAudio.stop",
@@ -209,6 +231,17 @@ public static class BridgeRequestPolicy
         "overlay.runtime.open",
         "overlay.runtime.close",
         "overlay.runtime.retry",
+        // Authenticated collection owner is derived inside Host, not supplied
+        // by the renderer. This exact route cannot report usage or place items.
+        "overlay.appearanceProgress.read",
+        // Finite display intents. The Host derives owner/generation and rejects
+        // caller account context; these exact routes cannot grant usage or access.
+        "overlay.appearanceLivePreview.open",
+        "overlay.appearanceLivePreview.update",
+        "overlay.appearanceLivePreview.close",
+        "overlay.appearanceLivePreview.protect",
+        "overlay.appearanceLivePreview.playback",
+        "overlay.appearanceLivePreview.renew",
         "overlay.preview",
         "overlay.update",
         "diagnostics.getSafeSummary",
@@ -226,7 +259,15 @@ public static class BridgeRequestPolicy
         "diagnostics.getLocalEvents",
         "diagnostics.exportLocalEvents",
         "diagnostics.clearLocalEvents",
-        "bridge.cancel"
+        "bridge.cancel",
+        // Review of shared device choices does not grant onboarding completion.
+        "onboarding.deviceReview.read",
+        "onboarding.deviceReview.confirm",
+        "onboarding.localStatistics.read",
+        "onboarding.localStatistics.confirm",
+        "onboarding.nativeOverlayObservation.read",
+        "onboarding.onlineInstallation.read",
+        "onboarding.onlineInstallation.install"
     };
 
     public static bool RequiresAccountContext(string requestName) =>
@@ -234,6 +275,21 @@ public static class BridgeRequestPolicy
 
     public static bool IsOutOfBandControl(string requestName) =>
         OutOfBandControlRequests.Contains(requestName);
+
+    // These authenticated, cancellable waits have distinct bounded
+    // slots in the account dispatcher. They must not occupy ordinary pipe workers.
+    public static bool IsActivityWait(string requestName) =>
+        requestName is "social.wait" or "communities.wait" or "officialFleet.wait";
+
+    // Opening the in-game menu reads/writes the local menu preference stores.
+    // Right after startup all ordinary workers can be waiting on private HTTP
+    // for seconds; these bounded local requests get their own serial lane
+    // instead of queueing behind them. (menuHotkey.window stays ordinary: it
+    // waits on the overlay UI thread, and the renderer bounds that wait.)
+    public static bool IsMenuInteraction(string requestName) =>
+        requestName is "applicationPreferences.menu.get" or "applicationPreferences.menu.update"
+            or "applicationPreferences.menu.begin" or "applicationPreferences.menu.finish"
+            or "applicationPreferences.menu.startup";
 }
 
 public class BridgeProtocolException : Exception

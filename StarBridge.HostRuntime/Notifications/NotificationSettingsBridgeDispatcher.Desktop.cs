@@ -21,24 +21,33 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             test || activationEvent == null ? null : () => Activate(id, current));
     }
 
-    private (string Id, Func<bool> Current, long Started, string Destination,
-        Func<CancellationToken, Task<bool>>? Revalidate)? _activation;
+    private readonly TimeProvider _activationTime = time ?? TimeProvider.System;
+    private (string Id, Func<bool> Current, long Started, long Generation, string Destination,
+        Func<CancellationToken, Task<bool>>? Revalidate, string? Reference)? _activation;
     private Guid? _activatedDesktop;
     private void Activate(Guid id, Func<bool> current, string destination = "roomReminders",
-        Func<CancellationToken, Task<bool>>? revalidate = null) {
+        Func<CancellationToken, Task<bool>>? revalidate = null, string? reference = null) {
         lock (_gate) {
             if (_disposed || !current() || activationEvent == null) return;
             var key = id.ToString("N");
             if (_activatedDesktop == id) return;
+            BridgeEnvelope envelope;
+            var sessionGeneration = generation();
+            try { envelope = activationEvent(sessionGeneration, new { schemaVersion = 1, activationId = key }); }
+            catch (OperationCanceledException) { return; } // No intent was created by the retired Native owner.
             _activatedDesktop = id;
-            _activation = (key, current, System.Diagnostics.Stopwatch.GetTimestamp(), destination, revalidate);
-            EventReady?.Invoke(activationEvent(generation(), new { schemaVersion = 1, activationId = key }));
+            // Routing data stays in this one in-memory intent, never in the click event.
+            var opaqueRef = destination is "trade" or "tradeChat" && reference is { Length: 32 } &&
+                reference.All(char.IsAsciiHexDigit) ? reference : null;
+            _activation = (key, current, _activationTime.GetTimestamp(), sessionGeneration, destination, revalidate, opaqueRef);
+            EventReady?.Invoke(envelope);
         }
     }
 
     private async ValueTask<BridgeDispatchBatch> ConsumeActivationAsync(BridgeEnvelope request, CancellationToken token) {
         try {
             string? destination = null;
+            string? reference = null;
             Func<bool>? current = null;
             Func<CancellationToken, Task<bool>>? revalidate = null;
             lock (_gate) {
@@ -50,15 +59,18 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                 Fields(request.Payload, "schemaVersion", "activationId");
                 if (request.Payload.GetProperty("schemaVersion").GetInt32() != 1) throw new ArgumentException();
                 var id = request.Payload.GetProperty("activationId").GetString();
-                var valid = _activation is { } active && active.Id == id && active.Current() &&
-                    System.Diagnostics.Stopwatch.GetElapsedTime(active.Started) < TimeSpan.FromSeconds(30);
-                if (valid && _activation is { } accepted) {
-                    destination = accepted.Destination;
-                    current = accepted.Current;
-                    revalidate = accepted.Revalidate;
+                if (_activation is { } active && active.Id == id) {
                     // Consume before awaiting the authoritative policy. Concurrent
                     // clicks cannot race into duplicate navigation/confirmation.
+                    // Expired or retired intents also release their reference here.
                     _activation = null;
+                    if (active.Generation == request.SessionGeneration && active.Current() &&
+                        _activationTime.GetElapsedTime(active.Started) < TimeSpan.FromSeconds(30)) {
+                        destination = active.Destination;
+                        current = active.Current;
+                        revalidate = active.Revalidate;
+                        reference = active.Reference;
+                    }
                 }
             }
             if (revalidate != null && !await revalidate(token).ConfigureAwait(false)) destination = null;
@@ -66,7 +78,8 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                 if (destination != null && (_disposed || request.SessionGeneration != generation() || current?.Invoke() != true))
                     destination = null;
             }
-            return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, destination }, preserveRequestAccountContext: false), []);
+            return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, destination,
+                @ref = destination is "trade" or "tradeChat" ? reference : null }, preserveRequestAccountContext: false), []);
         }
         catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
         catch (BridgeProtocolException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activation rejected.")), []); }

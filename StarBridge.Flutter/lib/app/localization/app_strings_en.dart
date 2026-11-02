@@ -1,8 +1,12 @@
+import 'menu_overlay_strings.dart';
+import 'room_tag_strings.dart';
+import 'community_tag_strings.dart';
 import 'general_settings_strings.dart';
 import 'notification_settings_strings.dart';
 import 'notification_audio_strings.dart';
 import 'profile_settings_strings.dart';
 import 'official_fleet_strings.dart';
+import 'official_fleet_rally_strings.dart';
 import 'party_rooms_strings.dart';
 import 'friends_strings.dart';
 import 'communities_strings.dart';
@@ -19,9 +23,19 @@ import 'help_support_strings.dart';
 import 'overlay_settings_strings.dart';
 import 'home_strings.dart';
 import 'handle_mismatch_strings.dart';
+import 'game_identity_strings.dart';
+import 'achievements_strings.dart';
+import 'exec_hangar_strings.dart';
 
 const englishAppStrings = <String, String>{
+  ...menuOverlayEn,
+  'account.error.compatibilityProofRejected': 'The linking proof is invalid or expired. Start account linking again.',
+  'account.legacyLogin.retired':
+      'This legacy account has moved to SCM. Sign in with your SCM account.',
+  ...execHangarEn,
+  ...achievementsEn,
   ...handleMismatchEn,
+  ...gameIdentityEn,
   'app.name': 'StarBridge',
   'navigation.home': 'Home',
   'navigation.home.description': 'Current state and next steps',
@@ -33,7 +47,7 @@ const englishAppStrings = <String, String>{
   'navigation.officialFleet.description': 'RSI main fleet workspace',
   'navigation.marketplace': 'Marketplace',
   'navigation.marketplace.description':
-      'Trading and services (coming soon)',
+      'Items and public market listings',
   'navigation.communities': 'Communities',
   'navigation.communities.description': 'Long-term cross-fleet organizations',
   'navigation.hangar': 'My Hangar',
@@ -42,7 +56,7 @@ const englishAppStrings = <String, String>{
   'navigation.overlay.description': 'In-game info sources and layout',
   'navigation.tools': 'Tools',
   'navigation.tools.description':
-      'Personal utilities (coming soon)',
+      'Countdowns, calculators and reference tools',
   'navigation.settings': 'Settings',
   'navigation.settings.description': 'Appearance, language, and preferences',
   'navigation.friends': 'Friends',
@@ -55,6 +69,8 @@ const englishAppStrings = <String, String>{
   'navigation.account.description': 'Identity and profile',
   'navigation.profile': 'Profile',
   'navigation.profile.description': 'Public identity and profile showcase',
+  'navigation.achievements': 'Achievements',
+  'navigation.achievements.description': 'Your collection and journey through the stars',
   'navigation.personal': 'Personal',
   'deferredFeature.title': 'Coming soon',
   'comingSoon.body': '{feature} is in development and will appear here when it launches.',
@@ -79,7 +95,10 @@ const englishAppStrings = <String, String>{
   ...englishLocalPrivacyStrings,
   ...englishPrivacyScopeSettingsStrings,
   ...englishOfficialFleetStrings,
+  ...englishOfficialFleetRallyStrings,
   ...englishPartyRoomsStrings,
+  ...englishRoomTagStrings,
+  ...englishCommunityTagStrings,
   ...friendsEn,
   ...communitiesEn,
   ...englishLegacyMigrationStrings,
@@ -91,6 +110,8 @@ const englishAppStrings = <String, String>{
   ...overlaySettingsEn,
   ...homeEn,
   'account.notSignedIn': 'Not signed in',
+  'account.connectionPending': 'Account unconfirmed',
+  'account.offlineMode': 'Offline mode',
   'account.loading': 'Reading account state…',
   'account.signedOut.title': 'Continue with your SCM account',
   'account.signedOut.body': 'Authorization completes in your system browser. Sign-in credentials stay in StarBridge\'s local account service and are never exposed to the interface.',
@@ -110,15 +131,19 @@ const englishAppStrings = <String, String>{
   'account.login.cancelled':
       'Sign-in was cancelled. You can retry at any time.',
   'account.login.success': 'Your SCM account is connected.',
+  'account.login.loading': 'Authorized. Loading your account details…',
+  'account.login.stage.authorize': 'Authorize',
+  'account.login.stage.loading': 'Load details',
+  'account.login.stage.done': 'Signed in',
   'account.action.refresh': 'Refresh account profile',
   'account.action.retry': 'Retry',
   'account.value.notSet': 'Not set',
   'account.email.notShared': 'SCM did not provide an email address',
-  'account.source.live': 'Current from SCM',
+  'account.source.live': 'Profile up to date',
   'account.source.cached': 'Offline cache',
   'account.source.unavailable': 'Profile unavailable',
   'account.preferences.title': 'Profile preferences',
-  'account.preferences.body': 'Only SCM-supported language preferences and standard time zones are synchronized. The app interface language remains independent.',
+  'account.preferences.body': 'Set the language and time zone for your SCM account. The app display language is configured separately.',
   'account.preferences.locale': 'SCM language preference',
   'account.preferences.timeZone': 'SCM time zone',
   'account.preferences.save': 'Save changes',
@@ -179,6 +204,7 @@ const englishAppStrings = <String, String>{
   'account.legacyLogin.rejected':
       'Incorrect email or password. Check them and try again.',
   'account.legacyLogin.invalidInput': 'Enter your legacy email and password.',
+  'account.legacyLogin.scmRequired': 'This legacy account is linked. Sign in with your SCM account to continue using your existing data.',
   'account.legacyLogin.throttled':
       'Too many attempts. Wait for the countdown before trying again.',
   'account.legacyLogin.unavailable':
@@ -262,8 +288,11 @@ const englishAppStrings = <String, String>{
   'account.error.environmentNotEnabled': 'This client currently supports only the local integration environment and cannot connect to the production SCM website yet.',
   'account.error.reauthorizationRequired':
       'The SCM session must be authorized again.',
+  'account.error.logoutIncomplete':
+      'Sign-out did not finish: the saved sign-in on this PC could not be removed. Try again.',
   'account.error.writeForbidden':
       'This account cannot edit profile preferences.',
+  'account.error.profileReadForbidden': 'Access to this account profile was denied. Check your account authorization.',
   'account.error.writeConflict':
       'The profile changed elsewhere. Reload it before saving again.',
   'account.error.directoryUnavailable': 'The SCM time-zone directory is unavailable. No profile fields were changed.',
@@ -275,7 +304,8 @@ const englishAppStrings = <String, String>{
   'account.error.compatibilityUnavailable':
       'Legacy data compatibility is temporarily unavailable.',
   'account.error.compatibilityWriteUnavailable': 'The legacy-data operation could not be completed. An unknown result was not treated as success.',
-  'account.error.compatibilityConflict': 'That old account or compatibility profile is already linked to another SCM account. Nothing was changed.',
+  'account.error.legacyProofUnavailable': 'Legacy account verification is unavailable (503). No link was submitted and your SCM sign-in is unchanged. Try again later; contact support if this continues.',
+  'account.error.compatibilityConflict': 'This SCM account or old account already has another link and cannot be linked. Sign in with the originally linked account.',
   'account.error.compatibilityExistingLinkMismatch': 'This SCM account already has a different old-account link. Check the account before continuing.',
   'account.error.legacyCredentialsRequired': 'No migration credential is available. Enter the old account name or email and password.',
   'account.error.legacyCredentialsRejected':
@@ -328,9 +358,19 @@ const englishAppStrings = <String, String>{
   'connection.relay.unavailable.title': 'Legacy data service unavailable',
   'connection.relay.unavailable.detail': 'Your SCM account and migrated features remain available. Legacy data and online collaboration are temporarily unavailable.',
   'connection.action.retryNow': 'Retry now',
+  'connection.account.restorePending.title': 'Online recovery is unfinished',
+  'connection.account.restorePending.detail': 'The previous recovery did not finish. Account access is paused until you continue.',
+  'connection.action.restoreOnline': 'Continue online recovery',
+  'startup.onlineRecoveryRequired': 'Online recovery needed',
+  'startup.onlineRecovery.detail': 'Enter the app, then select “Continue online recovery”. Your existing account data has not been cleared.',
   'connection.action.retrying': 'Retrying…',
   'window.minimize': 'Minimize',
   'window.maximize': 'Maximize',
   'window.restore': 'Restore',
   'window.close': 'Close',
+  'window.closeNamed': 'Close {title} window',
+  'socialWindow.chatTitle': 'Chat',
+  'socialWindow.actionUnconfirmed': 'Action not confirmed. Refresh the list to check, then try again.',
+  'socialWindow.actionFailed': "Couldn't finish the action. Reopen the window to check.",
+  'friendsWindow.openRecentChat': 'Open recent chats',
 };

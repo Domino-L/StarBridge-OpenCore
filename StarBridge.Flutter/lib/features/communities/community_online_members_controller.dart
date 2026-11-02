@@ -19,8 +19,17 @@ class CommunityOnlineMembersController extends ChangeNotifier {
     });
   }
   final CommunityWorkspacePort port;
-  final String targetRef;
+  String targetRef;
   late final StreamSubscription<void> _subscription;
+
+  /// The caller verified the same organization on the same port. Future
+  /// reads use the new handle; the shown list stays until they land.
+  void renewTarget(String next) {
+    if (_closed || next == targetRef) return;
+    targetRef = next;
+    unawaited(refresh(silent: true));
+  }
+
   List<CommunityWorkspaceMember> members = [];
   bool loading = false, invalidated = false, _closed = false;
   bool _loaded = false, _silentRead = false;
@@ -31,19 +40,16 @@ class CommunityOnlineMembersController extends ChangeNotifier {
   bool get partial => showProgress || next != null;
 
   static bool visibleOnline(CommunityWorkspaceMember member) =>
-      member.online &&
-      const {
-        'apponline',
-        'online',
-        'ingame',
-        'away',
-      }.contains(member.liveStatus.toLowerCase());
+      member.publicOnline;
 
   Future<void> refresh({bool silent = false}) => _load(false, silent: silent);
   Future<void> loadMore() => _load(true);
   Future<void> _load(bool more, {bool silent = false}) async {
     if (_closed || invalidated || loading || more && next == null) return;
     final epoch = ++_epoch;
+    // One round reads one reference; a renewal meanwhile is re-read after
+    // it, never compared against this round's pages.
+    final readTarget = targetRef;
     loading = true;
     _silentRead = silent && _loaded;
     error = null;
@@ -54,9 +60,9 @@ class CommunityOnlineMembersController extends ChangeNotifier {
       var rows = more ? [...members] : <CommunityWorkspaceMember>[];
       for (var pageIndex = 0; pageIndex < 10; pageIndex++) {
         final offset = readNext ?? 0;
-        final page = await port.readWorkspace(targetRef, '', offset);
+        final page = await port.readWorkspace(readTarget, '', offset);
         if (_closed || invalidated || epoch != _epoch) return;
-        if (page.targetRef != targetRef ||
+        if (page.targetRef != readTarget ||
             page.query.isNotEmpty ||
             page.offset != offset ||
             page.matchedCount != page.totalCount ||
@@ -70,9 +76,11 @@ class CommunityOnlineMembersController extends ChangeNotifier {
         rows.addAll(page.members.where(visibleOnline));
         if (readNext == null) break;
       }
+      if (targetRef != readTarget) return;
       rows.sort((a, b) {
-        final gaming = (b.liveStatus.toLowerCase() == 'ingame' ? 1 : 0)
-            .compareTo(a.liveStatus.toLowerCase() == 'ingame' ? 1 : 0);
+        final gaming = (b.publicInGame ? 1 : 0).compareTo(
+          a.publicInGame ? 1 : 0,
+        );
         return gaming != 0 ? gaming : a.displayName.compareTo(b.displayName);
       });
       members = List.unmodifiable(rows);
@@ -81,7 +89,14 @@ class CommunityOnlineMembersController extends ChangeNotifier {
       next = readNext;
       _loaded = true;
     } catch (e) {
-      if (_closed || invalidated || epoch != _epoch) return;
+      // A round overtaken by a renewal keeps nothing of its failure either;
+      // the re-read below starts clean on the new reference.
+      if (_closed ||
+          invalidated ||
+          epoch != _epoch ||
+          targetRef != readTarget) {
+        return;
+      }
       error = e is CommunityFailure ? e.code : 'unavailable';
       if (error != 'unavailable') {
         members = [];
@@ -91,6 +106,9 @@ class CommunityOnlineMembersController extends ChangeNotifier {
       if (!_closed && epoch == _epoch) {
         loading = false;
         notifyListeners();
+        if (targetRef != readTarget && !invalidated) {
+          unawaited(refresh(silent: true));
+        }
       }
     }
   }

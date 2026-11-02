@@ -9,6 +9,86 @@ using StarBridge.NativeBridge;
 
 internal static partial class LegacyPasswordLoginTests
 {
+    internal static async Task BoundLoginRequiresScm()
+    {
+        var store = new Store();
+        using var transport = new Transport { Status = HttpStatusCode.Unauthorized,
+            Body = "{\"code\":\"SCM_LOGIN_REQUIRED\",\"error\":\"untrusted text\"}" };
+        using var client = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), store, transport);
+        using var host = CreateHost(client);
+        var result = (LegacyPasswordLoginResult)await host.LoginLegacyAsync(
+            BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "short" }), 0, default);
+        Check(result.Outcome == "scmRequired" && store.Saves == 0 && host.CurrentContext is null,
+            "bound rejection is actionable without saving credentials or publishing a legacy session");
+        transport.Body = "{\"code\":\"UNKNOWN\"}";
+        var other = await client.VerifyAsync(BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "short" }), default);
+        Check(other.Result.Outcome == "rejected", "unknown rejection must not assert a binding");
+        foreach (var body in new[] { "", "not-json", "[]", "null", "{\"code\":\"SCM_LOGIN_REQUIRED\",\"code\":\"SCM_LOGIN_REQUIRED\"}" })
+        {
+            transport.Body = body;
+            var rejection = await client.VerifyAsync(BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "short" }), default);
+            Check(rejection.Result.Outcome == "rejected" && rejection.Credential is null,
+                "a confirmed HTTP rejection without one valid binding code remains a rejection");
+        }
+        var preserved = new LegacyMigrationCredential("original-id", "old@example.invalid", "synthetic-token", DateTimeOffset.UtcNow);
+        var source = new Store { Value = preserved };
+        var active = new Store { Value = preserved };
+        using (var restoreTransport = new Transport { Status = HttpStatusCode.Unauthorized, Body = "{\"code\":\"SCM_LOGIN_REQUIRED\"}" })
+        using (var restoreClient = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), source, restoreTransport, active))
+        using (var restored = CreateHost(restoreClient))
+        {
+            Check((await restored.GetCurrentAsync(default)).State == "signedOut" && restored.CurrentContext is null && active.Value is null,
+                "restart cannot revive an old session rejected after binding");
+            Check(source.Value == preserved && source.Reads == 0 && source.Saves == 0,
+                "binding rejection leaves original credential source untouched");
+        }
+        using (var restartTransport = new Transport())
+        using (var restartClient = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), source, restartTransport, active))
+        using (var restarted = CreateHost(restartClient))
+        {
+            Check((await restarted.GetCurrentAsync(default)).State == "signedOut" && restartTransport.Calls == 0 && source.Reads == 0,
+                "subsequent restart does not import a preserved legacy credential to bypass binding");
+        }
+        Console.WriteLine("PASS bound legacy login and repeated restart cannot create a legacy session");
+    }
+
+    internal static async Task Retirement()
+    {
+        using var transport = new Transport { Status = HttpStatusCode.Conflict, Body = """{"code":"LEGACY_LOGIN_RETIRED","error":"untrusted remote text"}""" };
+        var migration = new Store();
+        var session = new Store();
+        using var client = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), migration, transport, session);
+        using var host = CreateHost(client);
+        await host.GetCurrentAsync(default);
+        session.Value = new("existing-fixture-id", "existing@example.invalid", "existing-synthetic-token", DateTimeOffset.UtcNow);
+        var saved = session.Value;
+        using var runtime = new AccountBridgeRuntime(host);
+        var request = BridgeEnvelope.Request("account.loginLegacy", "retired-login", 0,
+            BridgePayload.From(new { schemaVersion = 1, email = "old@example.invalid", password = "synthetic" }));
+        var response = await runtime.DispatchAsync(request);
+        Check(Outcome(response) == "retired" && response.Events.Count == 0 && host.Generation == 0 && host.CurrentContext is null,
+            $"stable 409 retired crosses Bridge without changing account or SCM context/generation (outcome={Outcome(response)}, events={response.Events.Count}, generation={host.Generation}, hasContext={host.CurrentContext is not null}, error={response.Response.Error?.Code})");
+        Check(migration.Saves == 0 && session.Saves == 0 && ReferenceEquals(session.Value, saved), "retired never writes/deletes credentials or existing session");
+        Check(response.Response.Payload.EnumerateObject().Select(p => p.Name).Order().SequenceEqual(new[] { "outcome", "retryAfterSeconds", "schemaVersion" }), "retired projection contains no remote text/credentials");
+        foreach (var body in new[] { "{}", "null", "bad-json", "{\"code\":\"OTHER_CONFLICT\"}",
+            "{\"code\":\"LEGACY_LOGIN_RETIRED\",\"code\":\"LEGACY_LOGIN_RETIRED\"}",
+            "{\"code\":\"LEGACY_LOGIN_RETIRED\"}{}", new string(' ', 4097) + "{\"code\":\"LEGACY_LOGIN_RETIRED\"}" })
+        {
+            transport.Body = body;
+            Check(Outcome(await runtime.DispatchAsync(request)) == "unavailable", "unknown/malformed 409 is unavailable");
+        }
+        Check(migration.Saves == 0 && session.Saves == 0 && ReferenceEquals(session.Value, saved) && host.Generation == 0, "unavailable preserves session/store/generation");
+        transport.Body = Transport.Valid;
+        transport.Status = HttpStatusCode.Unauthorized;
+        Check(Outcome(await runtime.DispatchAsync(request)) == "rejected", "ordinary password rejection remains compatible");
+        using var scm = CreateHost(client, new ScmOAuthSession("scm", "subject", "test", "synthetic-token", DateTimeOffset.UtcNow.AddMinutes(10), []));
+        var context = scm.CurrentContext;
+        var generation = scm.Generation;
+        var calls = transport.Calls;
+        Check(((LegacyPasswordLoginResult)await scm.LoginLegacyAsync(request.Payload, generation, default)).Outcome == "sessionChanged" &&
+            transport.Calls == calls && scm.CurrentContext == context && scm.Generation == generation, "SCM session unaffected and cannot issue legacy login");
+    }
+
     internal static async Task EntitlementLifecycle()
     {
         using var transport = new Transport { Body = Transport.Valid.TrimEnd('}') + ",\"entitlements\":[\"test-grant\"]}" };

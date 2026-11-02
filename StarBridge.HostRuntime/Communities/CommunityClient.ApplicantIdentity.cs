@@ -6,7 +6,7 @@ namespace StarBridge.HostRuntime.Communities;
 internal sealed partial class CommunityClient
 {
     internal async Task<string> ResolveApplicantIdentityAsync(string bearer, string targetRef,
-        string entryRef, string scope, string viewerId, Action current, CancellationToken token)
+        string entryRef, string scope, string? viewerId, Action current, CancellationToken token)
     {
         var epoch = Interlocked.Read(ref _inviteEpoch);
         var target = Resolve(targetRef, scope, allowWpfS2: true);
@@ -22,6 +22,9 @@ internal sealed partial class CommunityClient
             Text(result, "applicationId", 128) != entry.Id) throw Invalid();
         var id = Text(result, "accountId", 128);
         if (id.Length < 8) throw Invalid();
+        if (viewerId is null && (id.Length != 71 || !id.StartsWith("scm-v1:", StringComparison.Ordinal) ||
+            id.AsSpan(7).ContainsAnyExcept("0123456789abcdef")))
+            throw new AccountBridgeHostException("profile.visitor_unavailable");
         return id;
 
         void Check()

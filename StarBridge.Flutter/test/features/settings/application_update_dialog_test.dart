@@ -11,6 +11,35 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  testWidgets(
+    'version mismatch explains safe repair without retrying download',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          ApplicationUpdateDialog(
+            read: () async => {
+              'schemaVersion': 1,
+              'state': 'available',
+              'currentVersion': '0.7.0.4',
+              'availableVersion': '0.7.0.5',
+              'notes': null,
+            },
+            prepare: (_) async => throw const BridgeRemoteException(
+              'applicationUpdates.installationVersionMismatch',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('下载更新'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('安装登记与程序版本不一致'), findsOneWidget);
+      expect(find.textContaining('无需先卸载'), findsOneWidget);
+      expect(find.byKey(const Key('update-failure-code')), findsOneWidget);
+      expect(find.text('下载更新'), findsNothing);
+      expect(find.text('重启并安装'), findsNothing);
+    },
+  );
   Map<String, dynamic> progress(String phase, int received, int? total) => {
     'schemaVersion': 1,
     'requestId': 'fixture',

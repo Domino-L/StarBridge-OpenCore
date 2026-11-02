@@ -49,7 +49,7 @@ class GameIdVisibilityController extends ChangeNotifier {
         value['canConfigure'] is! bool ||
         stamp is! String ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(stamp) ||
-        value['canConfigure'] == false && locations != 15) {
+        value['canConfigure'] == false && locations != 0 && locations != 15) {
       throw const FormatException();
     }
     return Map.unmodifiable(value);

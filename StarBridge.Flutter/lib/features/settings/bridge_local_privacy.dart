@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
@@ -10,6 +12,7 @@ import 'local_privacy_port.dart';
 import 'privacy_publication_port.dart';
 import 'community_sharing.dart';
 import 'community_member_sharing.dart';
+import 'official_runtime_privacy_port.dart';
 
 /// Local settings and an independently consented, Host-owned publication channel.
 final class BridgeLocalPrivacy
@@ -17,9 +20,15 @@ final class BridgeLocalPrivacy
         LocalPrivacyPort,
         LocationConfidencePrivacyPort,
         PrivacyPublicationPort,
+        PrivacyPublicationChangePort,
         CommunitySharingPort,
-        CommunityMemberSharingPort {
-  BridgeLocalPrivacy(this._session) {
+        CommunityMemberSharingPort,
+        OfficialRuntimePrivacyPort {
+  BridgeLocalPrivacy(
+    this._session, {
+    this.officialSourceChanges,
+    this.officialContextRevision,
+  }) {
     _events = _session.events.listen((event) {
       if (const {
         'account.changed',
@@ -28,11 +37,187 @@ final class BridgeLocalPrivacy
         _epoch++;
         _lease = null;
         _pending = null;
+        _invalidateOfficial();
         _invalidations.add(null);
+      } else if (event.name == 'privacy.publicationChanged' &&
+          event.sessionGeneration == _session.activeGeneration) {
+        _publicationChanges.add(null);
       }
     });
+    _unobserveGeneration = _session.observeGenerationChanges((_, _) {
+      _invalidateOfficial();
+    });
+    _capabilities = _session.capabilitiesChanged.listen(
+      (_) => _invalidateOfficial(),
+    );
+    officialSourceChanges?.addListener(_sourceChanged);
+    _sourceRevision = officialContextRevision?.call();
   }
   final BridgeClientSession _session;
+  final Listenable? officialSourceChanges;
+  final Object? Function()? officialContextRevision;
+  Object? _sourceRevision;
+  late final VoidCallback _unobserveGeneration;
+  late final StreamSubscription<void> _capabilities;
+  final _officialInvalidations = StreamController<void>.broadcast();
+  OfficialRuntimePrivacySnapshot? _officialSnapshot;
+  int _officialEpoch = 0;
+  bool _officialSaving = false;
+  void _sourceChanged() {
+    final next = officialContextRevision?.call();
+    if (next == _sourceRevision) return;
+    _sourceRevision = next;
+    _invalidateOfficial();
+  }
+
+  void _invalidateOfficial() {
+    _officialEpoch++;
+    _officialSnapshot = null;
+    if (!_closed) _officialInvalidations.add(null);
+  }
+
+  @override
+  bool get officialRuntimePrivacySupported =>
+      _session.hostCapabilities.contains('privacy.officialFleetScopes');
+  @override
+  Stream<void> get officialRuntimePrivacyInvalidations =>
+      _officialInvalidations.stream;
+
+  @override
+  Future<OfficialRuntimePrivacySnapshot> readOfficialRuntimePrivacy() async {
+    _requireAvailable();
+    if (!officialRuntimePrivacySupported) {
+      throw const BridgeClientException('host.capability_missing');
+    }
+    final lease = _lease;
+    if (lease == null || _officialSaving) {
+      throw const BridgeClientException('privacy_local.refresh_required');
+    }
+    final officialEpoch = _officialEpoch;
+    _officialSnapshot = null;
+    final account = await _account();
+    _requireCurrent(lease.epoch, lease.generation);
+    if (!_sameOwner(account.accountContext, lease.owner) ||
+        !identical(lease, _lease)) {
+      throw const BridgeClientException('privacy_local.account_changed');
+    }
+    final reply = await _session.request(
+      'privacy.officialFleetRead',
+      accountContext: lease.owner,
+      payload: const {'schemaVersion': 1},
+    );
+    _requireCurrent(lease.epoch, lease.generation);
+    if (officialEpoch != _officialEpoch ||
+        !identical(lease, _lease) ||
+        !_sameOwner(reply.accountContext, lease.owner) ||
+        reply.sessionGeneration != lease.generation) {
+      throw const BridgeClientException('privacy_local.account_changed');
+    }
+    final view = OfficialRuntimePrivacySnapshot.parse(reply.payload);
+    if (view.revision != lease.revision) {
+      throw const BridgeClientException('privacy_local.conflict');
+    }
+    return _officialSnapshot = view;
+  }
+
+  @override
+  Future<OfficialRuntimePrivacySaveReceipt> saveOfficialRuntimePrivacy({
+    required OfficialRuntimePrivacySnapshot scope,
+    required int expectedRevision,
+    required int fields,
+    required bool cancelSavedScope,
+    OfficialFleetAudience? audience,
+  }) async {
+    _requireAvailable();
+    final lease = _lease;
+    final reference = cancelSavedScope
+        ? scope.cancelContextRef
+        : scope.contextRef;
+    if (!officialRuntimePrivacySupported ||
+        lease == null ||
+        _saving ||
+        _officialSaving ||
+        !identical(scope, _officialSnapshot) ||
+        expectedRevision != lease.revision ||
+        fields < 0 ||
+        fields > 15 ||
+        audience != null &&
+            (!scope.audienceRankSupported ||
+                !OfficialFleetAudience.valid(audience.maximumRankValue)) ||
+        reference == null ||
+        (cancelSavedScope ? !scope.canCancel || fields != 0 : !scope.canSave)) {
+      throw const BridgeClientException('privacy_local.refresh_required');
+    }
+    final officialEpoch = _officialEpoch;
+    final operation = List.generate(
+      16,
+      (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    _officialSaving = true;
+    try {
+      final account = await _account();
+      _requireCurrent(lease.epoch, lease.generation);
+      if (officialEpoch != _officialEpoch ||
+          !identical(lease, _lease) ||
+          !_sameOwner(account.accountContext, lease.owner)) {
+        throw const BridgeClientException('privacy_local.account_changed');
+      }
+      // This command consumes the old local revision. Only a subsequent common
+      // localRead can renew the lease used by the one existing publisher.
+      _lease = null;
+      final reply = await _session.request(
+        'privacy.officialFleetSave',
+        accountContext: lease.owner,
+        payload: {
+          'schemaVersion': 1,
+          'contextRef': reference,
+          'expectedRevision': expectedRevision,
+          'operationId': operation,
+          'fields': fields,
+          // Explicit null selects every member; omitted keeps the old shape.
+          if (audience != null) 'maximumRankValue': audience.maximumRankValue,
+        },
+      );
+      _requireCurrent(lease.epoch, lease.generation);
+      if (officialEpoch != _officialEpoch ||
+          !_sameOwner(reply.accountContext, lease.owner) ||
+          reply.sessionGeneration != lease.generation) {
+        throw const BridgeClientException('privacy_local.account_changed');
+      }
+      final body = reply.payload;
+      if (body.keys.any(
+            (key) => !const {
+              'schemaVersion',
+              'revision',
+              'operationId',
+              'fields',
+              'state',
+              'publicationApplied',
+              'maximumRankValue',
+            }.contains(key),
+          ) ||
+          !OfficialFleetAudience.valid(body['maximumRankValue']) ||
+          audience != null &&
+              body['maximumRankValue'] != audience.maximumRankValue ||
+          body['schemaVersion'] != 1 ||
+          body['revision'] != expectedRevision + 1 ||
+          body['operationId'] != operation ||
+          body['fields'] != fields ||
+          body['state'] != 'saved' ||
+          body['publicationApplied'] != false) {
+        throw const FormatException('Unconfirmed official privacy save.');
+      }
+      return OfficialRuntimePrivacySaveReceipt(
+        expectedRevision + 1,
+        fields,
+        body['maximumRankValue'] as int?,
+      );
+    } finally {
+      _officialSnapshot = null;
+      _officialSaving = false;
+    }
+  }
+
   late final StreamSubscription<BridgeEnvelope> _events;
   final _invalidations = StreamController<void>.broadcast();
   final _random = Random.secure();
@@ -118,6 +303,14 @@ final class BridgeLocalPrivacy
   bool get publicationSupported =>
       _session.hostCapabilities.contains('privacy.publication');
 
+  final _publicationChanges = StreamController<void>.broadcast();
+  @override
+  bool get publicationEventsSupported =>
+      publicationSupported &&
+      _session.hostCapabilities.contains('privacy.publicationEvents');
+  @override
+  Stream<void> get publicationChanges => _publicationChanges.stream;
+
   @override
   Future<PrivacyPublicationView> publication(
     String action, {
@@ -134,10 +327,12 @@ final class BridgeLocalPrivacy
     final name = switch (action) {
       'status' => 'privacy.publicationStatus',
       'apply' => 'privacy.applyPublication',
+      'applyPreservingPause' => 'privacy.applyPublication',
       'stop' => 'privacy.stopPublication',
       _ => throw ArgumentError.value(action),
     };
-    if (action == 'apply' && revision != lease.revision) {
+    if ((action == 'apply' || action == 'applyPreservingPause') &&
+        revision != lease.revision) {
       throw const BridgeClientException('privacy_local.refresh_required');
     }
     final account = await _account();
@@ -152,7 +347,9 @@ final class BridgeLocalPrivacy
       accountContext: lease.owner,
       payload: {
         'schemaVersion': 1,
-        if (action == 'apply') 'expectedRevision': revision,
+        if (action == 'apply' || action == 'applyPreservingPause')
+          'expectedRevision': revision,
+        if (action == 'applyPreservingPause') 'preservePause': true,
       },
     );
     _requireCurrent(lease.epoch, lease.generation);
@@ -360,8 +557,14 @@ final class BridgeLocalPrivacy
     _epoch++;
     _lease = null;
     _pending = null;
+    _unobserveGeneration();
+    await _capabilities.cancel();
+    officialSourceChanges?.removeListener(_sourceChanged);
+    _invalidateOfficial();
     await _events.cancel();
     await _invalidations.close();
+    await _officialInvalidations.close();
+    await _publicationChanges.close();
   }
 
   static bool _sameOwner(BridgeAccountContext? a, BridgeAccountContext b) =>

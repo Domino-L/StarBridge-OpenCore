@@ -71,12 +71,25 @@ internal static class GameLogRuntimeTests
         Require(h.Call().Payload.GetProperty("observedAtUtc").GetDateTimeOffset() == h.Time.Now,
             "check timestamp comes from the existing Host observation clock");
         Require(h.Runtime.SelectedPathForDiagnostics == h.Log, "diagnostics borrows active selection");
+        Require(h.Runtime.BoundLivePathForHistory == h.Log, "history borrows the bound LIVE path without a picker");
+        h.Runtime.Dispose(); h.Runtime = h.Create();
+        Require(h.Runtime.BoundLivePathForHistory == h.Log, "saved manual LIVE binding works before sampling after restart");
         Require(h.Call().Status == BridgeResponseStatuses.Ok, "diagnostics did not acquire a competing store lease");
+        h.Call("find");
+        Require(h.Runtime.BoundLivePathForHistory == h.Log, "automatic LIVE resolution is reused without another discovery");
+        var ptu = Path.Combine(h.Root, "StarCitizen", "PTU", "Game.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(ptu)!);
+        File.WriteAllText(ptu, Identity("Pilot_A"));
+        h.Call("select", ptu);
+        Require(h.Runtime.BoundLivePathForHistory is null, "selected PTU cannot masquerade as a LIVE binding");
+        h.Call("select", h.Log);
         h.Current = (Owner with { Subject = "another-owner" }, 2);
         try { _ = h.Runtime.SelectedPathForDiagnostics; throw new Exception("old account selection leaked"); }
         catch (InvalidOperationException) { }
+        Require(h.Runtime.BoundLivePathForHistory is null, "history never borrows another account's binding");
         h.Current = (null, 3);
         Require(h.Runtime.SelectedPathForDiagnostics is null, "signed-out diagnostics has no old selection");
+        Require(h.Runtime.BoundLivePathForHistory is null, "signed-out history has no old selection");
         return Task.CompletedTask;
     }
 

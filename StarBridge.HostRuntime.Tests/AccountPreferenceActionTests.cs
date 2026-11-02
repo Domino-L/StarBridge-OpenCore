@@ -7,7 +7,7 @@ using StarBridge.NativeBridge;
 using System.Net;
 using System.Net.Http.Json;
 
-internal static class AccountPreferenceActionTests
+internal static partial class AccountPreferenceActionTests
 {
     internal static async Task SaveConfirmsWithoutReplacingLogin()
     {
@@ -26,7 +26,7 @@ internal static class AccountPreferenceActionTests
         Equal(2, actions.GetArrayLength(), "advertise only the two enabled profile actions");
         var cached = f.Cache.Load(f.Route)!;
         Equal("en-US", cached.Locale, "confirmed data cached");
-        var json = File.ReadAllText(Directory.GetFiles(Path.Combine(f.Root.FullName, "scm-profile-cache")).Single());
+        var json = File.ReadAllText(Directory.GetFiles(Path.Combine(f.Root.FullName, "scm-profile-cache"), "*.json").Single());
         Equal(false, json.Contains("owner@example.invalid"), "email not cached");
         Equal(false, json.Contains("-token"), "tokens not cached");
     }
@@ -121,7 +121,7 @@ internal static class AccountPreferenceActionTests
     {
         using var f = new Fixture();
         f.Cache.Save(f.Route, f.Handler.Profile, DateTimeOffset.UtcNow);
-        var file = Directory.GetFiles(Path.Combine(f.Root.FullName, "scm-profile-cache")).Single();
+        var file = Directory.GetFiles(Path.Combine(f.Root.FullName, "scm-profile-cache"), "*.json").Single();
         using (File.Open(file, FileMode.Open, FileAccess.Read, FileShare.None))
         {
             var result = await f.Send("profile.clearLocalCache", new { schemaVersion = 1 });
@@ -181,6 +181,7 @@ internal static class AccountPreferenceActionTests
         internal Authorization Authorization { get; } = new();
         internal ScmProfileCacheStore Cache { get; }
         internal AccountBridgeRuntime Runtime { get; }
+        internal ScmAccountBridgeHost Host { get; }
         internal CompositeBridgeDispatcher Dispatcher { get; }
         internal BridgeAccountContext Context { get; } = new("integration", "synthetic", "owner");
         internal AccountRouteIdentity Route { get; } = AccountRouteIdentity.Create("integration", "synthetic", "owner", null);
@@ -195,8 +196,8 @@ internal static class AccountPreferenceActionTests
             Cache = new ScmProfileCacheStore(Root.FullName);
             var session = new ScmOAuthSession("synthetic", "owner", "Synthetic pilot", "read-token",
                 DateTimeOffset.UtcNow.AddHours(1), ["profile.read"]);
-            Runtime = new AccountBridgeRuntime(new ScmAccountBridgeHost(
-                oauth, Cache, "integration", () => null, session, 7, Authorization));
+            Host = new ScmAccountBridgeHost(oauth, Cache, "integration", () => null, session, 7, Authorization);
+            Runtime = new AccountBridgeRuntime(Host);
             Dispatcher = new CompositeBridgeDispatcher(new HostBridgeDispatcher("test"), Runtime,
                 new HostBridgeDispatcher("unused-settings"));
         }
@@ -241,6 +242,8 @@ internal static class AccountPreferenceActionTests
         internal int Patches { get; private set; }
         internal bool FailPatch { get; set; }
         internal bool FailRead { get; set; }
+        internal Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? ReadReply { get; set; }
+        internal Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? DirectoryReply { get; set; }
         internal string? PatchBody { get; private set; }
         internal List<string?> ReadTokens { get; } = [];
         internal ScmSelfProfileContract Profile { get; private set; } =
@@ -249,8 +252,15 @@ internal static class AccountPreferenceActionTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
+            if (request.RequestUri?.AbsolutePath == "/open-api/oauth2/token")
+                return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { error = "invalid_grant" }) };
+            if (request.RequestUri?.AbsolutePath == "/open-api/oauth2/revoke")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
             if (request.RequestUri?.AbsolutePath == "/app-api/member/timezone/list")
+            {
+                if (DirectoryReply is { } directory) return await directory(request, cancellationToken);
                 return Json(new { code = 0, data = new[] { new { value = "UTC", label = "UTC", offset = "UTC+00:00" } } });
+            }
             if (request.RequestUri?.AbsolutePath != "/app-api/starbridge/v1/profile")
                 throw new InvalidOperationException("Unexpected synthetic endpoint");
             if (request.Method == HttpMethod.Patch)
@@ -264,6 +274,7 @@ internal static class AccountPreferenceActionTests
             else
             {
                 ReadTokens.Add(request.Headers.Authorization?.Parameter);
+                if (ReadReply is { } reply) return await reply(request, cancellationToken);
                 if (FailRead) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             }
             return Json(Profile);

@@ -1,3 +1,5 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -49,7 +51,12 @@ class _MenuOrganizationHeaderState extends State<MenuOrganizationHeader> {
             builder: (context, constraints) => CommunityCompactHeader(
               name: view.title,
               code: org.code,
-              logo: CommunityLogo(data: org.logo, size: 32, framed: false),
+              logo: CommunityLogo(
+                data: org.logo,
+                size: 32,
+                framed: false,
+                downloadedBy: org,
+              ),
               narrow:
                   constraints.maxWidth /
                       MediaQuery.textScalerOf(context).scale(1) <
@@ -85,7 +92,12 @@ class _MenuOrganizationHeaderState extends State<MenuOrganizationHeader> {
           if (expanded) ...[
             const Divider(height: 24),
             if (org.description.isNotEmpty) Text(org.description),
-            if (org.activeTime.isNotEmpty) Text('活动时间 · ${org.activeTime}'),
+            if (org.activeTime.isNotEmpty)
+              Text(
+                menuText(context, 'menu.overlay.organizations.activeTime', {
+                  'time': org.activeTime,
+                }),
+              ),
           ],
         ],
       ),

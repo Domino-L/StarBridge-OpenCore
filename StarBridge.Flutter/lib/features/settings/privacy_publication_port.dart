@@ -3,6 +3,13 @@ abstract interface class PrivacyPublicationPort {
   Future<PrivacyPublicationView> publication(String action, {int? revision});
 }
 
+/// Optional push of publication status changes. When supported, the status
+/// is re-read on change and only a slow fallback timer remains.
+abstract interface class PrivacyPublicationChangePort {
+  bool get publicationEventsSupported;
+  Stream<void> get publicationChanges;
+}
+
 class PrivacyPublicationView {
   const PrivacyPublicationView(
     this.state, {

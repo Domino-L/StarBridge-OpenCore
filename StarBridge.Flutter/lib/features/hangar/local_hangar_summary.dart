@@ -9,8 +9,13 @@ import 'local_hangar_copy.dart';
 import 'local_hangar_presentation.dart';
 
 class LocalHangarSummary extends StatelessWidget {
-  const LocalHangarSummary({required this.ships, super.key});
+  const LocalHangarSummary({
+    required this.ships,
+    this.embedded = false,
+    super.key,
+  });
   final List<LocalHangarPresentation> ships;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +27,9 @@ class LocalHangarSummary extends StatelessWidget {
         label: c.shipsLabel,
         value: '${totals.count}',
         color: tokens.domainColors.ship.foreground,
-        valueKey: const Key('local-hangar-total-count'),
+        valueKey: Key(
+          embedded ? 'local-hangar-expanded-count' : 'local-hangar-total-count',
+        ),
       ),
       _Metric(
         label: totals.unpricedCount > 0 ? c.knownValue : c.valueLabel,
@@ -62,7 +69,9 @@ class LocalHangarSummary extends StatelessWidget {
       ),
     ];
     return StarBridgeSurface(
-      key: const Key('local-hangar-summary'),
+      key: Key(
+        embedded ? 'local-hangar-expanded-summary' : 'local-hangar-summary',
+      ),
       role: SurfaceRole.raised,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

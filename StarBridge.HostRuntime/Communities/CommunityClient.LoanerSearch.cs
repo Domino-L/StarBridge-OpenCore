@@ -11,10 +11,11 @@ internal sealed partial class CommunityClient
     // No cached authority: every continuation/detail read rebuilds a coherent authorized snapshot.
     // Server filtering/sorting remains authoritative; only WPF's local text predicate is added.
     private async Task<JsonElement> ReadLoanerSearchPage(string bearer, string code, ShipQuery query,
-        int requestedOffset, string? expected, Action current, CancellationToken token)
+        int requestedOffset, string? expected, Action current, CancellationToken token,
+        Func<int, string?, ShipQuery, CancellationToken, Task<JsonElement>>? readPage = null, TimeSpan? budget = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        deadline.CancelAfter(budget ?? TimeSpan.FromSeconds(30));
         var remote = query with { Text = "" };
         var offset = 0;
         string? revision = null;
@@ -33,7 +34,8 @@ internal sealed partial class CommunityClient
                 var path = "/api/fleets/ships?code=" + Uri.EscapeDataString(code)
                     + "&offset=" + offset.ToString(CultureInfo.InvariantCulture)
                     + (revision is null ? "" : "&revision=" + revision) + remote.Url;
-                var page = await WorkspaceJson(bearer, path, deadline.Token, 400 * 1024);
+                var page = readPage is null ? await WorkspaceJson(bearer, path, deadline.Token, 400 * 1024)
+                    : await readPage(offset, revision, remote, deadline.Token);
                 current(); deadline.Token.ThrowIfCancellationRequested();
                 ShipObject(page);
                 if (!page.TryGetProperty("queryVersion", out var version) || version.GetInt32() != 2)
@@ -65,10 +67,12 @@ internal sealed partial class CommunityClient
                     if (sourceCode.Length == 0) throw Invalid();
                     foreach (var field in new[] { "displayName", "ownerCallsign", "ownerGameName" }) Text(row, field, 512);
                     foreach (var field in new[] { "catalogSpec", "catalogRole", "catalogStatus", "catalogPriceUsd" }) Optional(row, field, 512);
+                    var enriched = FillShipMetadata(row);
                     var loaners = JsonSerializer.SerializeToElement(_shipLoaners(sourceCode,
-                        Optional(row, "catalogStatus", 256), query.Culture));
+                        Optional(enriched, "catalogStatus", 256), query.Culture));
+                    Hash(JsonSerializer.Serialize(ShipMetadata(enriched, _shipCatalog(sourceCode, Text(enriched, "displayName", 512)))));
                     Hash(loaners.GetRawText());
-                    if (MatchesShipSearch(row, loaners, query.Text)) matches.Add(row.Clone());
+                    if (MatchesShipSearch(enriched, loaners, query.Text)) matches.Add(enriched);
                 }
                 if (next is null) break;
                 offset = next.Value;

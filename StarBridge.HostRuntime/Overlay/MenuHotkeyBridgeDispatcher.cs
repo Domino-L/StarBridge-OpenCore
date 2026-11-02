@@ -11,7 +11,8 @@ public sealed class MenuHotkeyBridgeDispatcher(
     Func<(string? OwnerKey, long Generation)> scope,
     Func<long, object, BridgeEnvelope> eventFactory,
     int clientProcessId,
-    IMenuHotkeyPreferences? preferences = null) : IBridgeRequestDispatcher
+    IMenuHotkeyPreferences? preferences = null,
+    Func<long, bool>? menuWindowShown = null) : IBridgeRequestDispatcher
 {
     public const string Capability = "menuHotkey.runtime";
     public const string IntentEvent = "menuHotkey.intent";
@@ -20,6 +21,14 @@ public sealed class MenuHotkeyBridgeDispatcher(
     private long _lastClient;
     private volatile bool _disposed;
     public event Action<BridgeEnvelope>? EventReady;
+    public MenuShortcutHintGrant? ReadGameStartupHint()
+    {
+        var lease = Volatile.Read(ref _lease);
+        if (lease is null || !Current(lease) || !lease.Ready || !lease.Registration.Enabled || lease.Presentation.Visible) return null;
+        var registration = lease.Registration;
+        return new(registration.Binding, () => Current(lease) && lease.Ready &&
+            ReferenceEquals(lease.Registration, registration) && !lease.Presentation.Visible);
+    }
     public bool IsMenuVisible
     {
         get
@@ -29,13 +38,14 @@ public sealed class MenuHotkeyBridgeDispatcher(
         }
     }
 
-    private sealed class Lease(long client, string owner, long generation)
+    private sealed class Lease(long client, string owner, long generation, Func<long, bool> windowShown)
     {
         public readonly long Client = client;
         public readonly string Owner = owner;
         public readonly long Generation = generation;
         public MenuHotkeyRegistration Registration = null!;
-        public readonly MenuWindowPresentationState Presentation = new();
+        public volatile bool Ready;
+        public readonly MenuWindowPresentationState Presentation = new(windowShown);
     }
 
     private bool Current(Lease lease)
@@ -82,7 +92,8 @@ public sealed class MenuHotkeyBridgeDispatcher(
                 if (lease is null || lease.Client != client || !Current(lease))
                 {
                     if (client <= _lastClient) return Error(request, "menuHotkey.stale_client");
-                    lease = new(client, current.OwnerKey, current.Generation);
+                    lease = new(client, current.OwnerKey, current.Generation,
+                        menuWindowShown ?? MenuWindowPresentationState.NativeWindowShown);
                     created = lease;
                     lease.Registration = new(binding, enabled, close, clientProcessId,
                         () => Current(lease), intent => Publish(lease, intent));
@@ -92,8 +103,10 @@ public sealed class MenuHotkeyBridgeDispatcher(
                 else if (lease.Registration.Binding != binding || lease.Registration.Enabled != enabled ||
                     lease.Registration.CloseWithHotkey != close)
                     return Error(request, "menuHotkey.stale_client");
+                lease.Ready = false;
                 var state = await runtime.ConfigureMenuHotkeyAsync(lease.Registration, cancellationToken).ConfigureAwait(false);
                 if (!Current(lease)) return Error(request, "menuHotkey.session_unavailable");
+                lease.Ready = state == "registered";
                 return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, state }, preserveRequestAccountContext: false), []);
             }
             var active = _lease;
@@ -145,6 +158,7 @@ public sealed class MenuHotkeyBridgeDispatcher(
         {
             if (!Fields(data, "schemaVersion", "client")) return Error(request, BridgeErrorCodes.InvalidEnvelope);
             var state = await runtime.ConfigureMenuHotkeyAsync(lease.Registration, token).ConfigureAwait(false);
+            lease.Ready = Current(lease) && state == "registered";
             return Current(lease) ? SettingsResponse(request, saved, state) : Error(request, "menuHotkey.session_unavailable");
         }
         if (!Fields(data, "schemaVersion", "client", "expectedRevision", "binding", "enabled", "closeWithHotkey") ||
@@ -159,6 +173,7 @@ public sealed class MenuHotkeyBridgeDispatcher(
         var previous = lease.Registration;
         var next = previous with { Binding = binding, Enabled = enabled, CloseWithHotkey = close };
         var committed = false;
+        lease.Ready = false;
         try
         {
             var state = await runtime.ConfigureMenuHotkeyAsync(next, token).ConfigureAwait(false);
@@ -167,6 +182,7 @@ public sealed class MenuHotkeyBridgeDispatcher(
             if (state is not ("registered" or "disabled")) return Error(request, "menuHotkey." + state);
             saved = preferences.SaveHotkey(saved.Revision, options);
             lease.Registration = next;
+            lease.Ready = state == "registered";
             committed = true;
             return SettingsResponse(request, saved, state);
         }
@@ -176,7 +192,10 @@ public sealed class MenuHotkeyBridgeDispatcher(
             // Runtime rejection, canceled saves and disk/CAS failures do not
             // replace the last working key. Cleanup must not use canceled token.
             if (!committed)
-                await runtime.ConfigureMenuHotkeyAsync(Current(lease) ? previous : null).ConfigureAwait(false);
+            {
+                var restored = await runtime.ConfigureMenuHotkeyAsync(Current(lease) ? previous : null).ConfigureAwait(false);
+                lease.Ready = Current(lease) && restored == "registered";
+            }
         }
     }
 
@@ -195,11 +214,13 @@ public sealed class MenuHotkeyBridgeDispatcher(
     private void Publish(Lease lease, MenuHotkeyIntent intent)
     {
         if (!Current(lease)) return;
-        var envelope = eventFactory(lease.Generation, new
+        BridgeEnvelope envelope;
+        try { envelope = eventFactory(lease.Generation, new
         {
             schemaVersion = 1, client = lease.Client, action = intent.Action,
-            request = intent.Request, targetWindow = intent.TargetWindow, targetProcessId = intent.TargetProcessId
-        });
+            commandId = intent.CommandId, request = intent.Request, targetWindow = intent.TargetWindow, targetProcessId = intent.TargetProcessId
+        }); }
+        catch (OperationCanceledException) { return; } // Native owner retired after the lease check.
         if (Current(lease)) EventReady?.Invoke(envelope);
     }
 

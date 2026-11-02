@@ -6,27 +6,81 @@ import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
 import 'friends_module.dart';
-import '../direct_messages/bridge_direct_messages.dart'
-    show readConversationKey;
+import 'friends_retained_display.dart';
+import 'friends_online_display.dart';
+import 'friends_snapshot_decoder.dart';
+import 'friends_directory_read.dart';
+import 'friends_command_directory.dart';
+export 'friends_snapshot_decoder.dart' show parseFriendsSnapshot;
 
 final class BridgeFriendsAdapter
-    implements FriendsPort, FriendsCommandPort, FriendsActivityPort {
+    implements
+        FriendsPort,
+        FriendsCommandPort,
+        FriendsActivityPort,
+        FriendsCachedDisplayPort {
   BridgeFriendsAdapter(this._session) {
     _subscription = _session.events.listen(
       (event) {
+        _retained?.observeEvent(event);
         if (event.name == 'account.changed' ||
             event.name == 'account.avatarChanged' ||
             event.name == 'bootstrap.invalidated') {
+          if (event.name == 'account.changed' &&
+              _retained?.hasHandoff == true) {
+            return;
+          }
           cancelPending();
+          _publishCached(null);
           _invalidations.add(null);
+        } else if (event.name == 'account.avatarChanged') {
+          notifySocialReadChanged(_session);
         }
       },
       onDone: () {
-        if (!_closed) _invalidations.add(null);
+        if (!_closed) {
+          cancelPending();
+          _publishCached(null);
+          _invalidations.add(null);
+        }
       },
     );
   }
   final BridgeClientSession _session;
+  // Progress must reach the module before the same read's terminal result.
+  final _cachedDisplays = StreamController<FriendsCachedDisplay?>.broadcast(
+    sync: true,
+  );
+  bool _publishingCached = false, _queuedCached = false;
+  FriendsCachedDisplay? _queuedDisplay;
+  void _publishCached(FriendsCachedDisplay? value) {
+    if (_closed) return;
+    if (_publishingCached) {
+      _queuedCached = true;
+      _queuedDisplay = value;
+      return;
+    }
+    _publishingCached = true;
+    try {
+      var next = value;
+      do {
+        _queuedCached = false;
+        _cachedDisplays.add(next);
+        next = _queuedDisplay;
+      } while (_queuedCached && !_closed);
+    } finally {
+      _publishingCached = false;
+      _queuedCached = false;
+      _queuedDisplay = null;
+    }
+  }
+
+  @override
+  Stream<FriendsCachedDisplay?> get cachedDisplays => _cachedDisplays.stream;
+  FriendsRetainedDisplay? _retained;
+  FriendsOnlineDisplay? _onlineDisplay;
+  FriendsDirectoryRead? _directoryRead;
+  FriendsCommandDirectory? _commandDirectory;
   @override
   Stream<void> get changes => socialActivityChanges(_session);
   final _invalidations = StreamController<void>.broadcast();
@@ -42,6 +96,14 @@ final class BridgeFriendsAdapter
   @override
   void cancelPending() {
     _epoch++;
+    _commandDirectory?.dispose();
+    _commandDirectory = null;
+    _directoryRead?.dispose();
+    _directoryRead = null;
+    _retained?.dispose();
+    _retained = null;
+    _onlineDisplay?.dispose();
+    _onlineDisplay = null;
     final pending = _pending;
     _pending = null;
     if (pending != null) unawaited(pending.cancel());
@@ -50,6 +112,17 @@ final class BridgeFriendsAdapter
   @override
   Future<FriendsReadResult> read({String? query}) async {
     final epoch = ++_epoch;
+    _commandDirectory?.dispose();
+    _commandDirectory = null;
+    _directoryRead?.dispose();
+    _directoryRead = null;
+    _retained?.dispose();
+    _retained = null;
+    _onlineDisplay?.dispose();
+    _onlineDisplay = null;
+    if (_session.connectionModeChanging) {
+      return const FriendsReadResult(FriendsReadState.idle);
+    }
     if (_closed || !_session.hostCapabilities.contains('friends.read')) {
       return const FriendsReadResult(
         FriendsReadState.unavailable,
@@ -57,12 +130,27 @@ final class BridgeFriendsAdapter
       );
     }
     try {
-      _pending = _session.beginRequest(
-        'account.getCurrent',
-        payload: const {'schemaVersion': 1},
-      );
-      final account = await _pending!.future;
-      if (_closed || epoch != _epoch) {
+      final useRetained =
+          query == null &&
+          _session.hostCapabilities.contains('account.restoreDisplay');
+      final retained = useRetained
+          ? FriendsRetainedDisplay(
+              _session,
+              () => !_closed && epoch == _epoch,
+              _publishCached,
+            )
+          : null;
+      _retained = retained;
+      _pending = retained == null
+          ? _session.beginRequest(
+              'account.getCurrent',
+              payload: const {'schemaVersion': 1},
+            )
+          : null;
+      final account = retained == null
+          ? await _pending!.future
+          : await retained.read();
+      if (_closed || epoch != _epoch || _session.connectionModeChanging) {
         return const FriendsReadResult(FriendsReadState.idle);
       }
       if (account.payload['schemaVersion'] != 1) throw const FormatException();
@@ -71,26 +159,62 @@ final class BridgeFriendsAdapter
         return const FriendsReadResult(FriendsReadState.signedOut);
       }
       if (!hasRelayAccount(account) || account.accountContext == null) {
+        if (account.payload['state'] == 'credentialTemporarilyUnavailable' &&
+            retained != null) {
+          await retained.prepared;
+          if (_closed || epoch != _epoch) {
+            return const FriendsReadResult(FriendsReadState.idle);
+          }
+          if (retained.value != null) {
+            return const FriendsReadResult(
+              FriendsReadState.unavailable,
+              failure: 'unavailable',
+              transientFailure: true,
+            );
+          }
+        }
         return const FriendsReadResult(
           FriendsReadState.unavailable,
           failure: 'identityUnavailable',
         );
       }
-      _pending = _session.beginRequest(
-        'friends.read',
-        accountContext: account.accountContext,
-        payload: {'schemaVersion': 1, 'query': ?query},
+      final online =
+          query == null &&
+              _session.hostCapabilities.contains('friends.readDisplay')
+          ? FriendsOnlineDisplay(
+              _session,
+              () => !_closed && epoch == _epoch,
+              _publishCached,
+              owner: account.accountContext,
+            )
+          : null;
+      _onlineDisplay = online;
+      final directoryRead = FriendsDirectoryRead(
+        _session,
+        account.accountContext!,
+        () => !_closed && epoch == _epoch,
       );
-      final response = await _pending!.future;
-      if (_closed || epoch != _epoch) {
+      _directoryRead = directoryRead;
+      final body = await directoryRead.read(
+        query: query,
+        displayProgress: online?.observer,
+        onInitial: online?.attach,
+      );
+      if (body == null || _closed || epoch != _epoch) {
         return const FriendsReadResult(FriendsReadState.idle);
       }
-      final snapshot = parseFriendsSnapshot(response.payload);
+      final snapshot = parseFriendsSnapshot(body);
       if (snapshot.query != query) throw const FormatException();
+      online?.dispose();
+      _onlineDisplay = null;
       return FriendsReadResult(FriendsReadState.ready, snapshot: snapshot);
     } on BridgeClientException catch (error) {
       return FriendsReadResult(
         FriendsReadState.unavailable,
+        transientFailure:
+            error is BridgeDisconnectedException ||
+            error.code == 'bridge.timeout' ||
+            error.code == 'friends.read_transient' && error.retryable,
         failure: switch (error.code) {
           'friends.identity_unavailable' ||
           'account.reauthorization_required' => 'identityUnavailable',
@@ -107,16 +231,31 @@ final class BridgeFriendsAdapter
         failure: 'invalidResponse',
       );
     } finally {
-      if (epoch == _epoch) _pending = null;
+      if (epoch == _epoch) {
+        _pending = null;
+        _directoryRead?.dispose();
+        _directoryRead = null;
+      }
     }
   }
 
   @override
   Future<FriendCommandResult> execute(String action, String targetRef) async {
+    if (_session.connectionModeChanging) {
+      return const FriendCommandResult('cancelled');
+    }
     if (!commandsAvailable) {
       return const FriendCommandResult('rejected', error: 'hostUnavailable');
     }
     final epoch = ++_epoch;
+    _commandDirectory?.dispose();
+    _commandDirectory = null;
+    _directoryRead?.dispose();
+    _directoryRead = null;
+    _retained?.dispose();
+    _retained = null;
+    _onlineDisplay?.dispose();
+    _onlineDisplay = null;
     var dispatched = false;
     try {
       _pending = _session.beginRequest(
@@ -124,6 +263,9 @@ final class BridgeFriendsAdapter
         payload: const {'schemaVersion': 1},
       );
       final account = await _pending!.future;
+      if (_session.connectionModeChanging) {
+        return const FriendCommandResult('cancelled');
+      }
       if (_closed ||
           epoch != _epoch ||
           account.payload['schemaVersion'] != 1 ||
@@ -135,54 +277,28 @@ final class BridgeFriendsAdapter
         );
       }
       dispatched = true;
-      _pending = _session.beginRequest(
-        'friends.execute',
-        accountContext: account.accountContext,
-        payload: {'schemaVersion': 1, 'action': action, 'targetRef': targetRef},
+      final directory = FriendsCommandDirectory(
+        _session,
+        account.accountContext!,
+        () => !_closed && epoch == _epoch,
       );
-      final response = await _pending!.future;
+      _commandDirectory = directory;
+      final result = await directory.execute(action, targetRef);
       if (_closed || epoch != _epoch) {
         return const FriendCommandResult('unknown', error: 'outcomeUnknown');
       }
-      final body = response.payload;
-      if (body['schemaVersion'] != 1) throw const FormatException();
-      final status = body['status'];
-      if (status == 'accepted') {
-        final directory = parseFriendsSnapshot(
-          Map<String, Object?>.from(body['directory'] as Map),
-        );
-        if (directory.query != null) throw const FormatException();
-        return FriendCommandResult('accepted', directory: directory);
-      }
-      if (status != 'rejected' && status != 'unknown') {
-        throw const FormatException();
-      }
-      final error = body['error'];
-      return FriendCommandResult(
-        status as String,
-        error:
-            const {
-              'busy',
-              'targetChanged',
-              'identityUnavailable',
-              'forbidden',
-              'refreshRequired',
-              'cooldown',
-              'tooManyPending',
-              'rateLimited',
-              'rejected',
-              'outcomeUnknown',
-            }.contains(error)
-            ? error as String
-            : 'outcomeUnknown',
-      );
+      return result;
     } catch (_) {
       return FriendCommandResult(
         dispatched ? 'unknown' : 'rejected',
         error: dispatched ? 'outcomeUnknown' : 'identityUnavailable',
       );
     } finally {
-      if (epoch == _epoch) _pending = null;
+      if (epoch == _epoch) {
+        _pending = null;
+        _commandDirectory?.dispose();
+        _commandDirectory = null;
+      }
     }
   }
 
@@ -193,196 +309,6 @@ final class BridgeFriendsAdapter
     cancelPending();
     await _subscription.cancel();
     await _invalidations.close();
+    await _cachedDisplays.close();
   }
-}
-
-FriendsSnapshot parseFriendsSnapshot(
-  Map<String, Object?> value, {
-  bool avatarContext = false,
-}) {
-  if (value['schemaVersion'] != 1) throw const FormatException();
-  String text(Object? value, int max) {
-    if (value is! String ||
-        value.length > max ||
-        RegExp(r'[\x00-\x1f\x7f]').hasMatch(value)) {
-      throw const FormatException();
-    }
-    return value;
-  }
-
-  List<FriendRow> rows(String key, int max) {
-    final items = value[key];
-    if (items is! List || items.length > max) throw const FormatException();
-    return items.map((raw) {
-      final item = Map<String, Object?>.from(raw as Map);
-      final relation = text(item['relationship'], 64);
-      if (!(avatarContext && relation == 'self') &&
-          !const {
-            'none',
-            'friend',
-            'incoming',
-            'outgoing',
-            'blocked',
-            'unknown',
-          }.contains(relation)) {
-        throw const FormatException();
-      }
-      final avatar = item['avatarImageData'];
-      final reference = item['targetRef'];
-      final chatReference = item['chatTargetRef'];
-      if (chatReference != null &&
-          (!(relation == 'friend' ||
-                  avatarContext &&
-                      const [
-                        'none',
-                        'incoming',
-                        'outgoing',
-                      ].contains(relation)) ||
-              chatReference is! String ||
-              !RegExp(r'^[a-fA-F0-9]{32}$').hasMatch(chatReference))) {
-        throw const FormatException();
-      }
-      final actions = item['actions'];
-      if (reference != null &&
-          (reference is! String ||
-              !RegExp(r'^[a-fA-F0-9]{32}$').hasMatch(reference))) {
-        throw const FormatException();
-      }
-      final approved = actions == null
-          ? <String>[]
-          : (actions as List).cast<String>();
-      if (approved.length > 3 ||
-          approved.toSet().length != approved.length ||
-          approved.any((a) => !friendActionsFor(relation).contains(a)) ||
-          (approved.isNotEmpty && reference == null)) {
-        throw const FormatException();
-      }
-      return FriendRow(
-        text(item['callsign'], 512),
-        text(item['gameId'], 512),
-        relation,
-        DateTime.parse(item['updatedAt'] as String),
-        targetRef: reference as String?,
-        chatTargetRef: chatReference as String?,
-        conversationKey: relation == 'friend' || avatarContext
-            ? readConversationKey(item['conversationKey'])
-            : null,
-        actions: List.unmodifiable(approved),
-        shared: relation == 'friend' ? _readShared(item['shared']) : const {},
-        sharedLabels: relation == 'friend'
-            ? _readLabels(item['sharedLabels'])
-            : const {},
-        avatar:
-            avatar is String &&
-                avatar.length <= ((512 * 1024 + 2) ~/ 3 * 4) + 24 &&
-                (avatar.startsWith('data:image/png;base64,') ||
-                    avatar.startsWith('data:image/jpeg;base64,'))
-            ? avatar
-            : null,
-      );
-    }).toList();
-  }
-
-  final query = value['query'] == null ? null : text(value['query'], 128);
-  final groups = {
-    for (final section in FriendsSection.values)
-      section: rows(section.name, 2000),
-  };
-  final results = rows('results', 20);
-  if ((!avatarContext && query == null && results.isNotEmpty) ||
-      (query != null && groups.values.any((g) => g.isNotEmpty))) {
-    throw const FormatException();
-  }
-  return FriendsSnapshot(
-    groups: groups,
-    results: results,
-    query: query,
-    refreshedAt: value['refreshedAt'] == null
-        ? null
-        : DateTime.parse(value['refreshedAt'] as String),
-  );
-}
-
-Map<String, Object?> _readShared(Object? raw) {
-  if (raw == null) return const {};
-  final data = (raw as Map).cast<String, Object?>();
-  if (data.keys.any(
-    (key) => !const {
-      'presence',
-      'sameServer',
-      'serverId',
-      'serverRegion',
-      'ship',
-      'location',
-      'lastOnlineAt',
-    }.contains(key),
-  )) {
-    throw const FormatException();
-  }
-  for (final key in const [
-    'presence',
-    'serverId',
-    'serverRegion',
-    'ship',
-    'location',
-    'lastOnlineAt',
-  ]) {
-    final value = data[key];
-    if (value != null &&
-        (value is! String ||
-            value.length > 512 ||
-            RegExp(r'[\x00-\x1f\x7f]').hasMatch(value))) {
-      throw const FormatException();
-    }
-  }
-  if (data['sameServer'] != null && data['sameServer'] is! bool) {
-    throw const FormatException();
-  }
-  if (data['presence'] != null &&
-      !const {
-        'AppOnline',
-        'InGame',
-        'Away',
-        'Offline',
-      }.contains(data['presence'])) {
-    throw const FormatException();
-  }
-  if (data['lastOnlineAt'] != null &&
-      DateTime.tryParse(data['lastOnlineAt'] as String) == null) {
-    throw const FormatException();
-  }
-  return Map.unmodifiable(data);
-}
-
-Map<String, Map<String, String>> _readLabels(Object? raw) {
-  if (raw == null) return const {};
-  if (raw is! Map ||
-      raw.keys.any((key) => !const {'ship', 'location'}.contains(key))) {
-    throw const FormatException();
-  }
-  final result = <String, Map<String, String>>{};
-  for (final entry in raw.entries) {
-    if (entry.value == null) continue;
-    final names = entry.value;
-    if (names is! Map ||
-        names.keys.any(
-          (key) => !const {'en', 'zhHans', 'zhHant'}.contains(key),
-        )) {
-      throw const FormatException();
-    }
-    final translated = <String, String>{};
-    for (final name in names.entries) {
-      if (name.value == null) continue;
-      if (name.value is! String ||
-          (name.value as String).length > 512 ||
-          RegExp(r'[\x00-\x1f\x7f]').hasMatch(name.value as String)) {
-        throw const FormatException();
-      }
-      if ((name.value as String).trim().isNotEmpty) {
-        translated[name.key as String] = name.value as String;
-      }
-    }
-    result[entry.key as String] = Map.unmodifiable(translated);
-  }
-  return Map.unmodifiable(result);
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -9,14 +8,22 @@ import 'local_privacy_settings.dart';
 import 'privacy_publication_port.dart';
 import 'community_sharing.dart';
 import 'community_member_sharing.dart';
+import 'official_runtime_privacy_port.dart';
+import 'official_runtime_privacy_module.dart';
+import 'local_privacy_official_edits.dart';
+import 'privacy_publication_monitor.dart';
+
+import 'local_privacy_read_helpers.dart';
 
 enum LocalPrivacyStatus { initial, loading, ready, unavailable, signedOut }
 
 enum CommunityTargetsFailure { none, serviceUnavailable, retryable }
 
 /// Owns one account's draft; invalidation discards it before any new read starts.
-final class LocalPrivacyController extends ChangeNotifier {
-  LocalPrivacyController(this._port) {
+final class LocalPrivacyController extends ChangeNotifier
+    with LocalPrivacyOfficialEdits {
+  LocalPrivacyController(this._port)
+    : _official = OfficialRuntimePrivacyModule(_port) {
     _subscription = _port.invalidations.listen((_) {
       _epoch++;
       _snapshot = null;
@@ -36,9 +43,20 @@ final class LocalPrivacyController extends ChangeNotifier {
       communityTargetsFailure = CommunityTargetsFailure.none;
       _targetsReading = false;
       _settingsReading = false;
+      _official.retire(saving: saving || publicationBusy);
       notifyListeners();
       if (_opened || _publicationMonitors > 0) unawaited(refresh());
     });
+    if (_port case final OfficialRuntimePrivacyPort official) {
+      _officialSubscription = official.officialRuntimePrivacyInvalidations
+          .listen((_) {
+            _official.retire(saving: saving || publicationBusy);
+            notifyListeners();
+            if (_opened && !saving && !publicationBusy) {
+              unawaited(refreshOfficialRuntimePrivacy());
+            }
+          });
+    }
   }
   final LocalPrivacyPort _port;
   bool get locationConfidenceSupported =>
@@ -53,6 +71,35 @@ final class LocalPrivacyController extends ChangeNotifier {
   bool needsReload = false;
   bool _opened = false;
   bool _disposed = false;
+  final OfficialRuntimePrivacyModule _official;
+  StreamSubscription<void>? _officialSubscription;
+  @override
+  OfficialRuntimePrivacyModule get officialModule => _official;
+
+  Future<void> refreshOfficialRuntimePrivacy() async {
+    if (_disposed ||
+        !officialRuntimePrivacySupported ||
+        saving ||
+        publicationBusy ||
+        _settingsReading ||
+        officialScopeReading ||
+        status != LocalPrivacyStatus.ready) {
+      return;
+    }
+    final epoch = _epoch;
+    final read = _official.refresh(revision);
+    notifyListeners();
+    final result = await read;
+    if (!_current(epoch) || result == OfficialPrivacyRefreshResult.retired) {
+      return;
+    }
+    if (result == OfficialPrivacyRefreshResult.conflict) {
+      needsReload = true;
+      errorKey = 'privacy.local.conflict';
+    }
+    notifyListeners();
+  }
+
   CommunitySharingTargets? communityTargets;
   final _pendingTargetNames = <String, String>{};
   void renameCommunity(String code, String name) {
@@ -84,7 +131,6 @@ final class LocalPrivacyController extends ChangeNotifier {
       _port is CommunitySharingPort &&
       (_port as CommunitySharingPort).communitySharingSupported;
   int _epoch = 0;
-  Timer? _publicationTimer;
   Timer? _targetsTimer;
   bool publicationBusy = false;
   bool publicationObserved = false;
@@ -95,19 +141,12 @@ final class LocalPrivacyController extends ChangeNotifier {
 
   /// A receipt confirms the saved publication, not every joined audience.
   /// Unsaved choices must not turn a pending organization into an active grant.
-  bool get savedCommunityChoicesPending {
-    final saved = _snapshot?.settings;
-    final targets = communityTargets?.communities;
-    if (!communitySharingSupported ||
-        saved == null ||
-        targets == null ||
-        communityTargetsFailed) {
-      return false;
-    }
-    return targets.any(
-      (target) => !(saved.communities?.any(target.matches) ?? false),
-    );
-  }
+  bool get savedCommunityChoicesPending => hasPendingCommunityChoices(
+    _snapshot?.settings,
+    communityTargets,
+    supported: communitySharingSupported,
+    failed: communityTargetsFailed,
+  );
 
   PrivacyPublicationView publicationView = const PrivacyPublicationView(
     'inactive',
@@ -150,56 +189,25 @@ final class LocalPrivacyController extends ChangeNotifier {
       }
     }
 
-    // A revision race restarts the whole snapshot once; never mix two rosters.
-    for (var attempt = 0; attempt < 2; attempt++) {
-      final rows = <CommunitySharingMember>[];
-      String? revision;
-      try {
-        do {
-          requireCurrent();
-          final page = await (_port as CommunityMemberSharingPort)
-              .readCommunityMembers(
-                scope,
-                offset: rows.length,
-                revision: revision,
-              );
-          requireCurrent();
-          revision = page.revision;
-          rows.addAll(page.members);
-          if (rows.length == page.total) {
-            if (rows.map((row) => row.accountId.toLowerCase()).toSet().length !=
-                rows.length) {
-              throw const FormatException('Duplicate members across pages.');
-            }
-            return List.unmodifiable(rows);
-          }
-        } while (rows.length < 100000);
-        throw const FormatException('Member directory exceeds limit.');
-      } on BridgeClientException catch (error) {
-        if (error.code != 'privacy_publication.members_changed' ||
-            attempt == 1) {
-          rethrow;
-        }
-      }
-    }
-    throw const FormatException('Member directory changed.');
+    return readCommunityMemberSnapshot(
+      _port as CommunityMemberSharingPort,
+      scope,
+      requireCurrent: requireCurrent,
+    );
   }
 
   bool get hasSaved => _snapshot?.settings != null;
+  @override
   bool get canEdit =>
       status == LocalPrivacyStatus.ready &&
       !saving &&
       !needsReload &&
       !publicationBusy;
-  bool get dirty =>
-      draft != null &&
-      jsonEncode(draft!.toJson()) !=
-          jsonEncode(
-            (_snapshot?.settings ?? LocalPrivacySettings.editorDefaults)
-                .toJson(),
-          );
+  bool get _ordinaryDirty => privacySettingsDiffer(draft, _snapshot?.settings);
+  bool get dirty => _ordinaryDirty || officialDirty;
   bool get canSave =>
       _saveToken == null &&
+      !officialScopeReading &&
       canEdit &&
       (dirty ||
           !hasSaved ||
@@ -227,10 +235,7 @@ final class LocalPrivacyController extends ChangeNotifier {
 
   void closeEditor() {
     _opened = false;
-    if (_publicationMonitors == 0) {
-      _publicationTimer?.cancel();
-      _publicationTimer = null;
-    }
+    if (_publicationMonitors == 0) _stopPublicationMonitoring();
     _targetsTimer?.cancel();
     _targetsTimer = null;
   }
@@ -250,25 +255,29 @@ final class LocalPrivacyController extends ChangeNotifier {
       if (released) return;
       released = true;
       _publicationMonitors--;
-      if (!_opened && _publicationMonitors == 0) {
-        _publicationTimer?.cancel();
-        _publicationTimer = null;
-      }
+      if (!_opened && _publicationMonitors == 0) _stopPublicationMonitoring();
     };
   }
 
-  void _startPublicationTimer() {
-    if (!publicationSupported) return;
-    _publicationTimer ??= Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_disposed) return;
-      if (status == LocalPrivacyStatus.initial ||
-          status == LocalPrivacyStatus.unavailable) {
-        unawaited(refresh());
-      } else {
-        unawaited(refreshPublication());
-      }
-    });
+  late final _publicationMonitor = PrivacyPublicationMonitor(
+    _port,
+    _readPublicationStatus,
+  );
+  void _readPublicationStatus() {
+    if (_disposed) return;
+    if (status == LocalPrivacyStatus.initial ||
+        status == LocalPrivacyStatus.unavailable) {
+      unawaited(refresh());
+    } else {
+      unawaited(refreshPublication());
+    }
   }
+
+  void _startPublicationTimer() {
+    if (publicationSupported) _publicationMonitor.start();
+  }
+
+  void _stopPublicationMonitoring() => _publicationMonitor.stop();
 
   Future<void> refresh({bool silently = false}) async {
     if (_disposed ||
@@ -350,6 +359,7 @@ final class LocalPrivacyController extends ChangeNotifier {
     if (status == LocalPrivacyStatus.ready) {
       await refreshPublication();
       await refreshCommunityTargets();
+      await refreshOfficialRuntimePrivacy();
     }
   }
 
@@ -484,7 +494,8 @@ final class LocalPrivacyController extends ChangeNotifier {
         _settingsReading ||
         saving ||
         status != LocalPrivacyStatus.ready ||
-        (action == 'apply' && (dirty || !hasSaved || needsReload))) {
+        ((action == 'apply' || action == 'applyPreservingPause') &&
+            (dirty || !hasSaved || needsReload))) {
       return;
     }
     final epoch = _epoch;
@@ -518,6 +529,7 @@ final class LocalPrivacyController extends ChangeNotifier {
           status = LocalPrivacyStatus.signedOut;
           draft = null;
           _snapshot = null;
+          _official.retire(saving: false);
           publicationView = const PrivacyPublicationView('inactive');
           publicationObserved = false;
           publicationReadFailures = 0;
@@ -563,19 +575,69 @@ final class LocalPrivacyController extends ChangeNotifier {
     draft = _snapshot == null
         ? null
         : _snapshot!.settings ?? LocalPrivacySettings.editorDefaults;
+    _official.discard();
     errorKey = needsReload ? 'privacy.local.conflict' : null;
     notifyListeners();
   }
 
-  Future<bool> save({bool refreshStatus = true}) async {
+  /// Explicit first fleet choice shares the existing revision/consent transaction,
+  /// but must never save ordinary editor defaults or unrelated pending edits.
+  Future<bool> confirmOfficialFirstChoice(int fields, {int? audience}) async {
+    if (!canEditOfficial ||
+        officialScope?.choiceRequired != true &&
+            officialScope?.fleetChanged != true ||
+        fields < 0 ||
+        fields > 15) {
+      return false;
+    }
+    if (dirty) {
+      errorKey = 'privacy.official.pendingEdits';
+      notifyListeners();
+      return false;
+    }
+    editOfficialFields(fields);
+    // Sharing nothing has no audience; the Host stores it as null too.
+    if (officialScope!.audienceRankSupported) {
+      _official.editAudience(fields == 0 ? null : audience);
+    }
+    final scope = officialScope;
+    final result = await save(officialOnly: true);
+    if (!result && identical(scope, officialScope)) _official.discard();
+    return result;
+  }
+
+  Future<bool> save({
+    bool refreshStatus = true,
+    bool officialOnly = false,
+  }) async {
     if (!canSave || draft == null) return false;
     final epoch = _epoch;
     final submitted = draft!;
+    final submittedOfficial = officialDirty ? officialScope : null;
+    final submittedFields = officialDraftFields;
+    final cancelOfficial = officialCancelSavedScope;
+    final audience = _official.submitAudience;
+    final officialEpoch = _official.epoch;
+    if (officialOnly && (submittedOfficial == null || _ordinaryDirty)) {
+      return false;
+    }
+    final saveOrdinary =
+        !officialOnly && (submittedOfficial == null || _ordinaryDirty);
+    bool committedOrdinary = false,
+        sentOfficial = false,
+        committedOfficial = false;
     final saveToken = Object();
     _saveToken = saveToken;
     saving = true;
     errorKey = null;
+    if (submittedOfficial != null) {
+      _official.stage = OfficialPrivacySaveStage.savingSettings;
+    }
     notifyListeners();
+    bool currentSave() =>
+        _current(epoch) &&
+        identical(_saveToken, saveToken) &&
+        (submittedOfficial == null || officialEpoch == _official.epoch);
     try {
       // The Bridge retires its old revision grant when a read starts. Keep
       // editing live, but serialize this explicit write after that read.
@@ -583,31 +645,89 @@ final class LocalPrivacyController extends ChangeNotifier {
       final publicationRead = _publicationReadDone;
       if (settingsRead != null) await settingsRead.future;
       if (publicationRead != null) await publicationRead.future;
-      if (!_current(epoch) ||
-          needsReload ||
-          status != LocalPrivacyStatus.ready) {
+      if (!currentSave() || needsReload || status != LocalPrivacyStatus.ready) {
         return false;
       }
-      final result = await _port.save(submitted);
-      if (!_current(epoch)) return false;
-      _snapshot = result;
-      draft = result.settings;
+      if (saveOrdinary) {
+        final result = await _port.save(submitted);
+        if (!currentSave()) return false;
+        _snapshot = result;
+        draft = result.settings;
+        committedOrdinary = true;
+      }
+      if (submittedOfficial != null) {
+        _official.stage = OfficialPrivacySaveStage.savingOfficial;
+        notifyListeners();
+        sentOfficial = true;
+        final receipt = await (_port as OfficialRuntimePrivacyPort)
+            .saveOfficialRuntimePrivacy(
+              scope: submittedOfficial,
+              expectedRevision: revision,
+              fields: submittedFields!,
+              cancelSavedScope: cancelOfficial,
+              audience: audience,
+            );
+        if (!currentSave()) return false;
+        committedOfficial = true;
+        _official.stage = OfficialPrivacySaveStage.localSaved;
+        notifyListeners();
+        _official.stage = OfficialPrivacySaveStage.renewingLease;
+        final result = await _port.read();
+        if (!currentSave()) return false;
+        if (result.revision != receipt.revision || result.settings == null) {
+          throw const FormatException('Unconfirmed common privacy lease.');
+        }
+        final scope = await (_port as OfficialRuntimePrivacyPort)
+            .readOfficialRuntimePrivacy();
+        if (!currentSave()) return false;
+        if (scope.revision != receipt.revision ||
+            scope.savedFields != receipt.fields ||
+            audience != null &&
+                scope.maximumRankValue != audience.maximumRankValue ||
+            !cancelOfficial &&
+                (scope.scopeRef != submittedOfficial.scopeRef ||
+                    scope.sourceRef != submittedOfficial.sourceRef ||
+                    !scope.savedForCurrentSource ||
+                    scope.fields != receipt.fields)) {
+          throw const BridgeClientException('privacy_local.changed');
+        }
+        _snapshot = result;
+        draft = result.settings;
+        _official.acceptSaved(scope);
+      }
       saving = false;
       notifyListeners();
       // Saving the visible master switch is the explicit sharing action. Do not
       // require another Apply button, or infer consent from background reads.
       if (refreshStatus) {
-        if (publicationSupported && submitted.publicationEnabled) {
-          await applyPublication();
+        if (submittedOfficial != null) {
+          _official.stage = OfficialPrivacySaveStage.applying;
+        }
+        if (publicationSupported &&
+            (officialOnly
+                ? _snapshot?.settings?.publicationEnabled == true
+                : submitted.publicationEnabled)) {
+          if (officialOnly) {
+            await _publication('applyPreservingPause');
+          } else {
+            await applyPublication();
+          }
         } else if (publicationSupported) {
           await stopPublication();
         }
       }
+      if (submittedOfficial != null && currentSave()) {
+        _official.completeSave(
+          refreshStatus && publicationObserved ? publicationView : null,
+          revision,
+        );
+      }
+      if (submittedOfficial != null && !currentSave()) return false;
       return true;
     } catch (error) {
       if (!_current(epoch)) return false;
       saving = false;
-      if (_accountError(error)) {
+      if (LocalPrivacyController._accountError(error)) {
         _snapshot = null;
         draft = null;
         status = LocalPrivacyStatus.signedOut;
@@ -622,6 +742,15 @@ final class LocalPrivacyController extends ChangeNotifier {
         errorKey = needsReload
             ? 'privacy.local.conflict'
             : 'privacy.local.saveFailed';
+      }
+      if (submittedOfficial != null) {
+        _official.failSave(
+          error,
+          committedOfficial: committedOfficial,
+          committedOrdinary: committedOrdinary,
+          sentOfficial: sentOfficial,
+        );
+        needsReload = true;
       }
       notifyListeners();
       return false;
@@ -649,9 +778,11 @@ final class LocalPrivacyController extends ChangeNotifier {
     _epoch++;
     _saveToken = null;
     _finishBackgroundReads();
-    _publicationTimer?.cancel();
+    _stopPublicationMonitoring();
     _targetsTimer?.cancel();
     unawaited(_subscription.cancel());
+    _official.retire(saving: false);
+    unawaited(_officialSubscription?.cancel());
     unawaited(_port.close());
     super.dispose();
   }

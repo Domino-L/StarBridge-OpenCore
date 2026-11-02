@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -18,7 +20,8 @@ class SlowPreviewPort extends RenewingPort implements CommunityChatPreviewPort {
   }
 }
 
-class PendingPreviewPort extends RenewingPort implements CommunityChatPreviewPort {
+class PendingPreviewPort extends RenewingPort
+    implements CommunityChatPreviewPort {
   final pending = Completer<CommunityChatPage>();
   @override
   Future<CommunityChatPage> readChatPreview(String targetRef) => pending.future;
@@ -35,7 +38,8 @@ void main() {
       session.show(true);
       await ready(session, 'chat');
       await Future<void>.delayed(const Duration(milliseconds: 150));
-      final organization = session.currentView['organization'] as Map;
+      final organization =
+          resolvedMenuCopy(session.currentView)['organization'] as Map;
       final navigation = organization['navigation'] as List;
       final message = (await port.readChat(port.card.targetRef)).messages.last;
       expect(
@@ -43,24 +47,31 @@ void main() {
         contains(message.text.replaceAll(RegExp(r'\s+'), ' ')),
       );
       expect((navigation.single as Map)['summary'], isNot(contains('无法读取')));
-      expect(port.previewReads, 0, reason: 'Do not duplicate a successful chat read');
+      expect(
+        port.previewReads,
+        0,
+        reason: 'Do not duplicate a successful chat read',
+      );
     },
   );
 
-  test('late preview cannot overwrite newer chat and reset removes summary', () async {
-    final port = PendingPreviewPort();
-    final previews = MenuOrganizationPreviews(port, (_, _) {});
-    addTearDown(previews.dispose);
-    addTearDown(port.close);
-    final target = port.card.targetRef;
-    previews.refresh([target]);
-    final page = await port.readChat(target);
-    previews.observe(target, page.messages, page.unreadCount);
-    final expected = previews.value(target);
-    port.pending.completeError(const CommunityFailure('unavailable'));
-    await Future<void>.delayed(Duration.zero);
-    expect(previews.value(target), expected);
-    previews.clear();
-    expect(previews.value(target)['summary'], '正在读取聊天摘要');
-  });
+  test(
+    'late preview cannot overwrite newer chat and reset removes summary',
+    () async {
+      final port = PendingPreviewPort();
+      final previews = MenuOrganizationPreviews(port, (_, _) {});
+      addTearDown(previews.dispose);
+      addTearDown(port.close);
+      final target = port.card.targetRef;
+      previews.refresh([target]);
+      final page = await port.readChat(target);
+      previews.observe(target, page.messages, page.unreadCount);
+      final expected = previews.value(target);
+      port.pending.completeError(const CommunityFailure('unavailable'));
+      await Future<void>.delayed(Duration.zero);
+      expect(previews.value(target), expected);
+      previews.clear();
+      expect(resolvedMenuCopy(previews.value(target))['summary'], '正在读取聊天摘要');
+    },
+  );
 }

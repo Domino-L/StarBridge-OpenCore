@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'dart:async';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -96,6 +105,7 @@ class NotificationToggleRow extends StatelessWidget {
     this.leading,
     this.showDivider = true,
     this.badgeKey,
+    this.recommendKey,
     super.key,
   });
 
@@ -109,87 +119,88 @@ class NotificationToggleRow extends StatelessWidget {
   final bool showDivider;
   final String? badgeKey;
 
+  /// Accent badge for a recommended choice the user has not made yet.
+  final String? recommendKey;
+
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     final title = strings.text(titleKey);
     final description = strings.text(descriptionKey);
-    return Semantics(
-      container: true,
-      enabled: enabled,
-      toggled: value,
+    return StarBridgeSwitch.tile(
+      value: value,
       label: title,
-      hint: description,
-      child: ExcludeSemantics(
-        child: InkWell(
-          onTap: enabled ? () => onChanged(!value) : null,
-          borderRadius: tokens.shape.small,
-          child: Container(
-            padding: EdgeInsets.symmetric(vertical: tokens.space.sm),
-            decoration: BoxDecoration(
-              border: showDivider
-                  ? Border(
-                      bottom: BorderSide(
-                        color: tokens.surfaces.panel.border,
-                        width: tokens.stroke.hairline,
-                      ),
-                    )
-                  : null,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (leading != null) ...[
-                  Padding(
-                    padding: EdgeInsets.only(top: tokens.space.xxs),
-                    child: leading,
+      subtitle: description,
+      controlKey: settingKey,
+      onChanged: enabled
+          ? (next) {
+              onChanged(next);
+            }
+          : null,
+      rowBuilder: (control) => Container(
+        padding: EdgeInsets.symmetric(vertical: tokens.space.sm),
+        decoration: BoxDecoration(
+          border: showDivider
+              ? Border(
+                  bottom: BorderSide(
+                    color: tokens.surfaces.panel.border,
+                    width: tokens.stroke.hairline,
                   ),
-                  SizedBox(width: tokens.space.sm),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                )
+              : null,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (leading != null) ...[
+              Padding(
+                padding: EdgeInsets.only(top: tokens.space.xxs),
+                child: leading,
+              ),
+              SizedBox(width: tokens.space.sm),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              title,
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                          ),
-                          if (badgeKey != null) ...[
-                            SizedBox(width: tokens.space.xs),
-                            _InlineBadge(label: strings.text(badgeKey!)),
-                          ],
-                        ],
-                      ),
-                      SizedBox(height: tokens.space.xxs),
-                      Text(
-                        description,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: enabled
-                              ? tokens.colors.textSecondary
-                              : tokens.colors.textDisabled,
+                      Flexible(
+                        child: Text(
+                          title,
+                          style: Theme.of(context).textTheme.labelLarge,
                         ),
                       ),
+                      if (badgeKey != null) ...[
+                        SizedBox(width: tokens.space.xs),
+                        _InlineBadge(label: strings.text(badgeKey!)),
+                      ],
+                      if (recommendKey != null) ...[
+                        SizedBox(width: tokens.space.xs),
+                        _InlineBadge(
+                          key: const Key('notification-recommended'),
+                          label: strings.text(recommendKey!),
+                          color: tokens.colors.accent,
+                        ),
+                      ],
                     ],
                   ),
-                ),
-                SizedBox(width: tokens.space.md),
-                Switch(
-                  key: settingKey,
-                  value: value,
-                  onChanged: enabled
-                      ? (next) async {
-                          await onChanged(next);
-                        }
-                      : null,
-                ),
-              ],
+                  SizedBox(height: tokens.space.xxs),
+                  Text(
+                    description,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: enabled
+                          ? tokens.colors.textSecondary
+                          : tokens.colors.textDisabled,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+            SizedBox(width: tokens.space.md),
+            control,
+          ],
         ),
       ),
     );
@@ -283,43 +294,110 @@ class NotificationFailureBanner extends StatelessWidget {
         ),
         borderRadius: tokens.shape.small,
       ),
-      child: Row(
-        children: [
-          StarBridgeIcon(
-            StarBridgeIconSemantic.warning,
-            size: tokens.icons.medium,
-            color: tokens.colors.warning,
-          ),
-          SizedBox(width: tokens.space.sm),
-          Expanded(child: Text(strings.text(messageKey))),
-          SizedBox(width: tokens.space.sm),
-          OutlinedButton(
-            onPressed: onRetry,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final message = Row(
+            children: [
+              StarBridgeIcon(
+                StarBridgeIconSemantic.warning,
+                size: tokens.icons.medium,
+                color: tokens.colors.warning,
+              ),
+              SizedBox(width: tokens.space.sm),
+              Expanded(child: Text(strings.text(messageKey))),
+            ],
+          );
+          final retry = StarBridgeActionButton(
+            controlKey: const Key('notification-failure-retry'),
+            tone: ActionTone.warning,
+            semanticLabel: strings.text('settings.notification.retry'),
+            onActivate: (source) =>
+                unawaited(runStarBridgeActivation<void>(source, onRetry)),
             child: Text(strings.text('settings.notification.retry')),
-          ),
-        ],
+          );
+          // Give long copy its own row rather than shrinking the configured
+          // text scale. Keep the element path stable across the breakpoint so
+          // resizing does not retire the focused retry action.
+          final stacked =
+              constraints.maxWidth <
+              440 * (MediaQuery.textScalerOf(context).scale(14) / 14);
+          return Flex(
+            direction: stacked ? Axis.vertical : Axis.horizontal,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: stacked
+                ? CrossAxisAlignment.stretch
+                : CrossAxisAlignment.center,
+            children: [
+              Flexible(fit: FlexFit.loose, child: message),
+              SizedBox(
+                width: stacked ? 0 : tokens.space.sm,
+                height: stacked ? tokens.space.sm : 0,
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                widthFactor: stacked ? null : 1,
+                child: retry,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class NotificationLoadingView extends StatelessWidget {
-  const NotificationLoadingView({super.key});
+class NotificationLoadingView extends StatefulWidget {
+  const NotificationLoadingView({
+    this.source = InteractionSource.programmatic,
+    super.key,
+  });
+
+  final InteractionSource source;
+
+  @override
+  State<NotificationLoadingView> createState() =>
+      _NotificationLoadingViewState();
+}
+
+class _NotificationLoadingViewState extends State<NotificationLoadingView> {
+  InteractionSource? _source;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Freeze this phase's opening fact; a later viewport action cannot relabel it.
+    _source ??= resolveStarBridgeInitialReadSource(context, widget.source);
+  }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(tokens.space.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            SizedBox(height: tokens.space.md),
-            Text(AppStrings.of(context).text('settings.notification.loading')),
-          ],
-        ),
+    return StarBridgeInteractionRegion(
+      child: Builder(
+        builder: (context) {
+          final data = InteractionScope.of(context);
+          return InteractionScope(
+            data: data.copyWith(
+              reduceMotion:
+                  data.reduceMotion || _source == InteractionSource.keyboard,
+            ),
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(tokens.space.xl),
+                child: SuiteBusyFrame(
+                  busy: true,
+                  child: Padding(
+                    padding: EdgeInsets.all(tokens.space.md),
+                    child: SuiteBusyLabel(
+                      AppStrings.of(context)
+                          .text('settings.notification.loading'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -376,10 +454,20 @@ class NotificationStateView extends StatelessWidget {
                 ),
                 if (actionKey != null && onAction != null) ...[
                   SizedBox(height: tokens.space.lg),
-                  OutlinedButton.icon(
-                    onPressed: onAction,
-                    icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-                    label: Text(strings.text(actionKey!)),
+                  StarBridgeActionButton(
+                    controlKey: const Key('notification-state-action'),
+                    semanticLabel: strings.text(actionKey!),
+                    onActivate: (source) => unawaited(
+                      runStarBridgeActivation<void>(source, onAction!),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StarBridgeIcon(StarBridgeIconSemantic.refresh),
+                        const SizedBox(width: 8),
+                        Text(strings.text(actionKey!)),
+                      ],
+                    ),
                   ),
                 ],
               ],
@@ -392,7 +480,7 @@ class NotificationStateView extends StatelessWidget {
 }
 
 class _InlineBadge extends StatelessWidget {
-  const _InlineBadge({required this.label, this.color});
+  const _InlineBadge({required this.label, this.color, super.key});
 
   final String label;
   final Color? color;

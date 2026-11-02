@@ -8,6 +8,9 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../gameplay_time/gameplay_time_controller.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_collaboration.dart';
@@ -46,38 +49,58 @@ class PersonalProfileSectionHeading extends StatelessWidget {
       runSpacing: tokens.space.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Semantics(
-          button: true,
-          enabled: onVisibility != null,
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              key: const Key('profile-visibility'),
-              borderRadius: tokens.shape.small,
-              onTap: onVisibility,
-              child: _VisibilityBadge(visibility: projection.visibility),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: tokens.surfaces.status.fill,
+            borderRadius: tokens.shape.small,
+          ),
+          child: StarBridgeActionRow(
+            controlKey: const Key('profile-visibility'),
+            semanticLabel: strings.text(projection.visibility.labelKey),
+            baseRadius: tokens.shape.radiusSmall,
+            onActivate: onVisibility == null ? null : (_, _) => onVisibility!(),
+            child: ExcludeSemantics(
+              child: _VisibilityBadge(
+                visibility: projection.visibility,
+                fill: false,
+              ),
             ),
           ),
         ),
-        IconButton.outlined(
-          key: const Key('profile-refresh'),
-          tooltip: strings.text('profile.refresh'),
-          onPressed: onRefresh,
-          icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
+        StarBridgeTooltip(
+          message: strings.text('profile.refresh'),
+          excludeFromSemantics: true,
+          child: StarBridgeActionButton(
+            controlKey: const Key('profile-refresh'),
+            semanticLabel: strings.text('profile.refresh'),
+            minHeight: tokens.density.controlHeight,
+            padding: const EdgeInsets.all(8),
+            nativeStyle:
+                (IconButtonTheme.of(context).style ?? const ButtonStyle())
+                    .copyWith(
+                      padding: const WidgetStatePropertyAll(EdgeInsets.all(8)),
+                    ),
+            onActivate: projection.operation == PersonalProfileOperation.none
+                ? (_) => onRefresh()
+                : null,
+            child: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
+          ),
         ),
         if (projection.local == null)
-          OutlinedButton.icon(
-            key: const Key('profile-preview'),
-            onPressed: onPreview,
-            icon: StarBridgeIcon(StarBridgeIconSemantic.publicProfile),
-            label: Text(strings.text('profile.preview.action')),
+          StarBridgeActionButton(
+            controlKey: const Key('profile-preview'),
+            onActivate: (_) => onPreview(),
+            child: _ProfileActionLabel(
+              icon: StarBridgeIconSemantic.publicProfile,
+              label: strings.text('profile.preview.action'),
+            ),
           ),
-        OutlinedButton.icon(
-          key: const Key('profile-edit'),
-          onPressed: projection.canEdit ? onEdit : null,
-          icon: StarBridgeIcon(StarBridgeIconSemantic.edit),
-          label: Text(
-            strings.text(
+        StarBridgeActionButton(
+          controlKey: const Key('profile-edit'),
+          onActivate: projection.canEdit ? (_) => onEdit() : null,
+          child: _ProfileActionLabel(
+            icon: StarBridgeIconSemantic.edit,
+            label: strings.text(
               projection.local?.needsCreation == true
                   ? 'profile.local.create'
                   : 'profile.edit.action',
@@ -159,9 +182,10 @@ class PersonalProfileVisitorPreviewBanner extends StatelessWidget {
               ),
             ],
           );
-          final exit = TextButton(
-            key: const Key('profile-preview-exit'),
-            onPressed: onExit,
+          final exit = StarBridgeActionButton(
+            controlKey: const Key('profile-preview-exit'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (_) => onExit(),
             child: Text(strings.text('profile.preview.exit')),
           );
           if (constraints.maxWidth < 640) {
@@ -187,10 +211,27 @@ class PersonalProfileVisitorPreviewBanner extends StatelessWidget {
   }
 }
 
+class _ProfileActionLabel extends StatelessWidget {
+  const _ProfileActionLabel({required this.icon, required this.label});
+  final StarBridgeIconSemantic icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      StarBridgeIcon(icon),
+      const SizedBox(width: 8),
+      Flexible(child: Text(label)),
+    ],
+  );
+}
+
 class _VisibilityBadge extends StatelessWidget {
-  const _VisibilityBadge({required this.visibility});
+  const _VisibilityBadge({required this.visibility, this.fill = true});
 
   final PersonalProfileVisibility visibility;
+  final bool fill;
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +241,7 @@ class _VisibilityBadge extends StatelessWidget {
       PersonalProfileVisibility.everyone => tokens.colors.success,
       PersonalProfileVisibility.friendsAndMainFleet ||
       PersonalProfileVisibility.friendsFleetAndOrganizations ||
-      PersonalProfileVisibility.friendsOnly => tokens.colors.accent,
+      PersonalProfileVisibility.friendsOnly => tokens.colors.stateAccent,
       PersonalProfileVisibility.onlyMe => tokens.colors.textSecondary,
     };
     return Container(
@@ -209,7 +250,7 @@ class _VisibilityBadge extends StatelessWidget {
         vertical: tokens.space.xs,
       ),
       decoration: BoxDecoration(
-        color: tokens.surfaces.status.fill,
+        color: fill ? tokens.surfaces.status.fill : null,
         borderRadius: tokens.shape.small,
         border: Border.all(
           color: visibility == PersonalProfileVisibility.onlyMe
@@ -227,11 +268,13 @@ class _VisibilityBadge extends StatelessWidget {
             color: color,
           ),
           SizedBox(width: tokens.space.xs),
-          Flexible(child: Text(
-            strings.text(visibility.labelKey),
-            style: Theme.of(context).textTheme.labelMedium
-                ?.copyWith(color: color),
-          )),
+          Flexible(
+            child: Text(
+              strings.text(visibility.labelKey),
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(color: color),
+            ),
+          ),
         ],
       ),
     );
@@ -264,6 +307,21 @@ class PersonalProfileSummaryStrip extends StatelessWidget {
   Widget _buildSummary(BuildContext context, GameplayTimeView? gameplay) {
     final tokens = context.tokens;
     final strings = AppStrings.of(context);
+    // Local accounting is an owner-only observation, never evidence of upload.
+    // Imported history is already included in seconds; do not add it again.
+    final localSeconds = includeLocalTime && gameplay?.visible == true
+        ? gameplay?.seconds
+        : null;
+    final accountMinutes = projection.local?.remoteAvailable == false
+        ? null
+        : projection.gameplayMinutes;
+    final accountTime = accountMinutes == null
+        ? strings.text(
+            includeLocalTime
+                ? 'gameplay.remoteUnavailable'
+                : 'gameplay.visitorUnavailable',
+          )
+        : _formatPlaytime(context, accountMinutes);
     final items = <Widget>[
       _SummaryMetric(
         icon: StarBridgeIconSemantic.schedule,
@@ -278,18 +336,20 @@ class PersonalProfileSummaryStrip extends StatelessWidget {
         _SummaryMetric(
           icon: StarBridgeIconSemantic.playtime,
           colorRole: DomainColorRole.logistics,
-          labelKey: 'gameplay.remoteTotal',
-          value: projection.local?.remoteAvailable == false
-              ? '—'
-              : _formatPlaytime(context, projection.gameplayMinutes),
-          detail:
-              includeLocalTime &&
-                  gameplay?.visible == true &&
-                  (gameplay?.seconds ?? 0) > 0
-              ? '${strings.text('gameplay.localTotal')}: '
-                    '${_formatPlaytime(context, gameplay!.seconds! ~/ 60)}'
-                    '${gameplay.historicalSeconds > 0 ? '\n${strings.text('gameplay.importedTotal')}: ${_formatPlaytime(context, gameplay.historicalSeconds ~/ 60)}' : ''}'
-              : null,
+          labelKey: localSeconds == null
+              ? 'gameplay.remoteTotal'
+              : 'gameplay.localTotal',
+          value: localSeconds == null
+              ? accountTime
+              : _formatPlaytime(context, localSeconds ~/ 60),
+          detail: localSeconds == null
+              ? null
+              : [
+                  if (gameplay!.historicalSeconds > 0)
+                    '${strings.text('gameplay.importedTotal')}: '
+                        '${_formatPlaytime(context, gameplay.historicalSeconds ~/ 60)}',
+                  '${strings.text('gameplay.remoteTotal')}: $accountTime',
+                ].join('\n'),
         ),
       _SummaryMetric(
         icon: StarBridgeIconSemantic.activity,

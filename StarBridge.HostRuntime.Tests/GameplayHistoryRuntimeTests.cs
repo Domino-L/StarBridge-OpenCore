@@ -181,6 +181,8 @@ internal static class GameplayHistoryRuntimeTests
         internal (BridgeAccountContext? Context, long Generation) Current = (Owner, 1);
         internal GameplayHistoryEligibility Eligibility = new("available");
         internal string? Handle = "SyntheticPilot";
+        internal bool NoBinding;
+        internal bool TestChannel;
         internal Func<CancellationToken, Task>? BeforeEligibility;
         internal IGameplayHistoryRemote? Remote;
         internal GameplayTimeRuntime Runtime;
@@ -199,14 +201,14 @@ internal static class GameplayHistoryRuntimeTests
             startTimer: false, verifiedHandle: () => Handle, historyEligibility: async (_, token) => {
                 if (BeforeEligibility is not null) await BeforeEligibility(token);
                 return Eligibility;
-            }, historyRemote: Remote);
+            }, historyRemote: Remote, boundLiveLog: () => NoBinding ? null : TestChannel ? Path.Combine(Root, "PTU", "Game.log") : GameLog);
         internal BridgeEnvelope Request(string name, object? body = null, long? generation = null) =>
             BridgeEnvelope.Request("gameplayTime." + name, Guid.NewGuid().ToString("N"), generation ?? Current.Generation,
                 body ?? new { schemaVersion = 1 }, Current.Context);
         internal JsonElement Read() => Runtime.Dispatch(Request("read")).Response.Payload;
         internal async Task<JsonElement> History(string name, object? body = null) =>
             (await Runtime.DispatchHistoryAsync(Request(name, body))).Response.Payload;
-        internal Task<JsonElement> Preview() => History("historyPreview", new { schemaVersion = 1, path = GameLog });
+        internal Task<JsonElement> Preview() => History("historyPreview");
         internal Task<JsonElement> Confirm(string id) => History("historyConfirm", new { schemaVersion = 1, previewId = id });
         internal void Reopen() { Runtime.Dispose(); Runtime = Create(); }
         public void Dispose() { Runtime.Dispose(); Directory.Delete(Root, true); } // Unique test fixture only.
@@ -214,6 +216,19 @@ internal static class GameplayHistoryRuntimeTests
 
     internal static async Task OnceOnlyAndMigration()
     {
+        await ScanProgressAndCancellation();
+        using (var bound = new Harness())
+        {
+            bound.NoBinding = true;
+            Require(State(await bound.Preview()) == "path", "Missing binding must not open a picker or discover another install.");
+            bound.NoBinding = false; bound.TestChannel = true;
+            Require(State(await bound.Preview()) == "path", "Test-channel binding cannot import LIVE history.");
+            bound.TestChannel = false;
+            var injected = await bound.Runtime.DispatchHistoryAsync(bound.Request("historyPreview", new { schemaVersion = 1, path = bound.GameLog }));
+            Require(injected.Response.Status != "ok", "Caller supplied paths are rejected.");
+            Require(State(await bound.Preview()) == "preview", "Bound LIVE logbackups are scanned without a path argument.");
+            Require(bound.Read().GetProperty("seconds").GetInt64() == 0, "Automatic discovery never automatically commits time.");
+        }
         using var h = new Harness();
         var before = h.Read();
         Require(before.GetProperty("showOnProfile").GetBoolean(), "Display default enabled.");
@@ -251,6 +266,51 @@ internal static class GameplayHistoryRuntimeTests
         Require(!undated.Read().TryGetProperty("historyImportedAt", out _), "Unknown date is never fabricated.");
         undated.Reopen(); undated.Eligibility = new("available");
         Require(State(await undated.Preview()) == "imported", "Undated consumed marker also survives reopen.");
+    }
+
+    private static async Task ScanProgressAndCancellation()
+    {
+        using var h = new Harness();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.BeforeEligibility = async token => { entered.TrySetResult(); await Task.Delay(Timeout.Infinite, token); };
+        var start = await h.History("historyScanStart");
+        Require(State(start) == "scanning", "Scan starts without holding a long Bridge request.");
+        var id = start.GetProperty("scanId").GetString()!;
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Require(State(await h.History("historyScanStart")) == "busy", "Duplicate clicks cannot start a second scan.");
+        var query = new { schemaVersion = 1, scanId = id };
+        var progress = await h.History("historyScanRead", query);
+        Require(State(progress) == "scanning" && progress.GetProperty("phase").GetString() == "checking",
+            "Authority check has truthful indeterminate progress.");
+        var text = progress.GetRawText();
+        Require(!text.Contains(h.Root) && !text.Contains("SyntheticPilot") && !text.Contains("session.log"),
+            "Progress never exposes paths, filenames or identity.");
+        h.Current = (Owner with { Subject = "synthetic-other" }, 2);
+        Require(State(await h.History("historyScanRead", query)) == "previewExpired", "Other account cannot read the scan.");
+        h.Current = (Owner, 1);
+        await h.History("historyScanCancel", query);
+        for (var i = 0; i < 100; i++)
+        {
+            progress = await h.History("historyScanRead", query);
+            if (State(progress) != "scanning") break;
+            await Task.Delay(10);
+        }
+        Require(State(progress) == "cancelled" && h.Read().GetProperty("seconds").GetInt64() == 0,
+            "Cancelled scan drains without changing time or consuming eligibility.");
+        h.BeforeEligibility = null;
+        start = await h.History("historyScanStart");
+        id = start.GetProperty("scanId").GetString()!;
+        for (var i = 0; i < 100; i++)
+        {
+            progress = await h.History("historyScanRead", new { schemaVersion = 1, scanId = id });
+            if (State(progress) != "scanning") break;
+            await Task.Delay(10);
+        }
+        Require(State(progress) == "preview" && progress.GetProperty("seconds").GetInt64() == 3600,
+            "Completed background scan returns the existing explicit-confirmation preview.");
+        Require(h.Read().GetProperty("seconds").GetInt64() == 0, "Preview never commits automatically.");
+        var bad = await h.Runtime.DispatchHistoryAsync(h.Request("historyScanStart", new { schemaVersion = 1, path = h.GameLog }));
+        Require(bad.Response.Status != "ok", "New scan commands still reject caller-supplied paths.");
     }
 
     internal static async Task FailureAndOwnership()

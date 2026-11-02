@@ -1,0 +1,90 @@
+import 'package:flutter/material.dart';
+
+/// Trading Hall glyph semantics. Retains the accepted Material silhouettes;
+/// common V2 catalog substitutions would change the approved visuals.
+enum MarketplaceGlyph {
+  add,
+  edit,
+  sell,
+  buy,
+  swap,
+  search,
+  expand,
+  next,
+  close,
+  grid,
+  rows,
+  remove,
+  person,
+  schedule,
+  rating,
+  ratingEmpty,
+  warning,
+  info,
+  confirmed,
+  confirmedFilled,
+  inventory,
+  material,
+  hidden,
+  copy,
+  sort,
+  failed,
+  blueprint,
+  visible,
+  offline,
+  similar,
+  attachment,
+  refresh,
+  check,
+  checklist,
+  more,
+}
+
+class MarketplaceIcon extends StatelessWidget {
+  const MarketplaceIcon(this.glyph, {super.key, this.size, this.color});
+  final MarketplaceGlyph glyph;
+  final double? size;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) => Icon(
+    switch (glyph) {
+      MarketplaceGlyph.add => Icons.add,
+      MarketplaceGlyph.edit => Icons.edit_outlined,
+      MarketplaceGlyph.sell => Icons.sell_outlined,
+      MarketplaceGlyph.buy => Icons.shopping_bag_outlined,
+      MarketplaceGlyph.swap => Icons.swap_horiz,
+      MarketplaceGlyph.search => Icons.search,
+      MarketplaceGlyph.expand => Icons.keyboard_arrow_down,
+      MarketplaceGlyph.next => Icons.chevron_right,
+      MarketplaceGlyph.close => Icons.close,
+      MarketplaceGlyph.grid => Icons.grid_view,
+      MarketplaceGlyph.rows => Icons.format_list_bulleted,
+      MarketplaceGlyph.remove => Icons.remove,
+      MarketplaceGlyph.person => Icons.person_outline,
+      MarketplaceGlyph.schedule => Icons.schedule,
+      MarketplaceGlyph.rating => Icons.star,
+      MarketplaceGlyph.ratingEmpty => Icons.star_border,
+      MarketplaceGlyph.warning => Icons.warning_amber_rounded,
+      MarketplaceGlyph.info => Icons.info_outline,
+      MarketplaceGlyph.confirmed => Icons.check_circle_outline,
+      MarketplaceGlyph.confirmedFilled => Icons.check_circle,
+      MarketplaceGlyph.inventory => Icons.inventory_2_outlined,
+      MarketplaceGlyph.material => Icons.diamond_outlined,
+      MarketplaceGlyph.hidden => Icons.visibility_off_outlined,
+      MarketplaceGlyph.copy => Icons.copy_outlined,
+      MarketplaceGlyph.sort => Icons.swap_vert,
+      MarketplaceGlyph.failed => Icons.highlight_off,
+      MarketplaceGlyph.blueprint => Icons.description_outlined,
+      MarketplaceGlyph.visible => Icons.visibility_outlined,
+      MarketplaceGlyph.offline => Icons.computer_outlined,
+      MarketplaceGlyph.similar => Icons.grid_view_outlined,
+      MarketplaceGlyph.attachment => Icons.extension_outlined,
+      MarketplaceGlyph.refresh => Icons.refresh,
+      MarketplaceGlyph.check => Icons.check,
+      MarketplaceGlyph.more => Icons.adaptive.more,
+      MarketplaceGlyph.checklist => Icons.checklist_rtl_outlined,
+    },
+    size: size,
+    color: color,
+  );
+}

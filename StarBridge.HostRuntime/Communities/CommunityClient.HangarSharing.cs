@@ -18,7 +18,7 @@ internal sealed partial class CommunityClient
     private readonly object _hangarEditGate = new();
     private long _hangarEditEpoch;
 
-    internal void InvalidateHangarEdits() { lock (_hangarEditGate) { _hangarEditEpoch++; _hangarEdits.Clear(); } }
+    internal void InvalidateHangarEdits() { InvalidateOfficialHangarEdits(); lock (_hangarEditGate) { _hangarEditEpoch++; _hangarEdits.Clear(); } }
 
     internal Task<object> ReadHangarSharingAsync(string bearer, JsonElement body, string scope, Action current,
         CancellationToken token, string? legacyViewerId = null) => GuardWorkspace(async () =>
@@ -78,7 +78,8 @@ internal sealed partial class CommunityClient
     {
         try
         {
-            Validate(body, "editRef", "selectedRefs", "inventoryMode");
+            Validate(body, "editRef", "selectedRefs", "inventoryMode", "includeImages");
+            if (body.TryGetProperty("includeImages", out var images) && images.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Invalid();
             if (body.TryGetProperty("inventoryMode", out var inventoryMode) &&
                 inventoryMode.GetString() is not ("saved" or "local" or "auto")) throw Invalid();
             var reference = Text(body, "editRef", 32);
@@ -91,7 +92,8 @@ internal sealed partial class CommunityClient
     }
 
     internal async Task<CommunityCommand> SaveHangarSharingAsync(string bearer, JsonElement body, string scope,
-        Action current, CancellationToken token, Func<CommunityPublishedShip[]>? inventorySource = null)
+        Action current, CancellationToken token, Func<CommunityPublishedShip[]>? inventorySource = null,
+        Func<CommunityPublishedShip[], CancellationToken, Task<CommunityPublishedShip[]>>? prepareImages = null)
     {
         var (reference, selected) = ParseHangarSharingSave(body);
         if (!await _write.WaitAsync(0, token)) return new("rejected", "busy");
@@ -107,8 +109,9 @@ internal sealed partial class CommunityClient
             // binding is unavailable. Equal/new selections also refresh the inventory.
             var narrowing = codes.Length < edit.SelectedCodes.Length && !codes.Except(edit.SelectedCodes).Any();
             var useSavedInventory = body.TryGetProperty("inventoryMode", out var mode) && mode.GetString() == "saved";
+            var imagesRequested = body.TryGetProperty("includeImages", out var imageChoice) && imageChoice.GetBoolean();
             CommunityPublishedShip[]? inventory = null;
-            if (!useSavedInventory && codes.Length > 0 && !narrowing && inventorySource is not null)
+            if (!useSavedInventory && codes.Length > 0 && (!narrowing || imagesRequested) && inventorySource is not null)
             {
                 try { inventory = inventorySource(); }
                 catch (LocalHangarStoreException) when (mode.ValueKind == JsonValueKind.String && mode.GetString() == "auto")
@@ -119,6 +122,20 @@ internal sealed partial class CommunityClient
             current();
             token.ThrowIfCancellationRequested();
             if (!_hangarEdits.TryRemove(reference, out _)) return new("rejected", "refreshRequired");
+            if (inventory is not null && body.TryGetProperty("includeImages", out var includeImages) && includeImages.GetBoolean())
+            {
+                // Consume before the first upload. A repeated editor must never
+                // replay uploads whose response may have been lost.
+                if (prepareImages is null) return new("rejected", "upgradeRequired");
+                sent = true;
+                var prepared = await prepareImages(inventory, token);
+                if (prepared.Length != inventory.Length || prepared.Where((row, index) =>
+                    row with { ImageMediaId = null } != inventory[index] with { ImageMediaId = null }).Any())
+                    throw Invalid();
+                inventory = prepared;
+                current();
+                token.ThrowIfCancellationRequested();
+            }
             using var request = new HttpRequestMessage(HttpMethod.Put, new Uri(_origin, HangarSharingPath + (inventory is null ? "" : "/publish")))
             { Content = inventory is null ? JsonContent.Create(new { schemaVersion = 1, version = edit.Version, selectedCodes = codes }) :
                 JsonContent.Create(new { schemaVersion = 1, version = edit.Version, selectedCodes = codes, ships = inventory }) };
@@ -143,7 +160,7 @@ internal sealed partial class CommunityClient
             return saved.Explicit && saved.Version != edit.Version && saved.Codes.SequenceEqual(codes)
                 ? new("accepted") : new("unknown", "outcomeUnknown");
         }
-        catch (LocalHangarStoreException) { return new("rejected", "localHangarRequired"); }
+        catch (LocalHangarStoreException) { return new(sent ? "unknown" : "rejected", sent ? "outcomeUnknown" : "localHangarRequired"); }
         catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException or
             AccountBridgeHostException or BridgeStaleGenerationException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         { return new(sent ? "unknown" : "rejected", sent ? "outcomeUnknown" : "refreshRequired"); }

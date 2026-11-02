@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
@@ -450,11 +451,13 @@ void main() {
           .onChanged!(35);
       await tester.pumpAndSettle();
       tester
-          .widget<SwitchListTile>(find.byKey(const Key('menu-image-remember')))
+          .widget<StarBridgeSwitch>(
+            find.byKey(const Key('menu-image-remember')),
+          )
           .onChanged!(false);
       await tester.pumpAndSettle();
       tester
-          .widget<SwitchListTile>(find.byKey(const Key('menu-image-pinned')))
+          .widget<StarBridgeSwitch>(find.byKey(const Key('menu-image-pinned')))
           .onChanged!(true);
       await tester.pumpAndSettle();
       final save = find.byKey(const Key('menu-image-save'));

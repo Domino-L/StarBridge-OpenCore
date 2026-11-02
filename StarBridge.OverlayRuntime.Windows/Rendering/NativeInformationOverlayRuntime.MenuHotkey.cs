@@ -13,7 +13,31 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
     private long _menuRequest;
     private string _menuPhase = "closed";
     private IntPtr _menuWindow;
+    private long _menuOpeningTicks;
     private bool MenuActive => _menuPhase is "opening" or "visible";
+
+    // The renderer's window acknowledgements are best effort. A lost "closed"
+    // must not leave the shortcut ignoring Alt+M or the information layer in
+    // menu mode; the native menu HWND and the renderer's own opening timeouts
+    // (at most ~12s) are the ground truth.
+    internal static bool MenuStateStale(string phase, bool windowShown, long openingAgeMs) =>
+        phase switch
+        {
+            "visible" => !windowShown,
+            "opening" => openingAgeMs > 15000,
+            _ => false
+        };
+
+    private void ExpireStaleMenuState()
+    {
+        if (!MenuStateStale(_menuPhase,
+                _menuWindow != IntPtr.Zero && MenuIsWindow(_menuWindow) && MenuIsWindowVisible(_menuWindow),
+                Environment.TickCount64 - _menuOpeningTicks)) return;
+        DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=state result=expired-" + _menuPhase);
+        _menuPhase = "closed";
+        _menuWindow = IntPtr.Zero;
+        _window?.SetMenuAbove(IntPtr.Zero);
+    }
 
     public async ValueTask<string> ConfigureMenuHotkeyAsync(MenuHotkeyRegistration? registration,
         CancellationToken cancellationToken = default)
@@ -28,6 +52,8 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
                 // Replacement/revocation is not a normal menu close. Never
                 // restore content belonging to the outgoing session.
                 if (MenuActive) _ = CloseCore();
+                _temporaryHotkeys.Clear();
+                _hotkeyPlan = null;
                 _menuHotkey = registration;
                 _menuRequest = 0;
                 _menuPhase = "closed";
@@ -41,7 +67,7 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
     }
 
     private bool InformationHotkeyEnabled =>
-        _workspace is { HotkeyEnabled: true, HasInvalidSourceConfiguration: false };
+        _workspace is { HotkeyEnabled: true, HasInvalidConfiguration: false };
 
     public async ValueTask UpdateMenuWindowAsync(MenuHotkeyRegistration registration,
         long request, string phase, long window, CancellationToken cancellationToken = default)
@@ -57,6 +83,7 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
                 if (phase != "opening") return;
                 _menuRequest = request;
                 _menuPhase = phase;
+                _menuOpeningTicks = Environment.TickCount64;
                 _menuWindow = IntPtr.Zero;
                 _appearanceFocusTimer?.Stop();
                 _appearanceFocusTimer = null;
@@ -83,6 +110,7 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
 
     private bool ValidateMenuInformationLayer()
     {
+        ExpireStaleMenuState();
         if (!MenuActive) return false;
         if (_menuHotkey?.IsCurrent() != true)
         {
@@ -101,9 +129,14 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
     {
         var registration = _menuHotkey;
         if (registration is null || !registration.Enabled || !registration.IsCurrent() ||
-            _hotkeyPlan?.MenuState != OverlayHotkeyBindingState.Ready) return;
+            _hotkeyPlan?.MenuState != OverlayHotkeyBindingState.Ready) {
+            DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=trigger result=registration-unavailable"); return;
+        }
         var foreground = MenuGetForegroundWindow();
-        if (_menuPhase == "opening") return;
+        ExpireStaleMenuState();
+        if (_menuPhase == "opening") {
+            DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=trigger result=opening-in-progress"); return;
+        }
         MenuHotkeyIntent intent;
         if (_menuPhase == "visible")
         {
@@ -116,10 +149,15 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
         else
         {
             // Runner revalidates this exact handle/PID immediately at Begin.
-            if (!StarCitizenProcessProbe.TryCaptureForeground(out foreground, out var pid)) return;
+            if (!StarCitizenProcessProbe.TryCaptureForeground(out foreground, out var pid)) {
+                DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=trigger result=game-not-foreground"); return;
+            }
             intent = new("open", 0, foreground.ToInt64(), checked((int)pid));
         }
-        if (_menuHotkeyGate.TryAccept(unchecked((uint)GetMessageTime()))) registration.Trigger(intent);
+        if (_menuHotkeyGate.TryAccept(unchecked((uint)GetMessageTime()))) {
+            DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=intent action=" + intent.Action);
+            registration.Trigger(intent);
+        }
     }
 
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
@@ -131,4 +169,7 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
     [DllImport("user32.dll", EntryPoint = "IsWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool MenuIsWindow(IntPtr window);
+    [DllImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MenuIsWindowVisible(IntPtr window);
 }

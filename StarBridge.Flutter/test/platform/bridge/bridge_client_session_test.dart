@@ -6,6 +6,36 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  test('read-only cached data preserves the pending shared account root', () async {
+    final pair = InMemoryBridgeConnection.createPair();
+    final session = BridgeClientSession(connection: pair.client, sessionGeneration: 0);
+    final requests = <BridgeEnvelope>[];
+    final subscription = pair.host.incoming.listen((request) {
+      requests.add(request);
+      if (request.name == 'account.offlineData.read') {
+        unawaited(pair.host.send(_ok(request, {'schemaVersion': 1})));
+      }
+    });
+    final first = session.request('account.getCurrent', payload: {'schemaVersion': 1});
+    await _waitFor(() => requests.isNotEmpty);
+    await session.request('account.offlineData.read', payload: {
+      'schemaVersion': 1,
+      'readId': '0123456789abcdef0123456789abcdef',
+      'kind': 'profile',
+    });
+    final second = session.request('account.getCurrent', payload: {'schemaVersion': 1});
+    await Future<void>.delayed(Duration.zero);
+    final roots = requests.where((request) => request.name == 'account.getCurrent').toList();
+    for (final request in roots) {
+      await pair.host.send(_ok(request, {'schemaVersion': 1, 'state': 'signedOut'}));
+    }
+    await Future.wait([first, second]);
+    await subscription.cancel();
+    await session.close();
+    await pair.host.close();
+    expect(roots, hasLength(1));
+  });
+
   test(
     'shared account timeout fails every consumer and permits a fresh retry',
     () async {

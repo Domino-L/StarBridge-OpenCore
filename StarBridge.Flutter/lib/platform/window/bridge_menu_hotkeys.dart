@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../bridge/bridge_client_session.dart';
 import '../bridge/bridge_envelope.dart';
@@ -28,6 +29,8 @@ final class BridgeMenuHotkeys
   int? _client, _generation;
   int _authorityEpoch = 0;
   bool _disposed = false, _attached = false;
+  Timer? _retry;
+  int _retryFailures = 0;
 
   @override
   void initialize(
@@ -46,9 +49,12 @@ final class BridgeMenuHotkeys
 
   void _changed() {
     if (_disposed) return;
+    _retry?.cancel();
+    _retry = null;
     // Synchronous revocation: no event queued behind an account change may open
     // a window while the serialized native detach is still in flight.
     if (!isActive() || _generation != session.activeGeneration) {
+      _retryFailures = 0;
       _authorityEpoch++;
       _attached = false;
       if (_client != null) _onRevoked?.call();
@@ -71,7 +77,7 @@ final class BridgeMenuHotkeys
     _client = client;
     _generation = generation;
     try {
-      await session.request(
+      final reply = await session.request(
         'menuHotkey.attach',
         payload: {
           'schemaVersion': 1,
@@ -88,11 +94,32 @@ final class BridgeMenuHotkeys
           session.activeGeneration == generation &&
           isActive()) {
         _attached = true;
+        debugPrint(
+          'menu-shortcut | stage=attached state=${reply.payload['state']}',
+        );
+        _retryFailures = 0;
       } else {
         await _detach(client);
       }
     } on Object {
-      /* Button opening remains available; never fall back to demo. */
+      debugPrint('menu-shortcut | stage=attach result=unavailable');
+      if (!_disposed &&
+          epoch == _authorityEpoch &&
+          generation == session.activeGeneration &&
+          isActive()) {
+        final seconds = (2 * (1 << _retryFailures.clamp(0, 4))).clamp(2, 30);
+        _retryFailures++;
+        _retry?.cancel();
+        _retry = Timer(Duration(seconds: seconds), () {
+          _retry = null;
+          if (!_disposed &&
+              epoch == _authorityEpoch &&
+              generation == session.activeGeneration &&
+              isActive()) {
+            _work = _work.then((_) => _synchronize());
+          }
+        });
+      }
     }
   }
 
@@ -122,7 +149,11 @@ final class BridgeMenuHotkeys
           p['targetWindow'] as int,
           p['targetProcessId'] as int,
         ),
-      ).catchError((Object _) {}),
+      ).catchError((Object error) {
+        debugPrint(
+          'menu-shortcut | stage=opening result=${error is PlatformException ? error.code : error.runtimeType}',
+        );
+      }),
     );
   }
 
@@ -235,6 +266,8 @@ final class BridgeMenuHotkeys
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _retry?.cancel();
+    _retry = null;
     _attached = false;
     activation.removeListener(_changed);
     unawaited(_events?.cancel());

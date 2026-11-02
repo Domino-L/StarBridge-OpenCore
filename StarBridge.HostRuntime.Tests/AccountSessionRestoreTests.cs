@@ -5,8 +5,46 @@ using StarBridge.NativeBridge;
 using System.Net;
 using System.Text;
 
-internal static class AccountSessionRestoreTests
+internal static partial class AccountSessionRestoreTests
 {
+    internal static async Task ConcurrentUnauthorizedRefresh()
+    {
+        var options = ScmOAuthOptions.Create(CreateEnvironmentSettings());
+        var vault = new MemoryTokenVault();
+        vault.SaveRefreshToken($"{options.AuthorityId}:subject-1", "synthetic-refresh");
+        var refreshes = 0;
+        using var handler = new ScriptedHandler(request => request.RequestUri == options.TokenEndpoint
+            ? JsonResponse(HttpStatusCode.OK, "{\"access_token\":\"synthetic-access-" + (++refreshes) +
+                "\",\"refresh_token\":\"synthetic-next\",\"token_type\":\"Bearer\",\"expires_in\":3600}")
+            : JsonResponse(HttpStatusCode.OK,
+                "{\"subject\":\"subject-1\",\"displayName\":\"Synthetic Pilot\",\"capabilities\":[\"profile.read\"]}"));
+        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+        var initial = (await oauth.TryRestoreSessionAsync(default))!;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = oauth.SendResourceRequestAsync(initial, async (session, _) =>
+        {
+            if (session.AccessToken == initial.AccessToken)
+            {
+                entered.TrySetResult();
+                await release.Task;
+                throw new ScmApiAuthenticationException("Synthetic delayed 401");
+            }
+            return true;
+        }, default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        try
+        {
+            await oauth.SendResourceRequestAsync(initial, (session, _) =>
+                session.AccessToken == initial.AccessToken
+                    ? Task.FromException<bool>(new ScmApiAuthenticationException("Synthetic first 401"))
+                    : Task.FromResult(true), default);
+        }
+        finally { release.TrySetResult(); }
+        await late.WaitAsync(TimeSpan.FromSeconds(2));
+        AssertEqual(2, refreshes, "A delayed 401 must reuse the already refreshed session, not rotate again");
+    }
+
     internal static async Task RestoreCallerCancellationRemainsCancelled()
     {
         var settings = CreateEnvironmentSettings();
@@ -101,7 +139,7 @@ internal static class AccountSessionRestoreTests
         var result = await account.DispatchAsync(BridgeEnvelope.Request(
             "personalProfile.getSelf", "outage-read", generation,
             new { schemaVersion = 1 }, current.Response.AccountContext));
-        AssertEqual("personal_profile.read_unavailable", result.Response.Error?.Code,
+        AssertEqual("personal_profile.read_transient", result.Response.Error?.Code,
             "503 must remain a local profile failure");
         AssertEqual(1, refreshRequests, "503 triggered an unnecessary credential refresh");
         AssertEqual(generation, account.Generation, "503 changed account generation");
@@ -226,26 +264,23 @@ internal static class AccountSessionRestoreTests
         AssertEqual(BridgeResponseStatuses.Error, profile.Response.Status,
             "runtime invalidation response status");
         AssertEqual(
-            "account.reauthorization_required",
+            "profile.read_transient",
             profile.Response.Error?.Code,
             "runtime invalidation stable error");
-        AssertEqual(signedInGeneration + 1, account.Generation,
+        AssertEqual<bool?>(true, profile.Response.Error?.Retryable, "resource 401 remains retryable");
+        AssertEqual(signedInGeneration, account.Generation,
             "runtime invalidation generation");
-        AssertEqual(1, profile.Events.Count,
+        AssertEqual(0, profile.Events.Count,
             "runtime invalidation event count");
-        AssertEqual("account.changed", profile.Events[0].Name,
-            "runtime invalidation event name");
-        AssertEqual(account.Generation, profile.Events[0].SessionGeneration,
-            "runtime invalidation event generation");
-        AssertEqual<string?>(null, vault.LoadRefreshToken(accountKey),
+        AssertEqual("refresh-runtime-next", vault.LoadRefreshToken(accountKey),
             "runtime invalidation retained refresh credential");
 
         var current = await ReadCurrent(account, "runtime-invalidation-current");
         AssertEqual(
-            "reauthorizationRequired",
+            "signedIn",
             current.Response.Payload.GetProperty("state").GetString(),
             "runtime invalidation current state");
-        AssertEqual<BridgeAccountContext?>(null, current.Response.AccountContext,
+        AssertEqual<BridgeAccountContext?>(context, current.Response.AccountContext,
             "runtime invalidation current context");
     }
 

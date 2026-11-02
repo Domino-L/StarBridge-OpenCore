@@ -8,7 +8,7 @@ using StarBridge.NativeBridge;
 public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } =
-        ["overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing", "overlay.presetInspection"];
+        ["hotkeys.temporary", "overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing", "overlay.presetInspection", "overlay.appearancePreview", "overlay.appearanceProgress", RuntimeEventsCapability];
 
     private readonly IOverlaySettingsStore _store;
     private readonly IOverlayWorkspaceStore _workspaceStore;
@@ -51,14 +51,33 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         _runtime = runtime ?? new UnavailableInformationOverlayRuntime();
         _presetTrigger = presetTrigger ?? (() => null);
         _sourceScope = sourceScope ?? (() => (null, _generation()));
+        if (_runtime is IInformationOverlayRuntimeStateSource states) states.StateChanged += OnRuntimeStateChanged;
     }
 
-    public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
+    // Saved choices only: no account/session resolution, native Sync/Open, preview,
+    // source driver demand, or automatic workspace migration.
+    internal async ValueTask<OverlayWorkspaceReadResult> InspectLocalSetupAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            return _workspaceStore is IOverlayWorkspaceInspector inspector
+                ? inspector.Inspect()
+                : throw new OverlaySettingsException("overlay.workspace_inspection_unavailable");
+        }
+        finally { _gate.Release(); }
+    }
 
     public async ValueTask<BridgeDispatchBatch> DispatchAsync(
         BridgeEnvelope request,
         CancellationToken cancellationToken = default)
     {
+        // A bounded account read must not hold the local workspace/write gate.
+        if (request.Name == OverlayRequestNames.AppearanceProgressRead)
+            return await DispatchAppearanceProgressAsync(request, cancellationToken);
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -77,6 +96,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
                     request, InformationOverlayRuntimeCommand.Close, cancellationToken),
                 OverlayRequestNames.RuntimeRetry => await RuntimeAsync(
                     request, InformationOverlayRuntimeCommand.Retry, cancellationToken),
+                OverlayRequestNames.AppearancePreviewOpen => await OpenAppearancePreviewAsync(request, cancellationToken),
+                OverlayRequestNames.AppearancePreviewClose => await CloseAppearancePreviewAsync(request, cancellationToken),
                 OverlayRequestNames.Preview => throw new BridgeProtocolException(
                     BridgeErrorCodes.CapabilityUnavailable,
                     "Game overlay window is unavailable."),
@@ -152,7 +173,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         }
         await _runtime.ExecuteAsync(
             InformationOverlayRuntimeCommand.Sync,
-            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: workspace.SourcePresetsEnabled),
+            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: true),
             cancellationToken);
     }
 
@@ -208,7 +229,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             OptionalString(request.Payload, "renderMode"),
             hotkey,
             request.Payload.TryGetProperty("sources", out var sourcePolicy) ? ParseSources(sourcePolicy) : null,
-            OptionalString(request.Payload, "replaceAutoSwitchPresetId"));
+            OptionalString(request.Payload, "replaceAutoSwitchPresetId"),
+            request.Payload.TryGetProperty("appearanceOptions", out var appearanceOptions) ? ParseAppearanceOptions(appearanceOptions) : null);
         Func<bool>? activationCurrent = null;
         if (request.Payload.TryGetProperty("automaticSource", out var automatic))
         {
@@ -236,7 +258,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         // a failed save after the metadata transaction has already committed.
         await _runtime.ExecuteAsync(
             InformationOverlayRuntimeCommand.Sync,
-            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: workspace.SourcePresetsEnabled),
+            ToRuntimeWorkspace(workspace, ResolveLanguage(null), allowUnavailable: true),
             cancellationToken);
         return WorkspaceResponse(request, workspace);
     }
@@ -260,20 +282,27 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             command,
             runtimeWorkspace,
             cancellationToken);
-        return BridgeEnvelope.Response(request, new
-        {
-            schemaVersion = 1,
-            windowState = snapshot.WindowState,
-            isVisible = snapshot.IsVisible,
-            appliedRevision = snapshot.AppliedRevision,
-            hotkeyState = snapshot.HotkeyState,
-            followGameState = snapshot.FollowGameState,
-            requestedSkin = snapshot.RequestedSkin,
-            effectiveSkin = snapshot.EffectiveSkin,
-            usedFallbackSkin = snapshot.UsedFallbackSkin,
-            failureCode = snapshot.FailureCode,
-            retryable = snapshot.Retryable
-        }, preserveRequestAccountContext: false);
+        return BridgeEnvelope.Response(request, RuntimePayload(snapshot), preserveRequestAccountContext: false);
+    }
+
+    // One shape for getState/open/close/retry responses and the change event.
+    private object RuntimePayload(InformationOverlayRuntimeSnapshot snapshot)
+    {
+        return new
+    {
+        schemaVersion = 1,
+        windowState = snapshot.WindowState,
+        isVisible = snapshot.IsVisible,
+        appliedRevision = snapshot.AppliedRevision,
+        hotkeyState = snapshot.HotkeyState,
+        hotkeyRegistrationFailures = (_runtime as ISafeHotkeyRuntime)?.HotkeyRegistrationFailures,
+        followGameState = snapshot.FollowGameState,
+        requestedSkin = snapshot.RequestedSkin,
+        effectiveSkin = snapshot.EffectiveSkin,
+        usedFallbackSkin = snapshot.UsedFallbackSkin,
+        failureCode = snapshot.FailureCode,
+        retryable = snapshot.Retryable
+    };
     }
 
     private InformationOverlayRuntimeWorkspace ToRuntimeWorkspace(
@@ -291,7 +320,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             _currentSession(),
             language,
             workspace.SourcePresetsEnabled ? workspace.Presets.First(preset => preset.IsActive).Sources : null,
-            workspace.SourcePresetsEnabled, CurrentTemporarySource(workspace));
+            workspace.SourcePresetsEnabled, CurrentTemporarySource(workspace))
+        { UseRegisteredHotkey = workspace.Hotkey.UseRegisteredHotkey == true, IsPresetCorrupt = workspace.Presets.First(preset => preset.IsActive).StorageState == "corrupt" };
     }
 
     private static void RequireUsablePreset(OverlayWorkspaceReadResult workspace)
@@ -312,7 +342,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
                 BridgeErrorCodes.InvalidEnvelope,
                 "Overlay runtime workspace draft is invalid.");
         }
-        RejectUnknown(value, "expectedRevision", "settings", "layout", "hotkey", "sources");
+        RejectUnknown(value, "expectedRevision", "settings", "layout", "hotkey", "sources", "appearanceOptions");
         RequireWorkspaceFields(value, ["expectedRevision", "settings", "layout", "hotkey"]);
         if (!value.GetProperty("expectedRevision").TryGetInt64(out var expectedRevision) ||
             expectedRevision < 0)
@@ -328,6 +358,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 
         var settings = OverlayWorkspaceStore.NormalizeSettings(
             OverlayWorkspaceWireProjection.ParseSettings(value.GetProperty("settings")));
+        settings = settings with { AppearanceOptions = value.TryGetProperty("appearanceOptions", out var appearanceDraft)
+            ? ParseAppearanceOptions(appearanceDraft) : persisted.Settings.AppearanceOptions };
         var layout = OverlayWorkspaceStore.ValidateLayout(
             OverlayWorkspaceWireProjection.ParseLayout(value.GetProperty("layout")));
         var hotkey = OverlayWorkspaceStore.NormalizeHotkey(
@@ -347,7 +379,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             _currentSession(),
             language,
             sources,
-            persisted.SourcePresetsEnabled, CurrentTemporarySource(persisted));
+            persisted.SourcePresetsEnabled, CurrentTemporarySource(persisted))
+        { UseRegisteredHotkey = (hotkey.UseRegisteredHotkey ?? persisted.Hotkey.UseRegisteredHotkey) == true };
     }
 
     private static string ResolveLanguage(string? value)
@@ -393,9 +426,15 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             {
                 binding = workspace.Hotkey.Binding,
                 enabled = workspace.Hotkey.Enabled,
+                registerHotKey = workspace.Hotkey.UseRegisteredHotkey == true,
                 runtimeState = workspace.Hotkey.RuntimeState
             },
             settings = OverlayWorkspaceWireProjection.Settings(workspace.Settings),
+            appearanceOptions = workspace.Settings.AppearanceOptions.ToElement(),
+            appearanceOptionsEnabled = true,
+            appearanceConfigurations = BoundedAppearanceConfigurations(),
+            livePreviewAppearanceIds = BoundedLivePreviewIds(),
+            appearanceProgressIds = BoundedAppearanceProgressIds(),
             layout = workspace.Layout.Select(OverlayWorkspaceWireProjection.Layout).ToArray(),
             presets = workspace.Presets.Select(preset => new
             {
@@ -404,10 +443,26 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
                 isActive = preset.IsActive,
                 storageState = preset.StorageState,
                 settings = OverlayWorkspaceWireProjection.Settings(preset.Settings),
+                appearanceOptions = preset.Settings.AppearanceOptions.ToElement(),
                 layout = preset.Layout.Select(OverlayWorkspaceWireProjection.Layout).ToArray(),
                 sources = preset.Sources is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(OverlayPresetSourcesCodec.Serialize(preset.Sources))
             }).ToArray()
         }, preserveRequestAccountContext: false);
+    }
+
+    private JsonElement[] BoundedAppearanceConfigurations()
+    {
+        if (_runtime is not IInformationOverlayAppearanceConfigurationCatalog catalog) return [];
+        var values = catalog.GetAppearanceConfigurations();
+        if (values.Count > 8) return [];
+        var bytes = 0;
+        foreach (var value in values)
+        {
+            if (value.ValueKind != JsonValueKind.Object) return [];
+            var count = System.Text.Encoding.UTF8.GetByteCount(value.GetRawText());
+            if (count > 48 * 1024 || (bytes += count) > 64 * 1024) return [];
+        }
+        return values.Select(v => v.Clone()).ToArray();
     }
 
     private static OverlayWorkspaceHotkeySnapshot ParseHotkey(JsonElement value)
@@ -421,12 +476,19 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             throw new OverlaySettingsException("overlay.workspace_invalid_hotkey");
         }
 
-        RejectUnknown(value, "binding", "enabled");
+        RejectUnknown(value, "binding", "enabled", "registerHotKey");
+        bool? registered = null;
+        if (value.TryGetProperty("registerHotKey", out var registeredValue))
+        {
+            if (registeredValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new OverlaySettingsException("overlay.workspace_invalid_hotkey");
+            registered = registeredValue.GetBoolean();
+        }
 
         return new OverlayWorkspaceHotkeySnapshot(
             binding.GetString() ?? string.Empty,
             enabled.GetBoolean(),
-            "unavailable");
+            "unavailable", registered);
     }
 
     private static string? OptionalString(JsonElement value, string name)
@@ -445,7 +507,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
     private static string[] AllowedWorkspaceFields(OverlayWorkspaceMutationKind kind) => kind switch
     {
         OverlayWorkspaceMutationKind.SaveActive =>
-            ["schemaVersion", "expectedRevision", "action", "settings", "layout", "renderMode", "hotkey", "sources"],
+            ["schemaVersion", "expectedRevision", "action", "settings", "layout", "renderMode", "hotkey", "sources", "appearanceOptions"],
         OverlayWorkspaceMutationKind.ActivatePreset =>
             ["schemaVersion", "expectedRevision", "action", "presetId", "automaticSource"],
         OverlayWorkspaceMutationKind.DeletePreset or
@@ -457,7 +519,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         OverlayWorkspaceMutationKind.RenamePreset =>
             ["schemaVersion", "expectedRevision", "action", "presetId", "name"],
         OverlayWorkspaceMutationKind.ImportPreset =>
-            ["schemaVersion", "expectedRevision", "action", "name", "settings", "layout", "sources"],
+            ["schemaVersion", "expectedRevision", "action", "name", "settings", "layout", "sources", "appearanceOptions"],
         OverlayWorkspaceMutationKind.ConfigurePresetSources =>
             ["schemaVersion", "expectedRevision", "action", "presetId", "sources", "replaceAutoSwitchPresetId", "name"],
         _ => []
@@ -465,8 +527,15 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 
     private static string[] RequiredWorkspaceFields(OverlayWorkspaceMutationKind kind) =>
         AllowedWorkspaceFields(kind).Where(field => field != "replaceAutoSwitchPresetId" && field != "automaticSource" &&
+            field != "appearanceOptions" &&
             (field != "name" || kind != OverlayWorkspaceMutationKind.ConfigurePresetSources) &&
             (field != "sources" || kind == OverlayWorkspaceMutationKind.ConfigurePresetSources)).ToArray();
+
+    private static OverlayAppearanceOptions ParseAppearanceOptions(JsonElement value)
+    {
+        try { return OverlayAppearanceOptions.Parse(value.GetRawText()); }
+        catch (FormatException error) { throw new OverlaySettingsException("overlay.workspace_invalid_value", false, error); }
+    }
 
     private static OverlayPresetSources ParseSources(JsonElement value)
     {
@@ -557,6 +626,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
     public void Dispose()
     {
         _disposed = true;
+        if (_runtime is IInformationOverlayRuntimeStateSource states) states.StateChanged -= OnRuntimeStateChanged;
         _runtime.Dispose();
         _gate.Dispose();
     }

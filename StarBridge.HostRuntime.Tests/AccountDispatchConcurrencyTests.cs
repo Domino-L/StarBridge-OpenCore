@@ -3,9 +3,17 @@ using System.Reflection;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Friends;
 using StarBridge.NativeBridge;
+using StarBridge.HostRuntime;
 
-internal static class AccountDispatchConcurrencyTests
+internal static partial class AccountDispatchConcurrencyTests
 {
+    internal static async Task VerifyOfficialActivityLane()
+    {
+        await ActivityWaitsDoNotOccupyOrdinaryWorkers();
+        Console.WriteLine("PASS GOV2 pipe: held official wait leaves ordinary and cancellation workers available");
+        await ActivityWaitQueueRetainsBackpressure();
+        Console.WriteLine("PASS GOV2 pipe: three active waits plus two queued slots reject overflow without starving ordinary requests");
+    }
     internal static async Task Verify()
     {
         await IndependentRead();
@@ -17,6 +25,19 @@ internal static class AccountDispatchConcurrencyTests
         await ActivityDoesNotHoldWriteBarrier();
         await ActivityCrossesCompositionAndCancels();
         await CommunityActivityCrossesComposition();
+        await LoadingReadScheduling();
+        await MenuPreferencesDoNotQueueBehindOrdinaryWorkers();
+        await ForegroundReadsPassQueuedBackgroundMedia();
+        await PriorityKeepsWriteFence();
+        await RepeatedCurrentSkipsReadQueueButNotMutations();
+        await StartupBurstDoesNotStarveLocalReads();
+        await ForegroundReadsPassQueuedStartupReads();
+        await StartupReadsKeepWriteFence();
+        await ScmResourceReadsOverlap();
+        await ScmProjectionAndWritesStayExclusive();
+        await ScmResourceReadsNeedHealthySession();
+        await MessagesWindowReadPassesQueuedReads();
+        await MessagesWindowReadKeepsSendFence();
         Console.WriteLine("PASS bounded independent reads, exclusive account operations, cancellation, event batching and stale generation");
     }
 
@@ -84,6 +105,179 @@ internal static class AccountDispatchConcurrencyTests
     private static BridgeEnvelope Request(string name, long generation = 1) =>
         BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), generation, new { schemaVersion = 1 },
             name == AccountBridgeRequestNames.Login ? null : Probe.Owner);
+
+    private static async Task LoadingReadScheduling()
+    {
+        var failures = new List<Exception>();
+        foreach (var verify in new Func<Task>[] { LocalPolicyDoesNotWaitForNetworkRead, ActivityWaitsDoNotOccupyOrdinaryWorkers })
+        {
+            try { await verify(); }
+            catch (Exception error) { failures.Add(error); Console.WriteLine("FAIL loading scheduling: " + error.Message); }
+        }
+        if (failures.Count > 0) throw new AggregateException(failures);
+        await LocalPolicyRetainsWriteBarrier();
+        await UnauditedPolicyRemainsExclusive();
+        await ActivityWaitQueueRetainsBackpressure();
+    }
+
+    private static async Task LocalPolicyDoesNotWaitForNetworkRead()
+    {
+        var (host, probe) = Create();
+        using var dispatcher = new AccountBridgeDispatcher(host);
+        var slow = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.ReadCommunities));
+        await Until(() => probe.Reads == 1);
+        var policy = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.GetGameIdentityPolicy));
+        try
+        {
+            Check(await Task.WhenAny(policy, Task.Delay(1000)) == policy,
+                "A local identity-policy snapshot waits behind an independent network read.");
+            Check((await policy).Response.Status == "ok" && probe.Policies == 1 && !slow.IsCompleted,
+                "Policy must return the authorized snapshot while the network read remains pending.");
+        }
+        finally { probe.ReadRelease.TrySetResult(new { schemaVersion = 1 }); await Task.WhenAll(slow, policy); }
+        probe.Advance();
+        var stale = await dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.GetGameIdentityPolicy));
+        Check(stale.Response.Status == "error" && stale.Response.Error?.Code == BridgeErrorCodes.StaleGeneration && probe.Policies == 1,
+            "An old-generation policy request cannot reach the Host or return identity data.");
+    }
+
+    private static async Task LocalPolicyRetainsWriteBarrier()
+    {
+        var (host, probe) = Create();
+        using var dispatcher = new AccountBridgeDispatcher(host);
+        var slow = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.ReadCommunities));
+        await Until(() => probe.Reads == 1);
+        var write = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.Login));
+        var policy = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.GetGameIdentityPolicy));
+        try
+        {
+            Check(probe.Policies == 0 && probe.Writes == 0, "Policy cannot bypass a waiting account write.");
+            probe.ReadRelease.TrySetResult(new { schemaVersion = 1 });
+            await slow;
+            await Until(() => probe.Writes == 1);
+            Check(probe.Policies == 0, "Policy cannot overlap the account mutation.");
+        }
+        finally { probe.ReadRelease.TrySetResult(new { schemaVersion = 1 }); probe.WriteRelease.TrySetResult(new("signedIn", 1, Probe.Owner, "Fixture", null)); await Task.WhenAll(slow, write, policy); }
+        Check((await policy).Response.Status == "ok" && probe.Policies == 1, "Policy resumes after the mutation barrier.");
+    }
+
+    private static async Task UnauditedPolicyRemainsExclusive()
+    {
+        var (host, probe) = Create(); probe.ConcurrentReads = false;
+        using var dispatcher = new AccountBridgeDispatcher(host);
+        var slow = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.ReadCommunities));
+        await Until(() => probe.Reads == 1);
+        var policy = dispatcher.DispatchAsync(Request(AccountBridgeRequestNames.GetGameIdentityPolicy));
+        try { Check(probe.Policies == 0, "An unaudited session must retain serialized identity-policy reads."); }
+        finally { probe.ReadRelease.TrySetResult(new { schemaVersion = 1 }); await Task.WhenAll(slow, policy); }
+        Check((await policy).Response.Status == "ok", "Serialized policy still completes successfully.");
+    }
+
+    private static async Task ActivityWaitsDoNotOccupyOrdinaryWorkers()
+    {
+        var pair = InMemoryBridgeConnection.CreatePair();
+        using var dispatcher = new LoadingPipeProbe();
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = NativeHostPipeServer.ServeConnectionAsync(pair.Right, dispatcher, lifetime.Token);
+        var policyReply = new TaskCompletionSource<BridgeEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controlReply = new TaskCompletionSource<BridgeEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var responses = Task.Run(async () => {
+            await foreach (var response in pair.Left.ReadAllAsync(lifetime.Token))
+            {
+                if (response.CorrelationId == "local-policy") policyReply.TrySetResult(response);
+                if (response.CorrelationId == "cancel-activity") controlReply.TrySetResult(response);
+            }
+        });
+        try
+        {
+            foreach (var name in new[] { AccountBridgeRequestNames.WaitSocialActivity, "officialFleet.wait",
+                AccountBridgeRequestNames.WaitCommunityActivity,
+                AccountBridgeRequestNames.ReadFriends, AccountBridgeRequestNames.ReadCommunities })
+                await pair.Left.SendAsync(Request(name), lifetime.Token);
+            await Until(() => dispatcher.ActivityStarted == 3 && dispatcher.OrdinaryStarted == 2);
+            await pair.Left.SendAsync(BridgeEnvelope.Request(AccountBridgeRequestNames.GetGameIdentityPolicy, "local-policy", 1,
+                new { schemaVersion = 1 }, Probe.Owner), lifetime.Token);
+            await pair.Left.SendAsync(BridgeEnvelope.Request("bridge.cancel", "cancel-activity", 1,
+                new { targetCorrelationId = "synthetic-wait" }), lifetime.Token);
+            Check(await Task.WhenAny(controlReply.Task, Task.Delay(1000)) == controlReply.Task &&
+                (await controlReply.Task).Status == "ok", "Cancellation retains its independent control worker.");
+            Check(await Task.WhenAny(policyReply.Task, Task.Delay(1000)) == policyReply.Task &&
+                (await policyReply.Task).Status == "ok" && !dispatcher.Release.Task.IsCompleted,
+                "Long polls consume ordinary pipe workers and block a local policy request.");
+        }
+        finally
+        {
+            dispatcher.Release.TrySetResult();
+            lifetime.Cancel();
+            await pair.Left.DisposeAsync();
+            try { await Task.WhenAll(server, responses); }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            await pair.Right.DisposeAsync();
+        }
+    }
+
+    private sealed class LoadingPipeProbe : IBridgeRequestDispatcher
+    {
+        internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int ActivityStarted, OrdinaryStarted;
+        public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
+        public async ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken token = default)
+        {
+            if (BridgeRequestPolicy.IsActivityWait(request.Name))
+            {
+                Interlocked.Increment(ref ActivityStarted); await Release.Task.WaitAsync(token);
+            }
+            else if (request.Name is AccountBridgeRequestNames.ReadFriends or AccountBridgeRequestNames.ReadCommunities)
+            {
+                Interlocked.Increment(ref OrdinaryStarted); await Release.Task.WaitAsync(token);
+            }
+            return new(BridgeEnvelope.Response(request, new { schemaVersion = 1 }), []);
+        }
+        public void Dispose() => Release.TrySetResult();
+    }
+
+    private static async Task ActivityWaitQueueRetainsBackpressure()
+    {
+        var pair = InMemoryBridgeConnection.CreatePair();
+        using var dispatcher = new LoadingPipeProbe();
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = NativeHostPipeServer.ServeConnectionAsync(pair.Right, dispatcher, lifetime.Token);
+        var overflowReply = new TaskCompletionSource<BridgeEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var policyReply = new TaskCompletionSource<BridgeEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var responses = Task.Run(async () => {
+            await foreach (var response in pair.Left.ReadAllAsync(lifetime.Token))
+            {
+                if (response.CorrelationId == "activity-overflow") overflowReply.TrySetResult(response);
+                if (response.CorrelationId == "policy-after-backpressure") policyReply.TrySetResult(response);
+            }
+        });
+        try
+        {
+            await pair.Left.SendAsync(Request(AccountBridgeRequestNames.WaitSocialActivity), lifetime.Token);
+            await pair.Left.SendAsync(Request("officialFleet.wait"), lifetime.Token);
+            await pair.Left.SendAsync(Request(AccountBridgeRequestNames.WaitCommunityActivity), lifetime.Token);
+            await Until(() => dispatcher.ActivityStarted == 3);
+            await pair.Left.SendAsync(Request(AccountBridgeRequestNames.WaitSocialActivity), lifetime.Token);
+            await pair.Left.SendAsync(Request("officialFleet.wait"), lifetime.Token);
+            await pair.Left.SendAsync(BridgeEnvelope.Request(AccountBridgeRequestNames.WaitSocialActivity, "activity-overflow", 1,
+                new { schemaVersion = 1 }, Probe.Owner), lifetime.Token);
+            Check(await Task.WhenAny(overflowReply.Task, Task.Delay(1000)) == overflowReply.Task &&
+                (await overflowReply.Task).Error?.Code == BridgeErrorCodes.Backpressure,
+                "A saturated activity queue must reject excess waits with backpressure.");
+            Check(dispatcher.ActivityStarted == 3, "Activity waits cannot expand their three active workers.");
+            await pair.Left.SendAsync(BridgeEnvelope.Request(AccountBridgeRequestNames.GetGameIdentityPolicy, "policy-after-backpressure", 1,
+                new { schemaVersion = 1 }, Probe.Owner), lifetime.Token);
+            Check(await Task.WhenAny(policyReply.Task, Task.Delay(1000)) == policyReply.Task && (await policyReply.Task).Status == "ok",
+                "Activity backpressure cannot disconnect the pipe or block an ordinary local request.");
+        }
+        finally
+        {
+            dispatcher.Release.TrySetResult(); lifetime.Cancel(); await pair.Left.DisposeAsync();
+            try { await Task.WhenAll(server, responses); }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            await pair.Right.DisposeAsync();
+        }
+    }
 
     private static async Task IndependentRead()
     {
@@ -215,7 +409,8 @@ internal static class AccountDispatchConcurrencyTests
         internal readonly TaskCompletionSource<object> ActivityRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int ActivityWaits;
         internal readonly TaskCompletionSource<AccountBridgeSessionProjection> WriteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal int Reads, Friends, Writes;
+        internal int Reads, Friends, Writes, Policies, Currents, MediaStarted, Avatars;
+        internal readonly TaskCompletionSource<object> MediaRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool ConcurrentReads = true;
         private long _generation = 1;
         private Action<long>? _changed;
@@ -232,8 +427,12 @@ internal static class AccountDispatchConcurrencyTests
                 case "ReadCommunitiesAsync": Interlocked.Increment(ref Reads); return ReadRelease.Task.WaitAsync((CancellationToken)args![^1]!);
                 case "WaitSocialActivityAsync":
                 case "WaitCommunityActivityAsync": Interlocked.Increment(ref ActivityWaits); return ActivityRelease.Task.WaitAsync((CancellationToken)args![^1]!);
+                case "ReadCommunityMediaAsync": Interlocked.Increment(ref MediaStarted); return MediaRelease.Task.WaitAsync((CancellationToken)args![^1]!);
+                case "ReadAvatarAsync": Interlocked.Increment(ref Avatars); return Task.FromResult<object>(new { schemaVersion = 1 });
                 case "ReadFriendsAsync": Interlocked.Increment(ref Friends); return Task.FromResult(new FriendsView(null, DateTimeOffset.UtcNow, [], [], [], [], []));
+                case "GetGameIdentityPolicyAsync": Interlocked.Increment(ref Policies); return Task.FromResult(new AccountBridgeIdentityProjection("unknown", null, false));
                 case "LoginAsync": Interlocked.Increment(ref Writes); return WriteRelease.Task;
+                case "GetCurrentAsync": Interlocked.Increment(ref Currents); return Task.FromResult(new AccountBridgeSessionProjection("signedIn", 1, Owner, "Fixture", null));
                 default: throw new NotSupportedException(method.Name);
             }
         }

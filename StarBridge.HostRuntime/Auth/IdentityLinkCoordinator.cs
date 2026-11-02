@@ -116,17 +116,17 @@ public sealed class IdentityLinkCoordinator(
             proof,
             cancellationToken);
             ScmAuthDiagnostics.Write(correlationId, "identity-link-consume", "completed");
-        if (credential is not null && !SameAccount(result.LegacyAccountId, credential.AccountId))
-        {
-            throw new ScmApiProtocolException("SCM 返回的旧账号与本地迁移凭据不一致。");
-        }
-
         if (string.Equals(result.Status, "CONFLICT", StringComparison.OrdinalIgnoreCase))
         {
             return new IdentityLinkCoordinatorResult(
                 IdentityLinkOutcome.Conflict,
                 result.LegacyAccountId,
                 result.ConflictId);
+        }
+
+        if (credential is not null && !SameAccount(result.LegacyAccountId, credential.AccountId))
+        {
+            throw new ScmApiProtocolException("SCM 返回的旧账号与本地迁移凭据不一致。");
         }
 
         if (!string.Equals(result.Status, "LINKED", StringComparison.OrdinalIgnoreCase))

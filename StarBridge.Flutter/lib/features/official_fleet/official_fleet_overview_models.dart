@@ -68,16 +68,20 @@ final class OfficialFleetOverviewSnapshot {
     required this.tasks,
     required this.observedAtUtc,
   }) : availability = OfficialFleetOverviewAvailability.available,
+       transientFailure = false,
        failureKey = null;
 
-  const OfficialFleetOverviewSnapshot.unavailable({required this.failureKey})
-    : availability = OfficialFleetOverviewAvailability.unavailable,
-      announcement = null,
-      metrics = null,
-      tasks = const <OfficialFleetOverviewTask>[],
-      observedAtUtc = null;
+  const OfficialFleetOverviewSnapshot.unavailable({
+    required this.failureKey,
+    this.transientFailure = false,
+  }) : availability = OfficialFleetOverviewAvailability.unavailable,
+       announcement = null,
+       metrics = null,
+       tasks = const <OfficialFleetOverviewTask>[],
+       observedAtUtc = null;
 
   final OfficialFleetOverviewAvailability availability;
+  final bool transientFailure;
   final OfficialFleetOverviewAnnouncement? announcement;
   final OfficialFleetOverviewMetrics? metrics;
   final List<OfficialFleetOverviewTask> tasks;
@@ -89,6 +93,7 @@ final class OfficialFleetOverviewSnapshot {
 final class OfficialFleetOverviewProjection {
   const OfficialFleetOverviewProjection.idle()
     : availability = OfficialFleetOverviewAvailability.idle,
+      isRefreshing = false,
       announcement = null,
       metrics = null,
       tasks = const <OfficialFleetOverviewTask>[],
@@ -97,6 +102,7 @@ final class OfficialFleetOverviewProjection {
 
   const OfficialFleetOverviewProjection.loading()
     : availability = OfficialFleetOverviewAvailability.loading,
+      isRefreshing = false,
       announcement = null,
       metrics = null,
       tasks = const <OfficialFleetOverviewTask>[],
@@ -110,7 +116,21 @@ final class OfficialFleetOverviewProjection {
     required this.tasks,
     required this.observedAtUtc,
     required this.failureKey,
-  });
+  }) : isRefreshing = false;
+
+  OfficialFleetOverviewProjection.refreshing(
+    OfficialFleetOverviewProjection value,
+  ) : this.retained(value, failureKey: value.failureKey, isRefreshing: true);
+
+  OfficialFleetOverviewProjection.retained(
+    OfficialFleetOverviewProjection value, {
+    required this.failureKey,
+    this.isRefreshing = false,
+  }) : availability = value.availability,
+       announcement = value.announcement,
+       metrics = value.metrics,
+       tasks = value.tasks,
+       observedAtUtc = value.observedAtUtc;
 
   factory OfficialFleetOverviewProjection.fromSnapshot(
     OfficialFleetOverviewSnapshot snapshot,
@@ -124,6 +144,10 @@ final class OfficialFleetOverviewProjection {
   );
 
   final OfficialFleetOverviewAvailability availability;
+  final bool isRefreshing;
+  bool get refreshFailed =>
+      availability == OfficialFleetOverviewAvailability.available &&
+      failureKey != null;
   final OfficialFleetOverviewAnnouncement? announcement;
   final OfficialFleetOverviewMetrics? metrics;
   final List<OfficialFleetOverviewTask> tasks;

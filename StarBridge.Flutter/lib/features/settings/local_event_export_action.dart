@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import 'local_event_export.dart';
 
@@ -18,6 +23,8 @@ class LocalEventExportAction extends StatefulWidget {
 class _LocalEventExportActionState extends State<LocalEventExportAction> {
   bool _busy = false;
   int _epoch = 0;
+  int _completed = 0;
+  InteractionSource _source = InteractionSource.programmatic;
   LocalEventExportResult? _result;
   @override
   void didUpdateWidget(LocalEventExportAction oldWidget) {
@@ -27,6 +34,8 @@ class _LocalEventExportActionState extends State<LocalEventExportAction> {
       _epoch++;
       _busy = false;
       _result = null;
+      _completed = 0;
+      _source = InteractionSource.programmatic;
     }
   }
 
@@ -37,9 +46,18 @@ class _LocalEventExportActionState extends State<LocalEventExportAction> {
     super.dispose();
   }
 
-  Future<void> _export() async {
-    if (_busy || !widget.enabled) return;
-    final epoch = _epoch;
+  Future<void> _export(
+    InteractionSource source,
+    LocalEventExportPort owner,
+    int epoch,
+  ) async {
+    if (!mounted ||
+        _busy ||
+        !widget.enabled ||
+        epoch != _epoch ||
+        !identical(owner, widget.port)) {
+      return;
+    }
     final locale = Localizations.localeOf(context);
     final language = locale.languageCode == 'en'
         ? 'en'
@@ -49,45 +67,97 @@ class _LocalEventExportActionState extends State<LocalEventExportAction> {
     setState(() {
       _busy = true;
       _result = null;
+      _source = source;
     });
     LocalEventExportResult result;
     try {
-      result = await widget.port.export(language);
+      result = await runStarBridgeActivation(
+        source,
+        () => owner.export(language),
+      );
     } on Object {
       result = const LocalEventExportResult('unknown');
     }
-    if (!mounted || epoch != _epoch) return;
+    if (!mounted || epoch != _epoch || !identical(owner, widget.port)) return;
     setState(() {
       _busy = false;
       _result = result;
+      if (result.code != 'cancelled') _completed++;
     });
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      OutlinedButton(
-        key: const Key('history-export'),
-        onPressed: _busy || !widget.enabled ? null : _export,
-        child: Text(_text(context, _busy ? 'working' : 'export')),
+  Widget build(BuildContext context) {
+    final owner = widget.port, epoch = _epoch;
+    return StarBridgeInteractionRegion(
+      child: Builder(
+        builder: (context) {
+          final data = InteractionScope.of(context);
+          final effective = data.copyWith(
+            reduceMotion:
+                data.reduceMotion || _source == InteractionSource.keyboard,
+          );
+          return Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  StarBridgeActionButton(
+                    controlKey: const Key('history-export'),
+                    semanticLabel: _text(context, 'export'),
+                    onActivate: _busy || !widget.enabled
+                        ? null
+                        : (source) => _export(source, owner, epoch),
+                    child: Text(_text(context, _busy ? 'working' : 'export')),
+                  ),
+                  if (_busy && data.suite != InteractionSuite.standard)
+                    Semantics(
+                      liveRegion: true,
+                      child: InteractionScope(
+                        data: effective,
+                        child: SuiteBusyLabel(_text(context, 'working')),
+                      ),
+                    ),
+                  if (_result case final result?)
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _text(
+                          context,
+                          result.code == 'saved' && result.recovered
+                              ? 'savedBackup'
+                              : result.code,
+                        ).replaceAll('{count}', '${result.count}'),
+                        key: const Key('history-export-result'),
+                      ),
+                    ),
+                ],
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: InteractionScope(
+                      data: effective,
+                      child: SuiteBusyFrame(
+                        key: ValueKey(epoch),
+                        busy: _busy,
+                        doneToken: _completed,
+                        doneOutcome: _result?.code == 'saved'
+                            ? TaskOutcome.success
+                            : TaskOutcome.failure,
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
-      if (_result case final result?)
-        Semantics(
-          liveRegion: true,
-          child: Text(
-            _text(
-              context,
-              result.code == 'saved' && result.recovered
-                  ? 'savedBackup'
-                  : result.code,
-            ).replaceAll('{count}', '${result.count}'),
-            key: const Key('history-export-result'),
-          ),
-        ),
-    ],
-  );
+    );
+  }
 }
 
 String _text(BuildContext context, String key) {

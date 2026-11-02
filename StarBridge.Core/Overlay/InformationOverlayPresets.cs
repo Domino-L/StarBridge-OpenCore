@@ -135,8 +135,9 @@ public static class InformationOverlayPresetCodec
 
 public static class InformationOverlayDefaults
 {
+    // Fields 74–79 turn calm display on for new installs; older files parse as Unset.
     private const string DefaultSettingsPayload =
-        "0,CallsignAndGameName,1,1,1,1.00,1,1,0,1,Default,0,0,Simple,0,#FFFFFF,52.48,1.57,1,1,BridgeTerminal,1,1,120,1,Right,5.03,0.291,1,Auto,0,Default,AllFleet,0.456,2047,3,0,Slow,0;0;0;0;0;0;0;0;0;0;0,1,3.1,12.12,0,Default,Strong,0,0,0,60,3,Auto,1,FullScreenBarrage,Right,4,12,1,1,1,0,16,UpperMiddle,Standard,1,Strong,1,0,5,All";
+        "0,CallsignAndGameName,1,1,1,1.00,1,1,0,1,Default,0,0,Simple,0,#FFFFFF,52.48,1.57,1,1,BridgeTerminal,1,1,120,1,Right,5.03,0.291,1,Auto,0,Default,AllFleet,0.456,2047,3,0,Slow,0;0;0;0;0;0;0;0;0;0;0,1,3.1,12.12,0,Default,Strong,0,0,0,60,3,Auto,1,FullScreenBarrage,Right,4,12,1,1,1,0,16,UpperMiddle,Standard,1,Strong,1,0,5,All,1,1,0,Default,1,On,10,0,0,Relevant,";
 
     public const string DefaultLayoutPayload =
         "Notice,0.34,0,0.32,0.055,Center,Top,0,1,0.5;" +

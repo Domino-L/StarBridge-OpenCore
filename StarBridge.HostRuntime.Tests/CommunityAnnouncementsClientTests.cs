@@ -16,10 +16,10 @@ internal static class CommunityAnnouncementsClientTests
         var image = new byte[400 * 1024];
         new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(image, 0);
         var avatar = "data:image/png;base64," + Convert.ToBase64String(image);
-        object Author(bool detail, bool legacy = false) => new { accountId = legacy ? "legacy" : "hidden-account-id", callsign = "Author",
-            gameId = "VisibleGameId", roleTitle = "成员", roleColor = "#47AAEE", avatarImageData = detail ? avatar : null,
+        object Author(bool detail, bool legacy = false) => new { accountId = mode == "scm-minimal" ? "" : legacy ? "legacy" : "hidden-account-id", callsign = "Author",
+            gameId = mode == "scm-minimal" ? "" : "VisibleGameId", roleTitle = "成员", roleColor = "#47AAEE", avatarImageData = detail && mode != "scm-minimal" ? avatar : null,
             secret = "must-not-export" };
-        object Entry(string id, bool detail, bool archived = false) => new { authorHasAvatar = true, lastEditorHasAvatar = true,
+        object Entry(string id, bool detail, bool archived = false) => new { authorHasAvatar = mode != "scm-minimal", lastEditorHasAvatar = mode != "scm-minimal",
             announcement = new { id, fleetCode = "A", title = "Announcement", content = "Body\ntext", revision = 2,
                 state = archived ? "Archived" : "Published", publishedAt = "2026-09-07T00:00:00Z", updatedAt = "2026-09-08T00:00:00Z",
                 archivedAt = archived ? "2026-09-08T00:00:00Z" : null, withdrawnAt = (string?)null,
@@ -42,7 +42,7 @@ internal static class CommunityAnnouncementsClientTests
             {
                 Check(query.Contains("announcementId=actual-id") && query.Contains("expectedRevision=30"), "detail is pinned to the previously read record/version");
                 var node = JsonSerializer.SerializeToNode(new { schemaVersion = 1, membershipModelVersion = 2, fleetCode = "A", revision = 30L,
-                    canManage = mode != "revoked", refreshedAt = "2026-09-08T00:00:00Z", entry = Entry("actual-id", true) })!;
+                    canManage = mode is not ("revoked" or "scm-minimal"), refreshedAt = "2026-09-08T00:00:00Z", entry = Entry("actual-id", true) })!;
                 switch (mode)
                 {
                     case "detail-other": node["entry"]!["announcement"]!["id"] = "another-id"; break;
@@ -59,7 +59,7 @@ internal static class CommunityAnnouncementsClientTests
             var offset = query.Contains("offset=20") ? 20 : 0;
             if (offset > 0) Check(query.Contains("expectedRevision=30"), "next page requires snapshot revision");
             var page = JsonSerializer.SerializeToNode(new { schemaVersion = 1, membershipModelVersion = 2, fleetCode = "A", revision = 30L,
-                canManage = true, current = Entry("actual-id", false), history = Enumerable.Range(offset, offset == 0 ? 20 : 1).Select(i => Entry("history-" + i.ToString("D2"), false, true)),
+                canManage = mode != "scm-minimal", current = Entry("actual-id", false), history = Enumerable.Range(offset, offset == 0 ? 20 : 1).Select(i => Entry("history-" + i.ToString("D2"), false, true)),
                 offset, next = offset == 0 ? (int?)20 : null, totalHistoryCount = 21, refreshedAt = "2026-09-08T00:00:00Z", secret = "must-not-export" })!;
             switch (mode)
             {
@@ -169,6 +169,19 @@ internal static class CommunityAnnouncementsClientTests
         mode = "ok";
         await Read();
         Check(calls > before, "expired page recovers only through fresh authorized transport");
+        mode = "scm-minimal";
+        var minimal = await Read();
+        var person = minimal.GetProperty("current").GetProperty("author");
+        Check(!minimal.GetProperty("canManage").GetBoolean() && person.GetProperty("memberRef").ValueKind == JsonValueKind.Null &&
+            person.GetProperty("gameId").GetString() == "" && !person.GetProperty("hasAvatar").GetBoolean(),
+            "pure SCM announcement attribution needs neither identity menu nor avatar disclosure");
+        announcementRef = minimal.GetProperty("current").GetProperty("announcementRef").GetString()!;
+        var minimalDetail = await Detail();
+        using var redacted = JsonDocument.Parse(Convert.FromBase64String(minimalDetail.GetProperty("data").GetString()!));
+        Check(!minimalDetail.GetProperty("canManage").GetBoolean() && minimalDetail.GetProperty("next").ValueKind == JsonValueKind.Null &&
+            redacted.RootElement.GetProperty("authorAvatarImageData").ValueKind == JsonValueKind.Null &&
+            redacted.RootElement.GetProperty("editorAvatarImageData").ValueKind == JsonValueKind.Null,
+            "pure SCM detail preserves exact redacted page metadata and empty media");
     }
     private static async Task Reject(Func<Task<JsonElement>> action, string code)
     {

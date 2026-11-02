@@ -8,7 +8,10 @@ namespace StarBridge.HostRuntime.Notifications;
 internal sealed record NotificationPolicyRule(string Source, NotificationSourceMode Mode);
 internal sealed record NotificationPolicySnapshot(long Revision, string? OperationId, NotificationPolicyRule[] Rules)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, long>? SuppressionRevisions { get; init; }
     internal NotificationSourceMode For(string source) => Rules.FirstOrDefault(rule => rule.Source == source)?.Mode ?? NotificationSourceMode.Normal;
+    internal long SuppressionRevision(string source) => SuppressionRevisions?.GetValueOrDefault(source) ?? 0;
 }
 
 // Separate account-scoped delivery preferences, never a privacy grant. The
@@ -22,6 +25,14 @@ internal sealed class NotificationPolicyStore(string root)
     private sealed record FileValue(int SchemaVersion, string Owner, NotificationPolicySnapshot Snapshot, string Integrity);
     internal static string Organization(string code, DateTimeOffset joined) => "organization:" + Hash(
         JsonSerializer.SerializeToUtf8Bytes(new[] { code.ToUpperInvariant(), joined.ToUniversalTime().ToString("O") }));
+    internal static string OfficialFleet(string sourceRef)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(sourceRef, "^officialFleet:[1-9][0-9]{0,18}$") ||
+            !long.TryParse(sourceRef[14..], out var id) || id <= 0) throw new InvalidDataException("Invalid official source.");
+        return "officialFleet:" + Hash(JsonSerializer.SerializeToUtf8Bytes(new[] { sourceRef }));
+    }
+    internal static bool IsOfficialFleetKey(string source) => source is { Length: 78 } &&
+        source.StartsWith("officialFleet:", StringComparison.Ordinal) && source[14..].All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();
     private static string Owner(BridgeAccountContext owner)
     {
@@ -34,7 +45,7 @@ internal sealed class NotificationPolicyStore(string root)
     private static NotificationPolicyRule[] Validate(NotificationPolicyRule[] rules)
     {
         if (rules is null || rules.Length > 128 || rules.Any(rule => rule is null || !Enum.IsDefined(rule.Mode) ||
-            !(rule.Source is "room" or "friends" or "directMessages" || rule.Source is { Length: 77 } source &&
+            !(rule.Source is "room" or "friends" or "directMessages" || IsOfficialFleetKey(rule.Source) || rule.Source is { Length: 77 } source &&
                 source.StartsWith("organization:", StringComparison.Ordinal) && source[13..].All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))) ||
             rules.Select(rule => rule.Source).Distinct(StringComparer.Ordinal).Count() != rules.Length) throw new InvalidDataException("Invalid source rules.");
         return rules.OrderBy(rule => rule.Source, StringComparer.Ordinal).ToArray();
@@ -51,6 +62,7 @@ internal sealed class NotificationPolicyStore(string root)
         var file = doc.RootElement.Deserialize<FileValue>(Json);
         if (file is null || file.SchemaVersion != 1 || file.Owner != hash || file.Snapshot is null ||
             file.Snapshot.Revision < 1 || !Guid.TryParseExact(file.Snapshot.OperationId, "N", out _) ||
+            file.Snapshot.SuppressionRevisions?.Any(p => p.Value < 1 || p.Value > file.Snapshot.Revision) == true ||
             file.Integrity != Integrity(hash, file.Snapshot)) throw new InvalidDataException("Invalid policy file.");
         return file.Snapshot with { Rules = Validate(file.Snapshot.Rules) };
     }
@@ -67,7 +79,11 @@ internal sealed class NotificationPolicyStore(string root)
         if (!current()) throw new OperationCanceledException();
         if (previous.OperationId == operationId && previous.Revision == expected + 1 && previous.Rules.SequenceEqual(rules)) return previous;
         if (previous.Revision != expected || previous.OperationId == operationId) throw new NotificationSettingsConflictException();
-        var snapshot = new NotificationPolicySnapshot(expected + 1, operationId, rules);
+        var suppressions = previous.SuppressionRevisions is { } saved ? new Dictionary<string, long>(saved) : new();
+        foreach (var rule in rules.Where(rule => rule.Mode != NotificationSourceMode.Normal && rule.Mode != previous.For(rule.Source)))
+            suppressions[rule.Source] = expected + 1;
+        var snapshot = new NotificationPolicySnapshot(expected + 1, operationId, rules) {
+            SuppressionRevisions = suppressions.Count == 0 ? null : suppressions };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new FileValue(1, hash, snapshot, Integrity(hash, snapshot)), Json);
         if (bytes.Length > 32768) throw new InvalidDataException();
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";

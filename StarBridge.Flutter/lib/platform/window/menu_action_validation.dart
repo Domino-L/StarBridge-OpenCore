@@ -10,11 +10,15 @@ bool validMenuFriendsAction(Object? args, int? opening) =>
       'section',
       'search',
       'presence',
+      'offlineMode',
+      'resumeOnline',
     }.contains(args['action']) &&
     args['key'] is String &&
     (args['key'] as String).length <= 64 &&
     args['value'] is String &&
-    (args['value'] as String).length <= 128;
+    (args['value'] as String).length <= 128 &&
+    (!const {'offlineMode', 'resumeOnline'}.contains(args['action']) ||
+        args['value'] == '');
 
 bool validMenuCommsCompose(Object? args, int? opening) =>
     args is Map &&

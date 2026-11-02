@@ -58,6 +58,7 @@ internal static class RoomAvatarProjection
             "应用在线" or "應用在線" or "在线" or "在線" or "online" or "app online" => "presence.online",
             "暂离" or "暫離" or "away" => "presence.away",
             "离线" or "離線" or "offline" => "presence.offline",
+            "隐身" or "隱身" or "invisible" => "presence.invisible",
             _ => "presence.unknown"
         };
     }

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
-import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import 'local_event_clear.dart';
 
 class LocalEventClearAction extends StatefulWidget {
@@ -21,9 +26,15 @@ class _LocalEventClearActionState extends State<LocalEventClearAction> {
   bool _busy = false;
   int _epoch = 0;
   String? _result;
+  bool _requesting = false;
+  int _completed = 0;
+  InteractionSource _source = InteractionSource.programmatic;
+  StarBridgeDialogRoute<bool>? _confirmation;
   @override
   void dispose() {
     _epoch++;
+    retireStarBridgeDialog(_confirmation);
+    _confirmation = null;
     widget.port.cancel();
     super.dispose();
   }
@@ -31,85 +42,173 @@ class _LocalEventClearActionState extends State<LocalEventClearAction> {
   @override
   void didUpdateWidget(LocalEventClearAction oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.port != widget.port) {
+    if (oldWidget.port != widget.port ||
+        oldWidget.refresh != widget.refresh ||
+        (oldWidget.enabled && !widget.enabled && _confirmation != null)) {
       _epoch++;
+      retireStarBridgeDialog(_confirmation);
+      _confirmation = null;
       oldWidget.port.cancel();
       _busy = false;
       _result = null;
+      _requesting = false;
+      _completed = 0;
+      _source = InteractionSource.programmatic;
     }
   }
 
-  Future<void> _clear() async {
-    if (_busy || !widget.enabled) return;
-    final epoch = _epoch;
+  Future<void> _clear(
+    InteractionSource source,
+    LocalEventClearPort owner,
+    Future<void> Function() refresh,
+    int epoch,
+  ) async {
+    bool active() =>
+        mounted &&
+        epoch == _epoch &&
+        identical(owner, widget.port) &&
+        refresh == widget.refresh;
+    if (!active() || _busy || !widget.enabled) return;
+    var confirmedSource = source;
     setState(() {
       _busy = true;
       _result = null;
+      _source = source;
     });
-    final yes = await showDialog<bool>(
-      context: context,
+    StarBridgeDialogRoute<bool>? confirmation;
+    final yes = await showStarBridgeDialog<bool>(
+      context,
+      source: source,
+      onRouteCreated: (route) => _confirmation = confirmation = route,
       builder: (context) => AlertDialog(
         title: Text(_text(context, 'confirm')),
         content: Text(_text(context, 'scope')),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
+          StarBridgeActionButton(
+            controlKey: const Key('history-clear-cancel'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) {
+              if (!active() || ModalRoute.of(context)?.isCurrent != true) {
+                return;
+              }
+              dismissStarBridgeDialog(context, source: source, result: false);
+            },
             child: Text(_text(context, 'cancel')),
           ),
-          TextButton(
-            key: const Key('history-clear-confirm'),
-            style: TextButton.styleFrom(
-              foregroundColor: context.tokens.colors.danger,
-            ),
-            onPressed: () => Navigator.pop(context, true),
+          StarBridgeActionButton(
+            controlKey: const Key('history-clear-confirm'),
+            kind: StarBridgeActionKind.quiet,
+            tone: ActionTone.danger,
+            onActivate: (source) {
+              if (!active() ||
+                  !widget.enabled ||
+                  ModalRoute.of(context)?.isCurrent != true) {
+                return;
+              }
+              confirmedSource = source;
+              dismissStarBridgeDialog(context, source: source, result: true);
+            },
             child: Text(_text(context, 'clear')),
           ),
         ],
       ),
     );
-    if (!mounted || epoch != _epoch) return;
+    if (_confirmation == confirmation) _confirmation = null;
+    if (!active()) return;
     if (yes != true) {
       setState(() => _busy = false);
       return;
     }
+    setState(() {
+      _requesting = true;
+      _source = confirmedSource;
+    });
     String result;
     try {
-      result = await widget.port.clear();
+      result = await runStarBridgeActivation(confirmedSource, owner.clear);
     } on Object {
       result = 'unknown';
     }
-    if (!mounted || epoch != _epoch) return;
+    if (!active()) return;
     setState(() {
       _busy = false;
+      _requesting = false;
       _result = result;
+      _completed++;
     });
     // Read actual state even on uncertainty; never fake an empty list or retry deletion.
-    await widget.refresh();
+    await runStarBridgeActivation(confirmedSource, refresh);
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      TextButton(
-        key: const Key('history-clear'),
-        style: TextButton.styleFrom(
-          foregroundColor: context.tokens.colors.danger,
-        ),
-        onPressed: _busy || !widget.enabled ? null : _clear,
-        child: Text(_text(context, _busy ? 'working' : 'clear')),
+  Widget build(BuildContext context) {
+    final owner = widget.port, refresh = widget.refresh, epoch = _epoch;
+    return StarBridgeInteractionRegion(
+      child: Builder(
+        builder: (context) {
+          final data = InteractionScope.of(context);
+          final effective = data.copyWith(
+            reduceMotion:
+                data.reduceMotion || _source == InteractionSource.keyboard,
+          );
+          return Stack(
+            children: [
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StarBridgeActionButton(
+                    controlKey: const Key('history-clear'),
+                    kind: StarBridgeActionKind.quiet,
+                    tone: ActionTone.danger,
+                    semanticLabel: _text(context, 'clear'),
+                    onActivate: _busy || !widget.enabled
+                        ? null
+                        : (source) => _clear(source, owner, refresh, epoch),
+                    child: Text(_text(context, _busy ? 'working' : 'clear')),
+                  ),
+                  if (_requesting && data.suite != InteractionSuite.standard)
+                    Semantics(
+                      liveRegion: true,
+                      child: InteractionScope(
+                        data: effective,
+                        child: SuiteBusyLabel(_text(context, 'working')),
+                      ),
+                    ),
+                  if (_result != null)
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _text(context, _result!),
+                        key: const Key('history-clear-result'),
+                      ),
+                    ),
+                ],
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: InteractionScope(
+                      data: effective,
+                      child: SuiteBusyFrame(
+                        key: ValueKey(epoch),
+                        busy: _requesting,
+                        doneToken: _completed,
+                        doneOutcome: _result == 'cleared'
+                            ? TaskOutcome.success
+                            : TaskOutcome.failure,
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
-      if (_result != null)
-        Semantics(
-          liveRegion: true,
-          child: Text(
-            _text(context, _result!),
-            key: const Key('history-clear-result'),
-          ),
-        ),
-    ],
-  );
+    );
+  }
 }
 
 String _text(BuildContext context, String key) {

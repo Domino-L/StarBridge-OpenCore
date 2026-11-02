@@ -8,6 +8,7 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 
 #ifndef DWMWA_BORDER_COLOR
 #define DWMWA_BORDER_COLOR 34
@@ -39,6 +40,25 @@ int Number(const Map& map, const char* name) {
   const auto* number = value ? std::get_if<int32_t>(value) : nullptr;
   return number ? *number : -1;
 }
+int64_t Integer64(const Map& map, const char* name) {
+  const auto* value = Field(map, name);
+  if (const auto* value32 = value ? std::get_if<int32_t>(value) : nullptr) return *value32;
+  const auto* value64 = value ? std::get_if<int64_t>(value) : nullptr;
+  return value64 ? *value64 : -1;
+}
+int64_t WallMicros() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+}
+bool HealthEnvelope(const Map& map) {
+  const auto* scope_value = Field(map, "scope");
+  const auto* scope = scope_value ? std::get_if<std::string>(scope_value) : nullptr;
+  const auto* healthy = Field(map, "healthy");
+  return map.size() == 6 && scope && !scope->empty() && scope->size() <= 128 &&
+      healthy && std::get_if<bool>(healthy) && Number(map, "opening") > 0 &&
+      Number(map, "revision") >= 0 && Number(map, "leaseMilliseconds") == 3000 &&
+      Integer64(map, "sentAtUtcMilliseconds") > 0;
+}
 }
 
 class FriendsWindowBridge::Impl {
@@ -55,6 +75,26 @@ class FriendsWindowBridge::Impl {
       if (call.method_name() == "detach") {
         Hide(); snapshot_.clear(); result->Success(); return;
       }
+      if (call.method_name() == "activityHealth" && kind_ == "messages") {
+        const auto* map = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+        if (!map || !HealthEnvelope(*map)) {
+          result->Error("friends.invalid_activity_health", "Invalid activity health envelope."); return;
+        }
+        const auto* current_scope_value = Field(snapshot_, "activityScope");
+        const auto* current_scope = current_scope_value ? std::get_if<std::string>(current_scope_value) : nullptr;
+        const auto* scope = std::get_if<std::string>(Field(*map, "scope"));
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto sent = Integer64(*map, "sentAtUtcMilliseconds");
+        if (!wanted_ || !dart_ready_ || !secondary_ || !current_scope || *current_scope != *scope ||
+            Number(*map, "opening") != Number(snapshot_, "opening") || sent > now || now - sent >= 3000) {
+          result->Success(Value(false)); return;
+        }
+        // A bounded scheduling hint only: never replace the content snapshot,
+        // acknowledge paint, create, reveal, focus, or call the Host.
+        secondary_->InvokeMethod("activityHealth", std::make_unique<Value>(*map));
+        result->Success(Value(true)); return;
+      }
       if (call.method_name() != "show" && call.method_name() != "snapshot") {
         result->NotImplemented(); return;
       }
@@ -67,7 +107,16 @@ class FriendsWindowBridge::Impl {
       if (call.method_name() == "show") {
         const bool reopening = !wanted_;
         snapshot_ = *map;
-        if (!window_ && !Create()) { result->Success(Value(false)); return; }
+        if (!window_) {
+          // Loading diagnostics (2026-10-21): window + engine creation span,
+          // wall clock, so the primary trace can place it beside the click.
+          const auto created_from = WallMicros();
+          if (!Create()) { result->Success(Value(false)); return; }
+          primary_.InvokeMethod("engineCreated", std::make_unique<Value>(Map{
+              {Value("opening"), Value(Number(snapshot_, "opening"))},
+              {Value("beginWallUs"), Value(created_from)},
+              {Value("endWallUs"), Value(WallMicros())}}));
+        }
         if (reopening) painted_opening_ = -1;
         show_result_ = std::move(result);
         SetTimer(window_, kReadyTimeout, 8000, nullptr);

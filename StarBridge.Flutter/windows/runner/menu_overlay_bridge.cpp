@@ -1,7 +1,12 @@
 #include "menu_overlay_bridge.h"
+#include "menu_image_epoch.h"
 #include "menu_overlay_window.h"
+#include "menu_image_native.h"
 #include "menu_local_tools.h"
 #include "menu_screenshot_settings_intent.h"
+#include "menu_exec_hangar_intent.h"
+#include "menu_tool_page_intent.h"
+#include "manual_status_commands.h"
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
@@ -17,6 +22,13 @@ constexpr UINT kFrameReady = WM_APP + 0x73;
 const Value* Field(const Map& map, const char* name) {
   const auto item = map.find(Value(name));
   return item == map.end() ? nullptr : &item->second;
+}
+// Optional display provenance never broadens an action/visibility grant.
+std::string ReadMotionSource(const Map& map) {
+  const auto* raw = Field(map, "motionSource");
+  const auto* source = raw ? std::get_if<std::string>(raw) : nullptr;
+  return source && (*source == "pointer" || *source == "keyboard")
+      ? *source : "programmatic";
 }
 bool ReadText(const Map& map, const char* name, Map& output) {
   const auto* field = Field(map, name);
@@ -67,7 +79,7 @@ class MenuOverlayBridge::Impl {
             result->Error("menu.foreground_changed", "Foreground target changed."); return;
           }
         }
-        window_.Hide();
+        window_.Hide(false, "reconfigure");
         request_ = Field(*args, "request") ? Integer(*args, "request") : 0;
         const auto* live = Field(*args, "liveFriends");
         live_friends_ = preview && live && std::get_if<bool>(live) && std::get<bool>(*live);
@@ -94,6 +106,10 @@ class MenuOverlayBridge::Impl {
         const auto* startup = startup_raw ? std::get_if<std::string>(startup_raw) : nullptr;
         if (startup && (*startup == "normal" || *startup == "safe" || *startup == "unverified"))
           next[Value("startupMode")] = Value(*startup);
+        const auto* interaction_raw = Field(*args, "interactionPresentation");
+        const auto* interaction = interaction_raw ? std::get_if<std::string>(interaction_raw) : nullptr;
+        if (interaction && interaction->size() <= 128)
+          next[Value("interactionPresentation")] = Value(*interaction);
         const auto* recovery = Field(*args, "recoveryPending");
         next[Value("recoveryPending")] = Value(live_friends_ && recovery && std::get_if<bool>(recovery) && std::get<bool>(*recovery));
         const auto* comms = Field(*args, "liveComms");
@@ -101,6 +117,11 @@ class MenuOverlayBridge::Impl {
         next[Value("liveComms")] = Value(live_comms_);
         const auto* features = Field(*args, "liveFeatures");
         next[Value("liveFeatures")] = Value(live_friends_ && features && std::get_if<bool>(features) && std::get<bool>(*features));
+        const auto* hangar = Field(*args, "execHangar");
+        next[Value("execHangar")] = Value(live_friends_ && hangar && std::get_if<bool>(hangar) && std::get<bool>(*hangar));
+        const auto* game_hangar = Field(*args, "execHangarGameOverlay");
+        next[Value("execHangarGameOverlay")] = Value(live_friends_ && game_hangar && std::get_if<bool>(game_hangar) && std::get<bool>(*game_hangar));
+        if (Field(*args, "resourceEpoch")) image_epoch_.Observe(Integer(*args, "resourceEpoch"));
         snapshot_ = std::move(next);
         workspace_preview_ = preview;
         configured_ = true;
@@ -109,14 +130,15 @@ class MenuOverlayBridge::Impl {
           if (!opening) result->Error("menu.unavailable", "Menu could not prepare a frame.");
           else result->Success(Value(static_cast<int64_t>(opening)));
         } else result->Success();
-      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView" || call.method_name() == "attentionView" || call.method_name() == "noticeView") {
+      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView" || call.method_name() == "attentionView" || call.method_name() == "noticeView" || call.method_name() == "interactionPresentation") {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* raw = args ? Field(*args, "payload") : nullptr;
         const auto* payload = raw ? std::get_if<std::string>(raw) : nullptr;
         if (!args || !payload || payload->size() > 1048576 ||
             (call.method_name() == "attentionView" && payload->size() > 256) ||
             (call.method_name() == "noticeView" && payload->size() > 65536) ||
-            (call.method_name() != "preferencesState" && !(call.method_name() == "commsView" ? live_comms_ : live_friends_)) || !window_.session().wanted() ||
+            (call.method_name() == "interactionPresentation" && payload->size() > 128) ||
+            (call.method_name() != "preferencesState" && call.method_name() != "interactionPresentation" && !(call.method_name() == "commsView" ? live_comms_ : live_friends_)) || !window_.session().wanted() ||
             Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation()) ||
             Integer(*args, "revision") < 0) {
           result->Success(); return;
@@ -125,18 +147,32 @@ class MenuOverlayBridge::Impl {
         if (dart_ready_ && secondary_) secondary_->InvokeMethod(call.method_name(), std::make_unique<Value>(Map{
           {Value("opening"), Value(Integer(*args, "opening"))},
           {Value("revision"), Value(Integer(*args, "revision"))},
+          {Value("resourceEpoch"), Value(Field(*args, "resourceEpoch") ? Integer(*args, "resourceEpoch") : 0)},
           {Value("payload"), Value(*payload)}}));
         result->Success();
+      } else if (call.method_name() == "imageMaintenance") {
+        RetireImages(call.arguments(), std::move(result));
       } else if (call.method_name() == "handoffProfile") {
         // Retired: profile tools stay inside the menu workspace.
         result->Success(Value(false));
+      } else if (call.method_name() == "prewarm") {
+        // Engine creation blocks this platform thread (~1.6s measured inside a
+        // cold opening). Pay it once while hidden; the engine stays resident
+        // after any opening anyway. Defer while the desktop client is in use.
+        if (window_.session().wanted() || (client_ && GetForegroundWindow() == client_)) {
+          result->Success(Value(controller_ != nullptr)); return;
+        }
+        const bool fresh = !controller_;
+        const bool ready = window_.Create() && EnsureEngine();
+        if (ready && fresh) window_.Prepare();
+        result->Success(Value(ready));
       } else if (call.method_name() == "open") {
         const auto opening = Open();
         if (!opening) result->Error("menu.unavailable", "Menu could not prepare a frame.");
         else result->Success(Value(static_cast<int64_t>(opening)));
       } else if (call.method_name() == "close") {
         if (!OwnsRequest(call.arguments())) { result->Success(); return; }
-        window_.Hide(true); result->Success();
+        window_.Hide(true, "close"); result->Success();
       } else if (call.method_name() == "status") {
         result->Success(Value(Map{
           {Value("configured"), Value(configured_)},
@@ -145,38 +181,24 @@ class MenuOverlayBridge::Impl {
       } else if (call.method_name() == "detach") {
         if (!OwnsRequest(call.arguments())) { result->Success(); return; }
         configured_ = false;
-        window_.UnregisterShortcut();
-        window_.Hide();
+        window_.Hide(false, "detach");
         live_friends_ = live_comms_ = workspace_preview_ = false;
         if (local_tools_) local_tools_->Reset();
         ++local_tools_epoch_;
         snapshot_.clear();
         Update();
         result->Success();
-      } else if (call.method_name() == "shortcut") {
-        const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
-        const auto* mods = args && Field(*args,"modifiers") ? std::get_if<int32_t>(Field(*args,"modifiers")) : nullptr;
-        const auto* key = args && Field(*args,"key") ? std::get_if<int32_t>(Field(*args,"key")) : nullptr;
-        if (live_friends_ || !configured_ || !mods || !key || !window_.Create() ||
-            !window_.RegisterShortcut(static_cast<UINT>(*mods), static_cast<UINT>(*key))) {
-          result->Error("menu.shortcut_unavailable", "Shortcut is invalid or already in use."); return;
-        }
-        result->Success();
       } else { result->NotImplemented(); }
     });
-    window_.on_shortcut = [this]() {
-      if (window_.session().wanted()) window_.Hide(true);
-      else if (!Open()) NotifyState("unavailable");
-    };
     window_.on_hidden = [this]() {
       if (local_tools_) local_tools_->Hide();
       Update();
-      NotifyState("hidden");
+      NotifyState("hidden", window_.hide_reason());
     };
+    window_.on_visible = [this]() { NotifyState("visible"); };
     window_.on_message = [this](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
       if (msg == kFrameReady) {
-        if (window_.Reveal(static_cast<uint64_t>(wp)))
-          NotifyState("visible");
+        window_.Reveal(static_cast<uint64_t>(wp));
         return 0;
       }
       if (controller_) return controller_->HandleTopLevelWindowProc(hwnd, msg, wp, lp);
@@ -187,10 +209,9 @@ class MenuOverlayBridge::Impl {
     *alive_ = false;
     primary_.SetMethodCallHandler(nullptr);
     window_.on_hidden = nullptr;
-    window_.on_shortcut = nullptr;
+    window_.on_visible = nullptr;
     window_.on_message = nullptr;
     window_.Hide();
-    window_.UnregisterShortcut();
     if (secondary_) secondary_->SetMethodCallHandler(nullptr);
     secondary_.reset();
     local_tools_.reset();
@@ -198,6 +219,43 @@ class MenuOverlayBridge::Impl {
   }
 
  private:
+  MenuImageEpoch image_epoch_;
+  void RetireImages(const Value* raw, std::unique_ptr<flutter::MethodResult<Value>> result) {
+    const auto* args = raw ? std::get_if<Map>(raw) : nullptr;
+    if (!args || !OwnsRequest(raw) || args->size() != (request_ == 0 ? 2u : 3u) ||
+        Integer(*args, "schemaVersion") != 1 || !image_epoch_.Request(Integer(*args, "resourceEpoch"))) {
+      result->Error("menu.invalidImageMaintenance"); return;
+    }
+    const auto epoch = image_epoch_.value();
+    const bool present = controller_ != nullptr;
+    if (!dart_ready_ || !secondary_) {
+      // No display payload reaches an engine before ready; its first snapshot
+      // carries this epoch. This branch never calls Create or EnsureEngine.
+      result->Success(Value(Map{{Value("schemaVersion"), Value(1)},
+        {Value("resourceEpoch"), Value(epoch)}, {Value("enginePresent"), Value(present)}}));
+      return;
+    }
+    auto reply = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+    auto life = alive_;
+    secondary_->InvokeMethod("imageMaintenance", std::make_unique<Value>(Map{
+      {Value("schemaVersion"), Value(1)}, {Value("resourceEpoch"), Value(epoch)}}),
+      std::make_unique<flutter::MethodResultFunctions<Value>>(
+        [life, reply, epoch](const Value* value) {
+          if (!*life) return;
+          const auto* ack = value ? std::get_if<Map>(value) : nullptr;
+          const auto completed = ack ? Integer(*ack, "resourceEpoch") : -1;
+          if (!ack || ack->size() != 2 || Integer(*ack, "schemaVersion") != 1 ||
+              completed < epoch || completed > MenuImageEpoch::kMaximum) {
+            reply->Error("menu.unconfirmedImageMaintenance"); return;
+          }
+          reply->Success(Value(Map{{Value("schemaVersion"), Value(1)},
+            {Value("resourceEpoch"), Value(completed)}, {Value("enginePresent"), Value(true)}}));
+        },
+        [life, reply](const std::string&, const std::string&, const Value*) {
+          if (*life) reply->Error("menu.imageMaintenanceUnavailable");
+        },
+        [life, reply]() { if (*life) reply->Error("menu.imageMaintenanceUnavailable"); }));
+  }
   int64_t request_ = 0;
   bool OwnsRequest(const Value* value) const {
     const auto* args = value ? std::get_if<Map>(value) : nullptr;
@@ -205,10 +263,12 @@ class MenuOverlayBridge::Impl {
     return request_ == 0 ? !args || !Field(*args, "request")
                          : args && Integer(*args, "request") == request_;
   }
-  void NotifyState(const char* state) {
-    primary_.InvokeMethod("state", std::make_unique<Value>(Map{
+  void NotifyState(const char* state, const char* reason = nullptr) {
+    Map value{
       {Value("request"), Value(request_)}, {Value("state"), Value(state)},
-      {Value("window"), Value(static_cast<int64_t>(reinterpret_cast<intptr_t>(window_.handle())))}}));
+      {Value("window"), Value(static_cast<int64_t>(reinterpret_cast<intptr_t>(window_.handle())))}};
+    if (reason) value[Value("reason")] = Value(reason);
+    primary_.InvokeMethod("state", std::make_unique<Value>(std::move(value)));
   }
   static bool TargetIsForeground(HWND target, DWORD pid) {
     DWORD actual = 0;
@@ -224,7 +284,11 @@ class MenuOverlayBridge::Impl {
     if (target && !TargetIsForeground(target, target_pid)) return 0;
     if (!window_.Create() || !EnsureEngine()) return 0;
     if (target && !TargetIsForeground(target, target_pid)) return 0;
-    const auto opening = window_.Begin(foreground);
+    // A target comes only from the Host's shortcut intent. Settings and preview
+    // openings have none and never join an input queue.
+    bool game = false;
+    const bool may_join_game_input = target && menu_image::ReadProcessIsGame(target_pid, game) && game;
+    const auto opening = window_.Begin(foreground, may_join_game_input);
     if (opening) Update();
     return opening;
   }
@@ -236,6 +300,16 @@ class MenuOverlayBridge::Impl {
 #else
     project.set_dart_entrypoint("menuMain");
 #endif
+    // Menu engine only: Skia. The menu is a transparent full-screen surface
+    // over a GPU-bound game; in-game A/B (2026-10-18) measured drag
+    // input->raster ~2ms and ~0.8ms raster with no visible difference, and
+    // engine creation ~0.25s instead of ~1.2s. STARBRIDGE_MENU_RENDERER=impeller
+    // restores the default renderer for comparison.
+    wchar_t renderer[16]{};
+    const bool impeller =
+        GetEnvironmentVariableW(L"STARBRIDGE_MENU_RENDERER", renderer, 16) == 8 &&
+        _wcsicmp(renderer, L"impeller") == 0;
+    if (!impeller) project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
     controller_ = std::make_unique<flutter::FlutterViewController>(1, 1, project);
     if (!controller_->engine() || !controller_->view() ||
         !window_.Attach(controller_->view()->GetNativeWindow())) {
@@ -244,21 +318,59 @@ class MenuOverlayBridge::Impl {
     local_tools_ = std::make_unique<MenuLocalTools>(window_.handle(),
         [this]() { return window_.session().wanted(); },
         [this](bool modal) { window_.SetLocalModal(modal); },
-        [this]() { window_.Hide(true); });
+        [this]() { window_.Hide(true, "tool"); });
     secondary_ = std::make_unique<Channel>(controller_->engine()->messenger(),
         "starbridge/menu-surface", &flutter::StandardMethodCodec::GetInstance());
     secondary_->SetMethodCallHandler([this](const auto& call, auto result) {
       if (call.method_name() == "ready") {
         dart_ready_ = true;
         result->Success(Value(Snapshot()));
-      } else if (call.method_name() == "shortcutSettings" || call.method_name() == "recoveryAction" || call.method_name() == "browserResume" || call.method_name() == "screenshotDirectory") {
+      } else if (call.method_name() == "openExecHangar" || call.method_name() == "openHudSettings") {
+        // Both hand the user to one fixed client page. The overlay settings
+        // page always exists, so only the hangar needs its capability flag.
+        const bool hud = call.method_name() == "openHudSettings";
+        const std::string unavailable = hud ? "menuToolPage.session_unavailable" : "menuExecHangar.session_unavailable";
+        const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+        const auto opening = window_.session().generation();
+        const auto* capability = Field(snapshot_, "execHangar");
+        const bool allowed = capability && std::get_if<bool>(capability) && std::get<bool>(*capability);
+        if (!args || !(hud
+            ? ValidMenuToolPageIntent(*args, opening, live_friends_, window_.session().wanted(), window_.local_modal())
+            : ValidMenuExecHangarIntent(*args, opening, allowed, live_friends_, window_.session().wanted(), window_.local_modal()))) {
+          result->Error(unavailable, "Menu is closed"); return;
+        }
+        const auto life = alive_;
+        const auto owner = request_;
+        auto pending = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+        primary_.InvokeMethod(call.method_name(), std::make_unique<Value>(*args),
+          std::make_unique<flutter::MethodResultFunctions<Value>>(
+            [this, pending, life, opening, owner, unavailable](const Value* value) {
+              if (!*life) return;
+              if (request_ != owner || !live_friends_ || !window_.session().wanted() ||
+                  window_.session().generation() != opening || !value || !std::get_if<bool>(value) || !std::get<bool>(*value)) {
+                pending->Error(unavailable, "Menu session changed"); return;
+              }
+              pending->Success(Value(true));
+              window_.Hide(true, "tool");
+              if (client_ && IsWindow(client_)) {
+                ShowWindow(client_, IsIconic(client_) ? SW_RESTORE : SW_SHOW);
+                SetForegroundWindow(client_);
+              }
+            },
+            [pending, life](const std::string& code, const std::string&, const Value*) {
+              if (*life) pending->Error(code, "Tool unavailable");
+            },
+            [pending, life, hud]() { if (*life) pending->Error(hud ? "menuToolPage.unavailable" : "menuExecHangar.unavailable", "Tool unavailable"); }));
+      } else if (call.method_name() == "execHangarSummary" || call.method_name() == "execHangarGameOverlay" || call.method_name() == "shortcutSettings" || call.method_name() == "recoveryAction" || call.method_name() == "browserResume" || call.method_name() == "screenshotDirectory") {
+        const bool game_hangar = call.method_name() == "execHangarGameOverlay";
+        const bool hangar = call.method_name() == "execHangarSummary" || game_hangar;
         const bool recovery = call.method_name() == "recoveryAction";
         const bool resume = call.method_name() == "browserResume";
         const bool directory = call.method_name() == "screenshotDirectory";
-        const std::string prefix = directory ? "menuScreenshotDirectory" : recovery ? "menuRecovery" : resume ? "menuBrowserResume" : "menuHotkey";
+        const std::string prefix = hangar ? "menuExecHangar" : directory ? "menuScreenshotDirectory" : recovery ? "menuRecovery" : resume ? "menuBrowserResume" : "menuHotkey";
         const std::string unavailable = prefix + ".session_unavailable";
         const std::string failed = prefix + ".unavailable";
-        const size_t reply_limit = directory ? 262144 : recovery ? 32768 : resume ? 24576 : 1024;
+        const size_t reply_limit = game_hangar ? 256 : hangar ? 12288 : directory ? 262144 : recovery ? 32768 : resume ? 24576 : 1024;
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* action_raw = args ? Field(*args, "action") : nullptr;
         const auto* action = action_raw ? std::get_if<std::string>(action_raw) : nullptr;
@@ -267,9 +379,13 @@ class MenuOverlayBridge::Impl {
         const auto opening = window_.session().generation();
         const auto* directory_capability = Field(snapshot_, "screenshotDirectory");
         const bool directory_allowed = directory_capability && std::get_if<bool>(directory_capability) && std::get<bool>(*directory_capability);
-        if (!args || !action || !live_friends_ || !window_.session().wanted() ||
+        const auto* hangar_capability = Field(snapshot_, game_hangar ? "execHangarGameOverlay" : "execHangar");
+        const bool hangar_allowed = hangar_capability && std::get_if<bool>(hangar_capability) && std::get<bool>(*hangar_capability);
+        if (!args || (!hangar && !action) || !live_friends_ || !window_.session().wanted() ||
             Integer(*args, "opening") != static_cast<int64_t>(opening) ||
-            !(directory ? (directory_allowed && !window_.local_modal() && ValidScreenshotSettingsIntent(*args)) :
+            !(game_hangar ? ValidMenuExecHangarGameIntent(*args, opening, hangar_allowed, live_friends_, window_.session().wanted(), window_.local_modal()) :
+              hangar ? ValidMenuExecHangarIntent(*args, opening, hangar_allowed, live_friends_, window_.session().wanted(), window_.local_modal()) :
+              directory ? (directory_allowed && !window_.local_modal() && ValidScreenshotSettingsIntent(*args)) :
               recovery ? (args->size() == 2 && (*action == "restore" || *action == "startClean")) :
               ((*action == "get" && args->size() == 2) ||
               ((*action == "update" || (resume && *action == "remember")) && args->size() == 3 && payload && payload->size() <= reply_limit)))) {
@@ -376,7 +492,8 @@ class MenuOverlayBridge::Impl {
             Integer(*args, "opening") == static_cast<int64_t>(window_.session().generation())) {
           primary_.InvokeMethod(call.method_name(), std::make_unique<Value>(Map{
             {Value("opening"), Value(Integer(*args, "opening"))},
-            {Value("visible"), Value(*visible)}}));
+            {Value("visible"), Value(*visible)},
+            {Value("motionSource"), Value(ReadMotionSource(*args))}}));
         }
         result->Success();
       } else if (call.method_name() == "featureVisible" || call.method_name() == "featureAction") {
@@ -389,7 +506,8 @@ class MenuOverlayBridge::Impl {
             !window_.session().wanted() || Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation())) {
           result->Error("menu.unavailable", "Tool unavailable"); return;
         }
-        Map next{{Value("opening"), Value(Integer(*args, "opening"))}, {Value("tool"), Value(*tool)}};
+        Map next{{Value("opening"), Value(Integer(*args, "opening"))}, {Value("tool"), Value(*tool)},
+                 {Value("motionSource"), Value(ReadMotionSource(*args))}};
         if (call.method_name() == "featureVisible") {
           const auto* raw = Field(*args, "visible");
           const auto* visible = raw ? std::get_if<bool>(raw) : nullptr;
@@ -444,11 +562,15 @@ class MenuOverlayBridge::Impl {
         if (args && action && key && key->size() <= 64 && value && value->size() <= 512 &&
             live_friends_ && window_.session().wanted() &&
             Integer(*args, "opening") == static_cast<int64_t>(window_.session().generation()) &&
-            (*action == "prepare" || *action == "confirm" || *action == "dismiss" ||
-             *action == "refresh" || *action == "section" || *action == "search" || *action == "presence")) {
+            IsMenuFriendAction(*action) && ((*action != "offlineMode" && *action != "resumeOnline") || value->empty())) {
+          if (*action == "resumeOnline" && client_ && IsWindow(client_)) {
+            ShowWindow(client_, IsIconic(client_) ? SW_RESTORE : SW_SHOW);
+            SetForegroundWindow(client_);
+          }
           primary_.InvokeMethod("friendsAction", std::make_unique<Value>(Map{
             {Value("opening"), Value(Integer(*args, "opening"))},
-            {Value("action"), Value(*action)}, {Value("key"), Value(*key)}, {Value("value"), Value(*value)}}));
+            {Value("action"), Value(*action)}, {Value("key"), Value(*key)}, {Value("value"), Value(*value)},
+            {Value("motionSource"), Value(ReadMotionSource(*args))}}));
           result->Success();
         } else { result->Error("menu.invalid_friend_action", "Friend action is no longer available"); }
       } else if (call.method_name() == "commsCompose") {
@@ -467,7 +589,8 @@ class MenuOverlayBridge::Impl {
           primary_.InvokeMethod("commsCompose", std::make_unique<Value>(Map{
             {Value("opening"), Value(Integer(*args, "opening"))},
             {Value("action"), Value(*action)}, {Value("key"), Value(*key)},
-            {Value("text"), Value(*text)}, {Value("revision"), Value(Integer(*args, "revision"))}}));
+            {Value("text"), Value(*text)}, {Value("revision"), Value(Integer(*args, "revision"))},
+            {Value("motionSource"), Value(ReadMotionSource(*args))}}));
         }
         result->Success();
       } else if (call.method_name() == "commsAction") {
@@ -482,11 +605,12 @@ class MenuOverlayBridge::Impl {
              *action == "attachment" || *action == "inviteSend" || *action == "inviteRecords" || *action == "inviteAction" || *action == "inviteClose" || *action == "clearLocal")) {
           primary_.InvokeMethod("commsAction", std::make_unique<Value>(Map{
             {Value("opening"), Value(Integer(*args, "opening"))},
-            {Value("action"), Value(*action)}, {Value("key"), Value(*key)}}));
+            {Value("action"), Value(*action)}, {Value("key"), Value(*key)},
+            {Value("motionSource"), Value(ReadMotionSource(*args))}}));
         }
         result->Success();
       } else if (call.method_name() == "dismiss") {
-        window_.Hide(true); result->Success();
+        window_.Hide(true, "dismiss"); result->Success();
       } else { result->NotImplemented(); }
     });
     return true;
@@ -497,6 +621,7 @@ class MenuOverlayBridge::Impl {
     value[Value("wanted")] = Value(window_.session().wanted());
     value[Value("workspacePreview")] = Value(workspace_preview_);
     value[Value("localToolsEpoch")] = Value(local_tools_epoch_);
+    value[Value("resourceEpoch")] = Value(image_epoch_.value());
     return value;
   }
   void Update() {

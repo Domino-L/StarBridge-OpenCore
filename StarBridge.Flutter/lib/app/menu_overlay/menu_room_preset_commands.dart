@@ -1,3 +1,4 @@
+import 'menu_overlay_text.dart';
 import '../../features/party_rooms/party_rooms_module.dart';
 import '../../features/party_rooms/room_chat_module.dart';
 import '../../features/party_rooms/room_preset_port.dart';
@@ -74,17 +75,22 @@ final class MenuRoomPresetCommands {
       'error': _roomPreset.error,
       'draftName': _roomPreset.name,
       'open': !_state.uncertain
-          ? _session.button('分享浮层预设', (_) async {
+          ? _session.button(MenuOverlayText('menu.overlay.rooms.sharePreset'), (
+              _,
+            ) async {
               if (valid()) await _loadRoomPresets(roomId);
             })['key']
           : null,
       'clear': !_state.uncertain && _roomPreset.attachment != null
-          ? _session.button('移除附件', (_) async {
-              if (!valid() || _state.uncertain) return;
-              _roomPreset.attachment = null;
-              _roomPreset.name = null;
-              _roomPreset.revision++;
-            })['key']
+          ? _session.button(
+              MenuOverlayText('menu.overlay.rooms.removeAttachment'),
+              (_) async {
+                if (!valid() || _state.uncertain) return;
+                _roomPreset.attachment = null;
+                _roomPreset.name = null;
+                _roomPreset.revision++;
+              },
+            )['key']
           : null,
       'choices': [
         if (!_state.uncertain)

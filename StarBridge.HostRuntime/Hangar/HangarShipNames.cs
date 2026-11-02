@@ -39,6 +39,8 @@ internal static class HangarShipNames
     {
         var name = Catalog.Value.Find(ship.Title);
         return new { id = ship.Id, title = ship.Title, liner = ship.Liner, addedAt = ship.AddedAt, removedAt = ship.RemovedAt,
+            isFavorite = ship.IsFavorite,
+            nickname = ship.Nickname, notes = ship.Notes,
             catalogId = name.CatalogId, category = name.Category, sizeClass = name.SizeClass, display = name.Display,
             deliveryStatus = name.DeliveryStatus, priceUsd = name.PriceUsd, imageAsset = Media.Value.Find(name.ImageKey),
             thumbnailAsset = Media.Value.FindThumbnail(name.ImageKey),

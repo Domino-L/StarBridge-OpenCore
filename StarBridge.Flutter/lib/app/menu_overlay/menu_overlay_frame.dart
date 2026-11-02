@@ -1,10 +1,14 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/styles/attention_badge_palette.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'menu_chrome_hint.dart';
 
 /// A presentation-only registration. Business permissions and subscriptions
 /// remain with the caller. All text is already localized by composition.
@@ -90,31 +94,25 @@ class MenuOverlayFrame extends StatelessWidget {
                           ),
                         ),
                       if (onSettings != null)
-                        IconButton(
-                          tooltip: settingsLabel,
-                          onPressed: onSettings,
+                        MenuChromeIconAction(
+                          controlKey: const ValueKey('menu-settings'),
+                          label: settingsLabel,
+                          onActivate: (_) => onSettings!(),
                           icon: const StarBridgeIcon(
                             StarBridgeIconSemantic.settings,
                           ),
                         ),
                       if (compact)
-                        IconButton(
-                          key: const ValueKey('menu-return'),
-                          tooltip: returnLabel,
-                          onPressed: onReturn,
+                        MenuChromeIconAction(
+                          controlKey: const ValueKey('menu-return'),
+                          label: returnLabel,
+                          onActivate: (_) => onReturn(),
                           icon: const StarBridgeIcon(
                             StarBridgeIconSemantic.windowClose,
                           ),
                         )
                       else
-                        TextButton.icon(
-                          key: const ValueKey('menu-return'),
-                          onPressed: onReturn,
-                          icon: const StarBridgeIcon(
-                            StarBridgeIconSemantic.windowClose,
-                          ),
-                          label: Text(returnLabel),
-                        ),
+                        _ReturnAction(label: returnLabel, onReturn: onReturn),
                     ],
                   );
                   final title = Text(
@@ -184,6 +182,73 @@ class _MenuSurface extends StatelessWidget {
   }
 }
 
+/// Keep the original TextButton.icon defaults, including scaled gap and themed
+/// icon alignment, without changing the shared button module for one caller.
+class _ReturnAction extends StatelessWidget {
+  const _ReturnAction({required this.label, required this.onReturn});
+  final String label;
+  final VoidCallback onReturn;
+
+  @override
+  Widget build(BuildContext context) {
+    const icon = StarBridgeIcon(StarBridgeIconSemantic.windowClose);
+    final original = TextButton.icon(
+      onPressed: onReturn,
+      icon: icon,
+      label: Text(label),
+    );
+    final style = (TextButtonTheme.of(context).style ?? const ButtonStyle())
+        .merge(original.defaultStyleOf(context));
+    final theme = Theme.of(context);
+    final adjustment =
+        (style.visualDensity ?? theme.visualDensity).baseSizeAdjustment;
+    final target =
+        (style.tapTargetSize ?? theme.materialTapTargetSize) ==
+            MaterialTapTargetSize.padded
+        ? kMinInteractiveDimension
+        : 0.0;
+    final minimum = style.minimumSize!.resolve({})!;
+    final scale = (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(
+      1.0,
+      2.0,
+    );
+    final children = <Widget>[
+      IconTheme.merge(
+        data: IconThemeData(size: style.iconSize?.resolve({})),
+        child: icon,
+      ),
+      Flexible(
+        child: Text(
+          label,
+          style: style.textStyle
+              ?.resolve({})
+              ?.copyWith(
+                inherit: false,
+                color: style.foregroundColor?.resolve({}),
+              ),
+        ),
+      ),
+    ];
+    return StarBridgeActionButton(
+      controlKey: const ValueKey('menu-return'),
+      kind: StarBridgeActionKind.quiet,
+      nativeStyle: style,
+      minHeight: math.max(
+        minimum.height + adjustment.dy,
+        target + adjustment.dy,
+      ),
+      onActivate: (_) => onReturn(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 8 - (scale - 1) * 4,
+        children: style.iconAlignment == IconAlignment.end
+            ? children.reversed.toList()
+            : children,
+      ),
+    );
+  }
+}
+
 class _ToolButton extends StatelessWidget {
   const _ToolButton(this.tool);
   final MenuOverlayTool tool;
@@ -191,51 +256,58 @@ class _ToolButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return Semantics(
-      selected: tool.isActive,
-      child: Tooltip(
-        message: tool.onActivate == null ? tool.unavailableReason! : tool.label,
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: tokens.space.xs),
-          child: TextButton(
-            key: ValueKey('menu-tool-${tool.id}'),
-            onPressed: tool.onActivate,
-            style: tool.isActive
-                ? TextButton.styleFrom(
-                    backgroundColor: tokens.colors.accent.withValues(
-                      alpha: 0.16,
-                    ),
-                  )
-                : null,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Badge(
-                  key: ValueKey('menu-unread-${tool.id}'),
-                  backgroundColor: AttentionBadgePalette.background,
-                  textColor: AttentionBadgePalette.foreground,
-                  isLabelVisible: tool.hasUnread,
-                  child: StarBridgeIcon(tool.icon),
-                ),
-                Text(tool.label),
-                SizedBox(
-                  height: 4,
-                  width: 16,
-                  child: tool.isOpen
-                      ? DecoratedBox(
-                          key: ValueKey('menu-open-${tool.id}'),
-                          decoration: BoxDecoration(
-                            color: tool.isActive
-                                ? tokens.colors.accent
-                                : tokens.colors.textSecondary,
-                            borderRadius: BorderRadius.circular(
-                              tokens.shape.radiusSmall,
+    return MergeSemantics(
+      child: Semantics(
+        selected: tool.isActive,
+        child: MenuChromeHint(
+          message: tool.onActivate == null
+              ? tool.unavailableReason!
+              : tool.label,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: tokens.space.xs),
+            child: StarBridgeActionButton(
+              controlKey: ValueKey('menu-tool-${tool.id}'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: tool.onActivate == null
+                  ? null
+                  : (_) => tool.onActivate!(),
+              nativeStyle: tool.isActive
+                  ? TextButton.styleFrom(
+                      backgroundColor: tokens.colors.accent.withValues(
+                        alpha: 0.16,
+                      ),
+                    )
+                  : const ButtonStyle(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Badge(
+                    key: ValueKey('menu-unread-${tool.id}'),
+                    backgroundColor: AttentionBadgePalette.background,
+                    textColor: AttentionBadgePalette.foreground,
+                    isLabelVisible: tool.hasUnread,
+                    child: StarBridgeIcon(tool.icon),
+                  ),
+                  Text(tool.label),
+                  SizedBox(
+                    height: 4,
+                    width: 16,
+                    child: tool.isOpen
+                        ? DecoratedBox(
+                            key: ValueKey('menu-open-${tool.id}'),
+                            decoration: BoxDecoration(
+                              color: tool.isActive
+                                  ? tokens.colors.accent
+                                  : tokens.colors.textSecondary,
+                              borderRadius: BorderRadius.circular(
+                                tokens.shape.radiusSmall,
+                              ),
                             ),
-                          ),
-                        )
-                      : null,
-                ),
-              ],
+                          )
+                        : null,
+                  ),
+                ],
+              ),
             ),
           ),
         ),

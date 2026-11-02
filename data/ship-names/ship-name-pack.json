@@ -1,7 +1,13 @@
 {
     "schemaVersion":  1,
-    "revision":  "2026-09-30.1",
+    "revision":  "2026-10-14.1",
     "entries":  [
+                    {
+                        "runtimeId": "RSI_Constellation_Mk5_Centaurus",
+                        "englishName": "Constellation Mk V Centaurus",
+                        "chineseName": "星座 Mk V 半人马座",
+                        "aliases": ["RSI 星座 Mk V 半人马座", "星座 MKV 半人马座", "Constellation Mk5 Centaurus"]
+                    },
                     {
                         "runtimeId":  "AEGS_Avenger_Dead",
                         "englishName":  "Avenger Dead",
@@ -981,6 +987,7 @@
                         "englishName":  "Star Runner",
                         "chineseName":  "墨丘利",
                         "aliases":  [
+                                        "Mercury",
                                         "十字军 墨丘利 星际快运船"
                                     ]
                     },
@@ -1037,6 +1044,7 @@
                         "englishName":  "Starlifter A2",
                         "chineseName":  "大力神 A2",
                         "aliases":  [
+                                        "A2 Hercules",
                                         "十字军 大力神 A2 星际运输船"
                                     ]
                     },
@@ -1053,6 +1061,7 @@
                         "englishName":  "Starlifter C2",
                         "chineseName":  "大力神 C2",
                         "aliases":  [
+                                        "C2 Hercules",
                                         "十字军 大力神 C2 星际运输船"
                                     ]
                     },
@@ -1061,6 +1070,7 @@
                         "englishName":  "Starlifter M2",
                         "chineseName":  "大力神 M2",
                         "aliases":  [
+                                        "M2 Hercules",
                                         "十字军 大力神 M2 星际运输船"
                                     ]
                     },
@@ -1069,6 +1079,7 @@
                         "englishName":  "Starliner",
                         "chineseName":  "创世纪",
                         "aliases":  [
+                                        "Genesis",
                                         "十字军 创世纪 星际客机"
                                     ]
                     },
@@ -2140,6 +2151,7 @@
                         "englishName":  "Aurora CL",
                         "chineseName":  "极光 CL",
                         "aliases":  [
+                                        "Aurora Mk I CL",
                                         "RSI 极光 Mk I CL"
                                     ]
                     },
@@ -2148,6 +2160,7 @@
                         "englishName":  "Aurora ES",
                         "chineseName":  "极光 ES",
                         "aliases":  [
+                                        "Aurora Mk I ES",
                                         "RSI 极光 Mk I ES"
                                     ]
                     },
@@ -2156,6 +2169,7 @@
                         "englishName":  "Aurora LN",
                         "chineseName":  "极光 LN",
                         "aliases":  [
+                                        "Aurora Mk I LN",
                                         "RSI 极光 Mk I LN"
                                     ]
                     },
@@ -2164,6 +2178,7 @@
                         "englishName":  "Aurora LX",
                         "chineseName":  "极光 LX",
                         "aliases":  [
+                                        "Aurora Mk I LX",
                                         "RSI 极光 Mk I LX"
                                     ]
                     },
@@ -2196,6 +2211,7 @@
                         "englishName":  "Aurora MR",
                         "chineseName":  "极光 MR",
                         "aliases":  [
+                                        "Aurora Mk I MR",
                                         "RSI 极光 Mk I MR"
                                     ]
                     },

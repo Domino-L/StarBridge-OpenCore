@@ -105,6 +105,16 @@ internal sealed class ScmAccountCompatibilityCoordinator(
                         retryable: true);
             }
         }
+        catch (IdentityLinkProofRejectedException)
+        {
+            throw new AccountBridgeHostException(
+                AccountBridgeStableErrors.CompatibilityProofRejected, retryable: true);
+        }
+        catch (LegacyIdentityLinkProofUnavailableException)
+        {
+            throw new AccountBridgeHostException(
+                AccountBridgeStableErrors.LegacyProofUnavailable, retryable: true);
+        }
         catch (HttpRequestException exception)
             when (exception.StatusCode == HttpStatusCode.Unauthorized)
         {

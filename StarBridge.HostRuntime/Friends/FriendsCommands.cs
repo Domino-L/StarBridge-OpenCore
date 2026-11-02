@@ -14,7 +14,7 @@ internal sealed record FriendCommandView(string Status, string? Error = null, Fr
 
 internal sealed partial class FriendsReader
 {
-    private sealed record Target(string Owner, string Id, string Relation, string? Query, DateTimeOffset Expires);
+    private sealed record Target(string Owner, string Id, string Relation, string? Query, DateTimeOffset Expires, string[]? Denied = null);
     private readonly byte[] _conversationKey = RandomNumberGenerator.GetBytes(32);
     private string ConversationKey(string owner, string id, string scope) => Convert.ToHexString(
         HMACSHA256.HashData(_conversationKey, Encoding.UTF8.GetBytes((scope.Length == 0 ? owner : scope) + "\n" + id.ToUpperInvariant())));
@@ -30,6 +30,8 @@ internal sealed partial class FriendsReader
         "incoming" => ["accept", "reject", "block"], "outgoing" => ["cancel", "block"],
         "blocked" => ["unblock"], _ => []
     };
+    private static string[] Denied(FriendView row) =>
+        [.. row.Addable ? Array.Empty<string>() : ["send"], .. row.Blockable ? Array.Empty<string>() : ["block"]];
     private static IEnumerable<FriendView> All(FriendsView view) =>
         view.Friends.Concat(view.Incoming).Concat(view.Outgoing).Concat(view.Blocked).Concat(view.Results);
 
@@ -59,18 +61,21 @@ internal sealed partial class FriendsReader
                 if (_friendChatTargets.Count + All(view).Count() > 8192) throw Invalid();
             }
             FriendView[] Rows(FriendView[] rows) => rows.Select(row => {
-                var actions = AllowedActions(row.Relationship);
-                if (actions.Length == 0) return row;
+                var allowed = AllowedActions(row.Relationship);
+                if (allowed.Length == 0) return row;
+                // Still readable (profile), but nothing Relay would refuse is offered.
+                var denied = Denied(row);
+                var actions = allowed.Except(denied).ToArray();
                 var reference = Guid.NewGuid().ToString("N");
-                _targets.Add(reference, new(owner, row.AccountId, row.Relationship, view.Query, DateTimeOffset.UtcNow.AddMinutes(5)));
+                _targets.Add(reference, new(owner, row.AccountId, row.Relationship, view.Query, DateTimeOffset.UtcNow.AddMinutes(5), denied));
                 RememberAvatar(reference, _targets[reference]);
                 string? chatReference = null;
-                if (row.Relationship == "friend") {
+                if (row.Relationship == "friend" && row.ChatAvailable) {
                     var retained = retainedChats.GetValueOrDefault(row.AccountId);
                     chatReference = retained.Key ?? Guid.NewGuid().ToString("N");
                     _conversations[chatReference] = retained.Value is { } existing
                         ? existing with { Expires = DateTimeOffset.UtcNow.AddMinutes(30), DisplayName = row.Callsign }
-                        : new(owner, row.AccountId, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign);
+                        : new(owner, row.AccountId, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign, CredentialOwner: Owner(bearer, ""));
                     _friendChatTargets.Add(chatReference);
                 }
                 return row with { TargetRef = reference, ChatTargetRef = chatReference, Actions = actions,
@@ -85,9 +90,11 @@ internal sealed partial class FriendsReader
     {
         try {
             var names = payload.EnumerateObject().Select(p => p.Name).ToArray();
-            if (names.Length != 3 || names.Distinct().Count() != 3 ||
-                names.Any(n => n is not ("schemaVersion" or "action" or "targetRef")) ||
+            if (names.Length is < 3 or > 4 || names.Distinct().Count() != names.Length ||
+                names.Any(n => n is not ("schemaVersion" or "action" or "targetRef" or "pagedResponse")) ||
                 payload.GetProperty("schemaVersion").GetInt32() != 1) throw InvalidRequest();
+            if (payload.TryGetProperty("pagedResponse", out var paged) &&
+                paged.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw InvalidRequest();
             var action = Text(payload, "action", 16);
             var reference = Text(payload, "targetRef", 32);
             if (!Guid.TryParseExact(reference, "N", out _) ||
@@ -97,7 +104,8 @@ internal sealed partial class FriendsReader
     }
 
     internal async Task<FriendCommandView> ExecuteAsync(string bearer, JsonElement payload,
-        CancellationToken token, string scope = "", Action? ensureCurrent = null)
+        CancellationToken token, string scope = "", Action? ensureCurrent = null,
+        Func<string, CancellationToken, Task<FriendsView>>? scmSearch = null)
     {
         var (action, reference) = ParseCommand(payload);
         if (!await _commandGate.WaitAsync(0, token)) return new("rejected", "busy");
@@ -105,21 +113,23 @@ internal sealed partial class FriendsReader
             Target? target;
             lock (_targetGate) {
                 if (!_targets.TryGetValue(reference, out target) || target.Owner != Owner(bearer, scope) ||
-                    target.Expires < DateTimeOffset.UtcNow || !AllowedActions(target.Relation).Contains(action))
+                    target.Expires < DateTimeOffset.UtcNow || target.Denied?.Contains(action) == true || !AllowedActions(target.Relation).Contains(action))
                     return new("rejected", "targetChanged");
                 _targets.Clear(); // Consume before any await; retries require an explicit fresh read.
             }
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
             FriendsView current;
-            try { current = await ReadAsync(bearer, target.Query, deadline.Token, scope); }
+            try { current = target.Query is not null && scmSearch is not null
+                    ? await ReadScmSearchAsync(bearer, target.Query, scmSearch, deadline.Token, scope, ensureCurrent ?? (() => { }))
+                    : await ReadAsync(bearer, target.Query, deadline.Token, scope); }
             catch (AccountBridgeHostException error) {
                 return new("rejected", error.Code switch {
                     "friends.identity_unavailable" => "identityUnavailable", "friends.forbidden" => "forbidden", _ => "refreshRequired"
                 });
             }
             var selected = All(current).SingleOrDefault(row => row.AccountId == target.Id);
-            if (selected is null || selected.Relationship != target.Relation) return new("rejected", "targetChanged");
+            if (selected is null || selected.Relationship != target.Relation || Denied(selected).Contains(action)) return new("rejected", "targetChanged");
             token.ThrowIfCancellationRequested();
             ensureCurrent?.Invoke(); // Recheck identity after preflight, immediately before the POST.
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, "/api/friends/actions"));
@@ -143,6 +153,10 @@ internal sealed partial class FriendsReader
                 var result = Parse(await CommandBody(response, deadline.Token));
                 var relation = All(result).SingleOrDefault(row => row.AccountId == target.Id)?.Relationship;
                 var expected = action switch { "send" => "outgoing", "accept" => "friend", "block" => "blocked", _ => null };
+                // A linked target is listed under another identity, so ask about the one that was searched.
+                if (relation != expected && IsScmBusinessId(target.Id) &&
+                    await ReadScmRelationshipsAsync(bearer, [target.Id], deadline.Token) is { } confirmed &&
+                    confirmed.TryGetValue(target.Id, out var state)) relation = state.Relationship;
                 if (relation != expected) return new("unknown", "outcomeUnknown");
                 return new("accepted", null, IssueTargets(result, bearer, scope));
             } catch (Exception error) when (error is HttpRequestException or IOException or OperationCanceledException or

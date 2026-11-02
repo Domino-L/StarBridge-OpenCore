@@ -7,7 +7,10 @@ public sealed record LocalHangarShip(
     [property: JsonRequired] string Title, [property: JsonRequired] string? Liner,
     [property: JsonRequired] string? AcquiredText, [property: JsonRequired] DateTimeOffset AddedAt,
     string? CustomImagePath = null, LocalHangarImageCrop? CustomImageCrop = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? RemovedAt = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? RemovedAt = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFavorite = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Nickname = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notes = null);
 
 /// <summary>Normalized image rectangle; preserved metadata only, never loaded by this store.</summary>
 public sealed record LocalHangarImageCrop(
@@ -18,7 +21,9 @@ public sealed record LocalHangarSnapshot(
     [property: JsonRequired] long Revision, [property: JsonRequired] DateTimeOffset? SavedAt,
     [property: JsonRequired] string? OperationId, [property: JsonRequired] IReadOnlyList<LocalHangarShip> Ships,
     [property: JsonRequired] bool Partial = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<LocalHangarShip>? FormerShips = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<LocalHangarShip>? FormerShips = null,
+    // Optional and omitted when absent so legacy envelope checksums remain valid.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? InventorySavedAt = null);
 
 public sealed class LocalHangarStoreException : Exception
 {

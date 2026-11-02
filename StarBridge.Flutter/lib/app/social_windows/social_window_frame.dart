@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../localization/app_strings.dart';
+
 import '../../design_system/icons/window_control_icon.dart';
 import '../../design_system/styles/window_caption_palette.dart';
+import '../../design_system/interaction/starbridge_caption_action.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 
@@ -21,11 +24,12 @@ class SocialWindowFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final strings = AppStrings.of(context);
     Widget button(String label, WindowGlyph icon, String command) => SizedBox(
       width: 44,
       height: 34,
-      child: IconButton(
-        tooltip: label,
+      child: StarBridgeCaptionAction(
+        label: label,
         padding: EdgeInsets.zero,
         iconSize: 15,
         style: IconButton.styleFrom(
@@ -35,7 +39,7 @@ class SocialWindowFrame extends StatelessWidget {
               ? WindowCaptionPalette.closeHover
               : WindowCaptionPalette.hover,
         ).copyWith(side: const WidgetStatePropertyAll(BorderSide.none)),
-        onPressed: () => control(command),
+        onActivate: (_) => control(command),
         icon: WindowControlIcon(icon),
       ),
     );
@@ -67,13 +71,25 @@ class SocialWindowFrame extends StatelessWidget {
                       ),
                     ),
                   ),
-                  button('最小化', WindowGlyph.minimize, 'minimize'),
                   button(
-                    maximized ? '还原' : '最大化',
+                    strings.text('window.minimize'),
+                    WindowGlyph.minimize,
+                    'minimize',
+                  ),
+                  button(
+                    strings.text(
+                      maximized ? 'window.restore' : 'window.maximize',
+                    ),
                     maximized ? WindowGlyph.restore : WindowGlyph.maximize,
                     'toggleMaximize',
                   ),
-                  button('关闭$title窗口', WindowGlyph.close, 'close'),
+                  button(
+                    strings
+                        .text('window.closeNamed')
+                        .replaceAll('{title}', title),
+                    WindowGlyph.close,
+                    'close',
+                  ),
                 ],
               ),
             ),

@@ -14,6 +14,7 @@ enum StarBridgeIconSemantic {
   notifications,
   account,
   profile,
+  achievement,
   edit,
   add,
   dragHandle,

@@ -102,7 +102,7 @@ void main() {
       session.act(oldClear, '');
       await tester.pump();
       expect(view().chat!.preset!.draftName, '测试预设');
-      final send = view().buttons.singleWhere((b) => b.label == '发送消息');
+      final send = view().buttons.singleWhere((b) => b.role == 'sendMessage');
       session.act(send.key, '');
       session.act(send.key, '');
       await tester.pump();
@@ -204,13 +204,13 @@ void main() {
       session.act(view().chat!.preset!.choices.single.id, '');
       await tester.pump();
       port.roomChat.fail = true;
-      final send = view().buttons.singleWhere((b) => b.label == '发送消息');
+      final send = view().buttons.singleWhere((b) => b.role == 'sendMessage');
       session.act(send.key, '');
       await tester.pump();
       expect(view().chat!.status, 'unknown');
       session.act(send.key, '');
       await session.refresh();
-      expect(view().buttons.where((b) => b.label == '发送消息'), isEmpty);
+      expect(view().buttons.where((b) => b.role == 'sendMessage'), isEmpty);
       expect(view().chat!.preset!.open, isNull);
       expect(view().chat!.preset!.clear, isNull);
       expect(port.roomChat.sends, 1);

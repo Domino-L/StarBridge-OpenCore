@@ -71,7 +71,7 @@ internal sealed partial class OverlayCommunitySource
             var leases = _workspaceRosters.Where(p => now < p.Value.AcceptedAt.AddSeconds(40))
                 .ToDictionary(p => p.Key, p => new OverlaySourceLease(OverlaySourceMode.Community,
                     p.Key, key, generation, p.Value.AcceptedAt.AddSeconds(40)), StringComparer.Ordinal);
-            if (_content is { } selected && now < _validUntil)
+            if (!WantsFleet && _content is { } selected && now < _validUntil)
                 leases[selected.Code] = new(OverlaySourceMode.Community, selected.Code, key, generation, _validUntil);
             foreach (var (code, session) in _moduleSessions)
             {
@@ -83,12 +83,14 @@ internal sealed partial class OverlayCommunitySource
             {
                 "auto" => OverlaySourceBinding.Automatic,
                 "room" => new(OverlaySourceMode.Room),
+                "fleet" => new(OverlaySourceMode.Fleet),
                 "community" => new(OverlaySourceMode.Community, _choice.Code, key),
                 _ => null
             };
             if (choice is null) return null;
             // C7 means a focused organization, not an arbitrary directory row.
-            return new(key, generation, now, choice, room, _focusedModuleCommunity, leases);
+            return new(key, generation, now, choice, room, _focusedModuleCommunity, leases)
+            { Fleet = FleetLease(owner, generation), FocusedFleet = _pageFleet };
         }
     }
 
@@ -114,10 +116,10 @@ internal sealed partial class OverlayCommunitySource
             if (_disposed || _choiceFailed || _scope != (owner, generation)) return null;
             if (_moduleSessions.TryGetValue(code, out var session)) return session.Source.ReadModuleSource(owner, generation, code);
             var key = OverlaySceneChoiceStore.Hash(owner);
-            if (Read() is { } selected && selected.Code == code)
+            if (!WantsFleet && Read() is { } selected && selected.Code == code)
             {
                 var authority = ModuleAuthorityFor(code, _validUntil);
-                return new(new(OverlaySourceMode.Community, code, key, generation, _validUntil),
+                return new(new(_isFleetSession ? OverlaySourceMode.Fleet : OverlaySourceMode.Community, code, key, generation, _validUntil),
                     _communicationValidUntil, community: selected with { ContinuityId = authority.Continuity }, authorityStamp: authority,
                     clock: _now, realtimeValidUntil: _validUntil.AddSeconds(-10));
             }

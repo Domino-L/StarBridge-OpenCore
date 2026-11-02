@@ -1,6 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -9,10 +19,12 @@ import 'account_safety.dart';
 
 Future<void> showAccountSafetyDialog(
   BuildContext context,
-  AccountSafetyPort port,
-) async {
-  await showDialog<void>(
-    context: context,
+  AccountSafetyPort port, {
+  InteractionSource? source,
+}) async {
+  await showStarBridgeDialog<void>(
+    context,
+    source: source,
     builder: (_) => _AccountSafetyDialogScope(port: port),
   );
 }
@@ -122,15 +134,28 @@ class AccountSafetyDialog extends StatelessWidget {
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                         ),
-                        IconButton(
-                          tooltip: t('close'),
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: const StarBridgeIcon(StarBridgeIconSemantic.windowClose),
+                        StarBridgeTooltip(
+                          message: t('close'),
+                          excludeFromSemantics: true,
+                          consumeEscape: false,
+                          child: StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            controlKey: const Key('account-safety-close'),
+                            semanticLabel: t('close'),
+                            onActivate: (source) =>
+                                dismissStarBridgeDialog<void>(
+                                  context,
+                                  source: source,
+                                ),
+                            child: const StarBridgeIcon(
+                              StarBridgeIconSemantic.windowClose,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     if (controller.busy && snapshot == null) ...[
-                      const LinearProgressIndicator(),
+                      const _AccountSafetyProgress(),
                       SizedBox(height: tokens.space.sm),
                       Text(t('loading')),
                     ],
@@ -266,6 +291,23 @@ class _AppealEditorState extends State<_AppealEditor> {
   final _details = TextEditingController();
   bool _editing = false;
   late final int _identity = widget.controller.identityRevision;
+  InteractionSource _source = InteractionSource.programmatic;
+  bool _sendingHere = false;
+
+  Future<void> _submit(InteractionSource source) async {
+    _source = source;
+    _sendingHere = true;
+    try {
+      await widget.controller.submit(
+        widget.record.id,
+        _details.text,
+        _identity,
+      );
+    } finally {
+      if (mounted) setState(() => _sendingHere = false);
+    }
+  }
+
   @override
   void dispose() {
     _details.dispose();
@@ -273,7 +315,16 @@ class _AppealEditorState extends State<_AppealEditor> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) => SuiteContentSwitcher(
+        instant: _source == InteractionSource.keyboard,
+        child: _content(context),
+      ),
+    ),
+  );
+
+  Widget _content(BuildContext context) {
     String t(String key) => accountSafetyText(context, key);
     final controller = widget.controller;
     final id = widget.record.id;
@@ -283,46 +334,68 @@ class _AppealEditorState extends State<_AppealEditor> {
     if (existing ||
         outcome == AccountAppealOutcome.submitted ||
         outcome == AccountAppealOutcome.alreadySubmitted) {
-      return Text(t('appealSubmitted'));
+      return Text(t('appealSubmitted'), key: const ValueKey('submitted'));
     }
     if (outcome == AccountAppealOutcome.unknown) {
-      return Text(t('appealUnknown'));
+      return Text(t('appealUnknown'), key: const ValueKey('unknown'));
     }
     if (!_editing) {
-      return TextButton(
-        onPressed: controller.canAppeal(id)
-            ? () => setState(() => _editing = true)
+      return StarBridgeActionButton(
+        key: const ValueKey('closed'),
+        kind: StarBridgeActionKind.quiet,
+        controlKey: Key('account-safety-edit-$id'),
+        onActivate: controller.canAppeal(id)
+            ? (source) => setState(() {
+                _source = source;
+                _editing = true;
+              })
             : null,
         child: Text(t('appeal')),
       );
     }
     return Column(
+      key: const ValueKey('editing'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: _details,
-          maxLength: 2000,
-          minLines: 3,
-          maxLines: 6,
+        StarBridgeFieldFrame(
           enabled: !controller.submitting,
-          decoration: InputDecoration(labelText: t('reason')),
-          onChanged: (_) => setState(() {}),
+          error: outcome == AccountAppealOutcome.rejected,
+          builder: (context, focus) => TextField(
+            key: Key('account-safety-reason-$id'),
+            controller: _details,
+            focusNode: focus,
+            maxLength: 2000,
+            minLines: 3,
+            maxLines: 6,
+            enabled: !controller.submitting,
+            decoration: InputDecoration(labelText: t('reason')),
+            onChanged: (_) => setState(() {}),
+          ),
         ),
         if (outcome == AccountAppealOutcome.rejected) Text(t('appealRejected')),
+        if (controller.submitting && _sendingHere)
+          _AccountSafetyProgress(source: _source),
         Wrap(
           spacing: context.tokens.space.sm,
           children: [
-            FilledButton(
-              onPressed:
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: Key('account-safety-submit-$id'),
+              onActivate:
                   controller.canAppeal(id) && _details.text.trim().isNotEmpty
-                  ? () => controller.submit(id, _details.text, _identity)
+                  ? (source) => unawaited(_submit(source))
                   : null,
               child: Text(t(controller.submitting ? 'sending' : 'appeal')),
             ),
-            TextButton(
-              onPressed: controller.submitting
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: Key('account-safety-cancel-$id'),
+              onActivate: controller.submitting
                   ? null
-                  : () => setState(() => _editing = false),
+                  : (source) => setState(() {
+                      _source = source;
+                      _editing = false;
+                    }),
               child: Text(t('cancel')),
             ),
           ],
@@ -330,4 +403,30 @@ class _AppealEditorState extends State<_AppealEditor> {
       ],
     );
   }
+}
+
+/// Paint-only waiting. No request, timer, retry, progress or result is owned here.
+class _AccountSafetyProgress extends StatelessWidget {
+  const _AccountSafetyProgress({this.source = InteractionSource.programmatic});
+  final InteractionSource source;
+
+  @override
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        final origin = resolveStarBridgeInitialReadSource(context, source);
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion || origin == InteractionSource.keyboard,
+          ),
+          child: const SuiteProgressBar(
+            value: null,
+            phase: ProgressPhase.running,
+          ),
+        );
+      },
+    ),
+  );
 }

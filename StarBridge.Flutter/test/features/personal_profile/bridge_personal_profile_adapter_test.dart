@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/personal_profile/bridge_personal_profile_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_presentation.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_local_projection.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/hangar/legacy_profile_hangar.dart';
@@ -13,6 +14,447 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  for (final statistics in <Map<String, Object?>?>[null, {}]) {
+    test('missing account playtime remains unknown: $statistics', () async {
+      final harness = _PersonalProfileHostHarness();
+      addTearDown(harness.close);
+      harness.profileOverrides = {'gameplayStatistics': statistics};
+      final snapshot = await harness.adapter.read();
+      expect(snapshot.availability, PersonalProfileAvailability.available);
+      expect(snapshot.gameplayMinutes, isNull);
+      expect(
+        PersonalProfileProjection.fromSnapshot(snapshot).gameplayMinutes,
+        isNull,
+      );
+    });
+  }
+  test('explicit zero account playtime remains a known zero', () async {
+    final harness = _PersonalProfileHostHarness();
+    addTearDown(harness.close);
+    harness.profileOverrides = {
+      'gameplayStatistics': {'playTimeSeconds': 0},
+    };
+    expect((await harness.adapter.read()).gameplayMinutes, 0);
+  });
+  for (final seconds in <Object>[-1, 1.5, '3600']) {
+    test(
+      'malformed account playtime is not a successful zero: $seconds',
+      () async {
+        final harness = _PersonalProfileHostHarness();
+        addTearDown(harness.close);
+        harness.profileOverrides = {
+          'gameplayStatistics': {'playTimeSeconds': seconds},
+        };
+        expect(
+          (await harness.adapter.read()).availability,
+          PersonalProfileAvailability.unavailable,
+        );
+      },
+    );
+  }
+  for (final ownerCase in [
+    'different',
+    'missing',
+    'blank',
+    'rootSchema',
+    'profileSchema',
+  ]) {
+    test(
+      'profile read rejects $ownerCase before issuing a fresh receipt',
+      () async {
+        final pair = InMemoryBridgeConnection.createPair();
+        final session = BridgeClientSession(
+          connection: pair.client,
+          sessionGeneration: 7,
+        );
+        final adapter = BridgePersonalProfileAdapter(session);
+        final owner = BridgeAccountContext(
+          environment: 'integration',
+          authority: 'synthetic',
+          subject: ownerCase == 'blank' ? ' ' : 'owner',
+        );
+        Object rootSchema = 1, profileSchema = 1;
+        if (ownerCase == 'rootSchema') rootSchema = 1.0;
+        if (ownerCase == 'profileSchema') profileSchema = 1.0;
+        final requests = <String>[];
+        final subscription = pair.host.incoming.listen((request) {
+          requests.add(request.name);
+          unawaited(
+            pair.host.send(
+              BridgeEnvelope(
+                protocolVersion: 1,
+                messageType: 'response',
+                name: request.name,
+                correlationId: request.correlationId,
+                sessionGeneration: 7,
+                accountContext: request.name == 'account.getCurrent'
+                    ? owner
+                    : ownerCase == 'blank'
+                    ? owner
+                    : ownerCase == 'different'
+                    ? const BridgeAccountContext(
+                        environment: 'integration',
+                        authority: 'synthetic',
+                        subject: 'other',
+                      )
+                    : ownerCase == 'missing'
+                    ? null
+                    : owner,
+                payload: request.name == 'account.getCurrent'
+                    ? {'schemaVersion': rootSchema, 'state': 'signedIn'}
+                    : {..._profilePayload, 'schemaVersion': profileSchema},
+                status: 'ok',
+              ),
+            ),
+          );
+        });
+        try {
+          expect(
+            (await adapter.read()).availability,
+            PersonalProfileAvailability.unavailable,
+          );
+          expect(adapter.readScope, isNull);
+          if (ownerCase == 'rootSchema') {
+            expect(requests, ['account.getCurrent']);
+          }
+        } finally {
+          await adapter.close();
+          await session.close();
+          await subscription.cancel();
+          await pair.host.close();
+        }
+      },
+    );
+  }
+
+  for (final (code, retryable, retain) in [
+    ('bridge.timeout', true, true),
+    ('bridge.disconnected', true, false),
+    ('bridge.host_error', true, false),
+    ('personal_profile.read_transient', true, true),
+    ('personal_profile.read_transient', false, false),
+    ('personal_profile.read_unavailable', true, false),
+    ('personal_profile.read_unavailable', false, false),
+    ('account.reauthorization_required', true, false),
+    ('personal_profile.read_forbidden', true, false),
+    ('personal_profile.data_invalid', true, false),
+    ('personal_profile.write_forbidden', true, false),
+  ]) {
+    test(
+      'read failure $code/$retryable permits retention only when explicitly recoverable',
+      () async {
+        final h = _PersonalProfileHostHarness(profileAvailable: false)
+          ..readFailure = code
+          ..readRetryable = retryable;
+        addTearDown(h.close);
+        final snapshot = await h.adapter.read();
+        expect(snapshot.availability, PersonalProfileAvailability.unavailable);
+        expect(snapshot.transientReadFailure, retain);
+        expect(snapshot.allowEditing, isFalse);
+      },
+    );
+  }
+  test(
+    'page capability revoked during account recheck prevents write',
+    () async {
+      final harness = _PersonalProfileHostHarness();
+      addTearDown(harness.close);
+      harness._session.acceptHostCapabilities({
+        'personalProfile.presentation.write.v1',
+      });
+      harness.profileOverrides = {
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'linkedLegacy',
+          },
+        },
+      };
+      final snapshot = await harness.adapter.read();
+      harness.onAccountRead = () => harness._session.acceptHostCapabilities({});
+      final edits = {
+        'introduction': <String, Object?>{'introduction': ''},
+      };
+      final result = await harness.adapter.savePresentation(
+        snapshot.presentation!,
+        edits,
+      );
+      expect(result.outcome, PersonalProfileActionOutcome.rejected);
+      expect(result.requiresReload, isTrue);
+      expect(
+        harness.requestNames.where(
+          (name) => name.startsWith('personalProfile.update'),
+        ),
+        isEmpty,
+      );
+      harness.onAccountRead = null;
+      harness._session.acceptHostCapabilities({
+        'personalProfile.presentation.write.v1',
+      });
+      final retry = await harness.adapter.savePresentation(
+        snapshot.presentation!,
+        edits,
+      );
+      expect(retry.outcome, PersonalProfileActionOutcome.rejected);
+      expect(
+        harness.requestNames.where(
+          (name) => name.startsWith('personalProfile.update'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+  for (final failure in [
+    'personalProfile.write_unconfirmed',
+    'bridge.disconnected',
+    'malformed',
+  ]) {
+    test(
+      'uncertain page write $failure requires reread and is not replayed',
+      () async {
+        final harness = _PersonalProfileHostHarness()..pageFailure = failure;
+        addTearDown(harness.close);
+        harness._session.acceptHostCapabilities({
+          'personalProfile.presentation.write.v1',
+        });
+        harness.profileOverrides = {
+          'avatarStyle': 0,
+          'wallpaperId': 'none',
+          'presentation': {
+            'schemaVersion': 1,
+            'sourceVersion': 'a' * 64,
+            'origins': {
+              for (final group in PersonalProfilePresentation.groups)
+                group: 'linkedLegacy',
+            },
+          },
+        };
+        final snapshot = await harness.adapter.read();
+        final edits = {
+          'introduction': <String, Object?>{'introduction': ''},
+        };
+        final result = await harness.adapter.savePresentation(
+          snapshot.presentation!,
+          edits,
+        );
+        expect(result.outcome, PersonalProfileActionOutcome.failed);
+        expect(result.failureKey, 'profile.error.writeUnconfirmed');
+        expect(result.requiresReload, isTrue);
+        final retry = await harness.adapter.savePresentation(
+          snapshot.presentation!,
+          edits,
+        );
+        expect(retry.outcome, PersonalProfileActionOutcome.rejected);
+        expect(retry.requiresReload, isTrue);
+        expect(
+          harness.requestNames.where(
+            (name) => name == 'personalProfile.updatePresentation',
+          ),
+          hasLength(1),
+        );
+        // A later ordinary read may show that the uncertain mutation committed.
+        // It must neither replay the draft nor revive the original edit lease.
+        harness.pageFailure = null;
+        harness.profileOverrides = {
+          ...harness.profileOverrides,
+          'revision': snapshot.presentation!.revision + 1,
+          'presentation': {
+            'schemaVersion': 1,
+            'sourceVersion': 'a' * 64,
+            'origins': {
+              for (final group in PersonalProfilePresentation.groups)
+                group: group == 'introduction' ? 'custom' : 'linkedLegacy',
+            },
+          },
+        };
+        final recovered = await harness.adapter.read();
+        expect(
+          recovered.presentation!.revision,
+          snapshot.presentation!.revision + 1,
+        );
+        expect(recovered.presentation!.origins['introduction'], 'custom');
+        expect(
+          harness.requestNames.where(
+            (name) => name == 'personalProfile.updatePresentation',
+          ),
+          hasLength(1),
+        );
+        final stale = await harness.adapter.savePresentation(
+          snapshot.presentation!,
+          edits,
+        );
+        expect(stale.outcome, PersonalProfileActionOutcome.rejected);
+        expect(
+          harness.requestNames.where(
+            (name) => name == 'personalProfile.updatePresentation',
+          ),
+          hasLength(1),
+        );
+      },
+    );
+  }
+  test(
+    'repeated hidden favorite modules retain explicit instance selections',
+    () async {
+      final harness = _PersonalProfileHostHarness();
+      addTearDown(harness.close);
+      final profile = _profilePayload['profile']! as Map<String, Object?>;
+      harness.profileOverrides = {
+        'content': {
+          ...(profile['content']! as Map<String, Object?>),
+          'modules': [
+            for (var index = 0; index < 64; index++)
+              {
+                'id': 'favorite-ships-${index + 1}',
+                'span': 1,
+                'order': index,
+                'isVisible': false,
+                'position': -1,
+                'favoriteShipIds': [
+                  (index + 1).toRadixString(16).padLeft(32, '0'),
+                ],
+              },
+          ],
+        },
+      };
+      final snapshot = await harness.adapter.read();
+      expect(snapshot.moduleLayout, hasLength(64));
+      expect(snapshot.moduleLayout.last.favoriteShipIds, [
+        '00000000000000000000000000000040',
+      ]);
+      expect(snapshot.moduleLayout.last.isVisible, isFalse);
+    },
+  );
+  test(
+    'versioned page edits use explicit groups and consume their lease',
+    () async {
+      final harness = _PersonalProfileHostHarness();
+      addTearDown(harness.close);
+      harness._session.acceptHostCapabilities({
+        'personalProfile.presentation.write.v1',
+      });
+      harness.profileOverrides = {
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'linkedLegacy',
+          },
+        },
+      };
+      final snapshot = await harness.adapter.read();
+      final edits = {
+        'introduction': <String, Object?>{'introduction': ''},
+      };
+      final result = await harness.adapter.savePresentation(
+        snapshot.presentation!,
+        edits,
+      );
+      expect(result.outcome, PersonalProfileActionOutcome.completed);
+      expect(harness.lastUpdatePayload!['editedGroups'], ['introduction']);
+      expect(
+        harness.requestNames.contains('personalProfile.updateSelf'),
+        isFalse,
+      );
+      final retry = await harness.adapter.savePresentation(
+        snapshot.presentation!,
+        edits,
+      );
+      expect(retry.outcome, PersonalProfileActionOutcome.rejected);
+      expect(
+        harness.requestNames.where(
+          (name) => name == 'personalProfile.updatePresentation',
+        ),
+        hasLength(1),
+      );
+    },
+  );
+  test(
+    'ordinary read and local projection retain versioned page provenance',
+    () async {
+      final harness = _PersonalProfileHostHarness();
+      addTearDown(harness.close);
+      harness.profileOverrides = {
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'default',
+          },
+        },
+      };
+      final snapshot = await harness.adapter.read();
+      expect(snapshot.availability, PersonalProfileAvailability.available);
+      expect(snapshot.presentation!.sourceVersion, 'a' * 64);
+      final local = projectLocalProfile(snapshot, null, null, null);
+      expect(identical(local.presentation, snapshot.presentation), isTrue);
+    },
+  );
+  test('SCM profile avatar wins over account avatar while legacy keeps its own avatar', () {
+    final raw = Map<String, Object?>.from(_profilePayload);
+    final profile = Map<String, Object?>.from(raw['profile']! as Map);
+    final imported =
+        'data:image/png;base64,${base64Encode(List.filled(32, 0))}';
+    profile['identity'] = {
+      'callSign': 'Current',
+      'gameHandle': 'Current',
+      'avatarAssetId': imported,
+    };
+    raw['profile'] = profile;
+    final remote = parsePersonalProfileSnapshot(raw);
+    expect(
+      projectLocalProfile(
+        remote,
+        null,
+        null,
+        null,
+        accountAvatarImageData: 'legacy-avatar',
+      ).avatarImageData,
+      imported,
+    );
+    expect(
+      projectLocalProfile(
+        remote,
+        null,
+        null,
+        null,
+        accountAvatarImageData: 'legacy-avatar',
+        legacyAccount: true,
+      ).avatarImageData,
+      'legacy-avatar',
+    );
+  });
+  test('imported inline avatar reaches profile snapshot and clears on next account', () async {
+    final harness = _PersonalProfileHostHarness();
+    addTearDown(harness.close);
+    final image = 'data:image/png;base64,${base64Encode(List.filled(32, 0))}';
+    harness.profileOverrides = {
+      'identity': {
+        'callSign': 'Current',
+        'gameHandle': 'Current',
+        'avatarAssetId': image,
+      },
+    };
+    expect((await harness.adapter.read()).avatarImageData, image);
+    harness.profileOverrides = {
+      'identity': {
+        'callSign': 'Other',
+        'gameHandle': 'Other',
+        'avatarAssetId': null,
+      },
+    };
+    expect((await harness.adapter.read()).avatarImageData, isNull);
+  });
   for (final size in [120 * 1024, 512 * 1024, 512 * 1024 + 1]) {
     test(
       'affiliation preserves the directory image byte budget: $size',
@@ -562,6 +1004,31 @@ void main() {
     await unavailable.close();
   });
 
+  test(
+    'write conflict requires a fresh read and never resends a stale edit',
+    () async {
+      final harness = _PersonalProfileHostHarness()..writeConflict = true;
+      addTearDown(harness.close);
+      await harness.adapter.read();
+      final result = await harness.adapter.save(_edit);
+      expect(result.outcome, PersonalProfileActionOutcome.failed);
+      expect(result.failureKey, 'profile.error.writeConflict');
+      await harness.adapter.save(_edit);
+      expect(
+        harness.requestNames.where(
+          (name) => name == 'personalProfile.updateSelf',
+        ),
+        hasLength(1),
+      );
+      harness.writeConflict = false;
+      await harness.adapter.read();
+      expect(
+        (await harness.adapter.save(_edit)).outcome,
+        PersonalProfileActionOutcome.completed,
+      );
+    },
+  );
+
   test('save requires a successfully read editable profile', () async {
     final harness = _PersonalProfileHostHarness();
     addTearDown(harness.close);
@@ -636,6 +1103,10 @@ final class _PersonalProfileHostHarness {
 
   final bool signedIn;
   bool legacy = false;
+  bool writeConflict = false;
+  String? pageFailure;
+  String readFailure = 'personal_profile.read_unavailable';
+  bool readRetryable = true;
   final bool profileAvailable;
   final String? visibility;
   final String? delayedRequest;
@@ -648,6 +1119,7 @@ final class _PersonalProfileHostHarness {
   Map<String, Object?>? lastUpdatePayload;
   Map<String, Object?> profileOverrides = {};
   String subject = 'synthetic-subject';
+  void Function()? onAccountRead;
 
   List<String> get requestNames => requests.map((item) => item.name).toList();
 
@@ -663,6 +1135,7 @@ final class _PersonalProfileHostHarness {
       subject: subject,
     );
     if (request.name == 'account.getCurrent') {
+      onAccountRead?.call();
       await _send(request, <String, Object?>{
         'schemaVersion': 1,
         'state': signedIn
@@ -673,8 +1146,76 @@ final class _PersonalProfileHostHarness {
       }, context: signedIn ? context : null);
       return;
     }
+    if (request.name == 'personalProfile.updatePresentation') {
+      lastUpdatePayload = request.payload;
+      if (pageFailure != null) {
+        if (pageFailure == 'malformed') {
+          await _send(request, {'schemaVersion': 1}, context: context);
+        } else {
+          await _host.send(
+            BridgeEnvelope(
+              protocolVersion: 1,
+              messageType: 'response',
+              name: request.name,
+              correlationId: request.correlationId,
+              sessionGeneration: request.sessionGeneration,
+              accountContext: context,
+              payload: const {},
+              status: 'error',
+              error: BridgeErrorBody(
+                code: pageFailure!,
+                message: 'Synthetic failure.',
+                retryable: false,
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      await _send(request, {
+        ..._profilePayload,
+        'profile': {
+          ...(_profilePayload['profile']! as Map<String, Object?>),
+          ...profileOverrides,
+          'revision': (request.payload['expectedRevision']! as int) + 1,
+          'content': request.payload['content'],
+          'presentation': {
+            'schemaVersion': 1,
+            'sourceVersion': request.payload['sourceVersion'],
+            'origins': {
+              for (final group in PersonalProfilePresentation.groups)
+                group:
+                    (request.payload['editedGroups']! as List).contains(group)
+                    ? 'custom'
+                    : 'linkedLegacy',
+            },
+          },
+        },
+      }, context: context);
+      return;
+    }
     if (request.name == 'personalProfile.updateSelf') {
       lastUpdatePayload = request.payload;
+      if (writeConflict) {
+        await _host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            correlationId: request.correlationId,
+            sessionGeneration: request.sessionGeneration,
+            accountContext: context,
+            payload: const <String, Object?>{},
+            status: 'error',
+            error: const BridgeErrorBody(
+              code: 'personal_profile.write_conflict',
+              message: 'Conflict.',
+              retryable: true,
+            ),
+          ),
+        );
+        return;
+      }
       await _send(request, <String, Object?>{
         ..._profilePayload,
         'profile': <String, Object?>{
@@ -699,10 +1240,10 @@ final class _PersonalProfileHostHarness {
           accountContext: context,
           payload: const <String, Object?>{},
           status: 'error',
-          error: const BridgeErrorBody(
-            code: 'personal_profile.read_unavailable',
+          error: BridgeErrorBody(
+            code: readFailure,
             message: 'Unavailable.',
-            retryable: true,
+            retryable: readRetryable,
           ),
         ),
       );

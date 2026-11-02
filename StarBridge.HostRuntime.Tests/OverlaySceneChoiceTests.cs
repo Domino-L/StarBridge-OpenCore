@@ -97,7 +97,7 @@ internal static class OverlaySceneChoiceTests
             await restarted.RefreshAsync();
             Check(restarted.Read()?.Code == "B", "Restart preserves exact organization.");
             Check((await Send("auto", 0)).Error?.Code == "overlayScenes.conflict", "Reject stale revision.");
-            Check((await Send("fleet", 1)).Error is not null, "Fleet remains disabled.");
+            Check((await Send("fleet", 1, "B")).Error is not null, "Fleet cannot carry an organization code.");
             Check((await Send("community", 1, "unknown")).Error is not null, "Reject unknown target.");
             reader.Fail = true;
             Check((await Send("room", 1)).Error is null, "Room choice works while directory offline.");
@@ -141,6 +141,38 @@ internal static class OverlaySceneChoiceTests
         }
         finally { Directory.Delete(root, true); }
         return Task.CompletedTask;
+    }
+    internal static async Task ClosedOverlayKeepsOrganizationSources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "overlay-closed-source-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var clock = DateTimeOffset.UtcNow;
+            var owner = OverlaySceneChoiceStore.Hash(Owner);
+            InformationOverlayModuleDemand? demand = new(new OverlayPresetSources(OverlaySourceBinding.Automatic), [OverlaySourceModule.Members]);
+            using var source = new OverlayCommunitySource(() => (Owner, 1), new Reader(), false, now: () => clock,
+                choiceStore: new(root), presetRoomTrigger: () => (true, null), moduleDemand: () => demand);
+            async Task<System.Text.Json.JsonElement> Read() => (await source.DispatchAsync(BridgeEnvelope.Request(
+                OverlayCommunitySource.ReadRequest, Guid.NewGuid().ToString(), 1, new { schemaVersion = 1 }, Owner), default)).Response.Payload;
+            Check((await source.DispatchAsync(BridgeEnvelope.Request(OverlayCommunitySource.SelectRequest, "select", 1,
+                new { schemaVersion = 1, revision = 0, mode = "community", code = "A" }, Owner), default)).Response.Error is null,
+                "Organization choice saved.");
+            // The overlay is closed: no display demand ever renews the organization read.
+            clock = clock.AddMinutes(10);
+            var closed = await Read();
+            Check(closed.GetProperty("status").GetString() == "ready" && closed.GetProperty("actualId").GetString() == "org:A",
+                "A closed overlay still shows the chosen organization, not an unavailable source.");
+            var preview = closed.GetProperty("resolvedSourceIds");
+            Check(preview.GetProperty("org:A").GetString() == "org:A" && preview.GetProperty("org:B").GetString() == "org:B",
+                "Every directory organization previews as readable.");
+            Check(source.CaptureResolutionContext(Owner, 1, null)?.Communities.Count == 0,
+                "Native display still has no lease without a real read.");
+            demand = new(new OverlayPresetSources(new(OverlaySourceMode.Community, "Z", owner)), [OverlaySourceModule.Members]);
+            Check((await Read()).GetProperty("status").GetString() is "bindingUnavailable" or "unavailable",
+                "An organization outside the directory is still reported.");
+        }
+        finally { Directory.Delete(root, true); }
     }
     private sealed class Reader : IOverlayCommunityReader
     {

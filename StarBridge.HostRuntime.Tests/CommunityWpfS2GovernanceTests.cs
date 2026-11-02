@@ -63,9 +63,9 @@ internal static class CommunityWpfS2GovernanceTests
             var result = await fixture.Write("roles", edit, new() { ["roles"] = roles });
             Check(Status(result) == "accepted", "S2 role definitions save");
             Check(fixture.Posts.Single() == "/api/fleets/info", "roles use original unprojected info route");
-            Check(fixture.LastBody!["bannerImageData"]!.GetValue<string>() == "preserved-banner" &&
+            Check(!fixture.LastBody!.AsObject().ContainsKey("bannerImageData") && !fixture.LastBody.AsObject().ContainsKey("backgroundImageData") &&
                 fixture.LastBody["websiteUrl"]!.GetValue<string>() == "https://fixture.invalid/about" &&
-                fixture.LastBody["updatedSections"]![0]!.GetValue<string>() == "role-groups", "roles preserve unrelated profile data and section intent");
+                fixture.LastBody["updatedSections"]![0]!.GetValue<string>() == "role-groups", "roles omit unrelated images and preserve profile data and section intent");
             Check(result.GetProperty("profileRevision").GetInt64() == 2, "new revision reaches existing editor");
             var reread = E(await fixture.Client.ReadWpfS2GovernanceAsync("fixture", E(new { schemaVersion = 1, editRef = edit.GetProperty("editRef").GetString() }),
                 "scope", "roles", () => { }, default));
@@ -87,7 +87,7 @@ internal static class CommunityWpfS2GovernanceTests
             var result = await fixture.Write("role", edit, new() { ["roleKey"] = "fleet_deputy_commander" });
             Check(Status(result) == "accepted" && fixture.Posts.Single() == "/api/fleets/permissions", "original role assignment accepted");
             var permission = fixture.LastBody!["permission"]!;
-            Check(permission["gameName"]!.GetValue<string>() == "Pilot" && permission["canManageFleetInfo"]!.GetValue<bool>() &&
+            Check(permission["gameName"]!.GetValue<string>() == "Pilot" && !permission["canManageFleetInfo"]!.GetValue<bool>() &&
                 permission["canRemoveMembers"]!.GetValue<bool>() && !permission["canPublishTasks"]!.GetValue<bool>(), "WPF role flags and actual target name preserved");
             var reread = E(await fixture.Client.ReadWpfS2GovernanceAsync("fixture", E(new { schemaVersion = 1, editRef = edit.GetProperty("editRef").GetString() }),
                 "scope", "role", () => { }, default));
@@ -262,7 +262,9 @@ internal static class CommunityWpfS2GovernanceTests
             Requests++;
             Check(request.Headers.Authorization?.Parameter == "fixture", "fixture current bearer only");
             var path = request.RequestUri!.AbsolutePath;
-            Check(request.RequestUri.Query.Length == 0 || path == "/api/fleets/announcements" && request.RequestUri.Query == "?fleetCode=A", "S2 governance never calls newer projected endpoints");
+            Check(request.RequestUri.Query.Length == 0 || path == "/api/fleets/announcements" && request.RequestUri.Query == "?fleetCode=A" ||
+                request.Method == HttpMethod.Get && path == "/api/fleets" && request.RequestUri.Query == "?projection=metadata",
+                "S2 uses additive media metadata reads and original governance write routes");
             if (request.Method == HttpMethod.Get) return path switch
             {
                 "/api/fleets/membership" => Json(new { fleetCode = HasMembership ? "A" : null }), "/api/fleets" => Json(new[] { Fleet }),

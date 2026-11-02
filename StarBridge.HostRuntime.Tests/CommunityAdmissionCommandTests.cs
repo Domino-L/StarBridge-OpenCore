@@ -62,6 +62,7 @@ internal static class CommunityAdmissionCommandTests
                 Check((await Send(Body(action, target, entry))).Error == "refreshRequired", "invalidation removes stale row capabilities");
         }
         await VerifyConcurrentAndLate();
+        await VerifyGenerationReceipts();
         await VerifyCurrentInviteOutsidePage();
         foreach (var changes in new[] {
             new Dictionary<string, object?> { ["maxUses"] = 51 },
@@ -75,6 +76,22 @@ internal static class CommunityAdmissionCommandTests
             foreach (var change in changes) fields[change.Key] = change.Value;
             try { CommunityClient.ParseAdmissionIntent(JsonSerializer.SerializeToElement(fields)); throw new InvalidOperationException("Invalid intent accepted"); }
             catch (AccountBridgeHostException error) when (error.Code == "communities.dataInvalid") { }
+        }
+    }
+
+    private static async Task VerifyGenerationReceipts()
+    {
+        foreach (var mode in new[] { "accepted", "unavailable", "pending", "wrong-id", "oversized" })
+        {
+            using var handler = new Handler { ReceiptMode = mode };
+            using var client = new CommunityClient(new Uri("https://community.invalid"), handler);
+            var target = (await client.ReadAsync("bearer", new("mine", "", null, null), "account:1", default)).Items.Single().TargetRef;
+            var body = Body("generateInvite", target, "unused");
+            var result = await client.ManageAdmissionsAsync("bearer", body, "account:1", () => { }, default);
+            var expected = mode == "accepted" ? "accepted" : mode == "unavailable" ? "rejected" : "unknown";
+            Check(result.Status == expected && handler.Writes == 1, "receipt outcome validated: " + mode);
+            Check(await client.ManageAdmissionsAsync("bearer", body, "account:1", () => { }, default) == result &&
+                handler.Writes == 1, "receipt retry cannot replay write");
         }
     }
 
@@ -117,6 +134,7 @@ internal static class CommunityAdmissionCommandTests
     private sealed class Handler : HttpMessageHandler
     {
         internal bool Denied, Missing;
+        internal string? ReceiptMode;
         internal string Mode = "ok";
         internal int Writes;
         internal int LastReadOffset;
@@ -132,6 +150,16 @@ internal static class CommunityAdmissionCommandTests
                 Writes++;
                 Check(path is "/api/fleets/applications/decide" or "/api/fleets/invites" or "/api/fleets/invites/revoke", "only existing WPF writes");
                 LastBody = JsonSerializer.Deserialize<JsonElement>(await request.Content!.ReadAsStringAsync(token));
+                if (ReceiptMode is { } receiptMode)
+                {
+                    Check(request.RequestUri.Query == "?view=client", "negotiated bounded receipt route");
+                    var requestId = LastBody.Value.GetProperty("clientRequestId").GetString();
+                    Check(Guid.TryParseExact(requestId, "N", out _) &&
+                        LastBody.Value.TryGetProperty("clientRequestedAt", out _), "durable intent fields");
+                    return Reply(new { schemaVersion = 1,
+                        requestId = receiptMode == "wrong-id" ? new string('f', 32) : requestId,
+                        status = receiptMode, padding = receiptMode == "oversized" ? new string('x', 5000) : "" });
+                }
                 if (Mode == "lost") throw new HttpRequestException("Lost after sending");
                 if (Mode == "hold") { Entered.SetResult(); await Release.Task; }
                 if (int.TryParse(Mode, out var status)) return new((HttpStatusCode)status);
@@ -143,7 +171,7 @@ internal static class CommunityAdmissionCommandTests
                     relationship = "owner", joinMode = "direct", actions = Array.Empty<string>() } } });
             Check(path == "/api/fleets/admissions", "preflight uses narrow page");
             var section = request.RequestUri.Query.Contains("section=applications") ? "applications" : "invites";
-            var body = new { schemaVersion = 1, membershipModelVersion = 2, code = "A", section, offset = 0, next = (int?)null,
+            var body = new { schemaVersion = 1, membershipModelVersion = 2, inviteGenerationVersion = ReceiptMode is null ? 0 : 1, code = "A", section, offset = 0, next = (int?)null,
                 totalCount = Missing ? 0 : 1,
                 applications = section == "applications" && !Missing ? new object[] { new { applicationId = "server-app", gameName = "Applicant", callsign = "Call", message = "Hello", status = "Pending", createdAt = (string?)null, hasAvatar = false } } : [],
                 invites = section == "invites" && !Missing ? new object[] { new { inviteId = "server-invite", code = "CODE", createdBy = "Owner", createdAt = (string?)null, expiresAt = (string?)null, maxUses = 1, usedCount = 0, status = "Active", isOwn = true, canRevoke = !Denied } } : [],

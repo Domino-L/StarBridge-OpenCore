@@ -8,8 +8,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
     <ProjectReference Include="../StarBridge.OverlayRuntime.Windows/StarBridge.OverlayRuntime.Windows.csproj" />
     <Using Include="StarBridge.Core.Overlay" />
+    <Compile Include="../StarBridge.HostRuntime.Tests/LocalOverlaySourceTests.cs" Link="Onboarding/LocalOverlaySourceTests.cs" />
     <Compile Include="../StarBridge.NativeHost/WindowsNotificationActivity.cs" Link="NativeHost/WindowsNotificationActivity.cs" />
     <Compile Include="../StarBridge.NativeHost/WindowsStorageFolderPicker.cs" Link="NativeHost/WindowsStorageFolderPicker.cs" />
     <!-- Only the regression harness links the old pure producer seam. The
@@ -17,4 +19,12 @@
     <Compile Include="../StarBridge.Desktop/FleetEventShipNormalizer.cs" Link="Legacy/FleetEventShipNormalizer.cs"
              Condition="Exists('../StarBridge.Desktop/FleetEventShipNormalizer.cs')" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Test processes never resolve the user's configured data root (HostDataRoot). -->
+    <RuntimeHostConfigurationOption Include="StarBridge.HostDataRoot.IsolatedTestProcess" Value="true" />
+  </ItemGroup>
+  <PropertyGroup Condition="Exists('../StarBridge.Flutter/assets/achievements/journey-lorville-earned.png')">
+    <DefineConstants>$(DefineConstants);STARBRIDGE_JOURNEY_ART</DefineConstants>
+  </PropertyGroup>
 </Project>

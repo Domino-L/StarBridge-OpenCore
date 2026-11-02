@@ -13,12 +13,15 @@ import '../common/user_avatar_menu.dart';
 import '../common/user_profile_page.dart';
 import 'personal_profile_affiliation_mark.dart';
 import 'personal_profile_models.dart';
+import 'personal_profile_public_facts.dart';
 
 class PersonalProfileIdentityHeader extends StatelessWidget {
   const PersonalProfileIdentityHeader({
     required this.projection,
     this.presence,
     this.isSelf = true,
+    this.trade,
+    this.publicOnly = false,
     super.key,
   });
 
@@ -26,53 +29,101 @@ class PersonalProfileIdentityHeader extends StatelessWidget {
   final bool isSelf;
   final ValueListenable<ShellChromeProjection>? presence;
 
+  /// Trade strip on the card's lower edge (layout a, 2026-10-20); null hides it.
+  final Widget? trade;
+
+  /// A visitor outside the profile's visibility: only the always-public
+  /// avatar and name stay (with the trade strip); the game handle,
+  /// introduction and affiliations follow the visibility and are left out.
+  final bool publicOnly;
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final columns = _columns();
     return StarBridgeSurface(
       key: const Key('profile-identity-header'),
       role: SurfaceRole.raised,
       fillOpacity: 0.90,
       padding: EdgeInsets.all(tokens.space.xl),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < 820) {
-            return Column(
+      child: trade == null
+          ? columns
+          : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _Identity(projection: projection, presence: presence, isSelf: isSelf),
-                _SectionDivider(horizontal: true),
-                _Introduction(projection: projection),
-                _SectionDivider(horizontal: true),
-                _Affiliations(projection: projection),
-              ],
-            );
-          }
-          return IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: _Identity(projection: projection, presence: presence, isSelf: isSelf),
-                ),
-                _SectionDivider(horizontal: false),
-                Expanded(flex: 4, child: _Introduction(projection: projection)),
-                _SectionDivider(horizontal: false),
-                Expanded(flex: 3, child: _Affiliations(projection: projection)),
+                columns,
+                SizedBox(height: tokens.space.lg),
+                trade!,
               ],
             ),
+    );
+  }
+
+  Widget _columns() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 820) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _Identity(
+                projection: projection,
+                presence: publicOnly ? null : presence,
+                isSelf: isSelf,
+                publicOnly: publicOnly,
+              ),
+              if (!publicOnly) ...[
+                _SectionDivider(horizontal: true),
+                _Introduction(projection: projection, isSelf: isSelf),
+              ],
+              _SectionDivider(horizontal: true),
+              _Affiliations(projection: projection, isSelf: isSelf),
+            ],
           );
-        },
-      ),
+        }
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: _Identity(
+                  projection: projection,
+                  presence: publicOnly ? null : presence,
+                  isSelf: isSelf,
+                  publicOnly: publicOnly,
+                ),
+              ),
+              if (!publicOnly) ...[
+                _SectionDivider(horizontal: false),
+                Expanded(
+                  flex: 4,
+                  child: _Introduction(projection: projection, isSelf: isSelf),
+                ),
+              ],
+              _SectionDivider(horizontal: false),
+              Expanded(
+                flex: 3,
+                child: _Affiliations(projection: projection, isSelf: isSelf),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
 class _Identity extends StatelessWidget {
-  const _Identity({required this.projection, this.presence, required this.isSelf});
+  const _Identity({
+    required this.projection,
+    this.presence,
+    required this.isSelf,
+    this.publicOnly = false,
+  });
 
   final bool isSelf;
+  final bool publicOnly;
 
   final PersonalProfileProjection projection;
   final ValueListenable<ShellChromeProjection>? presence;
@@ -107,19 +158,32 @@ class _Identity extends StatelessWidget {
                     ? strings.text('profile.local.noCallSign')
                     : projection.callSign,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
-              SizedBox(height: tokens.space.xxs),
-              Text(
-                projection.gameHandle.isEmpty
-                    ? '—'
-                    : '@${projection.gameHandle}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: tokens.colors.textSecondary),
-              ),
+              if (publicOnly && projection.nameMasked) ...[
+                SizedBox(height: tokens.space.xxs),
+                Text(
+                  personalProfileMaskedNameHint(context),
+                  key: const Key('profile-masked-name-hint'),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: tokens.colors.textSecondary),
+                ),
+              ],
+              if (!publicOnly) ...[
+                SizedBox(height: tokens.space.xxs),
+                Text(
+                  projection.gameHandle.isEmpty
+                      ? '—'
+                      : '@${projection.gameHandle}',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: tokens.colors.textSecondary),
+                ),
+              ],
               SizedBox(height: tokens.space.sm),
               Wrap(
                 spacing: tokens.space.sm,
@@ -149,8 +213,9 @@ class _Identity extends StatelessWidget {
                         ],
                       ),
                     ),
-                  if (projection.presenceIntent ==
-                      PersonalProfilePresenceIntent.availableSupport)
+                  if (!publicOnly &&
+                      projection.presenceIntent ==
+                          PersonalProfilePresenceIntent.availableSupport)
                     _QuietLabel(
                       label: strings.text('profile.presence.availableSupport'),
                     ),
@@ -165,9 +230,10 @@ class _Identity extends StatelessWidget {
 }
 
 class _Introduction extends StatelessWidget {
-  const _Introduction({required this.projection});
+  const _Introduction({required this.projection, required this.isSelf});
 
   final PersonalProfileProjection projection;
+  final bool isSelf;
 
   @override
   Widget build(BuildContext context) {
@@ -187,7 +253,11 @@ class _Introduction extends StatelessWidget {
           SizedBox(height: tokens.space.sm),
           Text(
             projection.about.isEmpty
-                ? strings.text('profile.about.empty')
+                ? strings.text(
+                    isSelf
+                        ? 'profile.about.empty'
+                        : 'profile.visitor.aboutUnavailable',
+                  )
                 : projection.about,
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
@@ -230,9 +300,10 @@ class _PresenceLabel extends StatelessWidget {
 }
 
 class _Affiliations extends StatelessWidget {
-  const _Affiliations({required this.projection});
+  const _Affiliations({required this.projection, required this.isSelf});
 
   final PersonalProfileProjection projection;
+  final bool isSelf;
 
   @override
   Widget build(BuildContext context) {
@@ -253,7 +324,9 @@ class _Affiliations extends StatelessWidget {
           if (projection.affiliations.isEmpty)
             Text(
               strings.text(
-                projection.local?.remoteAvailable == false
+                !isSelf
+                    ? _visitorAffiliationKey(projection)
+                    : projection.local?.remoteAvailable == false
                     ? 'profile.local.unknown'
                     : 'profile.affiliation.empty',
               ),
@@ -297,7 +370,8 @@ class _AffiliationRow extends StatelessWidget {
               Text(
                 affiliation.name,
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               SizedBox(height: tokens.space.xxs),
@@ -305,7 +379,8 @@ class _AffiliationRow extends StatelessWidget {
                 '${strings.text(affiliation.positionLabelKey)} · '
                 '${affiliation.code}',
                 maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow.fade,
+                softWrap: false,
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: tokens.colors.textSecondary),
               ),
@@ -356,3 +431,13 @@ class _SectionDivider extends StatelessWidget {
           );
   }
 }
+
+String _visitorAffiliationKey(PersonalProfileProjection projection) =>
+    projection.restricted
+    ? 'profile.visitor.affiliationHidden'
+    : switch (projection.affiliationStatus) {
+        'none' => 'profile.visitor.affiliationNone',
+        'hidden' => 'profile.visitor.affiliationHidden',
+        'unavailable' => 'profile.visitor.affiliationUnreadable',
+        _ => 'profile.visitor.affiliationUnavailable',
+      };

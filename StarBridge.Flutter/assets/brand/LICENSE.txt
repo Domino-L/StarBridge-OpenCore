@@ -48,6 +48,20 @@ StarBridge open-core source. This scope was confirmed by the maintainer on
 - StarBridge.Flutter/windows/runner/resources/app_icon_light_surface.ico
 - StarBridge.Flutter/windows/runner/resources/app_icon.ico
 
+For the 0.7.2 open-core source, the same limited permission is extended to
+the following StarBridge-authored holiday runtime artwork files:
+
+- StarBridge.Flutter/windows/runner/resources/app_icon_xmas_dark_surface.ico
+- StarBridge.Flutter/windows/runner/resources/app_icon_xmas_light_surface.ico
+- StarBridge.Flutter/windows/runner/resources/app_icon_halloween_dark_surface.ico
+- StarBridge.Flutter/windows/runner/resources/app_icon_halloween_light_surface.ico
+- StarBridge.Flutter/assets/brand/holiday/halloween_mark_dark_surface.png
+- StarBridge.Flutter/assets/brand/holiday/halloween_mark_light_surface.png
+- StarBridge.Flutter/assets/brand/holiday/halloween_mark_small_dark_surface.png
+- StarBridge.Flutter/assets/brand/holiday/halloween_mark_small_light_surface.png
+- StarBridge.Flutter/assets/brand/holiday/xmas_mark_dark_surface.png
+- StarBridge.Flutter/assets/brand/holiday/xmas_mark_light_surface.png
+
 No permission is granted to use or redistribute these files as the branding of
 a fork, modified build, competing product, or any distribution likely to imply
 official status, affiliation or endorsement. Forks and modified builds must

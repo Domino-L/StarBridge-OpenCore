@@ -34,6 +34,7 @@ final class _DefaultOfficialFleetOverviewModule
   late final StreamSubscription<void> _subscription;
   String? _sourceRef;
   int _requestRevision = 0;
+  Future<void>? _readTask;
   bool _disposed = false;
 
   @override
@@ -50,26 +51,48 @@ final class _DefaultOfficialFleetOverviewModule
             OfficialFleetOverviewAvailability.idle) {
       return;
     }
+    reset();
     _sourceRef = sourceRef;
     await refresh();
   }
 
   @override
-  Future<void> refresh() async {
+  Future<void> refresh() {
     final sourceRef = _sourceRef;
     if (_disposed || sourceRef == null) {
-      return;
+      return Future.value();
     }
+    if (_readTask != null) return _readTask!;
     final revision = ++_requestRevision;
-    _projection.value = const OfficialFleetOverviewProjection.loading();
+    final previous = _projection.value;
+    _projection.value =
+        previous.availability == OfficialFleetOverviewAvailability.available
+        ? OfficialFleetOverviewProjection.refreshing(previous)
+        : const OfficialFleetOverviewProjection.loading();
+    return _readTask = _read(sourceRef, revision).whenComplete(() {
+      if (revision == _requestRevision) _readTask = null;
+    });
+  }
+
+  Future<void> _read(String sourceRef, int revision) async {
     try {
       final snapshot = await _port.read(sourceRef);
       if (_disposed || revision != _requestRevision) {
         return;
       }
-      _projection.value = OfficialFleetOverviewProjection.fromSnapshot(
-        snapshot,
-      );
+      final previous = _projection.value;
+      _projection.value =
+          snapshot.availability ==
+                  OfficialFleetOverviewAvailability.unavailable &&
+              snapshot.transientFailure &&
+              previous.availability ==
+                  OfficialFleetOverviewAvailability.available
+          ? OfficialFleetOverviewProjection.retained(
+              previous,
+              failureKey:
+                  snapshot.failureKey ?? 'officialFleet.error.transient',
+            )
+          : OfficialFleetOverviewProjection.fromSnapshot(snapshot);
     } on Object {
       if (_disposed || revision != _requestRevision) {
         return;
@@ -88,6 +111,7 @@ final class _DefaultOfficialFleetOverviewModule
       return;
     }
     ++_requestRevision;
+    _readTask = null;
     _sourceRef = null;
     _projection.value = const OfficialFleetOverviewProjection.idle();
   }

@@ -75,6 +75,7 @@ void main() {
     ]);
     identity.changed.add(null);
     expect(module.members.projection.value.members, isEmpty);
+    expect(module.contextRevision, 1);
     expect(module.members.projection.value.query, isNull);
     expect(module.overview.projection.value.metrics, isNull);
     expect(module.ships.projection.value.query, isNull);
@@ -121,8 +122,9 @@ void main() {
       final refreshing = module.refresh();
       expect(
         module.members.projection.value.availability,
-        OfficialFleetMemberDirectoryAvailability.idle,
+        OfficialFleetMemberDirectoryAvailability.available,
       );
+      expect(module.projection.value.isRefreshing, isTrue);
       identity.reads.last.complete(await _memberSnapshot());
       await refreshing;
       await _flush();

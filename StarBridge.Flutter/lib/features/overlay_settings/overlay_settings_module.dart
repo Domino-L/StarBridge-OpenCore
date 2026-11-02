@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../shared/diagnostics/loading_read_scope.dart';
+
 import '../../platform/window/overlay_editor_window_port.dart';
 import '../../platform/window/menu_preview_window_port.dart';
 import '../../platform/window/menu_window_preferences.dart';
@@ -27,6 +29,9 @@ final class OverlaySettingsModule {
     this.scenes,
     this.roster,
     this.menuPreview,
+    this.languageChanges,
+    this.language,
+    Stream<void>? hostInvalidations,
   }) : workspace = workspacePort == null
            ? null
            : OverlayWorkspaceModule(
@@ -46,7 +51,32 @@ final class OverlaySettingsModule {
         scenes!.projection,
       );
     }
+    _lastLanguage = language?.call();
+    languageChanges?.addListener(_onLanguage);
+    _invalidations = hostInvalidations?.listen((_) => resynchronize());
   }
+
+  final Listenable? languageChanges;
+  final Object? Function()? language;
+  Object? _lastLanguage;
+  StreamSubscription<void>? _invalidations;
+
+  void _onLanguage() {
+    final next = language?.call();
+    if (next == _lastLanguage) return;
+    _lastLanguage = next;
+    resynchronize();
+  }
+
+  /// One read while the tray or settings page watches: language change and
+  /// Host invalidation. Runtime facts otherwise arrive as pushes.
+  void resynchronize() {
+    if (_disposed || _observers == 0) return;
+    unawaited(backgroundLoadingRead(synchronize));
+  }
+
+  /// Host pushes `overlay.runtime.changed`; older Hosts keep the poll.
+  bool get _runtimePushed => workspace?.supportsRuntimeChanges ?? false;
 
   OverlayPresetAutoSwitch? _presetAutoSwitch;
   OverlaySourceSelectionCoordinator? _sourceSelection;
@@ -66,13 +96,23 @@ final class OverlaySettingsModule {
   Timer? _refreshTimer;
 
   // Shared by the tray and settings page; neither owns a second settings copy.
+  // Each watch (settings page entry, tray) reads once. With runtime pushes no
+  // timer runs; on an older Host the 10 s poll remains the fallback.
   VoidCallback watch() {
     if (_disposed) return () {};
     _observers++;
-    unawaited(synchronize());
-    _refreshTimer ??= Timer.periodic(const Duration(seconds: 10), (_) {
-      unawaited(synchronize());
-    });
+    unawaited(backgroundLoadingRead(synchronize));
+    if (!_runtimePushed) {
+      _refreshTimer ??= Timer.periodic(const Duration(seconds: 10), (timer) {
+        // Capabilities can arrive after the watch started.
+        if (_runtimePushed) {
+          timer.cancel();
+          if (identical(_refreshTimer, timer)) _refreshTimer = null;
+          return;
+        }
+        unawaited(backgroundLoadingRead(synchronize));
+      });
+    }
     bool released = false;
     return () {
       if (released) return;
@@ -163,6 +203,8 @@ final class OverlaySettingsModule {
     _sourceSelection?.dispose();
     if (menuPreview case final MenuLiveWindowPort menu) menu.dispose();
     _refreshTimer?.cancel();
+    languageChanges?.removeListener(_onLanguage);
+    unawaited(_invalidations?.cancel());
     _projection.dispose();
     _port.close();
     workspace?.dispose();

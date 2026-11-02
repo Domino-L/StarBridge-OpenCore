@@ -24,6 +24,21 @@ typedef NavigationPanelBuilder = Widget Function(
 );
 
 typedef DestinationBuilder = Widget Function(BuildContext context);
+
+/// What the sidebar shows when its attention count is hovered or focused
+/// (0.7.2, approved option C): a breakdown card. [open] opens the feature the
+/// same way its navigation item does; [describe] is what a reader announces
+/// instead of the bare number.
+class AttentionDetail {
+  const AttentionDetail({
+    required this.build,
+    required this.describe,
+    required this.listenable,
+  });
+  final Widget Function(BuildContext context, VoidCallback open) build;
+  final String Function(BuildContext context) describe;
+  final Listenable listenable;
+}
 typedef DestinationLeaveGuard = Future<bool> Function(BuildContext context);
 
 final class FeatureDescriptor {
@@ -40,10 +55,14 @@ final class FeatureDescriptor {
     this.navigationParentId,
     this.confirmLeave,
     this.attentionCount,
+    this.attentionDetail,
     this.buildNavigationPanel,
     this.onPrimaryNavigation,
+    this.onSearchShortcut,
     this.primaryNavigationSelected,
     this.prefetch,
+    this.onDispose,
+    this.openSection,
   }) : assert(
          availability == FeatureAvailability.comingSoon ||
              buildDestination != null,
@@ -70,14 +89,30 @@ final class FeatureDescriptor {
   final String? navigationParentId;
   final DestinationLeaveGuard? confirmLeave;
   final ValueListenable<int>? attentionCount;
+  final AttentionDetail? attentionDetail;
   final NavigationPanelBuilder? buildNavigationPanel;
   // A feature with child destinations may give its primary item a distinct
   // landing action and selection state, without changing shortcut activation.
   final Future<void> Function()? onPrimaryNavigation;
+
+  /// What the global search shortcut (Ctrl+K) does after opening this
+  /// destination. Kept apart from [onPrimaryNavigation] so an ordinary visit
+  /// never grabs focus for a search the user did not ask for.
+  final Future<void> Function()? onSearchShortcut;
   final ValueListenable<bool>? primaryNavigationSelected;
 
   /// Optional, bounded read only. Must not activate a destination or mutate data.
   final Future<void> Function()? prefetch;
+
+  /// Release resources owned by this registration when its registry retires.
+  /// Route changes do not retire the registration. Borrowed resources stay owned
+  /// by their original composition and must not be disposed by this callback.
+  final VoidCallback? onDispose;
+
+  /// A part of the destination a route asks for with `?section=` (a
+  /// notification opening 我的交易 or 交易消息). The shell calls it before
+  /// selecting the destination; unknown sections are ignored.
+  final void Function(String section)? openSection;
 
   bool ownsNavigationSelection(FeatureDescriptor selected) =>
       identical(this, selected) || selected.navigationParentId == id;
@@ -90,6 +125,15 @@ final class FeatureRegistry {
   }
 
   final List<FeatureDescriptor> _descriptors;
+  bool _disposed = false;
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    for (final descriptor in _descriptors) {
+      descriptor.onDispose?.call();
+    }
+  }
 
   List<FeatureDescriptor> get all => _descriptors;
 

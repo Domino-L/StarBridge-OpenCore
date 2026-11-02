@@ -319,7 +319,10 @@ void main() {
         await tester.tap(find.byType(ChoiceChip).last);
         await tester.pumpAndSettle();
         expect(find.text('STAR-INVITE'), findsOneWidget);
-        expect(find.byType(DropdownButtonFormField<int>), findsNWidgets(2));
+        expect(
+          find.byWidgetPredicate((w) => w is DropdownButtonFormField<int>),
+          findsNWidgets(2),
+        );
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       });

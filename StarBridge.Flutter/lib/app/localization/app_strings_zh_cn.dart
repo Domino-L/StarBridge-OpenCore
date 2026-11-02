@@ -1,8 +1,12 @@
+import 'menu_overlay_strings.dart';
+import 'room_tag_strings.dart';
+import 'community_tag_strings.dart';
 import 'general_settings_strings.dart';
 import 'notification_settings_strings.dart';
 import 'notification_audio_strings.dart';
 import 'profile_settings_strings.dart';
 import 'official_fleet_strings.dart';
+import 'official_fleet_rally_strings.dart';
 import 'party_rooms_strings.dart';
 import 'friends_strings.dart';
 import 'communities_strings.dart';
@@ -19,9 +23,18 @@ import 'help_support_strings.dart';
 import 'overlay_settings_strings.dart';
 import 'home_strings.dart';
 import 'handle_mismatch_strings.dart';
+import 'game_identity_strings.dart';
+import 'achievements_strings.dart';
+import 'exec_hangar_strings.dart';
 
 const simplifiedAppStrings = <String, String>{
+  ...menuOverlayZhCn,
+  'account.error.compatibilityProofRejected': '关联证明无效或已过期，请重新发起账号关联。',
+  'account.legacyLogin.retired': '此旧账号已迁入 SCM，请使用 SCM 账号登录。',
+  ...execHangarZhCn,
+  ...achievementsZhCn,
   ...handleMismatchZhCn,
+  ...gameIdentityZhCn,
   'app.name': '星海舰桥',
   'navigation.home': '首页',
   'navigation.home.description': '当前态势与下一步',
@@ -32,7 +45,7 @@ const simplifiedAppStrings = <String, String>{
   'navigation.officialFleet': '主舰队',
   'navigation.officialFleet.description': 'RSI 官网主舰队工作区',
   'navigation.marketplace': '交易大厅',
-  'navigation.marketplace.description': '交易与服务（即将推出）',
+  'navigation.marketplace.description': '物品与公开行情',
   'navigation.communities': '社区组织',
   'navigation.communities.description': '跨舰队长期协作组织',
   'navigation.hangar': '个人机库',
@@ -40,7 +53,7 @@ const simplifiedAppStrings = <String, String>{
   'navigation.overlay': '浮层',
   'navigation.overlay.description': '游戏内信息来源与布局',
   'navigation.tools': '工具',
-  'navigation.tools.description': '个人辅助工具（即将推出）',
+  'navigation.tools.description': '倒计时、计算与查询工具',
   'navigation.settings': '设置',
   'navigation.settings.description': '明暗、语言与客户端偏好',
   'navigation.friends': '好友',
@@ -53,6 +66,8 @@ const simplifiedAppStrings = <String, String>{
   'navigation.account.description': '身份与个人资料',
   'navigation.profile': '个人页面',
   'navigation.profile.description': '公开资料与主页展示',
+  'navigation.achievements': '成就中心',
+  'navigation.achievements.description': '收藏成就与星海旅程',
   'navigation.personal': '个人空间',
   'deferredFeature.title': '即将推出',
   'comingSoon.body': '{feature}正在开发中，上线后会在这里提供。',
@@ -77,7 +92,10 @@ const simplifiedAppStrings = <String, String>{
   ...simplifiedLocalPrivacyStrings,
   ...simplifiedPrivacyScopeSettingsStrings,
   ...simplifiedOfficialFleetStrings,
+  ...simplifiedOfficialFleetRallyStrings,
   ...simplifiedPartyRoomsStrings,
+  ...simplifiedRoomTagStrings,
+  ...simplifiedCommunityTagStrings,
   ...friendsZhCn,
   ...communitiesZhCn,
   ...simplifiedLegacyMigrationStrings,
@@ -89,6 +107,8 @@ const simplifiedAppStrings = <String, String>{
   ...overlaySettingsZhCn,
   ...homeZhCn,
   'account.notSignedIn': '未登录',
+  'account.connectionPending': '账号待确认',
+  'account.offlineMode': '离线模式',
   'account.loading': '正在读取账号状态…',
   'account.signedOut.title': '使用 SCM 账号继续',
   'account.signedOut.body': '授权在系统浏览器中完成。登录凭据由本机账号服务安全保管，不会进入界面页面。',
@@ -108,15 +128,19 @@ const simplifiedAppStrings = <String, String>{
   'account.login.cancelling': '正在取消登录…',
   'account.login.cancelled': '登录已取消，可以随时重试。',
   'account.login.success': 'SCM 账号已连接。',
+  'account.login.loading': '授权成功，正在载入账号资料…',
+  'account.login.stage.authorize': '等待授权',
+  'account.login.stage.loading': '载入资料',
+  'account.login.stage.done': '完成登录',
   'account.action.refresh': '刷新账号资料',
   'account.action.retry': '重试',
   'account.value.notSet': '未设置',
   'account.email.notShared': 'SCM 未提供邮箱',
-  'account.source.live': 'SCM 最新',
+  'account.source.live': '资料已同步',
   'account.source.cached': '离线缓存',
   'account.source.unavailable': '资料不可用',
   'account.preferences.title': '资料偏好',
-  'account.preferences.body': '仅同步 SCM 当前支持的语言偏好与标准时区；客户端界面语言仍可单独选择。',
+  'account.preferences.body': '设置 SCM 账号的语言和时区。客户端显示语言可在“常规与数据”中单独设置。',
   'account.preferences.locale': 'SCM 语言偏好',
   'account.preferences.timeZone': 'SCM 时区',
   'account.preferences.save': '保存更改',
@@ -166,6 +190,7 @@ const simplifiedAppStrings = <String, String>{
   'account.legacyLogin.retry': '稍后重试',
   'account.legacyLogin.verified': '旧账号已验证，登录凭据已加密保存。',
   'account.legacyLogin.rejected': '邮箱或密码不正确，请检查后重试。',
+  'account.legacyLogin.scmRequired': '此旧账号已绑定，请使用 SCM 账号登录。原有数据会继续沿用。',
   'account.legacyLogin.invalidInput': '请输入旧账号邮箱和密码。',
   'account.legacyLogin.throttled': '尝试次数过多，请等待倒计时结束后再试。',
   'account.legacyLogin.unavailable': '暂时无法确认登录结果，请稍后重试。',
@@ -235,7 +260,9 @@ const simplifiedAppStrings = <String, String>{
   'account.error.sessionChanged': '账号会话已经变化，旧操作结果已丢弃。',
   'account.error.environmentNotEnabled': '当前客户端仅开放本地联调环境，尚不能连接正式 SCM 网页。',
   'account.error.reauthorizationRequired': 'SCM 会话需要重新授权。',
+  'account.error.logoutIncomplete': '退出未完成：本机保存的登录还没清除，请重试。',
   'account.error.writeForbidden': '当前账号没有资料修改权限。',
+  'account.error.profileReadForbidden': '当前账号资料读取被拒绝，请检查账号授权。',
   'account.error.writeConflict': '资料已在其它位置更新，请重新载入后再保存。',
   'account.error.directoryUnavailable': '暂时无法读取 SCM 时区目录，资料没有被修改。',
   'account.error.invalidResponse': '本机账号服务返回了不兼容的资料，已安全停止处理。',
@@ -243,7 +270,8 @@ const simplifiedAppStrings = <String, String>{
   'account.error.unavailable': '账号资料暂时不可用，请稍后重试。',
   'account.error.compatibilityUnavailable': '暂时无法读取旧数据兼容状态。',
   'account.error.compatibilityWriteUnavailable': '暂时无法完成旧数据兼容操作，未知结果没有被当成成功。',
-  'account.error.compatibilityConflict': '该旧账号或兼容档案已与其他 SCM 账号关联，未作任何更改。',
+  'account.error.legacyProofUnavailable': '旧账号验证服务暂时不可用（503），本次未提交关联。SCM 登录保持不变；请稍后重试，若持续出现请联系支持。',
+  'account.error.compatibilityConflict': '该 SCM 账号或旧账号已存在其他关联，无法关联。请使用原已关联账号登录。',
   'account.error.compatibilityExistingLinkMismatch':
       '当前 SCM 账号已有不同的旧账号关联，请先核对账号。',
   'account.error.legacyCredentialsRequired': '没有可用的迁移凭据，请输入旧账号名或邮箱和密码。',
@@ -290,9 +318,19 @@ const simplifiedAppStrings = <String, String>{
   'connection.relay.unavailable.title': '旧数据兼容服务暂不可用',
   'connection.relay.unavailable.detail': 'SCM 账号及已迁移功能仍可使用；依赖旧服务的数据与在线协作暂时不可用。',
   'connection.action.retryNow': '立即重试',
+  'connection.account.restorePending.title': '恢复在线尚未完成',
+  'connection.account.restorePending.detail': '上次恢复在线没有完成，账号读取仍暂停。请继续恢复。',
+  'connection.action.restoreOnline': '继续恢复在线',
+  'startup.onlineRecoveryRequired': '需要恢复在线',
+  'startup.onlineRecovery.detail': '先进入应用，再点击“继续恢复在线”。现有账号资料未被清除。',
   'connection.action.retrying': '正在重试…',
   'window.minimize': '最小化',
   'window.maximize': '最大化',
   'window.restore': '还原',
   'window.close': '关闭',
+  'window.closeNamed': '关闭{title}窗口',
+  'socialWindow.chatTitle': '聊天',
+  'socialWindow.actionUnconfirmed': '操作未确认，请刷新列表核对后再试。',
+  'socialWindow.actionFailed': '暂时无法完成操作，请重新打开窗口核对。',
+  'friendsWindow.openRecentChat': '打开最近聊天',
 };

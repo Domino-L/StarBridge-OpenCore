@@ -17,20 +17,28 @@ internal sealed partial class CommunityClient
         string targetRef = Text(body, "targetRef", 32), messageRef = Text(body, "messageRef", 32);
         if (!LowerHex(targetRef, 32) || !LowerHex(messageRef, 32)) throw Invalid();
         var sent = false;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        int? httpStatus = null;
+        var diagnostic = "reference-expired";
         object Result(string status, string? error = null, long? through = null) => new
         {
-            schemaVersion = 1, targetRef, messageRef, status, error, readThroughSequence = through,
+            schemaVersion = 1,
+            targetRef,
+            messageRef,
+            status,
+            error,
+            readThroughSequence = through,
         };
         try
         {
             current();
             var target = Resolve(targetRef, scope, allowWpfS2: true);
             if (!_chatTargets.TryGetValue(messageRef, out var message) || message.Code != target.Code ||
-                message.Scope != scope || message.Expires <= DateTimeOffset.UtcNow)
+                message.Scope != scope || message.Expires <= (target.OfficialFleet ? _targetClock.GetUtcNow() : DateTimeOffset.UtcNow))
                 return Result("rejected", "refreshRequired");
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(12));
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, "/api/fleets/chat/read"))
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, CommunicationPath(target, "/chat/read")))
             {
                 Content = JsonContent.Create(new FleetChatMarkReadRequestContract(target.Code, message.ChannelId, message.Sequence)),
             };
@@ -39,6 +47,8 @@ internal sealed partial class CommunityClient
             deadline.Token.ThrowIfCancellationRequested();
             sent = true;
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            httpStatus = (int)response.StatusCode;
+            diagnostic = "http-error";
             current();
             if (response.StatusCode != HttpStatusCode.OK)
                 return Result(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or
@@ -53,11 +63,12 @@ internal sealed partial class CommunityClient
                         _ => "outcomeUnknown",
                     });
             using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+            diagnostic = "invalid-response";
             var bytes = new byte[4097];
             var length = 0;
             int count;
             while (length < bytes.Length && (count = await stream.ReadAsync(bytes.AsMemory(length), deadline.Token)) > 0) length += count;
-            if (length > 4096) return Result("unknown", "outcomeUnknown");
+            if (length > 4096) { diagnostic = "body-too-large"; return Result("unknown", "outcomeUnknown"); }
             using var document = JsonDocument.Parse(bytes.AsMemory(0, length));
             var root = document.RootElement;
             ChatObject(root);
@@ -66,19 +77,40 @@ internal sealed partial class CommunityClient
             // cursor back to this page, or pretend an incomplete receipt succeeded.
             if (!Text(root, "channelId", 272).Equals(message.ChannelId, StringComparison.OrdinalIgnoreCase) ||
                 through < message.Sequence || Optional(root, "error", 512) is not null)
-                return Result("unknown", "outcomeUnknown");
+            { diagnostic = "cursor-mismatch"; return Result("unknown", "outcomeUnknown"); }
             deadline.Token.ThrowIfCancellationRequested();
             current();
+            diagnostic = "accepted";
             return Result("accepted", through: through);
         }
         catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException or JsonException or
             InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or AccountBridgeHostException or
             StarBridge.NativeBridge.BridgeStaleGenerationException)
         {
+            diagnostic = e switch
+            {
+                OperationCanceledException => "cancelled",
+                HttpRequestException or IOException => "network",
+                AccountBridgeHostException failure when failure.Code == "communities.dataInvalid" => "invalid-response",
+                AccountBridgeHostException failure when failure.Code == "communities.refreshRequired" => "reference-expired",
+                AccountBridgeHostException or StarBridge.NativeBridge.BridgeStaleGenerationException => "account-changed",
+                _ => "invalid-response",
+            };
             // Never trigger the OAuth retry path after POST, and never clear the
             // badge based on an unconfirmed response. The same visible reference
             // can be explicitly submitted again: the server cursor is monotonic.
             return Result(sent ? "unknown" : "rejected", sent ? "outcomeUnknown" : "refreshRequired");
+        }
+        finally
+        {
+            // Temporary [DEBUG-community-read] boundary evidence only. Never
+            // include references, channel/organization IDs, messages or bodies.
+            try
+            {
+                ReadDiagnostic?.Invoke("chat-read-receipt", diagnostic, httpStatus,
+                (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+            catch (Exception) { /* Optional diagnostics cannot change a receipt. */ }
         }
     }
 }

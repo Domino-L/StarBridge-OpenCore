@@ -5,6 +5,22 @@ namespace StarBridge.Desktop;
 
 internal sealed partial class OverlayCompositionHudWindow
 {
+    private long _appearanceEpoch;
+    private (OverlaySkin Skin, OverlaySceneKind Kind, string? Room, string? Channel, bool Local, string? Modules)? _appearanceScope;
+    private void UpdateExtendedAppearanceScope(OverlaySkin skin, OverlaySceneContext scene, OverlayModulePresentation? modules)
+    {
+        var scope = (skin, scene.Kind, scene.RoomId, scene.ChatChannelId, scene.IsLocalOnly, modules?.ScopeKey);
+        if(_appearanceScope == scope) return;
+        _appearanceScope = scope;
+        _appearanceEpoch++;
+    }
+    // Optional external appearance implementation. Ordinary builds erase these calls.
+    partial void ObserveExtendedAppearanceFrame(OverlayCompositionFrameState state);
+    partial void ResetExtendedAppearanceLifecycle();
+    partial void PrepareExtendedAppearanceAnimationFrame(ref bool appearanceChanged);
+    partial void ResolveExtendedAppearanceSampleDelay(ref int sampleDelayMs);
+    partial void RecordExtendedAppearanceFrameCommit();
+
     public double AppearanceStartupFocusRemainingMs =>
 #if STARBRIDGE_VERDICT_NEXT
         _settings.Skin == OverlaySkin.Verdict ? VerdictNextFocusRemainingMs() : 0;
@@ -20,17 +36,6 @@ internal sealed partial class OverlayCompositionHudWindow
         if (TryBeginVerdictNextStartup(ref started, ref durationMs)) return;
 #endif
         TryBeginExtendedAppearanceStartup(ref started, ref durationMs);
-        if (started)
-        {
-            return;
-        }
-
-        if (ShouldPlayLagrangeStartup())
-        {
-            _lagrangeStartupStartedAtUtc = DateTimeOffset.UtcNow;
-            started = true;
-            durationMs = LagrangeWeaveTimeline.DurationMs;
-        }
     }
 
     private bool BeginExtendedStartupTransition(int settleDelayMs)
@@ -43,13 +48,17 @@ internal sealed partial class OverlayCompositionHudWindow
     private AppearanceAnimationState ReadAppearanceAnimationState()
     {
         var state = new AppearanceAnimationState(
-            IsLagrangeStartupActive(),
+            false,
             false,
             false);
         TryReadExtendedAppearanceAnimationState(ref state);
 #if STARBRIDGE_VERDICT_NEXT
         if (_state is { VerdictStyle: true }) state = ReadVerdictNextAnimationState();
 #endif
+        // Installed appearance contributions run after the legacy commercial
+        // adapter, which may replace its own animation flags. Optional methods
+        // erase from ordinary builds; this never changes catalog eligibility.
+        TryReadInstalledAppearanceAnimationState(ref state);
         return state;
     }
 
@@ -60,9 +69,7 @@ internal sealed partial class OverlayCompositionHudWindow
 #endif
         ID2D1CommandList? glowMask = null;
         TryBuildExtendedAppearanceGlowMask(target, ref glowMask);
-        return glowMask ?? (ShouldDrawLagrangeGlow(_state)
-            ? BuildLagrangeGlowMask(target)
-            : null);
+        return glowMask;
     }
 
     private void DrawAppearanceGlow(
@@ -75,36 +82,32 @@ internal sealed partial class OverlayCompositionHudWindow
         if (state.VerdictStyle) return;
 #endif
         TryDrawExtendedAppearanceGlow(target, state, glowMask, ref handled);
-        if (!handled)
-        {
-            DrawLagrangeGlow(target, state, glowMask);
-        }
     }
 
     private void DisposeAppearanceResources()
     {
-        DisposeLagrangeGeometryCache();
 #if STARBRIDGE_VERDICT_NEXT
         DisposeVerdictNextResources();
 #endif
         DisposeExtendedAppearanceResources();
+        DisposeInstalledAppearanceResources();
     }
 
-    private void DrawScene(ID2D1RenderTarget target, OverlayCompositionFrameState state)
+    private void DrawSceneModules(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
 #if STARBRIDGE_VERDICT_NEXT
         if (state.VerdictStyle) { DrawVerdictNextScene(target, state); return; }
 #endif
         var handled = false;
-        TryDrawExtendedAppearanceScene(target, state, ref handled);
+        TryDrawInstalledAppearanceScene(target, state, ref handled);
         if (handled)
         {
             return;
         }
 
-        if (state.LagrangeWeaveStyle)
+        TryDrawExtendedAppearanceScene(target, state, ref handled);
+        if (handled)
         {
-            DrawLagrangeScene(target, state);
             return;
         }
 
@@ -115,6 +118,17 @@ internal sealed partial class OverlayCompositionHudWindow
         ID2D1RenderTarget target,
         OverlayCompositionFrameState state,
         ref bool handled);
+
+    // Separate seam for an installed external pack: built-in commercial
+    // appearances already implement the Extended methods in private builds.
+    partial void TryDrawInstalledAppearanceScene(
+        ID2D1RenderTarget target,
+        OverlayCompositionFrameState state,
+        ref bool handled);
+
+    partial void TryReadInstalledAppearanceAnimationState(ref AppearanceAnimationState state);
+
+    partial void DisposeInstalledAppearanceResources();
 
     partial void TryBeginExtendedAppearanceStartup(ref bool started, ref double durationMs);
 
@@ -223,15 +237,17 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private (double Opacity, float OffsetY) ResolveContentReveal(WpfRect rect, int index)
     {
+        // Calm display rides the same per-module visibility every scene already applies.
+        var calm = CalmFactor(rect);
         if (_contentRevealStartedAtUtc == DateTimeOffset.MinValue)
         {
-            return (1, 0);
+            return (calm, 0);
         }
 
         var elapsedMs = (AppearanceAnimationUtcNow - _contentRevealStartedAtUtc).TotalMilliseconds;
         var delayMs = ResolveContentRevealDelayMs(rect, index);
         var progress = Smooth01((float)((elapsedMs - delayMs) / ContentRevealMs));
-        return (progress, ContentRevealOffsetY * (1 - progress));
+        return (progress * calm, ContentRevealOffsetY * (1 - progress));
     }
 
     private double ResolveContentRevealDelayMs(WpfRect rect, int index)

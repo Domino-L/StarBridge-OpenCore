@@ -1,7 +1,11 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../shell/widgets/attention_badge.dart';
 
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../features/communities/community_logo.dart';
 import 'menu_organization_view.dart';
@@ -32,41 +36,60 @@ class _MenuOrganizationSidebarState extends State<MenuOrganizationSidebar> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Padding(
+        Padding(
           padding: EdgeInsets.all(12),
-          child: Text('我的组织', style: TextStyle(fontWeight: FontWeight.w600)),
+          child: Text(
+            menuText(context, 'menu.overlay.organizations.mine'),
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: TextField(
-            key: const ValueKey('menu-organization-search'),
-            decoration: const InputDecoration(
-              hintText: '搜索已加入的组织',
-              isDense: true,
+          child: StarBridgeFieldFrame(
+            builder: (context, focus) => TextField(
+              focusNode: focus,
+              key: const ValueKey('menu-organization-search'),
+              decoration: InputDecoration(
+                hintText: menuText(
+                  context,
+                  'menu.overlay.organizations.filter',
+                ),
+                isDense: true,
+              ),
+              onChanged: (value) => setState(() => query = value),
             ),
-            onChanged: (value) => setState(() => query = value),
           ),
         ),
         Expanded(
           child: ListView(
             children: [
               if (items.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('没有匹配的组织'),
+                  child: Text(
+                    menuText(context, 'menu.overlay.organizations.noMatch'),
+                  ),
                 ),
               for (final item in items)
                 Material(
                   color: item.selected
                       ? colors.info.withValues(alpha: .12)
                       : Colors.transparent,
-                  child: InkWell(
-                    onTap: widget.busy ? null : () => widget.onSelect(item.key),
+                  child: StarBridgeActionRow(
+                    controlKey: ValueKey(
+                      'menu-organization-sidebar-${item.key}',
+                    ),
+                    semanticLabel: item.name,
+                    semanticSelected: item.selected,
+                    onActivate: widget.busy
+                        ? null
+                        : (_, _) => widget.onSelect(item.key),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
                           CommunityLogo(
+                            downloadedBy: item,
                             data: item.avatar,
                             size: 40,
                             framed: false,

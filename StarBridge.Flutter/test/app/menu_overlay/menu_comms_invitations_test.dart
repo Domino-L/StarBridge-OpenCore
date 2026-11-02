@@ -111,7 +111,10 @@ void main() {
       expect(port.calls, isEmpty);
       expect(jsonEncode(views.last), isNot(contains('secret-invitation-code')));
       expect(jsonEncode(views.last), isNot(contains(port.value.previewRef)));
-      expect(view().buttons.where((b) => b.label == '保存选择并加入'), isEmpty);
+      expect(
+        view().buttons.where((b) => b.role == 'joinOrganization'),
+        isEmpty,
+      );
       act('确认共享设置');
       await tester.pump();
       expect(port.calls, ['read']);
@@ -124,7 +127,9 @@ void main() {
       expect(port.calls, ['read']);
       act('我已确认共享选择');
       await tester.pump();
-      final join = view().buttons.singleWhere((b) => b.label == '保存选择并加入');
+      final join = view().buttons.singleWhere(
+        (b) => b.role == 'joinOrganization',
+      );
       expect(join.confirm, isNotEmpty);
       session.act(join.key, '');
       session.act(join.key, '');

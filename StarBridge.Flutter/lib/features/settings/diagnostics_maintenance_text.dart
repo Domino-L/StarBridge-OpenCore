@@ -11,6 +11,8 @@ String maintenanceText(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
+  'opening': ('正在打开数据目录…', '正在開啟資料目錄…', 'Opening the data folder…'),
+  'clearing': ('正在清理图片缓存…', '正在清理圖片快取…', 'Clearing the image cache…'),
   'title': ('维护工具', '維護工具', 'Maintenance tools'),
   'scope': (
     '只处理当前设备。清理缓存不会重置账号、设置或游玩时长。',

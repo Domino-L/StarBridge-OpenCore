@@ -88,9 +88,22 @@ class _MenuInlineAvatarState extends State<MenuInlineAvatar> {
       ? ColoredBox(
           color: MenuBridgeColors.of(context).selected,
           child: Center(
-            child: Text(
-              widget.name!.trim().characters.first,
-              style: TextStyle(color: MenuBridgeColors.of(context).text, fontSize: 20),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              // The initial is a bounded portrait mark, not the full name.
+              // Respect inherited text scaling, then fit its complete line box
+              // inside the unchanged40px portrait without cropping a glyph.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  widget.name!.trim().characters.first,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: MenuBridgeColors.of(context).text,
+                    fontSize: 20,
+                  ),
+                ),
+              ),
             ),
           ),
         )

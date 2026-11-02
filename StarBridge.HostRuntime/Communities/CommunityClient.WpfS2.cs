@@ -24,6 +24,7 @@ internal sealed partial class CommunityClient
         bool backgroundActivity = false, bool includeManagement = true,
         Action<IReadOnlyList<Overlay.InformationOverlayCommunityContent>>? rostersReady = null)
     {
+        var imageEpoch = ImageReadEpoch;
         if (query.View == "discover") return await ReadWpfS2Discovery(bearer, query, scope, viewerId, token);
         if (query.View != "mine") throw Invalid();
         if (string.IsNullOrWhiteSpace(viewerId) || query.After is not null || query.Filters is not null || query.TargetRef is not null)
@@ -51,9 +52,10 @@ internal sealed partial class CommunityClient
                 items.Add(new(name, WpfText(fleet, "description", 8192, true), WpfText(fleet, "language", 512),
                     WpfText(fleet, "activeTime", 1024), count,
                     ownership == WpfS2Ownership.Self ? "owner" : "member", "unavailable", canLeave ? ["leave"] : [],
-                    CacheSharingLogo(scope, code, RoomAvatarProjection.Normalize(Optional(fleet, "logoImageData", 1024 * 1024), 512 * 1024)), reference)
+                    CacheSharingLogo(scope, code, RoomAvatarProjection.Normalize(Optional(fleet, "logoImageData", 1024 * 1024), 512 * 1024), imageEpoch), reference)
                 {
                     OrganizationRef = _organizationRefs.GetOrAdd(scope + "\0" + code, _ => Guid.NewGuid().ToString("N")),
+                    LogoDeferred = WpfS2HasMediaProjection(fleet) && WpfS2HasMedia(fleet, "logo"),
                     Tags = WpfText(fleet, "type", 2048),
                     Systems = fleet.TryGetProperty("activeSystemIds", out var systems) && systems.ValueKind != JsonValueKind.Null ? ParseSystems(systems) : []
                 });
@@ -78,13 +80,19 @@ internal sealed partial class CommunityClient
         { throw Invalid(); }
     }
 
-    private async Task<JsonElement[]> WpfS2Membership(string bearer, CancellationToken token)
+    private async Task<JsonElement[]> WpfS2Membership(string bearer, CancellationToken token, bool classifyReadFailure = false)
     {
         // Same authenticated sources as MainWindow.RelaySync.PullFleetsAsync.
-        var membership = await WorkspaceJson(bearer, "/api/fleets/membership", token);
-        var codes = WpfS2MembershipCodes(membership);
-        if (codes.Count == 0) return [];
-        var root = await WorkspaceJson(bearer, "/api/fleets", token, 8 * 1024 * 1024);
+        HashSet<string> codes;
+        JsonElement root;
+        try {
+            var membership = await WorkspaceJson(bearer, "/api/fleets/membership", token);
+            codes = WpfS2MembershipCodes(membership);
+            if (codes.Count == 0) return [];
+            root = await WorkspaceJson(bearer, "/api/fleets?projection=metadata", token, 8 * 1024 * 1024);
+        }
+        catch (AccountBridgeHostException error) when (classifyReadFailure && error.Code == "communities.unavailable" && error.Retryable)
+        { throw DirectoryReadFailure(error.HttpStatus); }
         if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() > 10000) throw Invalid();
         var matches = root.EnumerateArray().Where(row => codes.Contains(Text(row, "code", 256))).ToArray();
         // Missing membership snapshot is an incomplete read, never an empty roster.
@@ -177,8 +185,7 @@ internal sealed partial class CommunityClient
             string.Equals(Text(row, "code", 256), target.Code, StringComparison.OrdinalIgnoreCase));
         if (fleet.ValueKind == JsonValueKind.Undefined) throw new AccountBridgeHostException("communities.notAllowed");
         var ownership = includeManagement ? await ReadWpfS2Ownership(bearer, fleet, target.WpfS2ViewerId!, token) : WpfS2Ownership.Unknown;
-        var canEditProfile = ownership == WpfS2Ownership.Self ||
-                             WpfS2HasPermission(fleet, target.WpfS2ViewerId!, "canManageFleetInfo");
+        var canEditProfile = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "fleet.profile.edit", ownership);
         var members = ProjectWpfS2Roster(fleet, target.WpfS2ViewerId!);
         var matched = members.Where(row => query.Length == 0 || WpfText(row, "callsign", 512).Contains(query, StringComparison.OrdinalIgnoreCase) ||
             WpfText(row, "gameName", 512).Contains(query, StringComparison.OrdinalIgnoreCase) || WpfText(row, "roleTitle", 128).Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -200,8 +207,10 @@ internal sealed partial class CommunityClient
             timeZoneId = Optional(fleet, "timeZoneId", 128), websiteUrl = Optional(fleet, "websiteUrl", 2048),
             activeSystemIds = fleet.TryGetProperty("activeSystemIds", out var systems) && systems.ValueKind != JsonValueKind.Null ? ParseSystems(systems) : [],
             externalContacts = contacts, activityWindows = windows,
-            hasLogo = !string.IsNullOrEmpty(Optional(fleet, "logoImageData", 1024 * 1024)),
-            hasBanner = !string.IsNullOrEmpty(Optional(fleet, "bannerImageData", 3 * 1024 * 1024)),
+            hasLogo = WpfS2HasMedia(fleet, "logo"),
+            hasBanner = WpfS2HasMedia(fleet, "banner"),
+            hasBackground = WpfS2HasMedia(fleet, "background"),
+            mediaProjectionVersion = SupportsWideImages(fleet) ? 1 : 0,
             query, offset, next = offset + page.Length < matched.Length ? (int?)(offset + page.Length) : null,
             totalCount = members.Length, matchedCount = matched.Length, members = page, fetchedAt = DateTimeOffset.UtcNow,
             // Expose only the management slice with a completed WPF adapter.
@@ -211,7 +220,8 @@ internal sealed partial class CommunityClient
                 canRemoveMembers = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "members.remove", ownership),
                 canCreateInvite = WpfS2CanCreateInvite(fleet, target.WpfS2ViewerId!, ownership),
                 canManageAnnouncements = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "announcements.manage", ownership),
-                canEditLogo = canEditProfile, canEditBanner = canEditProfile,
+                canEditLogo = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "fleet.avatar.edit", ownership),
+                canEditBanner = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "fleet.banner.edit", ownership),
                 canViewLogs = WpfS2HasPermissionId(fleet, target.WpfS2ViewerId!, "audit.view", ownership) }
         });
         completeRoster?.Invoke(JsonSerializer.SerializeToElement(members));
@@ -226,13 +236,8 @@ internal sealed partial class CommunityClient
         // only Relay's privacy-projected presence, never the raw player feed.
         // LINQ's stable ordering keeps equal-ranked members in source order.
         var roster = Rows(fleet, "members", 10000)
-            .OrderBy(row => PlayerPresence.Normalize(WpfText(row, "liveStatus", 64, fallback: "Offline"),
-                row.GetProperty("online").GetBoolean()) switch
-            {
-                PlayerPresenceKind.InGame => 0,
-                PlayerPresenceKind.AppOnline or PlayerPresenceKind.Away => 1,
-                _ => 2,
-            })
+            .OrderBy(row => OrganizationMemberPresence.SortRank(WpfText(row, "liveStatus", 64, fallback: "Offline"),
+                row.GetProperty("online").GetBoolean()))
             .ThenByDescending(row => WpfMemberIsOwner(fleet, row))
             .ThenByDescending(row => WpfFlag(WpfMemberPermission(fleet, row), "permissionEnabled"))
             .ToArray();
@@ -244,6 +249,20 @@ internal sealed partial class CommunityClient
             var mediaId = WpfS2MemberId(row);
             var memberId = mediaId ?? "s2-row:" + index;
             if (!seen.Add(memberId)) throw Invalid();
+            var rawStatus = WpfText(row, "liveStatus", 64, fallback: "Offline");
+            var rawOnline = row.GetProperty("online").GetBoolean();
+            var offline = OrganizationMemberPresence.IsOffline(rawStatus, rawOnline);
+            // Validate the supplied contract even when its runtime is withheld.
+            var ship = Optional(row, "ship", 512);
+            var location = Optional(row, "location", 512);
+            var locationHiddenReason = Optional(row, "locationHiddenReason", 32);
+            var hasServerSession = OptionalServerSession(row);
+            var locationConfidence = Optional(row, "locationConfidence", 512);
+            var serverRegion = Optional(row, "serverRegion", 512);
+            var serverShard = Optional(row, "serverShard", 512);
+            var lastUpdated = Timestamp(row, "lastUpdated");
+            var arrivalPending = row.TryGetProperty("arrivalPendingConfirmation", out var pending) && pending.GetBoolean();
+            var arrivalTarget = Optional(row, "arrivalTargetCode", 512);
             var role = WpfText(row, "roleTitle", 128);
             var color = "#9DAAB3";
             if (fleet.TryGetProperty("roleGroups", out var groups) && groups.ValueKind == JsonValueKind.Array)
@@ -261,16 +280,16 @@ internal sealed partial class CommunityClient
                 roleTitle = role, roleColor = color,
                 isSelf = string.Equals(accountId, viewerId, StringComparison.OrdinalIgnoreCase),
                 isOwner = WpfMemberIsOwner(fleet, row),
-                online = row.GetProperty("online").GetBoolean(), liveStatus = WpfText(row, "liveStatus", 64, fallback: "Offline"),
+                online = !offline && rawOnline, liveStatus = offline ? "Offline" : rawStatus,
                 hasAvatar = mediaId is not null && !string.IsNullOrEmpty(Optional(row, "avatarImageData", 1024 * 1024)),
                 avatarVersion = mediaId is null ? null : AvatarContentVersion(Optional(row, "avatarImageData", 1024 * 1024)),
-                ship = Optional(row, "ship", 512), location = Optional(row, "location", 512),
-                locationHiddenReason = Optional(row, "locationHiddenReason", 32),
-                hasServerSession = OptionalServerSession(row),
-                locationConfidence = Optional(row, "locationConfidence", 512), serverRegion = Optional(row, "serverRegion", 512),
-                serverShard = Optional(row, "serverShard", 512), lastUpdated = Timestamp(row, "lastUpdated"), joinedAt = Timestamp(row, "joinedAt"),
-                arrivalPendingConfirmation = row.TryGetProperty("arrivalPendingConfirmation", out var pending) && pending.GetBoolean(),
-                arrivalTargetCode = Optional(row, "arrivalTargetCode", 512)
+                ship = offline ? null : ship, location = offline ? null : location,
+                locationHiddenReason = offline ? null : locationHiddenReason,
+                hasServerSession = offline ? null : hasServerSession,
+                locationConfidence = offline ? null : locationConfidence, serverRegion = offline ? null : serverRegion,
+                serverShard = offline ? null : serverShard, lastUpdated = offline ? null : lastUpdated, joinedAt = Timestamp(row, "joinedAt"),
+                arrivalPendingConfirmation = !offline && arrivalPending,
+                arrivalTargetCode = offline ? null : arrivalTarget
             };
         }).ToArray();
         return JsonSerializer.SerializeToElement(members).EnumerateArray().ToArray();
@@ -282,11 +301,20 @@ internal sealed partial class CommunityClient
     private async Task<JsonElement> WpfS2Media(string bearer, Target target, string kind, string? memberId,
         int offset, string? version, CancellationToken token)
     {
+        async Task<JsonElement> ReadChunk()
+        {
+            var path = $"/api/fleets/media?code={Uri.EscapeDataString(target.Code)}&kind={kind}&offset={offset}";
+            if (memberId is not null) path += "&memberId=" + Uri.EscapeDataString(memberId);
+            if (version is not null) path += "&version=" + Uri.EscapeDataString(version);
+            return await WorkspaceJson(bearer, path, token);
+        }
+        if (target.WpfS2Directory && target.WpfS2RemoteMedia && kind == "logo") return await ReadChunk();
         var fleet = (await ReadWpfS2MembershipShared(bearer, target.Scope, token)).SingleOrDefault(row =>
             string.Equals(Text(row, "code", 256), target.Code, StringComparison.OrdinalIgnoreCase));
         if (fleet.ValueKind == JsonValueKind.Undefined) throw new AccountBridgeHostException("communities.notAllowed");
+        if (WpfS2HasMediaProjection(fleet) && kind is "logo" or "banner" or "background") return await ReadChunk();
         var source = fleet;
-        var key = kind == "logo" ? "logoImageData" : "bannerImageData";
+        var key = kind switch { "logo" => "logoImageData", "background" => "backgroundImageData", _ => "bannerImageData" };
         if (kind == "applicant")
         {
             var ownership = await ReadWpfS2Ownership(bearer, fleet, target.WpfS2ViewerId!, token);
@@ -313,13 +341,20 @@ internal sealed partial class CommunityClient
         return WpfS2MediaChunk(raw, kind, memberId, offset, version);
     }
 
+    private static bool WpfS2HasMediaProjection(JsonElement fleet) =>
+        fleet.TryGetProperty("mediaProjectionVersion", out var version) && version.ValueKind == JsonValueKind.Number && version.GetInt32() == 1;
+
+    private static bool WpfS2HasMedia(JsonElement fleet, string kind) => WpfS2HasMediaProjection(fleet)
+        ? WpfFlag(fleet, "has" + char.ToUpperInvariant(kind[0]) + kind[1..])
+        : !string.IsNullOrEmpty(Optional(fleet, kind + "ImageData", 3 * 1024 * 1024));
+
     private static JsonElement WpfS2MediaChunk(string? raw, string kind, string? memberId, int offset, string? version)
     {
         if (string.IsNullOrEmpty(raw)) throw new AccountBridgeHostException("communities.notFound");
         var comma = raw.IndexOf(',');
         if (comma >= 0 && !raw.StartsWith("data:image/", StringComparison.Ordinal)) throw Invalid();
         var bytes = Convert.FromBase64String(comma >= 0 ? raw[(comma + 1)..] : raw);
-        if (bytes.Length == 0 || bytes.Length > (kind == "banner" ? 2 * 1024 * 1024 : 512 * 1024)) throw Invalid();
+        if (bytes.Length == 0 || bytes.Length > (kind is "banner" or "background" ? 2 * 1024 * 1024 : 512 * 1024)) throw Invalid();
         var mimeType = WpfS2Mime(bytes) ?? throw Invalid();
         var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         if (version is not null && version != hash) throw new AccountBridgeHostException("communities.mediaChanged");

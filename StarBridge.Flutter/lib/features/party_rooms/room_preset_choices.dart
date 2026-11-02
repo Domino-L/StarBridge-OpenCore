@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_row.dart';
 
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -13,7 +16,7 @@ class RoomPresetChoices extends StatelessWidget {
     this.enabled = true,
   });
   final List<RoomPresetChoice> choices;
-  final ValueChanged<RoomPresetChoice> onSelected;
+  final void Function(RoomPresetChoice, InteractionSource) onSelected;
   final bool enabled;
 
   @override
@@ -21,10 +24,20 @@ class RoomPresetChoices extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       for (final choice in choices)
-        ListTile(
-          title: Text(choice.name),
-          trailing: const StarBridgeIcon(StarBridgeIconSemantic.forward),
-          onTap: enabled ? () => onSelected(choice) : null,
+        StarBridgeActionRow(
+          controlKey: ValueKey('room-preset-choice-${choice.id}'),
+          semanticLabel: choice.name,
+          onActivate: enabled
+              ? (_, source) => onSelected(choice, source)
+              : null,
+          child: ExcludeFocus(
+            child: ExcludeSemantics(
+              child: ListTile(
+                title: Text(choice.name),
+                trailing: const StarBridgeIcon(StarBridgeIconSemantic.forward),
+              ),
+            ),
+          ),
         ),
     ],
   );

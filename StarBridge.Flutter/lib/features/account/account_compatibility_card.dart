@@ -13,8 +13,16 @@ import 'account_module.dart';
 import 'account_port.dart';
 import 'account_view_components.dart';
 import 'password_recovery_dialog.dart';
+import 'account_operation_motion.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_dialog_owner.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
 
-class AccountCompatibilityCard extends StatelessWidget {
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+class AccountCompatibilityCard extends StatefulWidget {
   const AccountCompatibilityCard({
     required this.projection,
     required this.module,
@@ -29,11 +37,28 @@ class AccountCompatibilityCard extends StatelessWidget {
   final bool existingAccountOnly;
 
   @override
+  State<AccountCompatibilityCard> createState() =>
+      _AccountCompatibilityCardState();
+}
+
+class _AccountCompatibilityCardState extends State<AccountCompatibilityCard> {
+  AccountProjection get projection => widget.projection;
+  AccountModule get module => widget.module;
+  bool get readOnly => widget.readOnly;
+  bool get existingAccountOnly => widget.existingAccountOnly;
+  bool _askingCredential = false;
+  bool _isCurrent(AccountModule owner, int generation) =>
+      mounted &&
+      identical(owner, module) &&
+      owner.projection.value.generation == generation;
+
+  @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     final compatibility = projection.compatibility;
     final operation = projection.operation;
+    final owner = module, generation = projection.generation;
     final mutating =
         operation == AccountOperation.linkingLegacyAccount ||
         operation == AccountOperation.creatingCompatibilityIdentity ||
@@ -45,12 +70,12 @@ class AccountCompatibilityCard extends StatelessWidget {
         ? tokens.colors.success
         : linked
         ? tokens.colors.warning
-        : tokens.colors.accent;
+        : tokens.colors.stateAccent;
     final background = available
         ? tokens.colors.successSoft
         : linked
         ? tokens.colors.warningSoft
-        : tokens.colors.accentSoft;
+        : tokens.colors.stateAccentSoft;
 
     return StarBridgeSurface(
       role: SurfaceRole.panel,
@@ -64,13 +89,26 @@ class AccountCompatibilityCard extends StatelessWidget {
             color: color,
           ),
           if (module.passwordRecovery case final recovery?)
-            TextButton(
-              key: const Key('account-linked-password-recovery'),
-              onPressed: projection.isBusy
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const Key('account-linked-password-recovery'),
+              onActivate: projection.isBusy
                   ? null
-                  : () => unawaited(
-                      showPasswordRecoveryDialog(context, recovery),
-                    ),
+                  : (source) {
+                      bool current() =>
+                          _isCurrent(owner, generation) &&
+                          identical(owner.passwordRecovery, recovery);
+                      if (!current() || owner.projection.value.isBusy) return;
+                      unawaited(
+                        showPasswordRecoveryDialog(
+                          context,
+                          recovery,
+                          source: source,
+                          isCurrent: current,
+                          ownerChanges: owner.projection,
+                        ),
+                      );
+                    },
               child: Text(strings.text('account.recovery.title')),
             ),
           SizedBox(height: tokens.space.md),
@@ -97,25 +135,60 @@ class AccountCompatibilityCard extends StatelessWidget {
           ],
           if (readOnly || (existingAccountOnly && !mutating)) ...[
             SizedBox(height: tokens.space.md),
-            OutlinedButton.icon(
-              key: const Key('account-compatibility-refresh'),
-              onPressed: projection.isBusy
+            StarBridgeActionButton(
+              controlKey: const Key('account-compatibility-refresh'),
+              onActivate: projection.isBusy
                   ? null
-                  : () => unawaited(module.refresh()),
-              icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-              label: Text(strings.text('account.compatibility.refreshAction')),
+                  : (source) {
+                      if (!_isCurrent(owner, generation) ||
+                          owner.projection.value.isBusy) {
+                        return;
+                      }
+                      unawaited(
+                        runAccountMotionCommand(
+                          owner,
+                          AccountOperation.refreshing,
+                          source,
+                          owner.refresh,
+                        ),
+                      );
+                    },
+              child: _actionContent(
+                context,
+                StarBridgeIconSemantic.refresh,
+                strings.text('account.compatibility.refreshAction'),
+              ),
             ),
           ],
           if (!readOnly && mutating) ...[
             SizedBox(height: tokens.space.md),
-            OutlinedButton.icon(
-              key: const Key('account-compatibility-cancel'),
-              onPressed:
+            SizedBox(width: 56, child: AccountOperationWaiting(module: owner)),
+            SizedBox(height: tokens.space.sm),
+            StarBridgeActionButton(
+              controlKey: const Key('account-compatibility-cancel'),
+              onActivate:
                   operation == AccountOperation.cancellingCompatibilityOperation
                   ? null
-                  : () => unawaited(module.cancelCompatibilityOperation()),
-              icon: const StarBridgeIcon(StarBridgeIconSemantic.windowClose),
-              label: Text(
+                  : (source) {
+                      if (!_isCurrent(owner, generation) ||
+                          !owner
+                              .projection
+                              .value
+                              .canCancelCompatibilityOperation) {
+                        return;
+                      }
+                      unawaited(
+                        runAccountMotionCommand(
+                          owner,
+                          AccountOperation.cancellingCompatibilityOperation,
+                          source,
+                          owner.cancelCompatibilityOperation,
+                        ),
+                      );
+                    },
+              child: _actionContent(
+                context,
+                StarBridgeIconSemantic.windowClose,
                 strings.text(
                   operation == AccountOperation.cancellingCompatibilityOperation
                       ? 'account.compatibility.cancelling'
@@ -134,16 +207,21 @@ class AccountCompatibilityCard extends StatelessWidget {
               runSpacing: tokens.space.sm,
               children: [
                 if (projection.canLinkLegacyAccount)
-                  FilledButton.icon(
-                    key: const Key('account-compatibility-link'),
-                    onPressed: () => unawaited(
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.primary,
+                    controlKey: const Key('account-compatibility-link'),
+                    onActivate: (source) => unawaited(
                       _linkExisting(
                         context,
+                        source: source,
+                        expectedOwner: owner,
+                        generation: generation,
                         forceManualCredential: existingAccountOnly,
                       ),
                     ),
-                    icon: const StarBridgeIcon(StarBridgeIconSemantic.login),
-                    label: Text(
+                    child: _actionContent(
+                      context,
+                      StarBridgeIconSemantic.login,
                       strings.text(
                         !existingAccountOnly &&
                                 compatibility.storedLegacyCredentialAvailable
@@ -158,7 +236,12 @@ class AccountCompatibilityCard extends StatelessWidget {
                   OutlinedButton.icon(
                     key: const Key('account-compatibility-link-manual'),
                     onPressed: () => unawaited(
-                      _linkExisting(context, forceManualCredential: true),
+                      _linkExisting(
+                        context,
+                        forceManualCredential: true,
+                        expectedOwner: owner,
+                        generation: generation,
+                      ),
                     ),
                     icon: const StarBridgeIcon(StarBridgeIconSemantic.account),
                     label: Text(
@@ -169,18 +252,33 @@ class AccountCompatibilityCard extends StatelessWidget {
                     projection.canCreateCompatibilityIdentity)
                   OutlinedButton.icon(
                     key: const Key('account-compatibility-create'),
-                    onPressed: () => unawaited(_createIdentity(context)),
+                    onPressed: () =>
+                        unawaited(_createIdentity(context, owner, generation)),
                     icon: const StarBridgeIcon(StarBridgeIconSemantic.add),
                     label: Text(
                       strings.text('account.compatibility.createAction'),
                     ),
                   ),
                 if (projection.canRetryCompatibility)
-                  OutlinedButton.icon(
-                    key: const Key('account-compatibility-retry'),
-                    onPressed: () => unawaited(module.refresh()),
-                    icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-                    label: Text(
+                  StarBridgeActionButton(
+                    controlKey: const Key('account-compatibility-retry'),
+                    onActivate: (source) {
+                      if (!_isCurrent(owner, generation) ||
+                          !owner.projection.value.canRetryCompatibility) {
+                        return;
+                      }
+                      unawaited(
+                        runAccountMotionCommand(
+                          owner,
+                          AccountOperation.refreshing,
+                          source,
+                          owner.refresh,
+                        ),
+                      );
+                    },
+                    child: _actionContent(
+                      context,
+                      StarBridgeIconSemantic.refresh,
                       strings.text('account.compatibility.retryAction'),
                     ),
                   ),
@@ -227,29 +325,84 @@ class AccountCompatibilityCard extends StatelessWidget {
   Future<void> _linkExisting(
     BuildContext context, {
     bool forceManualCredential = false,
+    InteractionSource source = InteractionSource.pointer,
+    AccountModule? expectedOwner,
+    int? generation,
   }) async {
+    final owner = expectedOwner ?? module,
+        version = generation ?? projection.generation;
+    bool current() =>
+        _isCurrent(owner, version) &&
+        !readOnly &&
+        owner.projection.value.isSignedIn &&
+        owner.projection.value.compatibility.availableActions.contains(
+          AccountCompatibilityAction.linkExistingAccount,
+        );
+    if (!current() ||
+        _askingCredential ||
+        !owner.projection.value.canLinkLegacyAccount) {
+      return;
+    }
     if (projection.compatibility.storedLegacyCredentialAvailable &&
         !forceManualCredential) {
-      await module.linkLegacyAccount();
+      await runAccountMotionCommand(
+        owner,
+        AccountOperation.linkingLegacyAccount,
+        source,
+        owner.linkLegacyAccount,
+      );
       return;
     }
-    final credential = await showLegacyAccountCredentialDialog(context);
-    if (credential == null) {
+    LegacyAccountCredential? credential;
+    var completingSource = source;
+    _askingCredential = true;
+    try {
+      credential = await showLegacyAccountCredentialDialog(
+        context,
+        source: source,
+        isCurrent: current,
+        canSubmit: () =>
+            current() && owner.projection.value.canLinkLegacyAccount,
+        ownerChanges: owner.projection,
+        onSubmitSource: (value) => completingSource = value,
+      );
+    } finally {
+      _askingCredential = false;
+    }
+    final accepted = credential;
+    if (accepted == null ||
+        !current() ||
+        !owner.projection.value.canLinkLegacyAccount) {
       return;
     }
-    await module.linkLegacyAccount(
-      accountName: credential.accountName,
-      password: credential.password,
+    await runAccountMotionCommand(
+      owner,
+      AccountOperation.linkingLegacyAccount,
+      completingSource,
+      () => owner.linkLegacyAccount(
+        accountName: accepted.accountName,
+        password: accepted.password,
+      ),
     );
   }
 
-  Future<void> _createIdentity(BuildContext context) async {
+  Future<void> _createIdentity(
+    BuildContext context,
+    AccountModule owner,
+    int generation,
+  ) async {
+    bool current() =>
+        _isCurrent(owner, generation) &&
+        !readOnly &&
+        !existingAccountOnly &&
+        owner.projection.value.canCreateCompatibilityIdentity;
+    if (!current()) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => const _CreateCompatibilityIdentityDialog(),
     );
-    if (confirmed == true) {
-      await module.createCompatibilityIdentity();
+    if (confirmed == true && current()) {
+      await owner.createCompatibilityIdentity();
     }
   }
 }
@@ -257,17 +410,47 @@ class AccountCompatibilityCard extends StatelessWidget {
 Future<LegacyAccountCredential?> showLegacyAccountCredentialDialog(
   BuildContext context, {
   bool forMigration = false,
+  InteractionSource? source,
+  bool Function()? isCurrent,
+  bool Function()? canSubmit,
+  Listenable? ownerChanges,
+  ValueChanged<InteractionSource>? onSubmitSource,
 }) {
-  return showDialog<LegacyAccountCredential>(
-    context: context,
-    builder: (context) =>
-        _LegacyAccountCredentialDialog(forMigration: forMigration),
+  final current = isCurrent ?? () => context.mounted;
+  return showStarBridgeDialog<LegacyAccountCredential>(
+    context,
+    source: source,
+    builder: (_) {
+      Widget editor() => _LegacyAccountCredentialDialog(
+        forMigration: forMigration,
+        isCurrent: current,
+        canSubmit: canSubmit ?? current,
+        onSubmitSource: onSubmitSource,
+      );
+      return StarBridgeDialogOwnerGuard(
+        isCurrent: current,
+        child: ownerChanges == null
+            ? editor()
+            : AnimatedBuilder(
+                animation: ownerChanges,
+                builder: (_, _) => editor(),
+              ),
+      );
+    },
   );
 }
 
 class _LegacyAccountCredentialDialog extends StatefulWidget {
-  const _LegacyAccountCredentialDialog({this.forMigration = false});
+  const _LegacyAccountCredentialDialog({
+    this.forMigration = false,
+    required this.isCurrent,
+    required this.canSubmit,
+    this.onSubmitSource,
+  });
   final bool forMigration;
+  final bool Function() isCurrent;
+  final bool Function() canSubmit;
+  final ValueChanged<InteractionSource>? onSubmitSource;
 
   @override
   State<_LegacyAccountCredentialDialog> createState() =>
@@ -279,6 +462,7 @@ class _LegacyAccountCredentialDialogState
   final _formKey = GlobalKey<FormState>();
   final _accountNameController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _submitted = false, _invalid = false;
 
   @override
   void dispose() {
@@ -299,111 +483,130 @@ class _LegacyAccountCredentialDialogState
           role: SurfaceRole.floating,
           child: Form(
             key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        strings.text(
-                          widget.forMigration
-                              ? 'migration.dialogTitle'
-                              : 'account.compatibility.dialog.title',
-                        ),
-                        style: Theme.of(context).textTheme.headlineSmall,
-                      ),
-                    ),
-                    IconButton(
-                      key: const Key('account-legacy-dialog-close'),
-                      tooltip: strings.text(
-                        'account.compatibility.dialog.close',
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const StarBridgeIcon(
-                        StarBridgeIconSemantic.windowClose,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: tokens.space.sm),
-                Text(
-                  strings.text(
-                    widget.forMigration
-                        ? 'migration.dialogBody'
-                        : 'account.compatibility.dialog.body',
-                  ),
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: tokens.colors.textSecondary),
-                ),
-                SizedBox(height: tokens.space.lg),
-                TextFormField(
-                  key: const Key('account-legacy-name'),
-                  controller: _accountNameController,
-                  autofocus: true,
-                  textInputAction: TextInputAction.next,
-                  decoration: InputDecoration(
-                    labelText: strings.text(
-                      'account.compatibility.dialog.accountName',
-                    ),
-                  ),
-                  validator: (value) => value?.trim().isNotEmpty == true
-                      ? null
-                      : strings.text('account.compatibility.dialog.required'),
-                ),
-                SizedBox(height: tokens.space.md),
-                TextFormField(
-                  key: const Key('account-legacy-password'),
-                  controller: _passwordController,
-                  obscureText: true,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _submit(),
-                  decoration: InputDecoration(
-                    labelText: strings.text(
-                      'account.compatibility.dialog.password',
-                    ),
-                  ),
-                  validator: (value) => value?.isNotEmpty == true
-                      ? null
-                      : strings.text('account.compatibility.dialog.required'),
-                ),
-                SizedBox(height: tokens.space.md),
-                AccountInlineNotice(
-                  icon: StarBridgeIconSemantic.account,
-                  textKey: widget.forMigration
-                      ? 'migration.passwordNotice'
-                      : 'account.compatibility.dialog.security',
-                  color: tokens.colors.accent,
-                  background: tokens.colors.accentSoft,
-                ),
-                SizedBox(height: tokens.space.lg),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        strings.text('account.compatibility.dialog.cancel'),
-                      ),
-                    ),
-                    SizedBox(width: tokens.space.sm),
-                    FilledButton(
-                      key: const Key('account-legacy-submit'),
-                      onPressed: _submit,
-                      child: Text(
-                        strings.text(
-                          widget.forMigration
-                              ? 'migration.verifyPreview'
-                              : 'account.compatibility.dialog.submit',
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          strings.text(
+                            widget.forMigration
+                                ? 'migration.dialogTitle'
+                                : 'account.compatibility.dialog.title',
+                          ),
+                          style: Theme.of(context).textTheme.headlineSmall,
                         ),
                       ),
+                      StarBridgeIconAction(
+                        controlKey: const Key('account-legacy-dialog-close'),
+                        label: strings.text(
+                          'account.compatibility.dialog.close',
+                        ),
+                        onActivate: _close,
+                        icon: const StarBridgeIcon(
+                          StarBridgeIconSemantic.windowClose,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: tokens.space.sm),
+                  Text(
+                    strings.text(
+                      widget.forMigration
+                          ? 'migration.dialogBody'
+                          : 'account.compatibility.dialog.body',
                     ),
-                  ],
-                ),
-              ],
+                    style: Theme.of(context).textTheme.bodyMedium
+                        ?.copyWith(color: tokens.colors.textSecondary),
+                  ),
+                  SizedBox(height: tokens.space.lg),
+                  StarBridgeFieldFrame(
+                    error:
+                        _invalid && _accountNameController.text.trim().isEmpty,
+                    builder: (_, focus) => TextFormField(
+                      key: const Key('account-legacy-name'),
+                      controller: _accountNameController,
+                      focusNode: focus,
+                      autofocus: true,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: strings.text(
+                          'account.compatibility.dialog.accountName',
+                        ),
+                      ),
+                      validator: (value) => value?.trim().isNotEmpty == true
+                          ? null
+                          : strings.text(
+                              'account.compatibility.dialog.required',
+                            ),
+                    ),
+                  ),
+                  SizedBox(height: tokens.space.md),
+                  StarBridgeFieldFrame(
+                    error: _invalid && _passwordController.text.isEmpty,
+                    builder: (_, focus) => TextFormField(
+                      key: const Key('account-legacy-password'),
+                      controller: _passwordController,
+                      focusNode: focus,
+                      obscureText: true,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) =>
+                          _submit(InteractionSource.keyboard),
+                      decoration: InputDecoration(
+                        labelText: strings.text(
+                          'account.compatibility.dialog.password',
+                        ),
+                      ),
+                      validator: (value) => value?.isNotEmpty == true
+                          ? null
+                          : strings.text(
+                              'account.compatibility.dialog.required',
+                            ),
+                    ),
+                  ),
+                  SizedBox(height: tokens.space.md),
+                  AccountInlineNotice(
+                    icon: StarBridgeIconSemantic.account,
+                    textKey: widget.forMigration
+                        ? 'migration.passwordNotice'
+                        : 'account.compatibility.dialog.security',
+                    color: tokens.colors.accent,
+                    background: tokens.colors.accentSoft,
+                  ),
+                  SizedBox(height: tokens.space.lg),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      StarBridgeActionButton(
+                        kind: StarBridgeActionKind.quiet,
+                        controlKey: const Key('account-legacy-dialog-cancel'),
+                        onActivate: _close,
+                        child: Text(
+                          strings.text('account.compatibility.dialog.cancel'),
+                        ),
+                      ),
+                      SizedBox(width: tokens.space.sm),
+                      StarBridgeActionButton(
+                        kind: StarBridgeActionKind.primary,
+                        controlKey: const Key('account-legacy-submit'),
+                        onActivate: widget.canSubmit() ? _submit : null,
+                        child: Text(
+                          strings.text(
+                            widget.forMigration
+                                ? 'migration.verifyPreview'
+                                : 'account.compatibility.dialog.submit',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -411,8 +614,25 @@ class _LegacyAccountCredentialDialogState
     );
   }
 
-  void _submit() {
+  void _close(InteractionSource source) {
+    if (!mounted || _submitted || ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    _submitted = true;
+    _passwordController.clear();
+    dismissStarBridgeDialog<LegacyAccountCredential>(context, source: source);
+  }
+
+  void _submit(InteractionSource source) {
+    if (!mounted ||
+        _submitted ||
+        !widget.isCurrent() ||
+        !widget.canSubmit() ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
     if (_formKey.currentState?.validate() != true) {
+      setState(() => _invalid = true);
       return;
     }
     final credential = LegacyAccountCredential(
@@ -420,7 +640,9 @@ class _LegacyAccountCredentialDialogState
       password: _passwordController.text,
     );
     _passwordController.clear();
-    Navigator.of(context).pop(credential);
+    _submitted = true;
+    widget.onSubmitSource?.call(source);
+    dismissStarBridgeDialog(context, result: credential, source: source);
   }
 }
 
@@ -479,3 +701,16 @@ class _CreateCompatibilityIdentityDialog extends StatelessWidget {
     );
   }
 }
+
+Widget _actionContent(
+  BuildContext context,
+  StarBridgeIconSemantic icon,
+  String label,
+) => Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    StarBridgeIcon(icon),
+    SizedBox(width: context.tokens.space.xs),
+    Flexible(child: Text(label)),
+  ],
+);

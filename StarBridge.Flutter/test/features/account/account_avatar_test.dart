@@ -121,20 +121,101 @@ void main() {
       isFalse,
     );
   });
-  test('SCM and cancelled picks do not write avatars', () async {
+  test('SCM avatar selection uses the current authenticated account', () async {
     final connection = _Connection()..state = 'signedIn';
-    final session = BridgeClientSession(
-      connection: connection,
-      sessionGeneration: 7,
-    )..acceptHostCapabilities({'account.avatar', 'account.avatarImages'});
+    final session =
+        BridgeClientSession(connection: connection, sessionGeneration: 7)
+          ..acceptHostCapabilities({
+            'account.avatar',
+            'account.avatarImages',
+            'account.scmAvatar',
+          });
     addTearDown(session.close);
     final port = AccountAvatarPort(session);
-    await expectLater(port.pickLogo(), throwsFormatException);
-    expect(connection.requests.length, 1);
-    connection.state = 'legacySignedIn';
-    connection.cancel = true;
-    expect(await port.pickLogo(), isNull);
+    final source = await port.pickLogo();
+    expect(source, isNotNull);
+    final crop = await port.cropLogo(source!.sourceRef, 0, 0, 1);
+    await port.save(crop);
     await port.clearLogo();
+    expect(
+      connection.requests.where((r) => r.name == 'account.updateAvatar').length,
+      1,
+    );
+    expect(
+      connection.requests
+          .skip(1)
+          .every((r) => r.accountContext?.subject == 'owner'),
+      isTrue,
+    );
+  });
+  test(
+    'unavailable sessions and cancelled picks do not write avatars',
+    () async {
+      final connection = _Connection()
+        ..state = 'credentialTemporarilyUnavailable';
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 7,
+      )..acceptHostCapabilities({'account.avatar', 'account.avatarImages'});
+      addTearDown(session.close);
+      final port = AccountAvatarPort(session);
+      await expectLater(port.pickLogo(), throwsFormatException);
+      expect(connection.requests.length, 1);
+      connection.state = 'signedIn';
+      expect(port.canEditScm, isFalse);
+      await expectLater(port.pickLogo(), throwsFormatException);
+      expect(connection.requests.length, 2);
+      connection.state = 'legacySignedIn';
+      connection.cancel = true;
+      expect(await port.pickLogo(), isNull);
+      await port.clearLogo();
+      expect(
+        connection.requests.any((r) => r.name == 'account.updateAvatar'),
+        isFalse,
+      );
+    },
+  );
+
+  testWidgets('SCM avatar is read-only and links to the RSI profile page', (
+    tester,
+  ) async {
+    final connection = _Connection()..state = 'signedIn';
+    final session =
+        BridgeClientSession(connection: connection, sessionGeneration: 7)
+          ..acceptHostCapabilities({
+            'account.avatar',
+            'account.avatarImages',
+            'helpSupport.openRsiProfileSettings',
+          });
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: AppStrings.supportedLocales,
+        localizationsDelegates: const [
+          AppStringsDelegate(),
+          ...GlobalMaterialLocalizations.delegates,
+        ],
+        home: Scaffold(
+          body: AccountAvatarScope(
+            port: AccountAvatarPort(session),
+            imageData: null,
+            editable: false,
+            rsiManaged: true,
+            child: const AccountAvatarEditor(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('RSI 账号一致'), findsOneWidget);
+    expect(find.byKey(const Key('profile-change-account-avatar')), findsNothing);
+    await tester.tap(find.byKey(const Key('profile-open-rsi-avatar')));
+    await tester.pumpAndSettle();
+    expect(
+      connection.requests.map((r) => r.name),
+      contains('helpSupport.openRsiProfileSettings'),
+    );
     expect(
       connection.requests.any((r) => r.name == 'account.updateAvatar'),
       isFalse,
@@ -164,7 +245,7 @@ class _Connection implements BridgeConnection {
         'status': 'ok',
         'accountContext': {
           'environment': 'test',
-          'authority': 'relay',
+          'authority': state == 'signedIn' ? 'scm-test' : 'relay',
           'subject': 'owner',
         },
         'payload': {

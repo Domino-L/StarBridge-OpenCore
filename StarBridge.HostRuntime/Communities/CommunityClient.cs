@@ -34,28 +34,44 @@ internal sealed record CommunityCommand(string Status, string? Error = null)
 
 internal sealed partial class CommunityClient : IDisposable
 {
-    private sealed record Target(string Code, string Scope, DateTimeOffset Expires, string Name = "", string? WpfS2ViewerId = null, bool WpfS2Directory = false);
+    internal Action<string, string, int?, long>? ReadDiagnostic { get; set; }
+    private sealed record Target(string Code, string Scope, DateTimeOffset Expires, string Name = "", string? WpfS2ViewerId = null, bool WpfS2Directory = false,
+        bool OfficialFleet = false, int AuthorIdentitySchemaVersion = 0, bool WpfS2RemoteMedia = false, bool PreviewAuthorsAvailable = false);
     private readonly ConcurrentDictionary<string, Target> _targets = new();
     private readonly ConcurrentDictionary<string, string> _organizationRefs = new();
     private readonly SemaphoreSlim _write = new(1);
     private readonly Uri _origin;
     private readonly HttpClient _http;
+    private readonly HttpClient _officialActivityHttp;
     private readonly TimeProvider _targetClock;
     private readonly Lazy<InvitationSendWorkflow> _invitationWorkflow;
+    private readonly Lazy<AnnouncementAttemptJournal> _announcementJournal;
     private readonly Func<string, string?, string, object[]?> _shipLoaners;
+    private readonly Func<string, string, StarBridge.Core.Ships.ShipPresentation> _shipCatalog;
     private readonly bool _loanerSearchAvailable;
     internal CommunityClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? targetClock = null,
         InvitationOutboxJournal? invitationJournal = null,
-        Func<string, string?, string, object[]?>? shipLoaners = null, bool? loanerSearchAvailable = null)
+        Func<string, string?, string, object[]?>? shipLoaners = null, bool? loanerSearchAvailable = null, AnnouncementAttemptJournal? announcementJournal = null,
+        Func<string, string, StarBridge.Core.Ships.ShipPresentation>? shipCatalog = null)
     {
         if (!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0 ||
             origin.Scheme != "https" && !(origin.Scheme == "http" && origin.IsLoopback)) throw new ArgumentException("Trusted origin required");
         _origin = origin;
         _targetClock = targetClock ?? TimeProvider.System;
         _invitationWorkflow = new(() => new(invitationJournal ?? new InvitationOutboxJournal()));
+        _announcementJournal = new(() => announcementJournal ?? new AnnouncementAttemptJournal(clock: _targetClock));
         _shipLoaners = shipLoaners ?? CommunityShipCatalog.Loaners;
+        _shipCatalog = shipCatalog ?? Hangar.HangarShipNames.Lookup;
         _loanerSearchAvailable = loanerSearchAvailable ?? CommunityShipCatalog.Available;
-        _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(12) };
+        var transport = handler ?? new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+        };
+        _http = new(transport) { Timeout = TimeSpan.FromSeconds(12) };
+        // The official wait has its own longer deadline. Ordinary reads keep 12s.
+        // The ordinary client owns this shared transport.
+        _officialActivityHttp = new(transport, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     }
     internal static CommunityQuery ParseQuery(JsonElement body)
     {
@@ -118,6 +134,7 @@ internal sealed partial class CommunityClient : IDisposable
     }
     internal async Task<CommunityPage> ReadAsync(string bearer, CommunityQuery query, string scope, CancellationToken token)
     {
+        var imageEpoch = ImageReadEpoch;
         if (query.TargetRef is not null && ResolveForRead(query.TargetRef, scope, allowWpfS2: true) is { WpfS2ViewerId: not null } legacy)
             return await ReadWpfS2Discovery(bearer, query, scope, legacy.WpfS2ViewerId, token);
         var code = query.TargetRef is null ? null : ResolveForRead(query.TargetRef, scope).Code;
@@ -134,7 +151,7 @@ internal sealed partial class CommunityClient : IDisposable
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw new AccountBridgeHostException("communities.identityUnavailable");
             if (response.StatusCode == HttpStatusCode.NotFound) throw new AccountBridgeHostException("communities.upgradeRequired");
-            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("communities.unavailable", true);
+            if (!response.IsSuccessStatusCode) throw DirectoryReadFailure(response.StatusCode);
             using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var buffer = new MemoryStream();
             var chunk = new byte[8192];
@@ -145,13 +162,15 @@ internal sealed partial class CommunityClient : IDisposable
                 buffer.Write(chunk, 0, count);
             }
             using var document = JsonDocument.Parse(buffer.ToArray());
-            return Project(document.RootElement, query, scope, code);
+            return Project(document.RootElement, query, scope, code, imageEpoch);
         }
-        catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw new AccountBridgeHostException("communities.unavailable", true); }
-        catch (Exception e) when (e is HttpRequestException or IOException) { throw new AccountBridgeHostException("communities.unavailable", true); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw DirectoryReadFailure(null); }
+        catch (InvalidDataException) { throw Invalid(); }
+        catch (HttpRequestException error) { throw DirectoryReadFailure(error.StatusCode); }
+        catch (IOException) { throw DirectoryReadFailure(null); }
         catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException) { throw Invalid(); }
     }
-    private CommunityPage Project(JsonElement root, CommunityQuery query, string scope, string? targetCode)
+    private CommunityPage Project(JsonElement root, CommunityQuery query, string scope, string? targetCode, int imageEpoch)
     {
         if (root.GetProperty("schemaVersion").GetInt32() != 1 || root.GetProperty("membershipModelVersion").GetInt32() != 2 ||
             Text(root, "view", 16) != query.View || Text(root, "query", 128) != query.Query.Trim()) throw Invalid();
@@ -175,11 +194,18 @@ internal sealed partial class CommunityClient : IDisposable
             if (memberCount < 0) throw Invalid();
             var reference = Guid.NewGuid().ToString("N");
             _targets[reference] = new(code, scope, _targetClock.GetUtcNow().AddMinutes(5), Text(item, "name", 512));
+            var logo = RoomAvatarProjection.Normalize(Optional(item, "logoImageData", 128 * 1024));
+            // This directory deliberately omits deferred media; null is not an avatar deletion.
+            if (logo is not null) CacheSharingLogo(scope, code, logo, imageEpoch);
             return new CommunityView(Text(item, "name", 512), Text(item, "description", 8192, true),
                 Text(item, "language", 512), Text(item, "activeTime", 1024), memberCount, relationship, mode, actions,
-                CacheSharingLogo(scope, code, RoomAvatarProjection.Normalize(Optional(item, "logoImageData", 128 * 1024))), reference)
+                logo, reference)
             {
                 OrganizationRef = _organizationRefs.GetOrAdd(scope + "\0" + code, _ => Guid.NewGuid().ToString("N")),
+                // The directory omits large logos. Null is not proof of absence;
+                // hydrate through the same authenticated, bounded media route.
+                // A genuinely absent/denied logo remains a local image failure.
+                LogoDeferred = logo is null,
                 Tags = Optional(item, "tags", 2048) ?? "",
                 MemberScale = Optional(item, "memberScale", 16) ?? "",
                 Recruiting = item.TryGetProperty("recruiting", out var recruiting) && recruiting.GetBoolean(),
@@ -210,10 +236,12 @@ internal sealed partial class CommunityClient : IDisposable
         token = deadline.Token;
         if (!await _write.WaitAsync(0, token)) return new("rejected", "busy");
         var sent = false;
+        Target? commandTarget = null;
         try
         {
             current();
             var target = Resolve(reference, scope, allowWpfS2: true);
+            commandTarget = target;
             if (target.WpfS2ViewerId is not null && action == "leave")
                 return await LeaveWpfS2Async(bearer, target, current, token);
             var latest = await ReadAsync(bearer, new("discover", "", null, reference), scope, token);
@@ -222,9 +250,11 @@ internal sealed partial class CommunityClient : IDisposable
             token.ThrowIfCancellationRequested();
             var path = action switch { "join" or "apply" => "/api/fleets/apply", "withdraw" => "/api/fleets/applications/withdraw", _ => "/api/fleets/leave" };
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, path))
-                { Content = target.WpfS2ViewerId is not null && action is "join" or "apply"
+            {
+                Content = target.WpfS2ViewerId is not null && action is "join" or "apply"
                     ? JsonContent.Create(new { FleetCode = target.Code, Message = "" })
-                    : JsonContent.Create(new { FleetCode = target.Code }) };
+                    : JsonContent.Create(new { FleetCode = target.Code })
+            };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
             sent = true;
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -251,7 +281,15 @@ internal sealed partial class CommunityClient : IDisposable
         }
         catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException or AccountBridgeHostException or StarBridge.NativeBridge.BridgeStaleGenerationException)
         { return new(sent ? "unknown" : "rejected", sent ? "outcomeUnknown" : "refreshRequired"); }
-        finally { if (sent) _targets.TryRemove(reference, out _); _write.Release(); }
+        finally
+        {
+            if (sent)
+            {
+                _targets.TryRemove(reference, out _);
+                if (action == "leave" && commandTarget is not null) ClearMemberReferences(scope, commandTarget.Code);
+            }
+            _write.Release();
+        }
     }
     private static string? Optional(JsonElement body, string name, int max, bool multiline = false) =>
         !body.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null ? null : Text(body, name, max, multiline);
@@ -262,5 +300,5 @@ internal sealed partial class CommunityClient : IDisposable
         return text;
     }
     private static AccountBridgeHostException Invalid() => new("communities.dataInvalid");
-    public void Dispose() { DisposeMembershipReads(); InvalidateInvitePreviews(); InvalidateProfileEdits(); InvalidateRolesEdits(); InvalidateHangarEdits(); ClearDirectoryLogos(); _http.Dispose(); _targets.Clear(); _organizationRefs.Clear(); _wpfS2DirectoryCursors.Clear(); _creationAttempts.Clear(); _memberTargets.Clear(); _profileAttempts.Clear(); _logTargets.Clear(); _disbandConfirmations.Clear(); _chatTargets.Clear(); _chatAttempts.Clear(); _announcementTargets.Clear(); _announcementAttempts.Clear(); _shipTargets.Clear(); _shipReportAttempts.Clear(); }
+    public void Dispose() { DisposeOfficialRolePages(); DisposeOfficialAnnouncementEditors(); DisposeMembershipReads(); InvalidateInvitePreviews(); InvalidateProfileEdits(); InvalidateRolesEdits(); InvalidateHangarEdits(); ClearDirectoryLogos(); _officialActivityHttp.Dispose(); _http.Dispose(); _targets.Clear(); _organizationRefs.Clear(); _wpfS2DirectoryCursors.Clear(); _creationAttempts.Clear(); ClearMemberReferences(); _profileAttempts.Clear(); _logTargets.Clear(); _disbandConfirmations.Clear(); _chatTargets.Clear(); _chatAttempts.Clear(); _announcementTargets.Clear(); _announcementAttempts.Clear(); _shipTargets.Clear(); _shipReportAttempts.Clear(); }
 }

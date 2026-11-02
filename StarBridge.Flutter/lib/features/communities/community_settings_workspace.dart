@@ -1,16 +1,21 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:typed_data';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'community_holo_workspace.dart' show communityCanManage;
 import 'community_workspace_port.dart';
 import 'community_workspace_image.dart';
 import 'community_profile_port.dart';
 import 'community_profile_dialog.dart';
 import 'community_roles_port.dart';
+import '../common/organization_settings_layout.dart';
 import 'community_roles_dialog.dart';
 import 'community_admissions_port.dart';
 import 'community_management_dialog.dart';
@@ -18,6 +23,9 @@ import 'community_logs_port.dart';
 import 'community_logs_dialog.dart';
 import 'community_announcements_port.dart';
 import 'community_announcements_dialog.dart';
+import '../settings/organization_notification_pane.dart';
+import '../settings/organization_personal_settings.dart';
+import '../settings/organization_privacy_pane.dart';
 
 String communitySettingsText(BuildContext context, String key) {
   const copy = <String, (String, String, String)>{
@@ -36,6 +44,9 @@ String communitySettingsText(BuildContext context, String key) {
     'contacts': ('联系方式', '聯絡方式', 'Contact details'),
     'profileGroup': ('组织资料', '組織資料', 'Organization profile'),
     'teamGroup': ('团队管理', '團隊管理', 'Team management'),
+    'mineGroup': ('我自己', '我自己', 'For me'),
+    'privacy': ('隐私', '隱私', 'Privacy'),
+    'notifications': ('通知', '通知', 'Notifications'),
     'quickActions': ('常用管理', '常用管理', 'Quick actions'),
     'membersHelp': (
       '查看成员并分配身份组。',
@@ -106,6 +117,7 @@ class CommunitySettingsWorkspace extends StatefulWidget {
     required this.dangerActions,
     required this.hasDangerActions,
     this.logo,
+    this.images,
     this.logoLoading = false,
     this.logoFailed = false,
     this.contextInvalidations,
@@ -117,6 +129,9 @@ class CommunitySettingsWorkspace extends StatefulWidget {
   final CommunityWorkspace workspace;
   final String targetRef;
   final Uint8List? logo;
+
+  /// Loaded workspace images by kind (logo, banner, background).
+  final Uint8List? Function(String kind)? images;
   final bool logoLoading, logoFailed;
   final Stream<void>? contextInvalidations;
   final ValueChanged<Set<String>>? onWorkspaceChanged;
@@ -143,6 +158,13 @@ class CommunitySettingsWorkspaceState
   bool _overviewLoading = false, _overviewFailed = false;
   int _overviewRead = 0;
   String t(String key) => communitySettingsText(context, key);
+  OrganizationPersonalSettings? _personal;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _personal = OrganizationPersonalSettings.of(context);
+  }
+
   static const _profileSections = [
     'profile',
     'discovery',
@@ -233,10 +255,16 @@ class CommunitySettingsWorkspaceState
           ('contacts', StandardIconSemantic.alternateEmail),
         ],
       ],
+      // Each page needs its own grant (user report 2026-10-29); reading
+      // announcements stays in the activity section for everyone.
       if (port is CommunityAnnouncementsPort &&
-          (port as CommunityAnnouncementsPort).announcementsAvailable)
+          (port as CommunityAnnouncementsPort).announcementsAvailable &&
+          (owner || access['canManageAnnouncements'] == true))
         ('announcements', StandardIconSemantic.campaign),
-      if (port is CommunityAdmissionsPort)
+      if (port is CommunityAdmissionsPort &&
+          (owner ||
+              access['canReviewApplications'] == true ||
+              access['canCreateInvite'] == true))
         ('admissions', StandardIconSemantic.personAddAlt),
       if (port is CommunityRolesPort &&
           (port as CommunityRolesPort).rolesAvailable &&
@@ -246,7 +274,11 @@ class CommunitySettingsWorkspaceState
           (port as CommunityLogsPort).logsAvailable &&
           access['canViewLogs'] == true)
         ('logs', StandardIconSemantic.history),
-      if (widget.hasDangerActions) ('danger', StandardIconSemantic.warningAmber),
+      if (widget.hasDangerActions)
+        ('danger', StandardIconSemantic.warningAmber),
+      if (_personal?.privacy != null) ('privacy', StandardIconSemantic.verifiedUser),
+      if (_personal?.notificationSources != null)
+        ('notifications', StandardIconSemantic.campaign),
     ];
   }
 
@@ -281,8 +313,9 @@ class CommunitySettingsWorkspaceState
             children: [
               Text(t('refreshFailed')),
               const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _refreshOverview,
+              StarBridgeActionButton(
+                controlKey: const Key('settings-overview-reload'),
+                onActivate: (_) => _refreshOverview(),
                 child: Text(t('reload')),
               ),
             ],
@@ -296,13 +329,19 @@ class CommunitySettingsWorkspaceState
       key: const PageStorageKey('community-settings-overview'),
       padding: const EdgeInsets.all(24),
       children: [
-        Text(t('quickActions'), style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 6),
-        Text(
-          t('overviewHelp'),
-          style: TextStyle(color: context.tokens.colors.textSecondary),
-        ),
-        const SizedBox(height: 24),
+        // A member with nothing to manage is here for their own settings.
+        if (communityCanManage(widget.workspace)) ...[
+          Text(
+            t('quickActions'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t('overviewHelp'),
+            style: TextStyle(color: context.tokens.colors.textSecondary),
+          ),
+          const SizedBox(height: 24),
+        ],
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
           child: Row(
@@ -311,7 +350,7 @@ class CommunitySettingsWorkspaceState
                 width: 48,
                 height: 48,
                 child: CommunityWorkspaceImage(
-                  bytes: widget.logo,
+                  bytes: widget.logo ?? widget.images?.call('logo'),
                   loading: widget.logoLoading,
                   loadFailed: widget.logoFailed,
                   icon: StandardIconSemantic.groups,
@@ -344,7 +383,15 @@ class CommunitySettingsWorkspaceState
         for (final action in [
           if (available.contains('profile'))
             ('profile', StandardIconSemantic.edit, 'profile', 'profileHelp'),
-          ('members', StandardIconSemantic.people, 'openMembers', 'membersHelp'),
+          if (widget.workspace.access['isOwner'] == true ||
+              widget.workspace.access['canRemoveMembers'] == true ||
+              available.contains('roles'))
+            (
+              'members',
+              StandardIconSemantic.people,
+              'openMembers',
+              'membersHelp',
+            ),
           if (available.contains('admissions'))
             (
               'admissions',
@@ -389,55 +436,70 @@ class CommunitySettingsWorkspaceState
     );
   }
 
-  Widget _quickAction(String id, StandardIconSemantic icon, String title, String help) =>
-      Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: ValueKey('settings-quick-$id'),
-          onTap: id == 'members' ? widget.onMembers : () => _select(id),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: context.tokens.surfaces.panel.border),
-              ),
-            ),
-            child: Row(
-              children: [
-                StandardIcon(icon, size: 22, color: context.tokens.colors.accent),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        t(title),
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        t(help),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const StandardIcon(StandardIconSemantic.chevronRight, size: 18),
-              ],
-            ),
+  Widget _quickAction(
+    String id,
+    StandardIconSemantic icon,
+    String title,
+    String help,
+  ) => Material(
+    color: Colors.transparent,
+    child: StarBridgeActionRow(
+      controlKey: ValueKey('settings-quick-$id'),
+      semanticLabel: t(title),
+      onActivate: (_, _) => id == 'members' ? widget.onMembers() : _select(id),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: context.tokens.surfaces.panel.border),
           ),
         ),
-      );
+        child: Row(
+          children: [
+            StandardIcon(icon, size: 22, color: context.tokens.colors.accent),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t(title),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(t(help), style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            const StandardIcon(StandardIconSemantic.chevronRight, size: 18),
+          ],
+        ),
+      ),
+    ),
+  );
 
   String? _group(String section) => switch (section) {
     'overview' => null,
     'profile' || 'discovery' || 'schedule' || 'contacts' => 'profileGroup',
     'danger' => 'advanced',
+    'privacy' || 'notifications' => 'mineGroup',
     _ => 'teamGroup',
   };
 
   Widget _content(String selected) => switch (selected) {
+    'privacy' => SingleChildScrollView(
+      child: OrganizationPrivacyPane(
+        controller: _personal!.privacy!,
+        communityCode: widget.workspace.code,
+      ),
+    ),
+    'notifications' => SingleChildScrollView(
+      child: OrganizationNotificationPane(
+        create: _personal!.notificationSources!,
+        communityCode: widget.workspace.code,
+      ),
+    ),
     'profile' ||
     'discovery' ||
     'schedule' ||
@@ -449,12 +511,19 @@ class CommunitySettingsWorkspaceState
           setState(() => _selected = _profileSections[index]),
       port: widget.port as CommunityProfilePort,
       targetRef: widget.targetRef,
-      logoBytes: widget.logo,
+      logoBytes: widget.logo ?? widget.images?.call('logo'),
+      bannerBytes: widget.images?.call('banner'),
+      backgroundBytes: widget.images?.call('background'),
       onNameConfirmed: widget.onNameConfirmed,
       onSaved: (fields) {
         _workspaceChanged({
           if (fields.contains('logoImageData')) 'logo',
-          if (fields.contains('bannerImageData')) 'banner',
+          if (fields.contains('bannerImageData') ||
+              fields.contains('clearBannerImage'))
+            'banner',
+          if (fields.contains('backgroundImageData') ||
+              fields.contains('clearBackgroundImage'))
+            'background',
         });
       },
     ),
@@ -517,134 +586,15 @@ class CommunitySettingsWorkspaceState
     final selected = sections.any((entry) => entry.$1 == _selected)
         ? _selected
         : 'overview';
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 760;
-        final content = ClipRect(
-          child: Material(
-            color: context.tokens.surfaces.panel.fill,
-            child: _content(selected),
-          ),
-        );
-        if (compact) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: t('title'),
-                    isDense: true,
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      key: const ValueKey('settings-category'),
-                      value: selected,
-                      isExpanded: true,
-                      isDense: true,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      items: [
-                        for (final entry in sections)
-                          DropdownMenuItem(
-                            value: entry.$1,
-                            child: Text(t(entry.$1)),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) _select(value);
-                      },
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(child: content),
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 220,
-              decoration: BoxDecoration(
-                color: context.tokens.surfaces.panel.fill,
-                border: Border(
-                  right: BorderSide(
-                    color: context.tokens.surfaces.panel.border,
-                  ),
-                ),
-              ),
-              child: SingleChildScrollView(
-                primary: false,
-                key: const ValueKey('settings-navigation-scroll'),
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var index = 0; index < sections.length; index++) ...[
-                      if (_group(sections[index].$1) != null &&
-                          (index == 0 ||
-                              _group(sections[index].$1) !=
-                                  _group(sections[index - 1].$1)))
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
-                          child: Text(
-                            t(_group(sections[index].$1)!),
-                            style: TextStyle(
-                              color: context.tokens.colors.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      Padding(
-                        padding: EdgeInsets.zero,
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: ListTile(
-                            key: ValueKey('settings-nav-${sections[index].$1}'),
-                            dense: true,
-                            visualDensity: const VisualDensity(vertical: -2),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                            ),
-                            minLeadingWidth: 18,
-                            horizontalTitleGap: 10,
-                            leading: StandardIcon(sections[index].$2, size: 18),
-                            title: Text(
-                              t(sections[index].$1),
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            selected: selected == sections[index].$1,
-                            selectedTileColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withValues(alpha: .12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            onTap: () => _select(sections[index].$1),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: content,
-              ),
-            ),
-          ],
-        );
-      },
+    return OrganizationSettingsLayout(
+      sections: [
+        for (final entry in sections)
+          (id: entry.$1, icon: entry.$2, group: _group(entry.$1)),
+      ],
+      label: t,
+      selected: selected,
+      onSelected: _select,
+      content: _content(selected),
     );
   }
 }

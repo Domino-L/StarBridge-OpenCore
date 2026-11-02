@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_overlay_frame.dart';
 import 'package:starbridge_flutter/design_system/icons/icon_semantic.dart';
@@ -125,9 +126,20 @@ void main() {
     expect(calls, isEmpty);
     await tester.tap(find.byKey(const ValueKey('menu-tool-future')));
     expect(calls, isEmpty);
-    expect(find.byTooltip('尚未接入'), findsOneWidget);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('menu-tool-future'))),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(find.text('尚未接入'), findsOneWidget);
+    expect(calls, isEmpty);
+    await mouse.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
+    await mouse.removePointer();
     await tester.tap(find.byKey(const ValueKey('menu-tool-friends')));
-    await tester.tap(find.byTooltip('菜单设置'));
+    await tester.tap(find.byKey(const ValueKey('menu-settings')));
     await tester.tap(find.byKey(const ValueKey('menu-return')));
     expect(calls, ['friends', 'settings', 'return']);
   });

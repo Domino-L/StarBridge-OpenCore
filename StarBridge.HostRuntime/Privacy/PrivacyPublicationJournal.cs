@@ -18,10 +18,14 @@ internal sealed class PrivacyPublicationJournal(string root)
             "privacy_publication.server_error" => "server",
             "privacy_publication.rate_limited" => "rateLimited",
             "privacy_publication.forbidden" => "forbidden",
-            "privacy_publication.identity_required" or "privacy_publication.identity_unavailable" => "identity",
+            "privacy_publication.rejected" => "rejected",
+            "privacy_publication.identity_required" or "privacy_publication.identity_unavailable" or
+                "privacy_publication.identity_pending" => "identity",
             "privacy_publication.account_changed" => "accountChanged",
             "privacy_publication.response_invalid" => "invalidReceipt",
             "privacy_publication.route_retired" => "retiredRoute",
+            "privacy_local.owner_unavailable" => "localOwnerPending",
+            "privacy_local.read_unavailable" => "localReadPending",
             "privacy_local.read_failed" or "privacy_local.write_failed" or "privacy_local.conflict" => "localPolicy",
             _ => "unclassified"
         };
@@ -43,3 +47,4 @@ internal sealed class PrivacyPublicationJournal(string root)
         catch (Exception errorWriting) when (errorWriting is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
     }
 }
+

@@ -5,6 +5,9 @@ internal static class ApplicationPreferencesSchema
     internal const int Version = 1;
     internal const string DefaultAppearanceMode = "dark";
     internal const string DefaultMotionPreference = "followSystem";
+    internal const string DefaultInteractionStyle = "standard";
+    internal static readonly IReadOnlySet<string> SupportedInteractionStyles =
+        new HashSet<string>(StringComparer.Ordinal) { "standard", "rail", "scan", "glow" };
 
     internal static readonly IReadOnlySet<string> SupportedLocales =
         new HashSet<string>(StringComparer.Ordinal)
@@ -63,7 +66,10 @@ internal sealed record ApplicationPreferencesSnapshot(
     bool StartMinimized,
     bool StartupChoiceMade,
     bool CloseBehaviorChoiceMade,
-    bool BackgroundHintShown)
+    bool BackgroundHintShown,
+    bool AppearancePreviewGuideSeen = false,
+    string InteractionStyle = ApplicationPreferencesSchema.DefaultInteractionStyle,
+    bool HolidayAppearance = true)
 {
     internal static ApplicationPreferencesSnapshot Default { get; } = new(
         ApplicationPreferencesSchema.Version,
@@ -87,7 +93,8 @@ internal sealed record ApplicationPreferencesSnapshot(
         (LocaleOverride is null ||
          ApplicationPreferencesSchema.SupportedLocales.Contains(LocaleOverride)) &&
         ApplicationPreferencesSchema.SupportedAppearanceModes.Contains(AppearanceMode) &&
-        ApplicationPreferencesSchema.SupportedMotionPreferences.Contains(MotionPreference);
+        ApplicationPreferencesSchema.SupportedMotionPreferences.Contains(MotionPreference) &&
+        ApplicationPreferencesSchema.SupportedInteractionStyles.Contains(InteractionStyle);
 }
 
 internal sealed record ApplicationPreferencesReadResult(

@@ -1,0 +1,10 @@
+{
+  "request": {
+    "schemaVersion": 1,
+    "handleHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "city": "new-babbage",
+    "evidence": "inventory"
+  },
+  "cities": ["lorville", "area18", "orison", "new-babbage"],
+  "evidence": ["inventory", "explicit"]
+}

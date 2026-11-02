@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../features/notifications/starbridge_notification_toast.dart';
 import '../../features/notifications/local_notification_content.dart';
@@ -97,6 +98,7 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
     if (!value.channels.inAppEnabled) return;
     _dismiss = showStarBridgeNotificationToast(
       context,
+      source: InteractionSource.programmatic,
       alignment: switch (value.channels.desktopPosition) {
         DesktopNotificationPosition.topLeft => Alignment.topLeft,
         DesktopNotificationPosition.topRight => Alignment.topRight,

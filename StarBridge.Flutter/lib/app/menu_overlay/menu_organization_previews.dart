@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:async';
 
 import '../../features/communities/community_chat_port.dart';
@@ -24,7 +26,11 @@ final class MenuOrganizationPreviews {
   }
 
   Map<String, Object?> value(String target) =>
-      _cache[target] ?? const {'summary': '正在读取聊天摘要', 'time': ''};
+      _cache[target] ??
+      {
+        'summary': MenuOverlayText('menu.overlay.comms.previewLoading'),
+        'time': '',
+      };
 
   /// Reuse a successful, authorized chat read; this never marks messages read.
   void observe(String target, List<CommunityChatMessage> messages, int unread) {
@@ -42,12 +48,18 @@ final class MenuOrganizationPreviews {
     final last = messages.lastOrNull;
     final time = last?.createdAt.toLocal();
     final text = last == null
-        ? '暂无消息'
-        : '${last.callsign.isEmpty ? last.gameId : last.callsign}：${last.text.isEmpty && last.hasAttachment ? '[附件]' : last.text}';
+        ? MenuOverlayText('menu.overlay.comms.noMessages')
+        : MenuOverlayJoin([
+            last.callsign.isEmpty ? last.gameId : last.callsign,
+            ': ',
+            last.text.isEmpty && last.hasAttachment
+                ? const MenuOverlayText('menu.overlay.comms.attachment')
+                : String.fromCharCodes(
+                    last.text.replaceAll(RegExp(r'\s+'), ' ').runes.take(580),
+                  ),
+          ]);
     return {
-      'summary': String.fromCharCodes(
-        text.replaceAll(RegExp(r'\s+'), ' ').runes.take(580),
-      ),
+      'summary': text,
       'time': time == null
           ? ''
           : '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
@@ -97,7 +109,12 @@ final class MenuOrganizationPreviews {
     } on Object catch (error) {
       value = organizationTransientRead(error) && _cache[target] != null
           ? _cache[target]!
-          : {'summary': '暂时无法读取聊天摘要', 'time': ''};
+          : {
+              'summary': MenuOverlayText(
+                'menu.overlay.comms.previewUnavailable',
+              ),
+              'time': '',
+            };
     }
     if (_disposed || epoch != _epoch) return;
     _pending.remove(target);

@@ -1,9 +1,15 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../common/social_read_activity.dart';
 import 'runtime_status_controller.dart';
 import 'runtime_status_copy.dart';
 
@@ -11,8 +17,8 @@ import 'runtime_status_copy.dart';
 Future<void> showRuntimeStatusDialog(
   BuildContext context,
   RuntimeStatusController controller,
-) => showDialog<void>(
-  context: context,
+) => showStarBridgeDialog<void>(
+  context,
   builder: (_) => RuntimeStatusDialog(controller: controller),
 );
 
@@ -30,16 +36,43 @@ class RuntimeStatusDialog extends StatefulWidget {
 
 class _RuntimeStatusDialogState extends State<RuntimeStatusDialog> {
   bool _detailsExpanded = false;
+  late SocialReadActivityBinding _readActivity;
+  int? _attachedBusyRevision;
+
+  void _bindReadActivity({required bool initialAttachment}) {
+    final controller = widget.controller;
+    final alreadyBusy = controller.value.busy;
+    _readActivity = SocialReadActivityBinding(
+      controller,
+      () => controller.value.busy,
+      initialRead: initialAttachment && !alreadyBusy,
+    );
+    // Borrowing an in-flight read does not reveal who started it. Do not
+    // relabel that existing phase from this dialog's opening command.
+    _attachedBusyRevision = alreadyBusy ? _readActivity.revision : null;
+  }
+
   @override
   void initState() {
     super.initState();
+    _bindReadActivity(initialAttachment: true);
     widget.controller.refresh();
   }
 
   @override
   void didUpdateWidget(RuntimeStatusDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) widget.controller.refresh();
+    if (oldWidget.controller != widget.controller) {
+      _readActivity.dispose();
+      _bindReadActivity(initialAttachment: false);
+      widget.controller.refresh();
+    }
+  }
+
+  @override
+  void dispose() {
+    _readActivity.dispose();
+    super.dispose();
   }
 
   @override
@@ -94,7 +127,27 @@ class _RuntimeStatusDialogState extends State<RuntimeStatusDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (value.busy) ...[
-                        LinearProgressIndicator(semanticsLabel: t('loading')),
+                        ExcludeSemantics(
+                          child: SocialReadActivity(
+                            key: ValueKey<Object>((
+                              _readActivity,
+                              _readActivity.revision,
+                            )),
+                            source:
+                                _attachedBusyRevision == _readActivity.revision
+                                ? InteractionSource.programmatic
+                                : _readActivity.source,
+                            opening:
+                                _attachedBusyRevision !=
+                                    _readActivity.revision &&
+                                _readActivity.opening,
+                            height:
+                                ProgressIndicatorTheme.of(context)
+                                    .linearMinHeight ??
+                                4,
+                            label: '',
+                          ),
+                        ),
                         SizedBox(height: tokens.space.sm),
                         Text(t('loading')),
                       ] else ...[
@@ -158,18 +211,25 @@ class _RuntimeStatusDialogState extends State<RuntimeStatusDialog> {
                             ],
                           ),
                         ),
-                        TextButton.icon(
-                          key: const Key('runtime-status-details'),
-                          onPressed: () => setState(
+                        StarBridgeActionButton(
+                          kind: StarBridgeActionKind.quiet,
+                          controlKey: const Key('runtime-status-details'),
+                          onActivate: (_) => setState(
                             () => _detailsExpanded = !_detailsExpanded,
                           ),
-                          icon: StandardIcon(
-                            _detailsExpanded
-                                ? StandardIconSemantic.expandLess
-                                : StandardIconSemantic.expandMore,
-                          ),
-                          label: Text(
-                            t(_detailsExpanded ? 'hideDetails' : 'details'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              StandardIcon(
+                                _detailsExpanded
+                                    ? StandardIconSemantic.expandLess
+                                    : StandardIconSemantic.expandMore,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                t(_detailsExpanded ? 'hideDetails' : 'details'),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -182,15 +242,19 @@ class _RuntimeStatusDialogState extends State<RuntimeStatusDialog> {
                 alignment: WrapAlignment.end,
                 spacing: tokens.space.sm,
                 children: [
-                  OutlinedButton(
-                    key: const Key('runtime-status-refresh'),
-                    onPressed: value.busy ? null : widget.controller.refresh,
+                  StarBridgeActionButton(
+                    controlKey: const Key('runtime-status-refresh'),
+                    onActivate: value.busy
+                        ? null
+                        : (_) => widget.controller.refresh(),
                     child: Text(t('refresh')),
                   ),
                   if (!widget.embedded)
-                    TextButton(
-                      key: const Key('runtime-status-close'),
-                      onPressed: () => Navigator.of(context).pop(),
+                    StarBridgeActionButton(
+                      kind: StarBridgeActionKind.quiet,
+                      controlKey: const Key('runtime-status-close'),
+                      onActivate: (source) =>
+                          dismissStarBridgeDialog(context, source: source),
                       child: Text(t('close')),
                     ),
                 ],

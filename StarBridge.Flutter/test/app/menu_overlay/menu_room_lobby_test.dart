@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -28,7 +30,7 @@ class LobbySource implements PartyRoomsPort, RoomCommandsPort {
   Future<void> close() => changes.close();
   @override
   Future<RoomReadResult> read() async {
-    final directory = (await source.read()).directory!;
+    final directory = (resolvedMenuCopy(await source.read())).directory!;
     return RoomReadResult(
       RoomReadState.ready,
       directory: RoomDirectory(
@@ -49,7 +51,7 @@ class LobbySource implements PartyRoomsPort, RoomCommandsPort {
     if (command.operation == RoomOperation.resolve) {
       return RoomCommandResult(
         'resolved',
-        preview: (await source.read()).directory!.rooms.first,
+        preview: (resolvedMenuCopy(await source.read())).directory!.rooms.first,
       );
     }
     return source.execute(command);

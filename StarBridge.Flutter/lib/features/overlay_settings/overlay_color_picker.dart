@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/color_choice_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -22,12 +27,19 @@ class OverlayColorField extends StatefulWidget {
     required this.value,
     required this.onChanged,
     this.helperText,
+    this.editOwner,
+    this.currentEditOwner,
     super.key,
   });
 
   final String label;
   final String value;
   final String? helperText;
+
+  /// Context token supplied by the existing Module/preset owner, not a new
+  /// storage authority. Equal color values must not bridge a preset switch.
+  final Object? editOwner;
+  final Object? Function()? currentEditOwner;
   final ValueChanged<String>? onChanged;
 
   @override
@@ -36,45 +48,93 @@ class OverlayColorField extends StatefulWidget {
 
 class _OverlayColorFieldState extends State<OverlayColorField> {
   bool _open = false;
+  StarBridgeDialogRoute<String>? _dialog;
+  Object? get _liveOwner => widget.currentEditOwner == null
+      ? widget.editOwner
+      : widget.currentEditOwner!();
 
-  Future<void> _pick() async {
+  void _retire() {
+    final route = _dialog;
+    _dialog = null;
+    retireStarBridgeDialog(route);
+  }
+
+  @override
+  void didUpdateWidget(OverlayColorField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.editOwner != widget.editOwner ||
+        oldWidget.value != widget.value ||
+        oldWidget.label != widget.label ||
+        widget.onChanged == null) {
+      _retire();
+    }
+  }
+
+  @override
+  void dispose() {
+    _retire();
+    super.dispose();
+  }
+
+  Future<void> _pick(
+    BuildContext openingContext,
+    InteractionSource source,
+  ) async {
     if (_open || widget.onChanged == null) return;
     _open = true;
     final original = widget.value;
-    final result = await showDialog<String>(
-      context: context,
+    final originalOwner = _liveOwner;
+    final result = await showStarBridgeDialog<String>(
+      openingContext,
+      source: source,
+      onRouteCreated: (route) => _dialog = route,
       builder: (_) =>
           OverlayColorPickerDialog(label: widget.label, initialValue: original),
     );
     _open = false;
+    _dialog = null;
     // A refresh, preset switch or theme toggle must not receive a stale edit.
-    if (!mounted || widget.value != original || result == null) return;
+    if (!mounted ||
+        widget.value != original ||
+        result == null ||
+        _liveOwner != originalOwner) {
+      return;
+    }
     if (result != original.toUpperCase()) widget.onChanged?.call(result);
   }
 
   @override
-  Widget build(BuildContext context) => InputDecorator(
-    decoration: InputDecoration(
-      labelText: widget.label,
-      helperText: widget.helperText,
-      helperMaxLines: 3,
-      enabled: widget.onChanged != null,
-      border: InputBorder.none,
-      contentPadding: const EdgeInsets.only(top: 8, bottom: 4),
-    ),
-    child: OutlinedButton(
-      onPressed: widget.onChanged == null ? null : _pick,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            _Swatch(color: _parse(widget.value) ?? Colors.white, size: 24),
-            const SizedBox(width: 10),
-            Expanded(child: Text(widget.value)),
-            Text(_copy(context, 'choose')),
-            const SizedBox(width: 6),
-            const ColorChoiceIcon.palette(),
-          ],
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) => InputDecorator(
+        decoration: InputDecoration(
+          labelText: widget.label,
+          helperText: widget.helperText,
+          helperMaxLines: 3,
+          enabled: widget.onChanged != null,
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.only(top: 8, bottom: 4),
+        ),
+        child: StarBridgeActionButton(
+          key: const Key('overlay-color-open'),
+          semanticLabel:
+              '${widget.label} · ${widget.value} · ${_copy(context, 'choose')}',
+          onActivate: widget.onChanged == null
+              ? null
+              : (source) => _pick(context, source),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                _Swatch(color: _parse(widget.value) ?? Colors.white, size: 24),
+                const SizedBox(width: 10),
+                Expanded(child: Text(widget.value)),
+                Text(_copy(context, 'choose')),
+                const SizedBox(width: 6),
+                const ColorChoiceIcon.palette(),
+              ],
+            ),
+          ),
         ),
       ),
     ),
@@ -240,39 +300,47 @@ class _OverlayColorPickerDialogState extends State<OverlayColorPickerDialog> {
                 ),
                 _ColorAxis(
                   hue: axis == 'hue',
-                  child: Slider(
-                    key: Key('overlay-color-$axis'),
-                    value: switch (axis) {
-                      'hue' => _hsv.hue / 360,
-                      'saturation' => _hsv.saturation,
-                      _ => _hsv.value,
-                    },
-                    semanticFormatterCallback: (value) =>
-                        '${_copy(context, axis)} ${(value * (axis == 'hue' ? 360 : 100)).round()}${axis == 'hue' ? '°' : '%'}',
-                    onChanged: (value) => _set(switch (axis) {
-                      'hue' => _hsv.withHue(value * 360),
-                      'saturation' => _hsv.withSaturation(value),
-                      _ => _hsv.withValue(value),
-                    }),
+                  child: StarBridgeFieldFrame(
+                    cursor: SystemMouseCursors.click,
+                    builder: (_, focus) => Slider(
+                      key: Key('overlay-color-$axis'),
+                      focusNode: focus,
+                      value: switch (axis) {
+                        'hue' => _hsv.hue / 360,
+                        'saturation' => _hsv.saturation,
+                        _ => _hsv.value,
+                      },
+                      semanticFormatterCallback: (value) =>
+                          '${_copy(context, axis)} ${(value * (axis == 'hue' ? 360 : 100)).round()}${axis == 'hue' ? '°' : '%'}',
+                      onChanged: (value) => _set(switch (axis) {
+                        'hue' => _hsv.withHue(value * 360),
+                        'saturation' => _hsv.withSaturation(value),
+                        _ => _hsv.withValue(value),
+                      }),
+                    ),
                   ),
                 ),
               ],
               const SizedBox(height: 8),
-              TextField(
-                key: const Key('overlay-color-hex'),
-                controller: _text,
-                maxLength: 7,
-                decoration: InputDecoration(
-                  labelText: _copy(context, 'hex'),
-                  hintText: '#RRGGBB',
-                  counterText: '',
-                  errorText: _valid ? null : _copy(context, 'invalid'),
+              StarBridgeFieldFrame(
+                error: !_valid,
+                builder: (_, focus) => TextField(
+                  key: const Key('overlay-color-hex'),
+                  controller: _text,
+                  focusNode: focus,
+                  maxLength: 7,
+                  decoration: InputDecoration(
+                    labelText: _copy(context, 'hex'),
+                    hintText: '#RRGGBB',
+                    counterText: '',
+                    errorText: _valid ? null : _copy(context, 'invalid'),
+                  ),
+                  onChanged: (value) => setState(() {
+                    final color = _parse(value);
+                    _valid = color != null;
+                    if (color != null) _hsv = HSVColor.fromColor(color);
+                  }),
                 ),
-                onChanged: (value) => setState(() {
-                  final color = _parse(value);
-                  _valid = color != null;
-                  if (color != null) _hsv = HSVColor.fromColor(color);
-                }),
               ),
               const SizedBox(height: 8),
               Text(
@@ -285,14 +353,21 @@ class _OverlayColorPickerDialogState extends State<OverlayColorPickerDialog> {
         ),
       ),
       actions: [
-        OutlinedButton(
-          onPressed: () => Navigator.of(context).pop(),
+        StarBridgeActionButton(
+          key: const Key('overlay-color-cancel'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog<String>(context, source: source),
           child: Text(AppStrings.of(context).text('common.cancel')),
         ),
-        FilledButton(
+        StarBridgeActionButton(
           key: const Key('overlay-color-apply'),
-          onPressed: _valid
-              ? () => Navigator.of(context).pop(_hex(_hsv.toColor()))
+          kind: StarBridgeActionKind.primary,
+          onActivate: _valid
+              ? (source) => dismissStarBridgeDialog(
+                  context,
+                  source: source,
+                  result: _hex(_hsv.toColor()),
+                )
               : null,
           child: Text(_copy(context, 'apply')),
         ),

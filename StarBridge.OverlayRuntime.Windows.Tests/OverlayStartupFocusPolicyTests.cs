@@ -21,9 +21,6 @@ internal static class OverlayStartupFocusPolicyTests
         { SkipStartupTransitionWhenGameForeground = true }, true);
         Check(!skipped.EnableStartupTransition && OverlayStartupFocusPolicy.DelayMs(skipped, true) == 120,
             "Foreground skip is applied before choosing focus timing.");
-        Check(OverlayStartupFocusPolicy.DelayMs(settings with
-        { StartupTransitionStyle = OverlayStartupTransitionStyle.LagrangeWeaveEquilibrium }, true) == LagrangeWeaveTimeline.FocusHandoffMs,
-            "Lagrange keeps its dedicated WPF handoff.");
 #if STARBRIDGE_COMMERCIAL_APPEARANCES
         var night = settings with { StartupTransitionStyle = OverlayStartupTransitionStyle.NightShadowFlowField };
         Check(OverlayStartupFocusPolicy.DelayMs(night, true) == NightShadowFlowFieldTimeline.FocusHandoffMs &&

@@ -394,8 +394,7 @@ internal sealed partial class CommunityClient
             roleTitle = key.Length == 0 ? "成员" : Text(role, "displayName", 512), permissionEnabled = key.Length > 0,
             canRemoveMembers = permissions.Contains("members.remove", StringComparer.OrdinalIgnoreCase),
             canPublishTasks = false, canPublishPlans = false,
-            canManageFleetInfo = permissions.Any(id => id.StartsWith("fleet.", StringComparison.OrdinalIgnoreCase) ||
-                new[] { "members.review", "audit.view", "audit.delete" }.Contains(id, StringComparer.OrdinalIgnoreCase)),
+            canManageFleetInfo = false,
             updatedAt = DateTimeOffset.UtcNow, roleGroupKey = key.Length == 0 ? null : key,
             extraAllowedPermissions = (string[]?)null, extraDeniedPermissions = (string[]?)null
         }, removeGameName = (string?)null };

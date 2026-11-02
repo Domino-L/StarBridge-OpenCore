@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../features/settings/client_license.dart';
-import '../../features/settings/client_license_dialog.dart';
 import 'startup_prompt_queue.dart';
-import 'test_build_notice_copy.dart';
+import 'usage_terms_page.dart';
 
 /// Device-level notice precedes optional account prompts; updates reuse the receipt.
 final class TestBuildNoticeFlow {
@@ -26,8 +29,10 @@ final class TestBuildNoticeFlow {
   bool _disposed = false, _reading = false, _checked = false, _required = true;
   Timer? _readRetry;
   int _readAttempts = 0;
-  DialogRoute<bool>? _route;
+  StarBridgeDialogRoute<bool>? _route;
   bool get blocksPrompts => !_disposed && (!_checked || _required);
+  bool get ownsCurrentRoute =>
+      !_disposed && _required && _route?.isCurrent == true;
 
   void wake() {
     if (_disposed || _reading || _readRetry != null || _route != null) return;
@@ -76,7 +81,7 @@ final class TestBuildNoticeFlow {
   bool? _receipt(Map<String, Object?> p) =>
       p.length == 3 &&
           p['schemaVersion'] == 1 &&
-          p['termsVersion'] == '2026-08-01-v3' &&
+          p['termsVersion'] == '2026-10-31-v4' &&
           p['acknowledged'] is bool
       ? p['acknowledged'] as bool
       : null;
@@ -86,17 +91,23 @@ final class TestBuildNoticeFlow {
   Future<void> _show() async {
     final nav = queue.navigator;
     if (nav == null || _disposed) return;
-    final route = DialogRoute<bool>(
-      context: nav.context,
-      barrierDismissible: false,
+    final route = StarBridgeDialogRoute<bool>(
+      data:
+          InteractionScope.maybeOf(nav.context) ??
+          resolveStarBridgeInteraction(nav.context),
+      link: InteractionScope.linkOf(nav.context),
+      barrierLabel: MaterialLocalizations.of(nav.context)
+          .modalBarrierDismissLabel,
+      dismissible: false,
       builder: (_) => TestBuildNoticeDialog(
+        exitApplication: onExit,
         readLicense: BridgeClientLicense(session, available: true).read,
         acknowledge: () async {
           final response = await session.request(
             'legal.acceptTestBuildNotice',
             payload: const {
               'schemaVersion': 1,
-              'termsVersion': '2026-08-01-v3',
+              'termsVersion': '2026-10-31-v4',
             },
           );
           return !_disposed && _valid(response.payload);
@@ -130,20 +141,26 @@ class TestBuildNoticeDialog extends StatefulWidget {
   const TestBuildNoticeDialog({
     required this.acknowledge,
     required this.readLicense,
+    this.exitApplication,
     super.key,
   });
   final Future<bool> Function() acknowledge;
   final ClientLicenseRead readLicense;
+  final Future<void> Function()? exitApplication;
   @override
   State<TestBuildNoticeDialog> createState() => _TestBuildNoticeDialogState();
 }
 
 class _TestBuildNoticeDialogState extends State<TestBuildNoticeDialog> {
-  bool _saving = false, _failed = false;
+  bool _saving = false, _failed = false, _exiting = false;
+  InteractionSource _savingSource = InteractionSource.programmatic;
   Future<void> _accept() async {
+    if (_saving || _exiting) return;
+    final source = captureStarBridgeActivationSource()();
     setState(() {
       _saving = true;
       _failed = false;
+      _savingSource = source;
     });
     var accepted = false;
     try {
@@ -151,7 +168,7 @@ class _TestBuildNoticeDialogState extends State<TestBuildNoticeDialog> {
     } catch (_) {}
     if (!mounted) return;
     if (accepted) {
-      Navigator.pop(context, true);
+      dismissStarBridgeDialog(context, source: source, result: true);
       return;
     }
     setState(() {
@@ -160,65 +177,38 @@ class _TestBuildNoticeDialogState extends State<TestBuildNoticeDialog> {
     });
   }
 
+  Future<void> _decline(InteractionSource source) async {
+    if (_saving || _exiting) return;
+    final exit = widget.exitApplication;
+    if (exit == null) {
+      dismissStarBridgeDialog(context, source: source, result: false);
+      return;
+    }
+    setState(() {
+      _exiting = true;
+      _savingSource = source;
+    });
+    try {
+      await exit();
+    } catch (_) {
+      // Keep the mandatory gate visible if the lifecycle cannot exit.
+    } finally {
+      if (mounted) setState(() => _exiting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final locale = Localizations.localeOf(context);
-    final en = locale.languageCode == 'en';
-    final tw = locale.countryCode == 'TW' || locale.scriptCode == 'Hant';
-    String t(String cn, String traditional, String english) => en
-        ? english
-        : tw
-        ? traditional
-        : cn;
     return PopScope(
       canPop: false,
-      child: AlertDialog(
-        key: const Key('test-build-notice'),
-        title: Text(t('测试版使用须知', '測試版使用須知', 'Before using this test version')),
-        content: SizedBox(
-          width: 540,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(testBuildNoticeBody(locale)),
-                const SizedBox(height: 16),
-                ClientLicenseButton(
-                  open: (context) => showClientLicenseDialog(
-                    context,
-                    read: widget.readLicense,
-                  ),
-                ),
-                if (_failed)
-                  Text(
-                    t(
-                      '暂时无法继续，请重试。若仍无法进入，请重启应用或联系支持。',
-                      '暫時無法繼續，請重試。若仍無法進入，請重新啟動應用程式或聯絡支援。',
-                      'Unable to continue. Please try again. If the problem persists, restart the app or contact support.',
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _saving ? null : () => Navigator.pop(context, false),
-            child: Text(t('退出应用', '結束應用程式', 'Exit application')),
-          ),
-          FilledButton(
-            key: const Key('test-build-accept'),
-            onPressed: _saving ? null : _accept,
-            child: Text(
-              t(
-                '我已阅读并理解，继续',
-                '我已閱讀並理解，繼續',
-                'I have read and understood, continue',
-              ),
-            ),
-          ),
-        ],
+      child: UsageTermsPage(
+        readLicense: widget.readLicense,
+        saving: _saving,
+        exiting: _exiting,
+        failed: _failed,
+        savingSource: _savingSource,
+        onAccept: () => unawaited(_accept()),
+        onExit: (source) => unawaited(_decline(source)),
       ),
     );
   }

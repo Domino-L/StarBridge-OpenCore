@@ -3,3 +3,8 @@ abstract interface class CommunityActivityPort {
   Stream<void> get workspaceChanges;
   bool get activityHealthy;
 }
+
+/// Read failure observations, never a capability or a message payload.
+abstract interface class CommunityActivityFailurePort {
+  Stream<String> get activityReadErrors;
+}

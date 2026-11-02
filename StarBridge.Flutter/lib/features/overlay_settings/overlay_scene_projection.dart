@@ -2,26 +2,41 @@ import '../../app/shell/chrome/shell_chrome_projection.dart';
 import 'overlay_scene_controller.dart';
 
 OverlaySceneProjection projectOverlayScene(OverlaySceneState state) {
+  // While the active plan fixes a source, choices would change nothing; the
+  // only enabled action is to follow the shared choice again.
+  final free = state.presetBindingId == null;
   final options = <OverlaySceneOption>[
-    if (state.presetBindingId != null)
+    if (!free)
       const OverlaySceneOption(
-        id: 'resumeBinding',
-        labelKey: 'overlay.source.resumeBinding',
+        id: 'followShared',
+        labelKey: 'overlay.source.followShared',
       ),
-    const OverlaySceneOption(id: 'auto', labelKey: 'overlay.source.auto'),
-    const OverlaySceneOption(id: 'room', labelKey: 'overlay.source.room'),
-    const OverlaySceneOption(
-      id: 'fleet',
-      labelKey: 'overlay.source.fleet',
-      enabled: false,
+    OverlaySceneOption(
+      id: 'auto',
+      labelKey: 'overlay.source.auto',
+      enabled: free,
     ),
+    OverlaySceneOption(
+      id: 'room',
+      labelKey: 'overlay.source.room',
+      enabled: free,
+    ),
+    if (state.offersFleet)
+      OverlaySceneOption(
+        id: 'fleet',
+        labelKey: 'overlay.source.fleet',
+        label: state.fleetName,
+        enabled: free,
+      ),
     for (final target in state.targets)
       OverlaySceneOption(
         id: 'org:${target.code}',
         labelKey: '',
         label: target.name,
+        enabled: free,
       ),
     if (state.preferredId == 'missing' ||
+        state.preferredId == 'fleet' && !state.offersFleet ||
         state.preferredId.startsWith('org:') &&
             !state.targets.any((x) => state.preferredId == 'org:${x.code}'))
       OverlaySceneOption(
@@ -50,6 +65,7 @@ OverlaySceneProjection projectOverlayScene(OverlaySceneState state) {
         ? 'overlay.source.saving'
         : state.status == 'ready'
         ? null
-        : 'overlay.source.${state.status}',
+        // A main fleet the viewer has left reads like an unavailable organization.
+        : 'overlay.source.${state.status == 'notMember' ? 'unavailable' : state.status}',
   );
 }

@@ -20,9 +20,37 @@ internal static class OverlayModuleSourcesTests
         MigrationAndTransfer();
         InvalidPayloadsAndImmutability();
         MultiChatPolicy();
+        LocalScopeWithoutSocialLeases();
     }
 
     private static readonly DateTimeOffset Now = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private static void LocalScopeWithoutSocialLeases()
+    {
+        // Matches the independent local Host frame: an opaque process-local
+        // key, no account focus, social leases or temporary account selection.
+        var context = new OverlaySourceResolutionContext("synthetic-local-display", 1, Now,
+            OverlaySourceBinding.Automatic, null, null, new Dictionary<string, OverlaySourceLease>());
+        var policy = new OverlayPresetSources(OverlaySourceBinding.Automatic,
+            modules: new Dictionary<OverlaySourceModule, OverlaySourceBinding> {
+                [OverlaySourceModule.Members] = Org("test-org-a"),
+                [OverlaySourceModule.Chat] = new(OverlaySourceMode.Room)
+            }, chatSources: [new(OverlaySourceMode.Room), Org("test-org-b")]);
+        var serialized = OverlayPresetSourcesCodec.Serialize(policy);
+        var plan = OverlayModuleSourceResolver.Resolve(policy, context);
+        Check(plan.PresetSource is { Mode: OverlaySourceMode.Local, Available: true } &&
+            plan.Modules[OverlaySourceModule.Overview].Mode == OverlaySourceMode.Local &&
+            !plan.Modules[OverlaySourceModule.Members].Available && plan.ChatSources.All(s => !s.Available),
+            "Independent local scope cannot manufacture organization members or chat from saved display choices.");
+        Check(plan.ResourceKeys.SequenceEqual(["Local:"]) &&
+            OverlayModuleSourceResolver.RequestedCommunities(policy, context, Enum.GetValues<OverlaySourceModule>()).Count == 0,
+            "Foreign account selections create neither a social resource read key nor organization recovery intent.");
+        var hidden = OverlayModuleSourceResolver.Resolve(policy, context, activeModules: [OverlaySourceModule.Overview]);
+        Check(hidden.Modules[OverlaySourceModule.Members].UnavailableReason == "module_hidden" &&
+            hidden.ChatSources.All(s => s.UnavailableReason == "module_hidden") &&
+            OverlayPresetSourcesCodec.Serialize(policy) == serialized,
+            "Local projection preserves hidden selections and never rewrites a preset to imply completion or consent.");
+    }
 
     private static void CommunityRefreshIntent()
     {
@@ -308,7 +336,7 @@ internal static class OverlayModuleSourcesTests
             valid.Replace("\"mode\":\"none\"", "\"mode\":\"none\",\"mode\":\"auto\""),
             valid.Replace("\"autoSwitch\":false", "\"autoSwitch\":true"),
             valid.Replace("\"ownerKey\":null", "\"ownerKey\":\"test-owner-a\""),
-            valid.Replace("\"mode\":\"none\"", "\"mode\":\"fleet\""),
+            valid.Replace("\"mode\":\"none\"", "\"mode\":\"local\""),
             valid.Replace("\"events\":", "\"crosshair\":"),
             new string(' ', OverlayPresetSourcesCodec.MaximumPayloadLength + 1)
         }) Throws<FormatException>(() => OverlayPresetSourcesCodec.Parse(invalid));

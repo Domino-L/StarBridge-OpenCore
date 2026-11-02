@@ -274,7 +274,9 @@ internal sealed partial class OverlayCompositionStartupTransitionWindow : IDispo
             _left = bounds.X;
             _top = bounds.Y;
             _width = bounds.Width;
-            _height = bounds.Height;
+            // One row short of the monitor: a topmost window covering all of it
+            // counts as a full-screen app and turns on Do Not Disturb.
+            _height = bounds.Height - 1;
             _settings = settings;
             _language = language;
             _context = context;

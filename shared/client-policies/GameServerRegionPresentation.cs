@@ -9,7 +9,8 @@ using StarBridge.Core.Presence;
 
 /// <summary>
 /// Owns the user-facing game-server region vocabulary. Concrete shard IDs are
-/// accepted only as a mapping input and are never returned to the interface.
+/// accepted only as a mapping input and are never returned from here; the
+/// overlay overview's short shard form comes from OverlayShardPresentation.
 /// </summary>
 internal static class GameServerRegionPresentation
 {

@@ -355,15 +355,9 @@ internal static class OverlayHwndDiagnostics
 
     private static string GetProcessName(uint processId)
     {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetProcessById((int)processId);
-            return process.ProcessName;
-        }
-        catch
-        {
-            return "unknown";
-        }
+        return StarBridge.HostRuntime.Presence.ProcessSnapshotNames.Find(processId) is { } imageName
+            ? Path.GetFileNameWithoutExtension(imageName)
+            : "unknown";
     }
 
     private static bool IsKnownStarBridgeProcess(uint processId)

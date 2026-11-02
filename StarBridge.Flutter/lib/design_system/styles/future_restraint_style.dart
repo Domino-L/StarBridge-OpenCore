@@ -11,12 +11,14 @@ abstract final class FutureRestraintStyle {
   static const name = 'Future Restraint';
 
   static const typography = TypographyTokens(
-    uiFamily: 'Source Sans 3',
+    uiFamily: 'Saira',
+    titleFamily: 'Rajdhani',
+    latinUiWidthAxis: 88,
     simplifiedChineseFamily: 'Source Han Sans CN',
     traditionalChineseFamily: 'Microsoft JhengHei UI',
     systemFallbacks: ['Segoe UI', 'Microsoft YaHei UI', 'Segoe UI Symbol'],
-    monoFamily: 'Source Code Pro',
-    monoFallbacks: ['Cascadia Mono', 'Consolas'],
+    monoFamily: 'Saira',
+    monoFallbacks: ['Source Code Pro', 'Cascadia Mono', 'Consolas'],
     display: 30,
     headline: 22,
     title: 18,

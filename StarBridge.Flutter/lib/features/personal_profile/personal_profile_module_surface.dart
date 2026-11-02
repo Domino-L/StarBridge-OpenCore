@@ -43,8 +43,7 @@ class PersonalProfileModuleSurface extends StatelessWidget {
           LayoutBuilder(
             builder: (context, constraints) {
               final stacked =
-                  headerTrailing != null &&
-                  constraints.maxWidth < 300;
+                  headerTrailing != null && constraints.maxWidth < 300;
               final heading = Row(
                 children: [
                   StarBridgeIcon(
@@ -57,7 +56,8 @@ class PersonalProfileModuleSurface extends StatelessWidget {
                     child: Text(
                       strings.text(titleKey),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),

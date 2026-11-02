@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+
 import '../../features/settings/community_sharing.dart';
 import '../../features/communities/community_hangar_sharing_port.dart';
 import '../../features/settings/community_join_hangar_choice.dart';
@@ -43,7 +46,7 @@ final class CommunitySharingFlow {
   Timer? _membershipRefresh;
   bool _discovering = false;
   bool _disposed = false, _showing = false;
-  DialogRoute<void>? _route;
+  StarBridgeDialogRoute<void>? _route;
   CommunitySharingTarget? _target;
   int? _epoch;
   bool get _eligible =>
@@ -137,15 +140,19 @@ final class CommunitySharingFlow {
               false);
       await _events?.refresh();
       if (!current() || !navigator.mounted) return;
-      final route = DialogRoute<void>(
-        context: navigator.context,
+      await showStarBridgeDialog<void>(
+        navigator.context,
+        source: InteractionSource.programmatic,
+        onRouteCreated: (route) => _route = route,
         barrierDismissible: false,
         builder: (_) => CommunitySharingDialog(
           target: target,
           legacyTransition: privacy.draft?.communities == null,
           sharingEnabled: privacy.draft?.publicationEnabled == true,
           initialEvents:
-              _events != null && _events.canEdit && _events.hasCommunityChoice(target)
+              _events != null &&
+                  _events.canEdit &&
+                  _events.hasCommunityChoice(target)
               ? _events.choice(target.code)
               : const EventSharingChoice(
                   enabled: true,
@@ -196,8 +203,6 @@ final class CommunitySharingFlow {
           },
         ),
       );
-      _route = route;
-      await navigator.push(route);
     } finally {
       _route = null;
       _target = null;

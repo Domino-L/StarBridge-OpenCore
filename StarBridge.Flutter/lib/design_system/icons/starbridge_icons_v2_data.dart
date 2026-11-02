@@ -2,6 +2,12 @@ import 'starbridge_icons_v2_pen.dart';
 import 'starbridge_icons_v2_spec.dart';
 
 final List<IconSpec> dataIconsV2 = [
+  IconSpec('listView', '列表视图', iconGroups[4], ['Std.listView'], (g) {
+    for (final y in [4.5, 10.5, 16.5]) {
+      g.rect(3.5, y, 7, y + 3);
+      g.l(10, y + 1.5, 20.5, y + 1.5);
+    }
+  }),
   // 时间与数据 -------------------------------------------------------------
   IconSpec('schedule', '可用时间', iconGroups[4], ['SB.schedule'], (g) {
     paintIconCalendar(g);

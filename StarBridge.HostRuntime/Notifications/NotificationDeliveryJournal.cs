@@ -3,7 +3,7 @@ namespace StarBridge.HostRuntime.Notifications;
 using System.Runtime.CompilerServices;
 using StarBridge.NativeBridge;
 
-internal enum NotificationDeliveryChannel { Audio, Desktop, Activity }
+internal enum NotificationDeliveryChannel { Audio, Desktop, Activity, ExecHangarAudio, RallyHotkey }
 internal enum NotificationDeliveryStage
 {
     NoFreshEvent, FreshEvent, SourceMuted, ChannelDisabled, EnvironmentSuppressed,

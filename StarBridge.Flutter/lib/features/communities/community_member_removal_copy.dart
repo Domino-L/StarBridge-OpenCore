@@ -3,6 +3,12 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityMemberRemovalCopy = <String, (String, String, String)>{
+  'activityLoading': (
+    '正在读取移除确认…',
+    '正在讀取移除確認…',
+    'Loading removal confirmation…',
+  ),
+  'activitySending': ('正在移除成员…', '正在移除成員…', 'Removing member…'),
   'remove': ('移除成员', '移除成員', 'Remove member'),
   'cancel': ('取消', '取消', 'Cancel'),
   'close': ('关闭', '關閉', 'Close'),

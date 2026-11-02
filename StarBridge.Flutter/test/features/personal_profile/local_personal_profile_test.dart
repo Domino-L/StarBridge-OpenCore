@@ -10,6 +10,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_presentation.dar
 import 'package:starbridge_flutter/features/personal_profile/bridge_local_personal_profile.dart';
 import 'package:starbridge_flutter/features/personal_profile/in_memory_personal_profile_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_presentation.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_module.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_local_projection.dart';
@@ -19,6 +20,596 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 
 void main() {
+  test('a cold-start owner race on the local read is retried, not shown as unavailable', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.connection.pendingLocalReadErrors.add('profile_local.account_changed');
+    final snapshot = await h.port.read();
+    expect(snapshot.availability, PersonalProfileAvailability.available);
+    expect(
+      h.connection.requests.where((r) => r.name == 'personalProfile.localRead'),
+      hasLength(2),
+    );
+  });
+  test(
+    'a persistent local owner mismatch stops after bounded retries',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.localReadError = 'profile_local.account_changed';
+      final snapshot = await h.port.read();
+      expect(snapshot.availability, PersonalProfileAvailability.unavailable);
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.localRead',
+        ),
+        hasLength(
+          1 + BridgeLocalPersonalProfile.ownerPendingRetryDelays.length,
+        ),
+      );
+    },
+  );
+  test('other local read failures are not retried', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.connection.localReadError = 'profile_local.invalid_request';
+    await h.port.read();
+    expect(
+      h.connection.requests.where((r) => r.name == 'personalProfile.localRead'),
+      hasLength(1),
+    );
+  });
+  test(
+    'retry after partial rename cannot overwrite a newer device name',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      final draft = edit(await h.port.read());
+      h.connection.failSave = true;
+      final partial = await h.port.save(draft);
+      expect(partial.failureKey, 'profile.callsign.localPending');
+      expect(partial.requiresReload, isTrue);
+      final requestsAfterPartial = h.connection.requests.length;
+      h.connection.callSign = 'Newer device name';
+      h.connection.failSave = false;
+      final retry = await h.port.save(draft);
+      expect(retry.failureKey, 'profile.error.refreshBeforeSave');
+      expect(h.connection.callSign, 'Newer device name');
+      expect(h.connection.content, isNull);
+      expect(h.connection.requests.length, requestsAfterPartial);
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.localSave',
+        ),
+        hasLength(1),
+      );
+    },
+  );
+  test(
+    'missing rename capability rejects combined edit before page write',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.session.acceptHostCapabilities([
+        'personalProfile.presentation.write.v1',
+      ]);
+      h.remote.presentation = PersonalProfilePresentation.fromProfile({
+        'revision': 4,
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'content': {},
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'default',
+          },
+        },
+      });
+      final page = await h.port.read();
+      final result = await h.port.save(edit(page));
+      expect(result.failureKey, 'profile.callsign.unavailable');
+      expect(h.remote.writes, 0);
+      expect(
+        h.connection.requests.where(
+          (r) =>
+              r.name == 'personalProfile.localSave' ||
+              r.name == 'account.updateCallSign',
+        ),
+        isEmpty,
+      );
+      expect(h.connection.content, isNull);
+      // Editing the page without renaming remains available.
+      expect(
+        (await h.port.save(edit(page, callSign: page.callSign))).outcome,
+        PersonalProfileActionOutcome.completed,
+      );
+      expect(h.remote.writes, 1);
+    },
+  );
+  test('versioned page recovers only after a fresh successful read', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.session.acceptHostCapabilities([
+      'account.callSign',
+      'personalProfile.presentation.write.v1',
+    ]);
+    h.remote.available = false;
+    final unavailable = await h.port.read();
+    expect(
+      (await h.port.save(edit(unavailable, callSign: unavailable.callSign)))
+          .outcome,
+      PersonalProfileActionOutcome.rejected,
+    );
+    h.remote.available = true;
+    h.remote.presentation = PersonalProfilePresentation.fromProfile({
+      'revision': 4,
+      'avatarStyle': 0,
+      'wallpaperId': 'none',
+      'content': {},
+      'presentation': {
+        'schemaVersion': 1,
+        'sourceVersion': 'a' * 64,
+        'origins': {
+          for (final group in PersonalProfilePresentation.groups)
+            group: 'default',
+        },
+      },
+    });
+    expect(
+      (await h.port.save(edit(unavailable, callSign: unavailable.callSign)))
+          .outcome,
+      PersonalProfileActionOutcome.rejected,
+    );
+    expect(h.remote.writes, 0);
+    final refreshed = await h.port.read();
+    expect(
+      (await h.port.save(edit(refreshed, callSign: refreshed.callSign)))
+          .outcome,
+      PersonalProfileActionOutcome.completed,
+    );
+    expect(h.remote.writes, 1);
+    expect(h.connection.revision, 1);
+  });
+  for (final changedScope in ['subject', 'authority', 'environment']) {
+    test('observed page authority does not leak across $changedScope', () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.remote.presentation = PersonalProfilePresentation.fromProfile({
+        'revision': 4,
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'content': {},
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'default',
+          },
+        },
+      });
+      final oldPage = await h.port.read();
+      h.session.advanceGeneration(8);
+      h.connection.generation = 8;
+      if (changedScope == 'subject') h.connection.subject = 'other-owner';
+      if (changedScope == 'authority') h.connection.authority = 'other-issuer';
+      if (changedScope == 'environment') {
+        h.connection.environment = 'other-test';
+      }
+      h.remote.presentation = null;
+      h.remote.available = false;
+      expect(
+        (await h.port.save(edit(oldPage, callSign: oldPage.callSign))).outcome,
+        PersonalProfileActionOutcome.rejected,
+      );
+      // An older Host still owns its local-only page. Another owner's observed
+      // versioned page must not silently change that contract.
+      final otherPage = await h.port.read();
+      expect(
+        (await h.port.save(edit(otherPage, callSign: otherPage.callSign)))
+            .outcome,
+        PersonalProfileActionOutcome.completed,
+      );
+      expect(h.remote.writes, 0);
+      expect(
+        h.connection.requests
+            .where((r) => r.name == 'personalProfile.localSave')
+            .single
+            .accountContext
+            ?.subject,
+        h.connection.subject,
+      );
+    });
+  }
+  for (final throwsRead in [false, true]) {
+    test(
+      'versioned Host cold read failure cannot become local success: $throwsRead',
+      () async {
+        final h = Harness();
+        addTearDown(h.close);
+        h.session.acceptHostCapabilities([
+          'account.callSign',
+          'personalProfile.presentation.write.v1',
+        ]);
+        h.remote.available = false;
+        if (throwsRead) h.remote.readError = StateError('Synthetic outage');
+        final page = await h.port.read();
+        expect(page.local!.remoteAvailable, isFalse);
+        final result = await h.port.save(edit(page, callSign: page.callSign));
+        expect(result.outcome, PersonalProfileActionOutcome.rejected);
+        expect(result.failureKey, 'profile.error.refreshBeforeSave');
+        expect(h.connection.content, isNull);
+        expect(h.remote.writes, 0);
+        expect(
+          h.connection.requests.where(
+            (r) => r.name == 'personalProfile.localSave',
+          ),
+          isEmpty,
+        );
+      },
+    );
+  }
+  test(
+    'known account-level page cannot fall back to local save after read outage',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.remote.presentation = PersonalProfilePresentation.fromProfile({
+        'revision': 4,
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'content': {},
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'default',
+          },
+        },
+      });
+      await h.port.read();
+      h.remote.available = false;
+      final cached = await h.port.read();
+      final result = await h.port.save(edit(cached, callSign: cached.callSign));
+      expect(result.outcome, PersonalProfileActionOutcome.rejected);
+      expect(result.failureKey, 'profile.error.refreshBeforeSave');
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.localSave',
+        ),
+        isEmpty,
+      );
+      expect(h.remote.writes, 0);
+      expect(h.connection.content, isNull);
+    },
+  );
+  for (final origin in [
+    'custom',
+    'linkedLegacy',
+    'imported',
+    'default',
+    'unknown',
+  ]) {
+    test(
+      'page reread respects $origin without rewriting local history',
+      () async {
+        final h = Harness();
+        addTearDown(h.close);
+        final before = await h.port.read();
+        expect(
+          (await h.port.save(edit(before, callSign: before.callSign))).outcome,
+          PersonalProfileActionOutcome.completed,
+        );
+        final oldContent = h.connection.content;
+        final oldRevision = h.connection.revision;
+        h.remote.about = '';
+        h.remote.presentation = PersonalProfilePresentation.fromProfile({
+          'revision': 4,
+          'avatarStyle': 0,
+          'wallpaperId': 'none',
+          'content': {},
+          'presentation': {
+            'schemaVersion': 1,
+            'sourceVersion': 'a' * 64,
+            'origins': {
+              for (final group in PersonalProfilePresentation.groups)
+                group: origin,
+            },
+          },
+        });
+        final reread = await h.port.read();
+        expect(reread.about, origin == 'unknown' ? 'Local introduction' : '');
+        expect(identical(h.connection.content, oldContent), isTrue);
+        expect(h.connection.revision, oldRevision);
+        expect(h.remote.writes, 0);
+      },
+    );
+  }
+  for (final mode in ['saved', 'remote-failed', 'local-failed']) {
+    test('versioned page coordinates account and local save: $mode', () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.remote.presentation = PersonalProfilePresentation.fromProfile({
+        'revision': 4,
+        'avatarStyle': 0,
+        'wallpaperId': 'none',
+        'content': {},
+        'presentation': {
+          'schemaVersion': 1,
+          'sourceVersion': 'a' * 64,
+          'origins': {
+            for (final group in PersonalProfilePresentation.groups)
+              group: 'default',
+          },
+        },
+      });
+      h.remote.pageOutcome = mode == 'remote-failed'
+          ? PersonalProfileActionOutcome.failed
+          : PersonalProfileActionOutcome.completed;
+      h.connection.failSave = mode == 'local-failed';
+      final profile = await h.port.read();
+      final change = PersonalProfileEdit(
+        callSign: profile.callSign,
+        about: 'Explicit new intro',
+        avatarStyle: profile.avatarStyle,
+        wallpaperId: profile.wallpaperId,
+        visibility: profile.visibility,
+        moduleLayout: profile.moduleLayout,
+      );
+      final result = await h.port.save(change);
+      expect(
+        result.outcome,
+        mode == 'saved'
+            ? PersonalProfileActionOutcome.completed
+            : PersonalProfileActionOutcome.failed,
+      );
+      if (mode == 'local-failed') expect(result.requiresReload, isTrue);
+      expect(h.remote.pageGroups!.keys, ['introduction']);
+      expect(h.remote.writes, 1);
+      expect(
+        h.connection.requests.where(
+          (r) => r.name == 'personalProfile.localSave',
+        ),
+        hasLength(mode == 'remote-failed' ? 0 : 1),
+      );
+      expect(
+        (await h.port.save(change)).outcome,
+        PersonalProfileActionOutcome.rejected,
+      );
+      expect(h.remote.writes, 1);
+    });
+  }
+  test(
+    'SCM profile avatar takes priority over stale account chrome avatar',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.avatarImageData = 'data:image/png;base64,account-default';
+      h.remote.avatarImageData = 'data:image/png;base64,inherited-profile';
+      final profile = await h.port.read();
+      expect(profile.avatarImageData, h.remote.avatarImageData);
+      expect(h.connection.content, isNull);
+      expect(h.remote.writes, 0);
+    },
+  );
+  test(
+    'legacy avatar authority and SCM missing-avatar fallback stay unchanged',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.connection.avatarImageData = 'data:image/png;base64,account-current';
+      expect(
+        (await h.port.read()).avatarImageData,
+        h.connection.avatarImageData,
+      );
+      h.connection.state = 'legacySignedIn';
+      h.connection.authority = 'starbridge-relay-test';
+      h.remote.avatarImageData = 'data:image/png;base64,older-profile';
+      expect(
+        (await h.port.read()).avatarImageData,
+        h.connection.avatarImageData,
+      );
+    },
+  );
+  test(
+    'SCM offline editor saves other local fields but cannot rename the account',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.remote.available = false;
+      h.connection.displayName = 'SCM Display';
+      final profile = await h.port.read();
+      expect(
+        (await h.port.save(edit(profile))).failureKey,
+        'profile.callsign.unavailable',
+      );
+      expect(h.connection.content, isNull);
+      expect(
+        (await h.port.save(edit(profile, callSign: profile.callSign))).outcome,
+        PersonalProfileActionOutcome.completed,
+      );
+      expect(h.connection.content!['introduction'], 'Local introduction');
+      expect(
+        h.connection.requests.where((r) => r.name == 'account.updateCallSign'),
+        isEmpty,
+      );
+    },
+  );
+  test('SCM call sign is Java-owned even when the local page retains an older name', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    await h.port.save(edit(await h.port.read()));
+    h.connection.callSign = 'Other device';
+    final after = await h.port.read();
+    expect(after.callSign, 'Other device');
+    expect(h.connection.content!['callSign'], 'Local call sign');
+    expect(after.about, 'Local introduction');
+    expect(after.gameHandle, 'Aster-Lin');
+  });
+  test('SCM rename syncs only call sign before local save, not whole remote profile', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    final before = await h.port.read();
+    final saved = await h.port.save(edit(before));
+    expect(saved.outcome, PersonalProfileActionOutcome.completed);
+    final write = h.connection.requests.singleWhere(
+      (r) => r.name == 'account.updateCallSign',
+    );
+    expect(write.payload, {
+      'schemaVersion': 1,
+      'expectedCallSign': 'Aster Lin',
+      'callSign': 'Local call sign',
+    });
+    expect(write.accountContext?.subject, 'owner');
+    expect(write.sessionGeneration, 7);
+    expect(
+      h.connection.requests.indexOf(write),
+      lessThan(
+        h.connection.requests.indexWhere(
+          (r) => r.name == 'personalProfile.localSave',
+        ),
+      ),
+    );
+    expect(h.remote.writes, 0);
+  });
+  test(
+    'rename conflict or unavailable write leaves local draft unsaved',
+    () async {
+      for (final error in [
+        'account.callsign_conflict',
+        'account.callsign_unavailable',
+        'personal_profile.write_forbidden',
+        'account.callsign_unconfirmed',
+        'bridge.disconnected',
+      ]) {
+        final h = Harness();
+        addTearDown(h.close);
+        h.connection.callSignError = error;
+        final draft = edit(await h.port.read());
+        final result = await h.port.save(draft);
+        expect(result.outcome, PersonalProfileActionOutcome.failed);
+        expect(result.requiresReload, isTrue);
+        final requestCount = h.connection.requests.length;
+        expect((await h.port.save(draft)).requiresReload, isTrue);
+        expect(h.connection.requests.length, requestCount);
+        expect(h.connection.content, isNull);
+        expect(
+          h.connection.requests.where(
+            (r) => r.name == 'personalProfile.localSave',
+          ),
+          isEmpty,
+        );
+      }
+    },
+  );
+  test(
+    'partial rename requires fresh read before an explicit local retry',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      final before = await h.port.read();
+      h.connection.failSave = true;
+      final result = await h.port.save(edit(before));
+      expect(result.failureKey, 'profile.callsign.localPending');
+      expect(result.requiresReload, isTrue);
+      expect(h.connection.callSign, 'Local call sign');
+      expect(h.connection.content, isNull);
+      h.connection.failSave = false;
+      expect(
+        (await h.port.save(edit(before))).outcome,
+        PersonalProfileActionOutcome.rejected,
+      );
+      final refreshed = await h.port.read();
+      expect(refreshed.callSign, 'Local call sign');
+      expect(
+        (await h.port.save(edit(refreshed))).outcome,
+        PersonalProfileActionOutcome.completed,
+      );
+      expect(
+        h.connection.requests.where((r) => r.name == 'account.updateCallSign'),
+        hasLength(1),
+      );
+      expect(h.connection.callSign, 'Local call sign');
+      expect((await h.port.read()).callSign, 'Local call sign');
+    },
+  );
+  test(
+    'missing call sign capability does not fall back to local account rename',
+    () async {
+      final h = Harness();
+      addTearDown(h.close);
+      h.session.acceptHostCapabilities([]);
+      expect(
+        (await h.port.save(edit(await h.port.read()))).failureKey,
+        'profile.callsign.unavailable',
+      );
+      expect(h.connection.content, isNull);
+    },
+  );
+  test('completed import change reloads selected presentation without changing SCM identity or inventory', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    final before = await h.port.read();
+    final inventory = h.hangar.snapshot;
+    h.connection.content = {
+      'callSign': 'Imported call sign',
+      'introduction': 'Retained introduction',
+      'avatarStyle': 0,
+      'wallpaperId': 'none',
+      'favoriteShipIds': <String>[],
+      'modules': [
+        {'id': 'skilled-roles', 'span': 2, 'isVisible': false, 'position': -1},
+      ],
+      'playStyle': {
+        'roles': ['旧版岗位'],
+        'support': ['旧支援'],
+        'interests': ['兴趣一', '兴趣二', '兴趣三', '兴趣四'],
+      },
+    };
+    h.connection.revision = 1;
+    h.connection.callSign = 'Imported call sign';
+    h.remote.importedSnapshot = projectLocalProfile(
+      await h.remote.source.read(),
+      null,
+      inventory,
+      null,
+      legacyAccount: true,
+      accountAvatarImageData: 'data:image/png;base64,synthetic-imported-avatar',
+    );
+    var invalidated = 0;
+    final subscription = h.port.changes.listen((_) => invalidated++);
+    addTearDown(subscription.cancel);
+    h.connection.stream.add(
+      BridgeEnvelope.fromJson({
+        'protocolVersion': 1,
+        'messageType': 'event',
+        'name': 'personalProfile.changed',
+        'sessionGeneration': 7,
+        'sequence': 1,
+        'payload': {'schemaVersion': 1},
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final after = await h.port.read();
+    expect(invalidated, 1);
+    expect(after.callSign, 'Imported call sign');
+    expect(
+      after.avatarImageData,
+      'data:image/png;base64,synthetic-imported-avatar',
+    );
+    expect(after.gameHandle, before.gameHandle);
+    expect(after.roles.single.displayLabel, '旧版岗位');
+    expect(after.participationInterests.length, 4);
+    expect(identical(h.hangar.snapshot, inventory), isTrue);
+    expect(h.remote.writes, 0);
+    expect(
+      h.connection.requests.where((r) => r.name == 'personalProfile.localSave'),
+      isEmpty,
+    );
+  });
   test(
     'legacy save synchronizes only background after local persistence',
     () async {
@@ -143,7 +734,7 @@ void main() {
       expect(h.remote.writes, 0);
     },
   );
-  test('visibility saves only audience and rejects a lease after account invalidation', () async {
+  test('visibility saves only audience and rejects a lease after rereading the profile', () async {
     final h = Harness();
     addTearDown(h.close);
     await h.port.read();
@@ -183,6 +774,46 @@ void main() {
       throwsStateError,
     );
     expect(h.connection.requests.length, count);
+  });
+  test('SCM visibility keeps Java audience and refuses unsupported organization scope', () async {
+    final h = Harness();
+    addTearDown(h.close);
+    h.connection.availableVisibilities = [
+      'public',
+      'friendsAndMainFleet',
+      'friendsOnly',
+      'private',
+    ];
+    await h.port.read();
+    final state = await h.port.readVisibility();
+    final before = h.connection.requests.length;
+    await expectLater(
+      h.port.saveVisibility(
+        state,
+        PersonalProfileVisibility.friendsFleetAndOrganizations,
+      ),
+      throwsStateError,
+    );
+    expect(h.connection.requests.length, before);
+    final result = await h.port.saveVisibility(
+      state,
+      PersonalProfileVisibility.friendsAndMainFleet,
+    );
+    expect(result.visibility, PersonalProfileVisibility.friendsAndMainFleet);
+    expect(
+      h.connection.requests.last.payload['visibility'],
+      'friendsAndMainFleet',
+    );
+    expect(h.remote.writes, 0);
+    for (final invalid in <List<String>>[
+      ['public', 'unknown', 'private'],
+      [],
+      ['private', 'private'],
+      ['public'],
+    ]) {
+      h.connection.availableVisibilities = invalid;
+      await expectLater(h.port.readVisibility(), throwsFormatException);
+    }
   });
   test('local profile projects the most recently added current ship', () async {
     final h = Harness();
@@ -308,7 +939,7 @@ void main() {
       await tester.runAsync(h.close);
     },
   );
-  test('former ownership is model-based while favorites retain instance references', () async {
+  test('former ownership and favorite choices retain every instance even when its model is owned', () async {
     final h = Harness();
     addTearDown(h.close);
     await h.port.save(edit(await h.port.read(), ids: [shipA]));
@@ -319,8 +950,8 @@ void main() {
       formerShips: [before[0]],
     );
     var profile = await h.port.read();
-    expect(profile.favoriteShips.single.formerlyOwned, isFalse);
-    expect(profile.local!.choices.length, 1);
+    expect(profile.favoriteShips.single.formerlyOwned, isTrue);
+    expect(profile.local!.choices.length, 2);
     expect(profile.hangarSummary.shipCount, 1);
     h.hangar.snapshot = LocalHangarSnapshot(
       revision: 3,
@@ -330,8 +961,8 @@ void main() {
     profile = await h.port.read();
     expect(profile.favoriteShips.single.identity.runtimeId, shipA);
     expect(profile.favoriteShips.single.formerlyOwned, isTrue);
-    expect(profile.local!.choices.length, 1);
-    expect(profile.local!.choices.single.formerlyOwned, isTrue);
+    expect(profile.local!.choices.length, 2);
+    expect(profile.local!.choices.every((s) => s.formerlyOwned), isTrue);
     expect(profile.hangarSummary.shipCount, 0);
     expect(profile.hangarSummary.unresolvedFavoriteCount, 0);
     h.hangar.snapshot = LocalHangarSnapshot(
@@ -339,7 +970,7 @@ void main() {
       ships: [before[1]],
       formerShips: [before[0]],
     );
-    expect((await h.port.read()).favoriteShips.single.formerlyOwned, isFalse);
+    expect((await h.port.read()).favoriteShips.single.formerlyOwned, isTrue);
   });
   test('S2 empty defaults inherit old data without overwriting edits or explicit clears', () async {
     final remote = await InMemoryPersonalProfileAdapter.forReview(
@@ -601,6 +1232,8 @@ void main() {
     'failed save retries same operation and does not report success',
     () async {
       final h = Harness();
+      // Exercise only the local writer, not a preceding account rename.
+      h.connection.callSign = 'Local call sign';
       addTearDown(h.close);
       final before = await h.port.read();
       h.connection.failSave = true;
@@ -635,6 +1268,10 @@ void main() {
       );
       expect(h.connection.operation, isNot(lostOperation));
       expect(h.connection.revision, 3);
+      expect(
+        h.connection.requests.where((r) => r.name == 'account.updateCallSign'),
+        isEmpty,
+      );
     },
   );
 
@@ -748,82 +1385,95 @@ void main() {
     expect(h.connection.content, isNull);
   });
 
-  testWidgets(
-    'local editor saves favorites, keeps failed draft and hides publish controls',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1600, 1400);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPhysicalSize);
-      final h = Harness();
-      await tester.pumpWidget(
-        StarBridgeApp(
-          composition: AppComposition.forTest(
-            windowChrome: InMemoryWindowChrome(),
-            accountPort: InMemoryAccountAdapter.forReview(
-              AccountReviewState.signedIn,
+  for (final legacy in [false, true]) {
+    testWidgets(
+      'local editor keeps failed draft with account-aware retry: legacy=$legacy',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1600, 1400);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final h = Harness(legacy: legacy);
+        await tester.pumpWidget(
+          StarBridgeApp(
+            composition: AppComposition.forTest(
+              windowChrome: InMemoryWindowChrome(),
+              accountPort: InMemoryAccountAdapter.forReview(
+                AccountReviewState.signedIn,
+              ),
+              personalProfilePort: h.port,
             ),
-            personalProfilePort: h.port,
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('account-command')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('profile-preview')), findsNothing);
-      await tester.tap(find.byKey(const Key('profile-edit')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('profile-visibility-selector')),
-        findsNothing,
-      );
-      expect(find.text('保存页面'), findsOneWidget);
-      final picker = find.byKey(
-        const Key('profile-module-edit-favorite-ships'),
-      );
-      await tester.ensureVisible(picker);
-      await tester.tap(picker);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('profile-favorite-$shipA')));
-      await tester.tap(find.byKey(const Key('profile-favorites-apply')));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(const Key('profile-call-sign-field')),
-      );
-      await tester.enterText(
-        find.byKey(const Key('profile-call-sign-field')),
-        'Local draft',
-      );
-      h.connection.failSave = true;
-      final save = find.byKey(const Key('profile-save'));
-      await tester.ensureVisible(save);
-      await tester.tap(save);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('profile-save-error')), findsOneWidget);
-      expect(find.text('Local draft'), findsOneWidget);
-      h.connection.failSave = false;
-      await tester.tap(save);
-      await tester.pumpAndSettle();
-      expect(h.connection.content!['callSign'], 'Local draft');
-      expect(h.connection.content!['favoriteShipIds'], [shipA]);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.runAsync(h.session.close);
-    },
-  );
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('account-command')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const Key('account-menu-personal-profile')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('profile-preview')), findsNothing);
+        await tester.tap(find.byKey(const Key('profile-edit')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('profile-visibility-selector')),
+          findsNothing,
+        );
+        expect(find.text('保存页面'), findsOneWidget);
+        final picker = find.byKey(
+          const Key('profile-module-edit-favorite-ships'),
+        );
+        await tester.ensureVisible(picker);
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('profile-favorite-$shipA')));
+        await tester.tap(find.byKey(const Key('profile-favorites-apply')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.byKey(const Key('profile-call-sign-field')),
+        );
+        await tester.enterText(
+          find.byKey(const Key('profile-call-sign-field')),
+          'Local draft',
+        );
+        h.connection.failSave = true;
+        final save = find.byKey(const Key('profile-save'));
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('profile-save-error')), findsOneWidget);
+        expect(find.text('Local draft'), findsOneWidget);
+        h.connection.failSave = false;
+        final requestsAfterFailure = h.connection.requests.length;
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        if (legacy) {
+          expect(h.connection.content!['callSign'], 'Local draft');
+          expect(h.connection.content!['favoriteShipIds'], [shipA]);
+        } else {
+          expect(tester.widget<FilledButton>(save).onPressed, isNull);
+          expect(h.connection.requests.length, requestsAfterFailure);
+          expect(h.connection.callSign, 'Local draft');
+          expect(h.connection.content, isNull);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(h.session.close);
+      },
+    );
+  }
 }
 
 const shipA = '11111111111111111111111111111111';
 const shipB = '22222222222222222222222222222222';
 PersonalProfileEdit edit(
   PersonalProfileSnapshot profile, {
+  String callSign = 'Local call sign',
   List<String>? ids,
   PersonalProfilePlayStyle? playStyle,
   PersonalProfileSchedule? schedule,
 }) => PersonalProfileEdit(
-  callSign: 'Local call sign',
+  callSign: callSign,
   about: 'Local introduction',
   avatarStyle: 1,
   wallpaperId: 'none',
@@ -835,8 +1485,14 @@ PersonalProfileEdit edit(
 );
 
 class Harness {
-  Harness() {
+  Harness({bool legacy = false}) {
+    if (legacy) {
+      connection.state = 'legacySignedIn';
+      connection.authority = 'starbridge-relay-test';
+    }
     session = BridgeClientSession(connection: connection, sessionGeneration: 7);
+    session.acceptHostCapabilities(['account.callSign']);
+    remote.connection = connection;
     port = BridgeLocalPersonalProfile(
       session,
       remote: remote,
@@ -854,13 +1510,38 @@ class Harness {
   }
 }
 
-class RemoteProfile implements PersonalProfilePort {
+class RemoteProfile
+    implements PersonalProfilePort, PersonalProfilePresentationWriter {
+  String? about;
+  PersonalProfilePresentation? presentation;
+  Map<String, Map<String, Object?>>? pageGroups;
+  PersonalProfileActionOutcome pageOutcome =
+      PersonalProfileActionOutcome.completed;
+  @override
+  Future<PersonalProfileActionResult> savePresentation(
+    PersonalProfilePresentation expected,
+    Map<String, Map<String, Object?>> edits,
+  ) async {
+    expect(identical(expected, presentation), isTrue);
+    writes++;
+    pageGroups = edits;
+    return PersonalProfileActionResult(
+      pageOutcome,
+      failureKey: pageOutcome == PersonalProfileActionOutcome.completed
+          ? null
+          : 'profile.error.refreshBeforeSave',
+    );
+  }
+
+  String? avatarImageData;
+  LocalProfileConnection? connection;
   final source = InMemoryPersonalProfileAdapter.forReview(signedIn: true);
   bool available = true;
   Object? readError;
   Completer<PersonalProfileSnapshot>? pendingRead;
   int writes = 0;
   int reads = 0;
+  PersonalProfileSnapshot? importedSnapshot;
   @override
   Stream<void> get invalidations => const Stream.empty();
   @override
@@ -868,9 +1549,33 @@ class RemoteProfile implements PersonalProfilePort {
     reads++;
     if (readError case final error?) throw error;
     if (pendingRead case final pending?) return pending.future;
-    return available
-        ? source.read()
-        : const PersonalProfileSnapshot.unavailable();
+    if (!available) return const PersonalProfileSnapshot.unavailable();
+    final base = importedSnapshot ?? await source.read();
+    return PersonalProfileSnapshot.available(
+      presentation: presentation,
+      callSign: connection?.callSign ?? base.callSign,
+      gameHandle: base.gameHandle,
+      about: about ?? base.about,
+      avatarStyle: base.avatarStyle,
+      avatarImageData: avatarImageData ?? base.avatarImageData,
+      wallpaperId: base.wallpaperId,
+      visibility: base.visibility,
+      presenceIntent: base.presenceIntent,
+      affiliations: base.affiliations,
+      availabilityWindows: base.availabilityWindows,
+      timeZoneLabel: base.timeZoneLabel,
+      gameplayMinutes: base.gameplayMinutes,
+      activityRhythm: base.activityRhythm,
+      roles: base.roles,
+      participationInterests: base.participationInterests,
+      supportCapabilities: base.supportCapabilities,
+      shipWishlist: base.shipWishlist,
+      favoriteShips: base.favoriteShips,
+      hangarSummary: base.hangarSummary,
+      moduleLayout: base.moduleLayout,
+      allowEditing: base.allowEditing,
+      local: base.local,
+    );
   }
 
   @override
@@ -914,6 +1619,10 @@ class SavedHangar implements LocalHangarPort {
 }
 
 class LocalProfileConnection implements BridgeConnection {
+  String subject = 'owner';
+  String environment = 'test';
+  String? callSign;
+  String? callSignError;
   int backgroundRevision = 4;
   String background = 'none';
   String? backgroundError;
@@ -921,6 +1630,7 @@ class LocalProfileConnection implements BridgeConnection {
   bool invalidateBackgroundRead = false;
   int visibilityRevision = 1;
   String visibility = 'private';
+  List<String>? availableVisibilities;
   final stream = StreamController<BridgeEnvelope>.broadcast();
   final requests = <BridgeEnvelope>[];
   Map<String, Object?>? content;
@@ -934,6 +1644,7 @@ class LocalProfileConnection implements BridgeConnection {
   String? displayName;
   String? avatarImageData;
   String? localReadError;
+  final pendingLocalReadErrors = <String>[];
   @override
   Stream<BridgeEnvelope> get incoming => stream.stream;
   @override
@@ -942,6 +1653,19 @@ class LocalProfileConnection implements BridgeConnection {
   Future<void> send(BridgeEnvelope request) async {
     if (request.messageType != 'request') return;
     requests.add(request);
+    // Match Host preflight: the same desired value is already confirmed, while
+    // a different current value must still match the editor's expected name.
+    final currentCallSign = callSign ?? 'Aster Lin';
+    final renameError =
+        callSignError ??
+        (request.name == 'account.updateCallSign' &&
+                currentCallSign != request.payload['callSign'] &&
+                currentCallSign != request.payload['expectedCallSign']
+            ? 'account.callsign_conflict'
+            : null);
+    if (request.name == 'account.updateCallSign' && renameError == null) {
+      callSign = request.payload['callSign'] as String;
+    }
     if (request.name == 'personalProfile.readBackground' &&
         invalidateBackgroundRead) {
       stream.add(
@@ -966,14 +1690,18 @@ class LocalProfileConnection implements BridgeConnection {
       visibilityRevision++;
     }
     final save = request.name == 'personalProfile.localSave';
-    final errorCode = request.name == 'personalProfile.saveBackground'
+    final errorCode = request.name == 'account.updateCallSign'
+        ? renameError
+        : request.name == 'personalProfile.saveBackground'
         ? backgroundWriteError ?? backgroundError
         : request.name.endsWith('Background')
         ? backgroundError
         : save && failSave
         ? 'profile_local.write_failed'
         : request.name == 'personalProfile.localRead'
-        ? localReadError
+        ? (pendingLocalReadErrors.isNotEmpty
+              ? pendingLocalReadErrors.removeAt(0)
+              : localReadError)
         : null;
     if (save && (!failSave || commitOnFailure)) {
       content = (request.payload['content'] as Map).cast<String, Object?>();
@@ -991,11 +1719,13 @@ class LocalProfileConnection implements BridgeConnection {
         if (errorCode != null)
           'error': {'code': errorCode, 'message': 'fixture', 'retryable': true},
         'accountContext': {
-          'environment': 'test',
+          'environment': environment,
           'authority': authority,
-          'subject': 'owner',
+          'subject': subject,
         },
-        'payload': request.name == 'account.getCurrent'
+        'payload': request.name == 'account.updateCallSign'
+            ? {'schemaVersion': 1, 'callSign': callSign}
+            : request.name == 'account.getCurrent'
             ? {
                 'schemaVersion': 1,
                 'state': state,
@@ -1013,6 +1743,8 @@ class LocalProfileConnection implements BridgeConnection {
                 'schemaVersion': 1,
                 'revision': visibilityRevision,
                 'visibility': visibility,
+                if (availableVisibilities != null)
+                  'availableVisibilities': availableVisibilities,
               }
             : {
                 'schemaVersion': 1,

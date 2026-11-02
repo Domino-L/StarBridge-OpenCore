@@ -4,6 +4,17 @@ import '../../app/localization/app_strings.dart';
 import 'community_ownership_transfer_copy.dart';
 
 const communityOwnershipExitCopy = <String, (String, String, String)>{
+  'activityDirectory': ('正在读取接任成员…', '正在讀取接任成員…', 'Loading eligible members…'),
+  'activityPreview': (
+    '正在读取交接退出确认…',
+    '正在讀取交接退出確認…',
+    'Loading handover and exit confirmation…',
+  ),
+  'activitySending': (
+    '正在处理交接退出请求…',
+    '正在處理交接退出請求…',
+    'Processing handover and exit request…',
+  ),
   'title': ('交接并退出', '交接並退出', 'Hand over and leave'),
   'choose': ('选择接任成员', '選擇接任成員', 'Choose a successor'),
   'help': (

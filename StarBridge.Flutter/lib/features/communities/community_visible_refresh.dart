@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../../platform/window/native_viewport_visibility.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 
 /// Event-driven readback for capable surfaces; bounded reconciliation is only
 /// the fallback for unavailable event transport. Hidden surfaces defer events.
@@ -21,7 +22,9 @@ mixin CommunityVisibleRefresh<T extends StatefulWidget> on State<T> {
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onResume: refreshCommunityIfVisible);
+    _lifecycle = AppLifecycleListener(
+      onResume: backgroundLoadingCallback(refreshCommunityIfVisible),
+    );
     _visibleRefresh = Timer.periodic(communityRefreshInterval, (_) {
       if (!communityEventsHealthy || _eventPending) refreshCommunityIfVisible();
     });
@@ -77,7 +80,7 @@ mixin CommunityVisibleRefresh<T extends StatefulWidget> on State<T> {
   void refreshCommunityIfVisible() {
     if (!isCommunityVisible) return;
     _eventPending = false;
-    unawaited(refreshVisibleCommunity());
+    unawaited(backgroundLoadingRead(refreshVisibleCommunity));
   }
 
   @override

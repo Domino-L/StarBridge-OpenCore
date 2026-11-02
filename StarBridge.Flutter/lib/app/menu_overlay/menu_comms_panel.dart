@@ -1,6 +1,9 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import 'menu_comms_view.dart';
 import 'menu_comms_directory.dart';
 import 'menu_comms_history.dart';
@@ -44,6 +47,7 @@ class MenuCommsPanel extends StatefulWidget {
 
 class _MenuCommsPanelState extends State<MenuCommsPanel> {
   String _query = '', _group = 'all';
+  int _searchRevision = 0;
   MenuFeatureView? _organizationDirectory;
   @override
   void didUpdateWidget(MenuCommsPanel oldWidget) {
@@ -54,6 +58,13 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
             widget.view.profileKey != oldWidget.view.profileKey)) {
       _query = '';
       _group = 'all';
+      _searchRevision++;
+    }
+    // A loading view can retain only its own presentation context. Private
+    // chat access is independent and is not organization authorization.
+    if (oldWidget.organization?.scope != widget.organization?.scope ||
+        widget.organization == null) {
+      _organizationDirectory = null;
     }
   }
 
@@ -70,6 +81,7 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
       final directoryOrganization = organization?.state == 'loading'
           ? MenuFeatureView(
               'loading',
+              scope: organization!.scope,
               busy: true,
               channels: _organizationDirectory?.channels ?? const [],
             )
@@ -85,6 +97,7 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
         view: view,
         query: _query,
         group: _group,
+        searchRevision: _searchRevision,
         onQuery: (value) => setState(() => _query = value),
         onGroup: (value) => setState(() => _group = value),
         onAction: (action, key) {
@@ -118,23 +131,30 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (view.state == 'idle' || view.state == 'loading')
-                  const MenuLoading(),
+                  MenuLoading(feedback: view.readFeedback),
                 Text(switch (view.state) {
-                  'idle' || 'loading' => '正在读取通讯…',
-                  'restricted' => '当前无法访问此会话，请检查登录或访问权限。',
-                  _ => '暂时无法读取通讯，请重试。',
+                  'idle' ||
+                  'loading' => menuText(context, 'menu.overlay.comms.loading'),
+                  'restricted' => menuText(
+                    context,
+                    'menu.overlay.comms.restricted',
+                  ),
+                  _ => menuText(context, 'menu.overlay.comms.unavailable'),
                 }),
                 if (view.state != 'idle' && view.state != 'loading') ...[
                   const SizedBox(height: 12),
-                  OutlinedButton(
-                    key: const ValueKey('menu-comms-retry'),
-                    onPressed: () => widget.onAction('retry', ''),
-                    child: const Text('重新读取'),
+                  StarBridgeActionButton(
+                    controlKey: const ValueKey('menu-comms-retry'),
+                    semanticLabel: menuText(context, 'menu.display.reload'),
+                    onActivate: (_) => widget.onAction('retry', ''),
+                    child: Text(menuText(context, 'menu.display.reload')),
                   ),
-                  TextButton(
-                    key: const ValueKey('menu-comms-back'),
-                    onPressed: () => widget.onAction('back', ''),
-                    child: const Text('返回会话列表'),
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const ValueKey('menu-comms-back'),
+                    semanticLabel: menuText(context, 'menu.overlay.comms.back'),
+                    onActivate: (_) => widget.onAction('back', ''),
+                    child: Text(menuText(context, 'menu.overlay.comms.back')),
                   ),
                 ],
               ],
@@ -147,11 +167,15 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: OutlinedButton(
-                onPressed: invitation.busy
+              child: StarBridgeActionButton(
+                semanticLabel: menuText(
+                  context,
+                  'menu.overlay.comms.backComms',
+                ),
+                onActivate: invitation.busy
                     ? null
-                    : () => widget.onAction('inviteClose', ''),
-                child: const Text('返回通讯'),
+                    : (_) => widget.onAction('inviteClose', ''),
+                child: Text(menuText(context, 'menu.overlay.comms.backComms')),
               ),
             ),
             Expanded(
@@ -210,12 +234,19 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
                   if (widget.organizationSelected)
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: () {
+                      child: StarBridgeActionButton(
+                        kind: StarBridgeActionKind.quiet,
+                        semanticLabel: menuText(
+                          context,
+                          'menu.overlay.comms.back',
+                        ),
+                        onActivate: (_) {
                           widget.onConversationKind?.call('private');
                           widget.onAction('back', '');
                         },
-                        child: const Text('返回会话列表'),
+                        child: Text(
+                          menuText(context, 'menu.overlay.comms.back'),
+                        ),
                       ),
                     ),
                   Expanded(child: detail),
@@ -239,18 +270,20 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
             if (!widget.embedded)
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      '通讯',
+                      menuText(context, 'menu.tools.comms'),
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                  TextButton(
-                    onPressed: widget.onClose,
-                    child: const Text('关闭'),
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    semanticLabel: menuText(context, 'window.close'),
+                    onActivate: (_) => widget.onClose(),
+                    child: Text(menuText(context, 'window.close')),
                   ),
                 ],
               ),
@@ -259,11 +292,18 @@ class _MenuCommsPanelState extends State<MenuCommsPanel> {
                 !widget.organizationSelected)
               Align(
                 alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: view.busy
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  semanticLabel: menuText(
+                    context,
+                    'menu.overlay.comms.inviteHistory',
+                  ),
+                  onActivate: view.busy
                       ? null
-                      : () => widget.onAction('inviteRecords', ''),
-                  child: const Text('邀请发送记录'),
+                      : (_) => widget.onAction('inviteRecords', ''),
+                  child: Text(
+                    menuText(context, 'menu.overlay.comms.inviteHistory'),
+                  ),
                 ),
               ),
             Expanded(child: content),

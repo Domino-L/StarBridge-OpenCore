@@ -130,12 +130,13 @@ class _FriendsPreviewState extends State<_FriendsPreview> {
       const SizedBox(height: 20),
       const Text('好友请求 · 0'),
       const Divider(),
-      for (final group in ['在线', '离线']) ...[
+      for (final group in ['online', 'offline']) ...[
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text(group),
+          child: Text(group == 'online' ? '在线' : '离线'),
         ),
-        for (final name in (group == '在线' ? ['演示好友 A', '演示好友 B'] : ['演示好友 C']))
+        for (final name
+            in (group == 'online' ? ['演示好友 A', '演示好友 B'] : ['演示好友 C']))
           if (name.toLowerCase().contains(query.toLowerCase()))
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -143,7 +144,7 @@ class _FriendsPreviewState extends State<_FriendsPreview> {
                 child: Text(name.substring(name.length - 1)),
               ),
               title: Text(name),
-              subtitle: Text(group == '在线' ? '未进入游戏' : '离线'),
+              subtitle: Text(group == 'online' ? '未进入游戏' : '离线'),
             ),
       ],
     ],

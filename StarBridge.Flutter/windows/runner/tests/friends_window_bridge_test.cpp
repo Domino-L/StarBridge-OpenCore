@@ -3,9 +3,14 @@
 #include <flutter/standard_method_codec.h>
 #include <cstdio>
 #include <map>
+#include <chrono>
 
 using Value = flutter::EncodableValue;
 using Map = flutter::EncodableMap;
+int64_t UtcMilliseconds() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+}
 class Messenger : public flutter::BinaryMessenger {
  public:
   std::map<std::string, flutter::BinaryMessageHandler> handlers;
@@ -24,6 +29,9 @@ class Messenger : public flutter::BinaryMessenger {
     auto bytes = codec.EncodeMethodCall(flutter::MethodCall<Value>(method, std::make_unique<Value>(args)));
     handlers.at("starbridge/" + kind + "-primary")(bytes->data(), bytes->size(),
       [this](const uint8_t* data, size_t count) {
+        if (!data || count == 0) {
+          answered = true; reply = Value("notImplemented"); return;
+        }
         class Response : public flutter::MethodResult<Value> {
          public:
           explicit Response(Messenger* owner) : owner_(owner) {}
@@ -59,10 +67,30 @@ int wmain(int argc, wchar_t** argv) {
   }
   {
     FriendsWindowBridge bridge(owner, &messenger, argv[1], messenger.kind);
+    Map health{{Value("opening"), Value(1)}, {Value("scope"), Value("fixture")},
+               {Value("revision"), Value(1)}, {Value("healthy"), Value(true)},
+               {Value("leaseMilliseconds"), Value(3000)},
+               {Value("sentAtUtcMilliseconds"), Value(UtcMilliseconds())}};
+    if (messenger.kind == "messages") {
+      messenger.Call("activityHealth");
+      check(messenger.reply == Value("friends.invalid_activity_health"), "reject absent messages health envelope");
+      messenger.Call("activityHealth", Value(health));
+      check(messenger.reply == Value(false), "health cannot prepare or reveal a window");
+      auto invalid = health; invalid[Value("leaseMilliseconds")] = Value(3001);
+      messenger.Call("activityHealth", Value(invalid));
+      check(messenger.reply == Value("friends.invalid_activity_health"), "bound messages health lease");
+      invalid = health; invalid[Value("extra")] = Value("fixture");
+      messenger.Call("activityHealth", Value(invalid));
+      check(messenger.reply == Value("friends.invalid_activity_health"), "health cannot forward extra payload fields");
+    } else {
+      messenger.Call("activityHealth", Value(health));
+      check(messenger.reply == Value("notImplemented"), "health is scoped to messages kind");
+    }
     messenger.Call("show");
     check(messenger.answered && messenger.reply == Value("friends.invalid_snapshot"), "reject invalid snapshot");
     Map snapshot{{Value("opening"), Value(1)}, {Value("revision"), Value(1)},
                  {Value("view"), Value("{\"state\":\"loading\",\"scope\":\"fixture\",\"targetVersion\":0}")}};
+    if (messenger.kind == "messages") snapshot[Value("activityScope")] = Value("fixture");
     messenger.Call("show", Value(snapshot));
     HWND window = FindWindowW(L"StarBridge.Flutter.Friends.Fixture", nullptr);
     check(window && !IsWindowVisible(window), "first opening waits for rendered presentation");
@@ -83,6 +111,11 @@ int wmain(int argc, wchar_t** argv) {
       Sleep(10);
     }
     check(ready, "real friendsMain engine completes channel handshake");
+    if (messenger.kind == "messages") {
+      health[Value("sentAtUtcMilliseconds")] = Value(UtcMilliseconds());
+      messenger.Call("activityHealth", Value(health));
+      check(messenger.reply == Value(false), "hidden window rejects health forwarding");
+    }
     // Approval prompts/other apps may change global foreground during a probe.
     // Assert this fixture cannot activate, rather than requiring the whole OS
     // to keep the same unrelated foreground window for twenty seconds.
@@ -120,6 +153,25 @@ int wmain(int argc, wchar_t** argv) {
     snapshot[Value("opening")] = Value(2);
     messenger.Call("show", Value(snapshot));
     check(FindWindowW(L"StarBridge.Flutter.Friends.Fixture", nullptr) == window, "reopening reuses native window");
+    if (messenger.kind == "messages") {
+      health[Value("opening")] = Value(2);
+      health[Value("sentAtUtcMilliseconds")] = Value(UtcMilliseconds());
+      messenger.Call("activityHealth", Value(health));
+      check(messenger.reply == Value(true), "forward bounded health to existing messages engine");
+      check(!IsWindowVisible(window), "health does not acknowledge painted readiness or reveal");
+      auto stale = health; stale[Value("scope")] = Value("retired");
+      messenger.Call("activityHealth", Value(stale));
+      check(messenger.reply == Value(false), "reject former messages scope health");
+      stale = health; stale[Value("opening")] = Value(1);
+      messenger.Call("activityHealth", Value(stale));
+      check(messenger.reply == Value(false), "reject former messages opening health");
+      stale = health; stale[Value("sentAtUtcMilliseconds")] = Value(UtcMilliseconds() - 3001);
+      messenger.Call("activityHealth", Value(stale));
+      check(messenger.reply == Value(false), "expired health cannot gain a new lease in native forwarding");
+      stale = health; stale[Value("sentAtUtcMilliseconds")] = Value(UtcMilliseconds() + 3000);
+      messenger.Call("activityHealth", Value(stale));
+      check(messenger.reply == Value(false), "future clock health is conservatively ignored");
+    }
     SendMessageW(window, WM_CLOSE, 0, 0);
     messenger.Call("detach");
     check(!IsWindowVisible(window), "detach hides and revokes surface");

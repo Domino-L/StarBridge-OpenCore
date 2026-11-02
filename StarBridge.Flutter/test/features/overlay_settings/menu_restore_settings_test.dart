@@ -159,7 +159,7 @@ void main() {
       await tester.ensureVisible(safe);
       await tester.tap(safe);
       await tester.pumpAndSettle();
-      final dropdown = find.byKey(const ValueKey('menu-restore-crash-ask'));
+      final dropdown = find.byKey(const ValueKey('menu-restore-crash'));
       await tester.ensureVisible(dropdown);
       await tester.tap(dropdown);
       await tester.pumpAndSettle();

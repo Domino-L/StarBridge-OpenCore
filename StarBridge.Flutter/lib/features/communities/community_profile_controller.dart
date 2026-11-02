@@ -113,6 +113,18 @@ final class CommunityProfileController extends ChangeNotifier {
 
   bool update(String field, Object? value) {
     if (locked || profile == null || !profile!.permits(field)) return false;
+    final wide = const {
+      'bannerImageData': 'clearBannerImage',
+      'backgroundImageData': 'clearBackgroundImage',
+    };
+    if (wide.containsKey(field) && value == null) {
+      // Dropping an unsaved wide image draft returns to the server state.
+      _changes = Map.unmodifiable({..._changes}..remove(field));
+      error = null;
+      outcome = null;
+      notifyListeners();
+      return true;
+    }
     if (fields['recruitingEnabled'] == true &&
         ((field == 'publicListingEnabled' && value == false) ||
             (field == 'joinPolicy' && value == 'Invite'))) {
@@ -125,13 +137,19 @@ final class CommunityProfileController extends ChangeNotifier {
     }
     final next = {..._changes};
     if (communityProfileEqual(profile!.fields[field], value) ||
-        ((field == 'clearLogoImage' || field == 'clearBannerImage') &&
+        ((field == 'clearLogoImage' ||
+                field == 'clearBannerImage' ||
+                field == 'clearBackgroundImage') &&
             value == false)) {
       next.remove(field);
     } else {
       next[field] = value;
     }
     if (field == 'logoImageData') next.remove('clearLogoImage');
+    if (wide.containsKey(field)) next.remove(wide[field]);
+    for (final entry in wide.entries) {
+      if (field == entry.value && value == true) next.remove(entry.key);
+    }
     if (field == 'clearLogoImage' && value == true) {
       next.remove('logoImageData');
     }

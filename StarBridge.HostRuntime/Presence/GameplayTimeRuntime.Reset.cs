@@ -15,22 +15,24 @@ public sealed partial class GameplayTimeRuntime
 {
     public async Task RecoverResetAsync(IGameplayTimeResetRemote remote)
     {
-        await RecoverHistoryImportAsync().ConfigureAwait(false);
+        using var work = _work.Enter(default);
+        if (work is null) return;
         try
         {
+            await RecoverHistoryImportAsync(work.Token).ConfigureAwait(false);
             (BridgeAccountContext? Context, long Generation) owner;
             bool pending;
             lock (_sync)
             {
-                if (_disposed) return;
+                if (!work.IsCurrent) return;
                 var entry = Resolve();
                 if (entry?.Saved is null) return;
                 pending = entry.Saved.PendingReset is not null;
                 owner = _active;
             }
-            if (pending) await ResetAsync(owner.Context!, owner.Generation, null, remote).ConfigureAwait(false);
-            else await ObserveAccountResetAsync(owner.Context!, owner.Generation, remote).ConfigureAwait(false);
-            await PublishCurrentGameplayAsync().ConfigureAwait(false);
+            if (pending) await ResetAsync(owner.Context!, owner.Generation, null, remote, work.Token).ConfigureAwait(false);
+            else await ObserveAccountResetAsync(owner.Context!, owner.Generation, remote, work.Token).ConfigureAwait(false);
+            await PublishCurrentGameplayAsync(work.Token).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -38,13 +40,15 @@ public sealed partial class GameplayTimeRuntime
         }
     }
 
-    private async Task ObserveAccountResetAsync(BridgeAccountContext context, long generation, IGameplayTimeResetRemote remote)
+    private async Task ObserveAccountResetAsync(BridgeAccountContext context, long generation, IGameplayTimeResetRemote remote,
+        CancellationToken cancellation)
     {
-        if (!await _historyGate.WaitAsync(0)) return;
+        if (!await _historyGate.WaitAsync(0, cancellation)) return;
         try
         {
-            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            bool Current() => !_disposed && !budget.IsCancellationRequested && _current() == (context, generation);
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            budget.CancelAfter(TimeSpan.FromSeconds(15));
+            bool Current() => OwnerIsCurrent((context, generation), budget.Token);
             if (!Current()) return;
             var state = await remote.ReadAsync(context, budget.Token).ConfigureAwait(false);
             if (state.SchemaVersion != 1 || state.LastOperationId is null ||
@@ -72,6 +76,9 @@ public sealed partial class GameplayTimeRuntime
     public async Task<string> ResetAsync(BridgeAccountContext context, long generation,
         long? confirmedRevision, IGameplayTimeResetRemote remote, CancellationToken cancellation = default)
     {
+        using var work = _work.Enter(cancellation);
+        if (work is null) return "accountChanged";
+        cancellation = work.Token;
         if (!await _historyGate.WaitAsync(0, cancellation)) return "busy";
         try
         {
@@ -79,7 +86,7 @@ public sealed partial class GameplayTimeRuntime
             budget.CancelAfter(TimeSpan.FromSeconds(20));
             var token = budget.Token;
             var owner = (Context: (BridgeAccountContext?)context, Generation: generation);
-            bool Current() => !_disposed && !token.IsCancellationRequested && _current() == owner;
+            bool Current() => OwnerIsCurrent(owner, token);
             Entry entry;
             GameplayPendingReset pending;
             bool submit;

@@ -45,6 +45,8 @@ class OverlayWorkspaceInteractivePreview extends StatelessWidget {
       child: OverlayWorkspaceLayoutWorkbench(
         layout: projection.layout,
         settings: projection.settings!,
+        editOwner: (module, projection.snapshot),
+        currentEditOwner: () => (module, module.projection.value.snapshot),
         controller: editor,
         previewIdentity: module.previewIdentity,
         sources: projection.sources,
@@ -86,6 +88,8 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
     this.startupExtra,
     this.editorActions,
     this.canvasOnly = false,
+    this.editOwner,
+    this.currentEditOwner,
     this.showHiddenModules = true,
     this.selectionOnly = false,
     this.background,
@@ -95,6 +99,8 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
 
   final List<OverlayWorkspaceLayoutItem> layout;
   final OverlayWorkspaceSettings settings;
+  final Object? editOwner;
+  final Object? Function()? currentEditOwner;
   final List<OverlayWorkspaceAppearance> appearances;
   final void Function(String field, Object? value)? onSettingChanged;
   final ValueChanged<String>? onExperiencePreset;
@@ -283,6 +289,10 @@ class _OverlayWorkspaceLayoutWorkbenchState
                     SizedBox(height: tokens.space.sm),
                     OverlayWorkspaceSettingsGroup(
                       group: _panelGroup,
+                      editOwner:
+                          widget.editOwner ??
+                          (widget.presetId, widget.settings),
+                      currentEditOwner: widget.currentEditOwner,
                       fields: overlayWorkspaceFieldSpecs
                           .where((field) => field.group == _panelGroup)
                           .toList(),
@@ -628,8 +638,8 @@ class _CanvasModuleState extends State<_CanvasModule> {
               _pointer = event.pointer;
               _previous = event.position;
               _resizing =
-                  event.localPosition.dx >= constraints.maxWidth - 24 &&
-                  event.localPosition.dy >= constraints.maxHeight - 24;
+                  event.localPosition.dx >= constraints.maxWidth - 32 &&
+                  event.localPosition.dy >= constraints.maxHeight - 32;
               if (_resizing) {
                 widget.onResizeStart();
               } else {

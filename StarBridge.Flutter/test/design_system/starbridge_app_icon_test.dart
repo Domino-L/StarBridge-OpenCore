@@ -278,13 +278,26 @@ void main() {
       expect(runner, contains('SmallIconUsesDarkForeground()'));
       expect(
         cache,
-        contains('LoadSmallApplicationIcon(pixels, dark_foreground)'),
+        contains('LoadSmallApplicationIcon(pixels, dark_foreground, variant)'),
       );
       expect(runner, contains('WM_SETICON, ICON_SMALL'));
       expect(tray, contains('RefreshTrayIcon()'));
       expect(tray, contains('data.uFlags = NIF_ICON;'));
       expect(rc, contains('app_icon_light_surface.ico'));
       expect(rc, contains('app_icon_dark_surface.ico'));
+      // 节日图标变体：窗口、任务栏、托盘走同一条刷新路径；默认资源不变。
+      expect(helper, contains('SmallIconVariantChangedMessage()'));
+      expect(helper, contains('IDI_APP_ICON_XMAS_DARK_SURFACE'));
+      expect(rc, contains('app_icon_xmas_dark_surface.ico'));
+      expect(rc, contains('app_icon_xmas_light_surface.ico'));
+      expect(helper, contains('IDI_APP_ICON_HALLOWEEN_DARK_SURFACE'));
+      expect(helper, contains('"halloween"'));
+      expect(rc, contains('app_icon_halloween_dark_surface.ico'));
+      expect(rc, contains('app_icon_halloween_light_surface.ico'));
+      expect(
+        File('windows/runner/flutter_window.cpp').readAsStringSync(),
+        contains('"setIconVariant"'),
+      );
     },
   );
 }

@@ -21,6 +21,7 @@ const _copy = <String, (String, String, String)>{
   ),
   'retry': ('重新读取', '重新讀取', 'Reload'),
   'copy': ('复制版本号', '複製版本號', 'Copy version'),
+  'copying': ('正在复制…', '正在複製…', 'Copying…'),
   'copied': ('版本号已复制', '版本號已複製', 'Version copied'),
   'copyFailed': ('未能复制，请重试。', '無法複製，請重試。', 'Could not copy. Try again.'),
   'close': ('关闭', '關閉', 'Close'),

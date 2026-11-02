@@ -9,6 +9,140 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 
 void main() {
   test(
+    'removal pages stay on one revision and send only chosen local IDs',
+    () async {
+      final connection = LocalConnection()..removalPages = true;
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 7,
+      )..acceptHostCapabilities(['hangar.localReconciliation']);
+      addTearDown(session.close);
+      final port = BridgeLocalHangar(session);
+      await port.read();
+      final groups = await port.previewRemovals('scan', 1);
+      expect(groups, hasLength(1));
+      expect(groups.single.shipIds, hasLength(201));
+      expect(groups.single.requiredCount, 200);
+      await port.saveResolved(
+        'scan',
+        1,
+        removedShipIds: groups.single.shipIds.skip(1).toList(),
+      );
+      final request = connection.requests.lastWhere(
+        (r) => r.name == 'hangarReader.save',
+      );
+      expect(request.payload['removedShipIds'], hasLength(200));
+      expect(request.payload.containsKey('ships'), isFalse);
+      connection.badRemovalRevision = true;
+      await expectLater(
+        port.previewRemovals('scan', 1),
+        throwsA(isA<LocalHangarFailure>()),
+      );
+      expect(
+        BridgeLocalHangar.offline(session, 2).reconciliationAvailable,
+        isFalse,
+      );
+    },
+  );
+  for (final mode in ['online', 'offline', 'retained']) {
+    test(
+      'separate inventory timestamp survives $mode projection and legacy fallback',
+      () async {
+        final connection = LocalConnection()
+          ..history = true
+          ..inventoryTime = '2026-10-14T10:00:00Z';
+        final session = BridgeClientSession(
+          connection: connection,
+          sessionGeneration: 7,
+        );
+        addTearDown(session.close);
+        final port = mode == 'offline'
+            ? BridgeLocalHangar.offline(session, 22)
+            : mode == 'retained'
+            ? BridgeLocalHangar.retained(
+                session,
+                '1234567890abcdef1234567890abcdef',
+                isCurrent: () => true,
+              )
+            : BridgeLocalHangar(session);
+        final result = await port.read();
+        expect(result.savedAt, DateTime.utc(2026, 10, 16, 15));
+        expect(result.inventoryReadSavedAt, DateTime.utc(2026, 10, 14, 10));
+        connection.inventoryTime = null;
+        final legacy = await port.read();
+        expect(legacy.inventorySavedAt, isNull);
+        expect(legacy.inventoryReadSavedAt, legacy.savedAt);
+      },
+    );
+  }
+
+  test('network outage inventory reads own retained pages without binding or writes', () async {
+    final connection = LocalConnection()..history = true;
+    final session = BridgeClientSession(
+      connection: connection,
+      sessionGeneration: 7,
+    );
+    addTearDown(session.close);
+    var current = true;
+    final port = BridgeLocalHangar.retained(
+      session,
+      '1234567890abcdef1234567890abcdef',
+      isCurrent: () => current,
+    );
+    final result = await port.read();
+    expect(result.ships, hasLength(201));
+    expect(result.formerShips, hasLength(201));
+    expect(port.favoritesAvailable, isFalse);
+    expect(connection.requests, hasLength(4));
+    expect(
+      connection.requests.every(
+        (r) =>
+            r.name == 'account.offlineData.read' &&
+            r.accountContext == null &&
+            r.payload['kind'] == 'hangar',
+      ),
+      isTrue,
+    );
+    final count = connection.requests.length;
+    await expectLater(
+      port.save('forbidden', 1),
+      throwsA(isA<LocalHangarFailure>()),
+    );
+    current = false;
+    await expectLater(port.read(), throwsA(isA<LocalHangarFailure>()));
+    expect(connection.requests.length, count);
+  });
+  test('offline inventory reads original pages without login, sharing or write authority', () async {
+    final connection = LocalConnection()..history = true;
+    final session = BridgeClientSession(
+      connection: connection,
+      sessionGeneration: 7,
+    );
+    addTearDown(session.close);
+    final port = BridgeLocalHangar.offline(session, 22);
+    final result = await port.read();
+    expect(result.ships, hasLength(201));
+    expect(result.formerShips, hasLength(201));
+    expect(port.favoritesAvailable, isFalse);
+    expect(port.imageFor('ship-0', 1), isNull);
+    expect(connection.requests, hasLength(4));
+    expect(
+      connection.requests.every(
+        (r) =>
+            r.name == 'onboarding.mode.hangar' &&
+            r.accountContext == null &&
+            r.payload['revision'] == 22,
+      ),
+      isTrue,
+    );
+    final count = connection.requests.length;
+    await expectLater(
+      port.save('not-allowed', 1),
+      throwsA(isA<LocalHangarFailure>()),
+    );
+    expect(connection.requests.length, count);
+  });
+  test(
     'history pages use the same revision and retain removal timestamps',
     () async {
       final connection = LocalConnection()..history = true;
@@ -21,7 +155,7 @@ void main() {
       expect(inventory.ships.length, 201);
       expect(inventory.formerShips.length, 201);
       expect(inventory.formerShips.first.removedAt, DateTime.utc(2026, 9, 20));
-      expect(inventory.formerModels.length, 1);
+      expect(inventory.formerInstances.length, 201);
       expect(
         connection.requests.where((r) => r.payload['former'] == true).length,
         2,
@@ -354,8 +488,11 @@ class LocalConnection implements BridgeConnection {
   final stream = StreamController<BridgeEnvelope>.broadcast();
   final requests = <BridgeEnvelope>[];
   String? operation;
+  String? inventoryTime;
+  String? nickname, notes;
   bool legacy = false, profileHasHangar = true;
   bool history = false;
+  bool removalPages = false, badRemovalRevision = false;
   int? emptyRevision;
   Map<String, Object?>? profilePayload;
   String profileSubject = 'owner';
@@ -374,6 +511,11 @@ class LocalConnection implements BridgeConnection {
     final offset = request.payload['offset'] as int? ?? 0;
     final former = request.payload['former'] == true;
     if (request.name == 'hangarReader.save') operation = 'scan';
+    if (request.name == 'hangarReader.personalData') {
+      operation = request.payload['operationId'] as String;
+      nickname = request.payload['nickname'] as String?;
+      notes = request.payload['notes'] as String?;
+    }
     var payload = request.name == 'account.getCurrent'
         ? <String, Object?>{
             'schemaVersion': 1,
@@ -382,6 +524,8 @@ class LocalConnection implements BridgeConnection {
         : <String, Object?>{
             'schemaVersion': 1,
             'revision': operation == null ? 1 : 2,
+            'savedAt': '2026-10-16T15:00:00Z',
+            if (inventoryTime != null) 'inventorySavedAt': inventoryTime,
             'total': 201,
             if (history) 'formerTotal': 201,
             if (history) 'former': former,
@@ -394,6 +538,8 @@ class LocalConnection implements BridgeConnection {
                 'id': '${former ? 'former' : 'ship'}-${offset + i}',
                 if (former) 'removedAt': '2026-09-20T00:00:00Z',
                 'title': 'Ship ${offset + i}',
+                if (nickname != null) 'nickname': nickname,
+                if (notes != null) 'notes': notes,
                 'names': {'zhHans': '舰船 ${offset + i}'},
                 'catalogId': former ? 'catalog-former' : 'catalog-carrack',
                 'category': 'exploration',
@@ -412,6 +558,24 @@ class LocalConnection implements BridgeConnection {
         'total': 0,
         'ships': <Object>[],
         'nextOffset': null,
+      };
+    }
+    if (request.name == 'hangarReader.removals' && removalPages) {
+      payload = {
+        'schemaVersion': 1,
+        'operationId': 'scan',
+        'revision': badRemovalRevision && offset == 200 ? 2 : 1,
+        'total': 201,
+        'nextOffset': offset == 0 ? 200 : null,
+        'rows': List.generate(
+          offset == 0 ? 200 : 1,
+          (i) => {
+            'groupId': 'ship-0',
+            'requiredCount': 200,
+            'groupSize': 201,
+            'shipId': 'ship-${offset + i}',
+          },
+        ),
       };
     }
     if (request.name == 'personalProfile.getSelf') {
@@ -457,13 +621,15 @@ class LocalConnection implements BridgeConnection {
             'message': 'Synthetic failure',
             'retryable': false,
           },
-        'accountContext': {
-          'environment': 'test',
-          'authority': legacy ? 'starbridge-relay-test' : 'issuer',
-          'subject': request.name == 'personalProfile.getSelf'
-              ? profileSubject
-              : 'owner',
-        },
+        if (request.name != 'onboarding.mode.hangar' &&
+            request.name != 'account.offlineData.read')
+          'accountContext': {
+            'environment': 'test',
+            'authority': legacy ? 'starbridge-relay-test' : 'issuer',
+            'subject': request.name == 'personalProfile.getSelf'
+                ? profileSubject
+                : 'owner',
+          },
         'payload': payload,
       }),
     );

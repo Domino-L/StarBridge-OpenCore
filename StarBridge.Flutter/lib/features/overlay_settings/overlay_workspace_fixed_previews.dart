@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/styles/overlay_preview_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_layout_geometry.dart';
@@ -263,10 +264,11 @@ class _EventNotificationPreviewState extends State<_EventNotificationPreview> {
   }
 
   @override
-  Widget build(BuildContext context) => Tooltip(
+  Widget build(BuildContext context) => StarBridgeTooltip(
     message: widget.onPlacementChanged == null
         ? ''
         : AppStrings.of(context).text('overlay.preview.eventDrag'),
+    consumeEscape: false,
     child: MouseRegion(
       cursor: widget.onPlacementChanged == null
           ? widget.onSelected == null

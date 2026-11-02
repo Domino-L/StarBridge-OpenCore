@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'community_author_projection.dart';
+
 import '../overlay_settings/overlay_preset_sources.dart';
 
 import 'dart:typed_data';
@@ -68,25 +70,30 @@ final class CommunityChatReadReceipt {
 }
 
 final class CommunityChatMessage {
-  CommunityChatMessage.parse(Map<String, Object?> row)
-    : sequence = _number(row, 'sequence'),
-      localRequestId = row['localRequestId'] == null
-          ? null
-          : _reference(row, 'localRequestId'),
-      messageRef = _reference(row, 'messageRef'),
-      senderRef = _reference(row, 'senderRef'),
-      callsign = _text(row, 'senderCallsign', 512),
-      gameId = _text(row, 'senderGameId', 512),
-      roleTitle = _text(row, 'senderRoleTitle', 128),
-      roleColor = _text(row, 'senderRoleColor', 7),
-      text = _text(row, 'text', 1000, multiline: true),
-      createdAt = _date(row, 'createdAt'),
-      isSelf = _flag(row, 'isSelf'),
-      hasAvatar = _flag(row, 'hasAvatar'),
-      avatarVersion = row['avatarVersion'] == null
-          ? null
-          : _text(row, 'avatarVersion', 64),
-      hasAttachment = _flag(row, 'hasAttachment') {
+  CommunityChatMessage.parse(
+    Map<String, Object?> row, {
+    bool officialAuthors = false,
+  }) : authorIdentity = officialAuthors
+           ? CommunityAuthorProjection.chat(row)
+           : null,
+       sequence = _number(row, 'sequence'),
+       localRequestId = row['localRequestId'] == null
+           ? null
+           : _reference(row, 'localRequestId'),
+       messageRef = _reference(row, 'messageRef'),
+       senderRef = _reference(row, 'senderRef'),
+       callsign = _text(row, 'senderCallsign', 512),
+       gameId = _text(row, 'senderGameId', 512),
+       roleTitle = _text(row, 'senderRoleTitle', 128),
+       roleColor = _text(row, 'senderRoleColor', 7),
+       text = _text(row, 'text', 1000, multiline: true),
+       createdAt = _date(row, 'createdAt'),
+       isSelf = _flag(row, 'isSelf'),
+       hasAvatar = _flag(row, 'hasAvatar'),
+       avatarVersion = row['avatarVersion'] == null
+           ? null
+           : _text(row, 'avatarVersion', 64),
+       hasAttachment = _flag(row, 'hasAttachment') {
     if (sequence <= 0 || !RegExp(r'^#[a-fA-F0-9]{6}$').hasMatch(roleColor)) {
       throw const FormatException();
     }
@@ -95,6 +102,29 @@ final class CommunityChatMessage {
       throw const FormatException();
     }
   }
+
+  /// Retire only presentation. Content, receipt and reconciliation facts remain.
+  CommunityChatMessage.neutralAuthor(CommunityChatMessage original)
+    : this.withAuthor(original, const CommunityAuthorProjection.unavailable());
+  CommunityChatMessage.withAuthor(
+    CommunityChatMessage original,
+    CommunityAuthorProjection identity,
+  ) : authorIdentity = identity,
+      sequence = original.sequence,
+      localRequestId = original.localRequestId,
+      messageRef = original.messageRef,
+      senderRef = original.senderRef,
+      callsign = identity.callsign,
+      gameId = '',
+      roleTitle = '',
+      roleColor = '#9DAAB3',
+      text = original.text,
+      createdAt = original.createdAt,
+      isSelf = original.isSelf,
+      hasAvatar = identity.hasAvatar,
+      avatarVersion = identity.avatarVersion,
+      hasAttachment = original.hasAttachment;
+  final CommunityAuthorProjection? authorIdentity;
   final int sequence;
   final String? localRequestId;
   final String? avatarVersion;
@@ -110,18 +140,28 @@ final class CommunityChatMessage {
 }
 
 final class CommunityChatPage {
-  CommunityChatPage.parse(Map<String, Object?> row)
-    : targetRef = _reference(row, 'targetRef'),
-      localHistoryUnavailable = row['localHistoryUnavailable'] == true,
-      unreadCount = _number(row, 'unreadCount'),
-      latestSequence = _number(row, 'latestSequence'),
-      oldestSequence = _number(row, 'oldestSequence'),
-      canSend = _flag(row, 'canSend'),
-      hasOlder = _flag(row, 'hasOlder'),
-      serverTime = _date(row, 'serverTime'),
-      messages = List.unmodifiable(
-        _rows(row['messages']).map((v) => CommunityChatMessage.parse(v)),
-      ) {
+  CommunityChatPage.parse(
+    Map<String, Object?> row, {
+    bool officialAuthors = false,
+  }) : authorUpdates = officialAuthors
+           ? officialChatUpdates(row['authorUpdates'])
+           : const [],
+       authorRefreshRequired =
+           officialAuthors && row['authorRefreshRequired'] != false,
+       targetRef = _reference(row, 'targetRef'),
+       localHistoryUnavailable = row['localHistoryUnavailable'] == true,
+       unreadCount = _number(row, 'unreadCount'),
+       latestSequence = _number(row, 'latestSequence'),
+       oldestSequence = _number(row, 'oldestSequence'),
+       canSend = _flag(row, 'canSend'),
+       hasOlder = _flag(row, 'hasOlder'),
+       serverTime = _date(row, 'serverTime'),
+       messages = List.unmodifiable(
+         _rows(row['messages']).map(
+           (v) =>
+               CommunityChatMessage.parse(v, officialAuthors: officialAuthors),
+         ),
+       ) {
     if (row['schemaVersion'] != 1 ||
         unreadCount > 500 ||
         oldestSequence != (messages.firstOrNull?.sequence ?? 0) ||
@@ -137,6 +177,8 @@ final class CommunityChatPage {
       previous = message.sequence;
     }
   }
+  final List<CommunityChatAuthorUpdate> authorUpdates;
+  final bool authorRefreshRequired;
   final String targetRef;
   final int unreadCount, latestSequence, oldestSequence;
   final bool canSend, hasOlder;
@@ -230,31 +272,91 @@ final class CommunityChatDetail {
   }
 }
 
+/// One request-local page proof; neither chunks nor cache hits renew it.
+final class CommunityChatDetailIdentity {
+  const CommunityChatDetailIdentity({
+    required this.expected,
+    required this.now,
+    required this.current,
+    required this.narrow,
+    required this.read,
+    this.avatarConfirmed,
+  });
+  factory CommunityChatDetailIdentity.neutral(
+    Future<Map<String, Object?>> Function(int, String?, String?) read,
+  ) => CommunityChatDetailIdentity(
+    expected: const CommunityAuthorProjection.unavailable(),
+    now: DateTime.now,
+    current: () => false,
+    narrow: (_) {},
+    read: read,
+  );
+  final CommunityAuthorProjection expected;
+  final DateTime Function() now;
+  final bool Function() current;
+  final void Function(CommunityAuthorProjection) narrow;
+  final Future<Map<String, Object?>> Function(int, String?, String?) read;
+
+  /// The read's own answer confirmed this avatar, whatever became of [expected]
+  /// meanwhile: an answer takes seconds to arrive and proofs live seconds.
+  final void Function(String version, Uint8List bytes)? avatarConfirmed;
+  bool get wantsAuthor => current() && expected.admit(now()).hasAvatar;
+}
+
 Future<CommunityChatDetail> assembleCommunityChatDetail(
   CommunityChatPort port,
   String targetRef,
   String messageRef, {
   required void Function() checkCurrent,
+  CommunityChatDetailIdentity? identity,
+  String? senderRef,
 }) async {
   final builder = BytesBuilder(copy: false);
   String? version;
   int? total;
-  var offset = 0;
+  var offset = 0, restarted = false;
+  var observed = const CommunityAuthorProjection.unavailable();
+  var answered = const CommunityAuthorProjection.unavailable();
   while (true) {
     checkCurrent();
-    final row = await port.readChatDetail(
-      targetRef,
-      messageRef,
-      offset,
-      version,
-    );
+    final row = identity == null
+        ? await port.readChatDetail(targetRef, messageRef, offset, version)
+        : await identity.read(offset, version, identity.expected.version);
     checkCurrent();
-    final hash = _text(row, 'version', 64), size = _number(row, 'totalBytes');
     if (row['schemaVersion'] != 1 ||
         row['targetRef'] != targetRef ||
         row['messageRef'] != messageRef ||
-        row['offset'] != offset ||
-        size <= offset ||
+        row['offset'] != offset) {
+      throw const FormatException();
+    }
+    var refresh = false;
+    if (identity != null) {
+      final person = officialChatDetailPerson(row, senderRef ?? '');
+      answered = person.author;
+      // A hidden answer stays hidden, whatever this request expected.
+      observed = person.author.state == CommunityAuthorState.hidden
+          ? person.author
+          : identity.current() && person.author.sameIdentityAs(identity.expected)
+          ? person.author.admit(identity.now())
+          : const CommunityAuthorProjection.unavailable();
+      // Retire the person before an obsolete byte assembly can fail or restart.
+      identity.narrow(observed);
+      refresh = person.refresh;
+    }
+    final hash = _text(row, 'version', 64), size = _number(row, 'totalBytes');
+    if (identity != null &&
+        version != null &&
+        (version != hash || total != size) &&
+        refresh) {
+      if (restarted) throw const FormatException();
+      restarted = true;
+      builder.clear();
+      offset = 0;
+      version = null;
+      total = null;
+      continue;
+    }
+    if (size <= offset ||
         size > 2 * 1024 * 1024 ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(hash) ||
         version != null && (version != hash || total != size)) {
@@ -278,7 +380,26 @@ Future<CommunityChatDetail> assembleCommunityChatDetail(
     throw const FormatException();
   }
   checkCurrent();
-  return CommunityChatDetail.parse(_map(jsonDecode(utf8.decode(bytes))));
+  final body = _map(jsonDecode(utf8.decode(bytes)));
+  if (identity == null) return CommunityChatDetail.parse(body);
+  if (answered.sameIdentityAs(identity.expected) && answered.hasAvatar) {
+    final seen = officialAuthorAvatarBytes(
+      body['avatarImageData'],
+      answered.avatarVersion!,
+    );
+    if (seen != null) {
+      identity.avatarConfirmed?.call(answered.avatarVersion!, seen);
+    }
+  }
+  final avatar = identity.wantsAuthor
+      ? officialAuthorAvatar(body['avatarImageData'], observed, identity.now())
+      : null;
+  if (avatar == null && observed.hasAvatar) {
+    identity.narrow(const CommunityAuthorProjection.unavailable());
+  }
+  checkCurrent();
+  // Optional identity failure cannot remove an independently authorized card.
+  return CommunityChatDetail.parse({...body, 'avatarImageData': avatar});
 }
 
 Map<String, Object?> _map(Object? value) =>

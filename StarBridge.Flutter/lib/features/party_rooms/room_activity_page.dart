@@ -1,3 +1,5 @@
+import '../../shared/guide/guide_scope.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -76,25 +78,28 @@ class RoomActivityPage extends StatelessWidget {
                 ),
               ),
             if (module.applicationCount > 0)
-              Card.outlined(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: StarBridgeIcon(
-                        StarBridgeIconSemantic.pending,
-                        color: context.tokens.colors.info,
+              GuideAnchor(
+                id: 'rooms.applications',
+                child: Card.outlined(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: StarBridgeIcon(
+                          StarBridgeIconSemantic.pending,
+                          color: context.tokens.colors.info,
+                        ),
+                        title: Text(
+                          strings.text('rooms.action.applications'),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        subtitle: Text(
+                          '${module.selectedRoom?.title ?? ''} · ${module.applicationCount}',
+                        ),
                       ),
-                      title: Text(
-                        strings.text('rooms.action.applications'),
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      subtitle: Text(
-                        '${module.selectedRoom?.title ?? ''} · ${module.applicationCount}',
-                      ),
-                    ),
-                    _openAction(context, 'applications', t('open')),
-                  ],
+                      _openAction(context, 'applications', t('open')),
+                    ],
+                  ),
                 ),
               ),
           ],

@@ -118,6 +118,15 @@ bool FlutterWindow::OnCreate() {
                           "The editor window mode could not be changed.");
             return;
           }
+        } else if (method == "setIconVariant") {
+          // Window, taskbar and tray only; the EXE and shortcut icons stay.
+          const auto* name = std::get_if<std::string>(call.arguments());
+          const auto variant =
+              ParseSmallIconVariant(name ? *name : std::string());
+          if (SetSmallIconVariant(variant)) {
+            ApplyBigIconVariant(variant);
+            SendMessageW(GetHandle(), SmallIconVariantChangedMessage(), 0, 0);
+          }
         } else if (method == "beginDrag") {
           ReleaseCapture();
           SendMessage(GetHandle(), WM_NCLBUTTONDOWN, HTCAPTION, 0);
@@ -197,7 +206,28 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::ApplyBigIconVariant(SmallIconVariant variant) noexcept {
+  const HWND window = GetHandle();
+  if (!window) return;
+  HICON next = nullptr;
+  if (variant != SmallIconVariant::kDefault) {
+    const UINT dpi = GetDpiForWindow(window);
+    next = LoadSmallApplicationIcon(
+        GetSystemMetricsForDpi(SM_CXICON, dpi ? dpi : 96),
+        SmallIconUsesDarkForeground(), variant);
+  }
+  // nullptr restores the window-class (EXE resource) icon.
+  SendMessageW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(next));
+  if (big_variant_icon_) DestroyIcon(big_variant_icon_);
+  big_variant_icon_ = next;
+}
+
 void FlutterWindow::OnDestroy() {
+  if (big_variant_icon_) {
+    SendMessageW(GetHandle(), WM_SETICON, ICON_BIG, 0);
+    DestroyIcon(big_variant_icon_);
+    big_variant_icon_ = nullptr;
+  }
   friends_window_bridge_.reset();
   messages_window_bridge_.reset();
   notifications_window_bridge_.reset();

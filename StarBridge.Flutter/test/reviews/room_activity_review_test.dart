@@ -19,6 +19,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     for (final font in {
       'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+      'Saira': 'assets/fonts/Saira-VF.ttf',
+      'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
     }.entries) {
@@ -36,7 +38,7 @@ void main() {
     await tester.pumpAndSettle();
     await composition.partyRooms.selectPreviewScene('host');
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('通知'));
+    await tester.tap(find.byKey(const ValueKey('top-action-notifications')));
     await tester.pumpAndSettle();
     expect(find.text('通知中心'), findsOneWidget);
     expect(find.text('房间提醒'), findsNothing);

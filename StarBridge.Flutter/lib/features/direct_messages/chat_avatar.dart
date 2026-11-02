@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../../shared/remote_image.dart';
+
 import '../common/user_avatar_menu.dart';
 
 import 'package:flutter/material.dart';
@@ -121,8 +123,9 @@ class _ChatAvatarState extends State<ChatAvatar> {
             uri.scheme == 'https' &&
             uri.host.isNotEmpty &&
             uri.userInfo.isEmpty) {
-          picture = Image.network(
+          picture = RemoteImage(
             uri.toString(),
+            kind: RemoteImageResourceKind.avatar,
             key: ValueKey(value),
             width: size,
             height: size,
@@ -131,8 +134,6 @@ class _ChatAvatarState extends State<ChatAvatar> {
             fit: BoxFit.cover,
             gaplessPlayback: false,
             excludeFromSemantics: true,
-            loadingBuilder: (_, child, progress) =>
-                progress == null ? child : fallback,
             errorBuilder: (_, _, _) => fallback,
           );
         }

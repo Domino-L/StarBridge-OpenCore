@@ -1,12 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 
+import '../../shared/diagnostics/loading_metrics.dart';
+import '../diagnostics/loading_diagnostics.dart';
+import '../diagnostics/loading_tour.dart';
+
 import 'package:flutter/services.dart';
 
 import '../menu_overlay/menu_friends_session.dart';
 import '../preferences/app_preferences_port.dart';
 import '../social_windows/window_presentation.dart';
+import '../social_windows/window_opening_source.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../platform/window/menu_preview_window_port.dart';
+import '../../platform/window/menu_read_feedback.dart';
 import '../../platform/window/menu_profile_navigation.dart';
 
 /// One authenticated primary-engine lease; the auxiliary engine only renders
@@ -24,6 +31,10 @@ final class FriendsWindowBinding {
     _session = create(_publish);
     channel.setMethodCallHandler(_receive);
     preferences?.projection.addListener(_presentationChanged);
+    _unregisterTour = LoadingDiagnostics.registerTourWindow(
+      'friends',
+      LoadingTourWindow(open: open, close: () => _notify('detach')),
+    );
   }
 
   final MethodChannel channel;
@@ -32,14 +43,19 @@ final class FriendsWindowBinding {
   final Future<void> Function(bool Function()) openMessages;
   final Future<void> Function(MenuProfileTarget) openProfile;
   late final MenuFriendsSession _session;
+  void Function()? _unregisterTour;
   bool _disposed = false, _visible = false, _openingNow = false;
   int _opening = 0, _revision = 0;
+  String _openingSource = 'programmatic';
   Map<String, Object?> _view = const {'state': 'idle'};
   Map<String, Object?> get _snapshot => {
     'opening': _opening,
     'revision': _revision,
+    'openingSource': _openingSource,
     if (preferences != null)
-      'presentation': encodeWindowPresentation(preferences!.projection.value.effective),
+      'presentation': encodeWindowPresentation(
+        preferences!.projection.value.effective,
+      ),
     'view': jsonEncode(_view),
   };
 
@@ -47,14 +63,19 @@ final class FriendsWindowBinding {
     if (_disposed) return false;
     if (_openingNow) return true;
     _openingNow = true;
-    if (!_visible) {
+    final starting = !_visible;
+    if (starting) {
+      _openingSource = captureWindowOpeningSource().name;
       _opening++;
+      _recordOpening(LoadingAuxiliaryPhase.request);
       _visible = true;
-      _session.show(true);
+      withMenuReadOrigin(_openingSource, () => _session.show(true));
     }
     try {
       final shown = await channel.invokeMethod<bool>('show', _snapshot) == true;
       if (!shown && !_disposed) _hide();
+      // Native answers show only after it revealed the painted window.
+      if (shown && starting) _recordOpening(LoadingAuxiliaryPhase.shown);
       return shown;
     } on PlatformException {
       _hide();
@@ -66,6 +87,9 @@ final class FriendsWindowBinding {
       _openingNow = false;
     }
   }
+
+  void _recordOpening(LoadingAuxiliaryPhase phase) => LoadingMetrics.current
+      ?.auxiliaryOpening(LoadingAuxiliarySurface.friends, phase, _opening);
 
   void _publish(Map<String, Object?> view) {
     if (_disposed) return;
@@ -94,6 +118,17 @@ final class FriendsWindowBinding {
   Future<Object?> _receive(MethodCall call) async {
     final args = call.arguments;
     if (_disposed || args is! Map || args['opening'] != _opening) return false;
+    if (call.method == 'engineCreated') {
+      final from = args['beginWallUs'], to = args['endWallUs'];
+      if (from is int && to is int) {
+        LoadingMetrics.current?.auxiliaryEngine(
+          LoadingAuxiliarySurface.friends,
+          from,
+          to,
+        );
+      }
+      return true;
+    }
     if (call.method == 'hidden') {
       _hide();
       return true;
@@ -122,15 +157,27 @@ final class FriendsWindowBinding {
     if (action == 'chat') {
       final target = _session.chatTarget(key);
       if (target == null) return false;
-      await openChat(target, current);
+      await runStarBridgeActivation<void>(
+        decodeWindowOpeningSource(args['motionSource']),
+        () => openChat(target, current),
+      );
     } else if (action == 'messages') {
-      await openMessages(current);
+      await runStarBridgeActivation<void>(
+        decodeWindowOpeningSource(args['motionSource']),
+        () => openMessages(current),
+      );
     } else if (action == 'profile') {
       final target = _session.profileTarget(key);
       if (target == null) return false;
-      await openProfile(target);
+      await runStarBridgeActivation<void>(
+        decodeWindowOpeningSource(args['motionSource']),
+        () => openProfile(target),
+      );
     } else {
-      _session.act(action, key, value);
+      withMenuReadOrigin(
+        args['motionSource'],
+        () => _session.act(action, key, value),
+      );
     }
     return true;
   }
@@ -139,6 +186,7 @@ final class FriendsWindowBinding {
     if (_disposed) return;
     _disposed = true;
     _visible = false;
+    _unregisterTour?.call();
     channel.setMethodCallHandler(null);
     preferences?.projection.removeListener(_presentationChanged);
     _session.dispose();

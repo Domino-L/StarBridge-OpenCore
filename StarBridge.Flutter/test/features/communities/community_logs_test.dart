@@ -149,6 +149,10 @@ void main() {
       );
     });
   }
+  test('the last page parses when the Bridge drops its null next', () {
+    final page = CommunityLogPage.parse(logsPayload()..remove('next'));
+    expect(page.next, isNull);
+  });
   test('duplicate entries and reversed time ranges are rejected', () {
     final payload = logsPayload();
     final rows = payload['items'] as List;

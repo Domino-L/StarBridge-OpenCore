@@ -1,10 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
 import '../common/user_avatar_menu.dart';
 
 import '../../app/localization/app_strings.dart';
-import '../../design_system/brand/scm_brand_mark.dart';
+import '../../design_system/brand/scm_success_motion.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -14,20 +17,29 @@ import '../../shared/embedded_avatar.dart';
 import 'account_models.dart';
 import 'account_compatibility_card.dart';
 import 'account_module.dart';
+import 'account_login_dialog.dart';
 import 'account_view_components.dart';
-import 'legacy_profile_migration_card.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/controls/semantic_action_style.dart';
+import 'account_operation_motion.dart';
+import 'game_identity_verification.dart';
+import 'game_identity_verification_dialog.dart';
 
 class AccountSignedInView extends StatelessWidget {
   const AccountSignedInView({
     required this.projection,
     required this.module,
     this.localStatus,
+    this.localRecognition,
+    this.gameIdentity,
     super.key,
   });
 
   final AccountProjection projection;
   final AccountModule module;
   final Widget? localStatus;
+  final Widget? localRecognition;
+  final GameIdentityVerificationPort? gameIdentity;
 
   @override
   Widget build(BuildContext context) {
@@ -39,59 +51,60 @@ class AccountSignedInView extends StatelessWidget {
         SizedBox(height: tokens.space.md),
         LayoutBuilder(
           builder: (context, constraints) {
-            final wide = constraints.maxWidth >= 820;
+            final wide =
+                constraints.maxWidth >=
+                820 * MediaQuery.textScalerOf(context).scale(1);
             final preferences = _ProfilePreferencesCard(
-              key: ValueKey(projection.generation),
+              key: ValueKey((module, projection.generation)),
               projection: projection,
               module: module,
             );
-            final primary = Column(
+            Widget pair(Widget left, Widget right) => wide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: left),
+                      SizedBox(width: tokens.space.md),
+                      Expanded(child: right),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      left,
+                      SizedBox(height: tokens.space.md),
+                      right,
+                    ],
+                  );
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                preferences,
-                if (localStatus case final status?) ...[
-                  SizedBox(height: tokens.space.md),
-                  status,
-                ],
-              ],
-            );
-            final side = Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _IdentityCard(identity: projection.identity),
-                SizedBox(height: tokens.space.md),
-                AccountCompatibilityCard(
-                  projection: projection,
-                  module: module,
-                  existingAccountOnly: true,
-                ),
-                if (module.legacyMigration case final migration?) ...[
-                  SizedBox(height: tokens.space.md),
-                  LegacyProfileMigrationCard(
-                    key: ValueKey('legacy-migration-${projection.generation}'),
-                    port: migration,
+                pair(
+                  AccountCompatibilityCard(
+                    projection: projection,
+                    module: module,
+                    existingAccountOnly: true,
                   ),
+                  _IdentityCard(
+                    identity: projection.identity,
+                    module: module,
+                    generation: projection.generation,
+                    verification: gameIdentity,
+                  ),
+                ),
+                SizedBox(height: tokens.space.md),
+                preferences,
+                if (localStatus != null || localRecognition != null) ...[
+                  SizedBox(height: tokens.space.md),
+                  if (localStatus != null && localRecognition != null)
+                    pair(localStatus!, localRecognition!)
+                  else
+                    (localStatus ?? localRecognition)!,
                 ],
+                // Compatibility binding is available; profile import is not
+                // exposed in this release, even when a backend port exists.
                 SizedBox(height: tokens.space.md),
                 _SessionCard(projection: projection, module: module),
-              ],
-            );
-            if (!wide) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  primary,
-                  SizedBox(height: tokens.space.md),
-                  side,
-                ],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 3, child: primary),
-                SizedBox(width: tokens.space.md),
-                Expanded(flex: 2, child: side),
               ],
             );
           },
@@ -134,14 +147,18 @@ class _AccountHeader extends StatelessWidget {
                     width: tokens.stroke.hairline,
                   ),
                 ),
-                child: UserAvatarMenu(name: displayName, isSelf: true, child: EmbeddedAvatar(
-                  source: profile?.avatarImageData,
-                  fallback: Text(
-                    displayName.characters.first.toUpperCase(),
-                    style: Theme.of(context).textTheme.titleLarge
-                        ?.copyWith(color: tokens.colors.accent),
+                child: UserAvatarMenu(
+                  name: displayName,
+                  isSelf: true,
+                  child: EmbeddedAvatar(
+                    source: profile?.avatarImageData,
+                    fallback: Text(
+                      displayName.characters.first.toUpperCase(),
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(color: tokens.colors.accent),
+                    ),
                   ),
-                )),
+                ),
               ),
               SizedBox(width: tokens.space.md),
               Expanded(
@@ -151,37 +168,52 @@ class _AccountHeader extends StatelessWidget {
                     Text(
                       displayName,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     SizedBox(height: tokens.space.xxs),
                     Text(
                       profile?.email ?? strings.text('account.email.notShared'),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.bodySmall
                           ?.copyWith(color: tokens.colors.textSecondary),
                     ),
-                    SizedBox(height: tokens.space.xs),
-                    const ScmBrandMark.compact(key: Key('scm-account-brand')),
                   ],
                 ),
               ),
             ],
           );
-          final refresh = IconButton(
-            key: const Key('account-refresh'),
-            onPressed: projection.isBusy
+          final refresh = StarBridgeIconAction(
+            controlKey: const Key('account-refresh'),
+            onActivate: projection.isBusy
                 ? null
-                : () => unawaited(module.refresh()),
-            tooltip: strings.text('account.action.refresh'),
+                : (source) {
+                    if (module.projection.value.isBusy) return;
+                    unawaited(
+                      runAccountMotionCommand(
+                        module,
+                        AccountOperation.refreshing,
+                        source,
+                        module.refresh,
+                      ),
+                    );
+                  },
+            label: strings.text('account.action.refresh'),
             icon: StarBridgeIcon(StarBridgeIconSemantic.refresh),
           );
-          if (constraints.maxWidth < 760) {
+          if (constraints.maxWidth <
+              640 * MediaQuery.textScalerOf(context).scale(1)) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 identity,
+                _ScmLoginBrand(
+                  module: module,
+                  key: const ValueKey('account-page-brand'),
+                ),
                 SizedBox(height: tokens.space.sm),
                 Row(
                   children: [
@@ -200,12 +232,12 @@ class _AccountHeader extends StatelessWidget {
           return Row(
             children: [
               Expanded(child: identity),
-              SizedBox(width: tokens.space.sm),
-              Flexible(
-                child: AccountFreshnessBadge(
-                  freshness: projection.profileFreshness,
-                ),
+              _ScmLoginBrand(
+                module: module,
+                key: const ValueKey('account-page-brand'),
               ),
+              SizedBox(width: tokens.space.sm),
+              AccountFreshnessBadge(freshness: projection.profileFreshness),
               SizedBox(width: tokens.space.sm),
               refresh,
             ],
@@ -214,6 +246,23 @@ class _AccountHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ScmLoginBrand extends StatefulWidget {
+  const _ScmLoginBrand({required this.module, super.key});
+  final AccountModule module;
+  @override
+  State<_ScmLoginBrand> createState() => _ScmLoginBrandState();
+}
+
+class _ScmLoginBrandState extends State<_ScmLoginBrand> {
+  late final bool _play = !isAccountLoginDialogOpen(widget.module);
+  @override
+  Widget build(BuildContext context) => ScmSuccessMotion(
+    key: const Key('scm-account-brand'),
+    play: _play,
+    brief: true,
+  );
 }
 
 class _ProfilePreferencesCard extends StatefulWidget {
@@ -255,6 +304,7 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
+    final owner = widget.module;
     final editable = widget.projection.canEditPreferences;
     final localeValues = <String>{
       '',
@@ -301,7 +351,9 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
             ),
             SizedBox(height: tokens.space.md),
           ],
-          DropdownButtonFormField<String>(
+          StarBridgeSelectFormField<String>(
+            identity: 'account-locale',
+            controlKey: const Key('account-locale-control'),
             key: const Key('account-locale-field'),
             initialValue: _locale,
             isExpanded: true,
@@ -325,7 +377,9 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
                 : null,
           ),
           SizedBox(height: tokens.space.md),
-          DropdownButtonFormField<String>(
+          StarBridgeSelectFormField<String>(
+            identity: 'account-time-zone',
+            controlKey: const Key('account-time-zone-control'),
             key: const Key('account-time-zone-field'),
             initialValue: _timeZone,
             isExpanded: true,
@@ -357,31 +411,51 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
           SizedBox(height: tokens.space.lg),
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: FilledButton.icon(
-              key: const Key('account-save-preferences'),
-              onPressed: editable
-                  ? () => unawaited(
-                      widget.module.savePreferences(
-                        locale: _locale.isEmpty ? null : _locale,
-                        timeZone: _timeZone.isEmpty ? null : _timeZone,
-                      ),
-                    )
+            child: StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('account-save-preferences'),
+              onActivate: editable
+                  ? (source) {
+                      if (!mounted ||
+                          !identical(owner, widget.module) ||
+                          !owner.projection.value.canEditPreferences) {
+                        return;
+                      }
+                      unawaited(
+                        runAccountMotionCommand(
+                          owner,
+                          AccountOperation.savingPreferences,
+                          source,
+                          () => owner.savePreferences(
+                            locale: _locale.isEmpty ? null : _locale,
+                            timeZone: _timeZone.isEmpty ? null : _timeZone,
+                          ),
+                        ),
+                      );
+                    }
                   : null,
-              icon:
-                  widget.projection.operation ==
-                      AccountOperation.savingPreferences
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : StarBridgeIcon(StarBridgeIconSemantic.save),
-              label: Text(
-                strings.text(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   widget.projection.operation ==
                           AccountOperation.savingPreferences
-                      ? 'account.preferences.saving'
-                      : 'account.preferences.save',
-                ),
+                      ? SizedBox.square(
+                          dimension: 16,
+                          child: AccountOperationWaiting(module: owner),
+                        )
+                      : StarBridgeIcon(StarBridgeIconSemantic.save),
+                  SizedBox(width: tokens.space.xs),
+                  Flexible(
+                    child: Text(
+                      strings.text(
+                        widget.projection.operation ==
+                                AccountOperation.savingPreferences
+                            ? 'account.preferences.saving'
+                            : 'account.preferences.save',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -394,11 +468,19 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
             ),
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton(
-                key: const Key('account-preferences-discard'),
-                onPressed: widget.projection.isBusy
+              child: StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('account-preferences-discard'),
+                onActivate: widget.projection.isBusy
                     ? null
-                    : widget.module.preferencesDraft.discard,
+                    : (_) {
+                        if (!mounted ||
+                            !identical(owner, widget.module) ||
+                            owner.projection.value.isBusy) {
+                          return;
+                        }
+                        owner.preferencesDraft.discard();
+                      },
                 child: Text(strings.text('account.preferences.discard')),
               ),
             ),
@@ -419,9 +501,25 @@ class _ProfilePreferencesCardState extends State<_ProfilePreferencesCard> {
 }
 
 class _IdentityCard extends StatelessWidget {
-  const _IdentityCard({required this.identity});
+  const _IdentityCard({
+    required this.identity,
+    required this.module,
+    required this.generation,
+    this.verification,
+  });
 
   final AccountIdentityProjection identity;
+  final AccountModule module;
+  final int? generation;
+  final GameIdentityVerificationPort? verification;
+
+  bool get _canVerify =>
+      verification?.supportsGameIdentityVerification == true &&
+      const {
+        AccountIdentityState.verificationRequired,
+        AccountIdentityState.reverifyRequired,
+        AccountIdentityState.revoked,
+      }.contains(identity.state);
 
   @override
   Widget build(BuildContext context) {
@@ -461,6 +559,38 @@ class _IdentityCard extends StatelessWidget {
                 ? tokens.colors.successSoft
                 : presentation.background,
           ),
+          if (verification case final port?)
+            StreamBuilder<void>(
+              stream: port.supportChanges,
+              builder: (context, _) => !_canVerify
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: EdgeInsets.only(top: tokens.space.md),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: StarBridgeActionButton(
+                          kind: StarBridgeActionKind.primary,
+                          controlKey: const Key('account-verify-game-identity'),
+                          onActivate: (source) => unawaited(
+                            showGameIdentityVerificationDialog(
+                              context,
+                              port,
+                              initialHandle: identity.detectedHandle,
+                              source: source,
+                              isCurrent: () =>
+                                  module.projection.value.generation ==
+                                  generation,
+                              ownerChanges: module.projection,
+                              onVerified: () => unawaited(module.refresh()),
+                            ),
+                          ),
+                          child: Text(
+                            strings.text('account.gameIdentity.action'),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
         ],
       ),
     );
@@ -490,21 +620,39 @@ class _SessionCard extends StatelessWidget {
             bodyKey: 'account.session.body',
           ),
           SizedBox(height: tokens.space.md),
-          OutlinedButton.icon(
-            key: const Key('account-clear-cache'),
-            onPressed: projection.canClearProfileCache
-                ? () => unawaited(module.clearLocalCache())
-                : null,
-            icon: clearing
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+          StarBridgeActionButton(
+            controlKey: const Key('account-clear-cache'),
+            onActivate: projection.canClearProfileCache
+                ? (source) => unawaited(
+                    runAccountMotionCommand(
+                      module,
+                      AccountOperation.clearingCache,
+                      source,
+                      module.clearLocalCache,
+                    ),
                   )
-                : StarBridgeIcon(StarBridgeIconSemantic.cache),
-            label: Text(
-              strings.text(
-                clearing ? 'account.cache.clearing' : 'account.cache.clear',
-              ),
+                : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (clearing)
+                  SizedBox(
+                    width: 40,
+                    child: AccountOperationWaiting(module: module),
+                  )
+                else
+                  StarBridgeIcon(StarBridgeIconSemantic.cache),
+                SizedBox(width: tokens.space.xs),
+                Flexible(
+                  child: Text(
+                    strings.text(
+                      clearing
+                          ? 'account.cache.clearing'
+                          : 'account.cache.clear',
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           if (!projection.supportsCacheClear) ...[
@@ -512,25 +660,34 @@ class _SessionCard extends StatelessWidget {
             Text(strings.text('account.action.unavailable')),
           ],
           SizedBox(height: tokens.space.sm),
-          OutlinedButton.icon(
-            key: const Key('account-logout'),
-            onPressed: projection.canLogout
-                ? () => unawaited(module.logout())
+          StarBridgeActionButton(
+            controlKey: const Key('account-logout'),
+            tone: ActionTone.danger,
+            onActivate: projection.canLogout
+                ? (source) => unawaited(
+                    runAccountMotionCommand(
+                      module,
+                      AccountOperation.signingOut,
+                      source,
+                      module.logout,
+                    ),
+                  )
                 : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: tokens.colors.danger,
-              side: BorderSide(
-                color: tokens.colors.danger,
-                width: tokens.stroke.regular,
-              ),
-            ),
-            icon: StarBridgeIcon(StarBridgeIconSemantic.logout),
-            label: Text(
-              strings.text(
-                signingOut
-                    ? 'account.logout.signingOut'
-                    : 'account.logout.action',
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                StarBridgeIcon(StarBridgeIconSemantic.logout),
+                SizedBox(width: tokens.space.xs),
+                Flexible(
+                  child: Text(
+                    strings.text(
+                      signingOut
+                          ? 'account.logout.signingOut'
+                          : 'account.logout.action',
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],

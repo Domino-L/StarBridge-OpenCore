@@ -13,6 +13,10 @@ import 'package:starbridge_flutter/app/shell/widgets/attention_badge.dart';
 import 'package:starbridge_flutter/platform/window/menu_attention.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_recovery_prompt.dart';
 import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
+import 'package:starbridge_flutter/platform/window/menu_exec_hangar_summary.dart';
+import 'package:starbridge_flutter/platform/window/menu_desktop_widgets.dart';
+
+import '../../features/tools/exec_hangar_test.dart' show sample;
 
 import 'menu_profiles_session_test.dart' show fixtureProfile;
 
@@ -41,6 +45,79 @@ Future<void> push(WidgetTester tester, Object value) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('hangar widget belongs only to a current visible menu opening', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 900);
+    addTearDown(tester.view.reset);
+    final calls = <MethodCall>[];
+    final summary = MenuExecHangarSummary.fromSnapshot(sample());
+    Completer<String>? pending;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      if (call.method == 'execHangarSummary') {
+        return pending?.future ?? jsonEncode(summary.toMap());
+      }
+      if (call.method == 'openExecHangar') return true;
+      return null;
+    });
+    Map<String, Object?> opening(int id, {bool wanted = true}) => {
+      ...snapshot(id, wanted: wanted),
+      'localToolsEpoch': 1,
+      if (wanted) ...{
+        'execHangar': true,
+        'nativeTools': true,
+        'liveFriends': true,
+        'preferences': MenuWindowPreferences.defaults.withSettingsPatch({
+          'widgets': const MenuDesktopWidgets(hangar: true).toMap(),
+        }).encode(),
+      },
+    };
+    await tester.pumpWidget(
+      const MenuOverlaySurfaceApp(workspacePreview: true),
+    );
+    await tester.pump();
+    await push(tester, opening(1));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('menu-hangar-widget')), findsOneWidget);
+    expect(find.text('01:05:00'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('menu-hangar-widget')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('menu-hangar-window')), findsOneWidget);
+    expect(calls.where((c) => c.method == 'openExecHangar'), isEmpty);
+    await push(tester, opening(1, wanted: false));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('menu-hangar-widget')), findsNothing);
+    final reads = calls.where((c) => c.method == 'execHangarSummary').length;
+    await tester.pump(const Duration(minutes: 2));
+    expect(calls.where((c) => c.method == 'execHangarSummary').length, reads);
+    pending = Completer<String>();
+    await push(tester, opening(2));
+    await tester.pump();
+    expect(
+      find.byKey(const Key('menu-hangar-countdown')),
+      findsOneWidget,
+      reason: 'Reopening immediately renders the aged local cache',
+    );
+    await push(tester, opening(2, wanted: false));
+    await tester.pump();
+    pending.complete(jsonEncode(summary.toMap()));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('menu-hangar-widget')), findsNothing);
+    expect(
+      calls.where(
+        (c) => c.method.startsWith('execHangar.') || c.method == 'localTool',
+      ),
+      isEmpty,
+      reason:
+          'The summary does not acquire a monitoring RPC or native local tool',
+    );
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'notices reject stale leases and malformed revisions without opening panels',
     (tester) async {
@@ -470,7 +547,7 @@ void main() {
     expect(calls.where((c) => c.method == 'shortcutSettings').length, 1);
     final close = find.descendant(
       of: find.byType(MenuShortcutSettingsCard),
-      matching: find.widgetWithText(SwitchListTile, '再次按快捷键关闭菜单'),
+      matching: find.byKey(const Key('menu-shortcut-close')),
     );
     await tester.ensureVisible(close);
     await tester.tap(close);
@@ -835,7 +912,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('menu-tool-chat')));
       await tester.pumpAndSettle();
       expect(calls.last.method, 'commsVisible');
-      expect(calls.last.arguments, {'opening': 1, 'visible': true});
+      expect(calls.last.arguments, {
+        'opening': 1,
+        'visible': true,
+        'motionSource': 'pointer',
+      });
       await comms(1, 1, {
         'state': 'ready',
         'rows': [
@@ -855,6 +936,7 @@ void main() {
         'opening': 1,
         'action': 'select',
         'key': 'c1',
+        'motionSource': 'pointer',
       });
       final history = <String, Object?>{
         'state': 'ready',
@@ -958,11 +1040,20 @@ void main() {
       expect(find.text('Fixture message'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('menu-comms-back')));
       await tester.pump();
-      expect(calls.last.arguments, {'opening': 1, 'action': 'back', 'key': ''});
+      expect(calls.last.arguments, {
+        'opening': 1,
+        'action': 'back',
+        'key': '',
+        'motionSource': 'pointer',
+      });
       await tester.tap(find.byKey(const ValueKey('menu-tool-friends')));
       await tester.pumpAndSettle();
       expect(calls.last.method, 'friendsVisible');
-      expect(calls.last.arguments, {'opening': 1, 'visible': true});
+      expect(calls.last.arguments, {
+        'opening': 1,
+        'visible': true,
+        'motionSource': 'pointer',
+      });
       expect(find.text('Fixture message'), findsOneWidget);
       expect(calls.where((c) => c.method == 'commsVisible').length, 1);
       await tester.tap(find.byKey(const ValueKey('menu-close-comms')));
@@ -1032,7 +1123,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('menu-tool-friends')));
     await tester.pumpAndSettle();
     expect(calls.last.method, 'friendsVisible');
-    expect(calls.last.arguments, {'opening': 1, 'visible': true});
+    expect(calls.last.arguments, {
+      'opening': 1,
+      'visible': true,
+      'motionSource': 'pointer',
+    });
     await friends(1, 2, 'Current');
     expect(find.text('Current'), findsOneWidget);
     expect(find.text('离线'), findsOneWidget);

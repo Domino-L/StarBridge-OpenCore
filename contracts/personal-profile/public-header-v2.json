@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "restricted": true,
+  "visibility": "private",
+  "publicHeader": {
+    "callsign": "S*****1",
+    "avatarAssetId": null,
+    "callSignOrigin": null,
+    "avatarOrigin": null,
+    "tradeWindow": {
+      "days": [
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "start": "19:30",
+      "end": "23:00",
+      "timezoneId": 16
+    },
+    "defaulted": true,
+    "nameMasked": true,
+    "facts": {
+      "reputation": 128,
+      "completedTrades": 31,
+      "sellOrders": 5,
+      "buyOrders": 3,
+      "lastOnlineDay": "2026-10-29",
+      "siteRegisteredDay": "2025-03-12",
+      "gameRegisteredDay": "2018-11-03",
+      "language": "zh",
+      "timezoneId": 16,
+      "banned": false,
+      "banCount": 0
+    }
+  }
+}

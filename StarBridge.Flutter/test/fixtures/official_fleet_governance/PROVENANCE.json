@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "syntheticTestData": true,
+  "noRealAccountOrCredentialsOrAvatarMedia": true,
+  "origin": "Actual existing Server governance/context endpoint over local HTTP, existing CommunityClient and SCM account runtime/dispatcher, actual NativeBridge BridgeWireCodec.Encode.",
+  "payloadConstruction": "No handcrafted success payload. These four files are byte-for-byte actual successful producer exports from the same focused regression.",
+  "rootAuthorityBoundary": {
+    "context-unconfigured": "The production default root provider remains Unconfigured.",
+    "context-observed": "Existing Scenario.Roots is an explicit synthetic observed-root provider for a test only. It proves no real RSI Owner and enables no production authority."
+  },
+  "frameBoundary": "Standard Bridge envelope account context and correlation IDs contain only existing synthetic fixture identity; UI payload omits private scope and grant identifiers. Frame correlation IDs are per actual run.",
+  "files": [
+    {
+      "file": "context-observed.bridge.json",
+      "sha256": "5EF593DABED34FBBB4CDE8B3D422C861074A3A9CFCC7BCA619C8D01B71501B62",
+      "bytes": 589
+    },
+    {
+      "file": "context-observed.frame.json",
+      "sha256": "DCCBC46382DF0A062B1E44271121717A958CC36CEE3171B7075F25C77D05A6C8",
+      "bytes": 921
+    },
+    {
+      "file": "context-unconfigured.bridge.json",
+      "sha256": "AC046F67C5CDED7D058A44217EEC0AD6700B16D88AF2E18C470553D84E6B0182",
+      "bytes": 631
+    },
+    {
+      "file": "context-unconfigured.frame.json",
+      "sha256": "0F19435CB1723AA63E167E75330ABED6DAAD4E20D013CC8B4AE94C59F1384B44",
+      "bytes": 963
+    }
+  ],
+  "producerInputsSha256": "92395FEF34B447DE0824314DA630574E7F53BA64CB234B8BA10978AD5AF9A20F",
+  "producerSourceSha256": [
+    {
+      "path": "StarBridge.Server.Tests/OfficialFleetGovernanceHostTests.cs",
+      "sha256": "23D87F3E041D1EDCCD0C24C13050E79C280841E72868F01B83DAABAC591AB144"
+    },
+    {
+      "path": "StarBridge.Server.Tests/OfficialFleetGovernanceContextTests.cs",
+      "sha256": "F9330C7DEEE1CE2265B9F16F576E156B7BCEC35CFF1AC870D50C3DC4A018A436"
+    },
+    {
+      "path": "StarBridge.Server.Tests/OfficialFleetAuthorizationPublishTests.cs",
+      "sha256": "754AF04B618A4070473A8B6305A9D6091711C08922962EA99D93C314802CBF7A"
+    },
+    {
+      "path": "StarBridge.HostRuntime/Communities/CommunityClient.OfficialFleetGovernance.cs",
+      "sha256": "0012CC9CAF4C9B1AFAB52E7C5784D837A820989816542FB8CD72220F0545D447"
+    },
+    {
+      "path": "StarBridge.HostRuntime/Account/ScmAccountBridgeHost.OfficialFleetGovernance.cs",
+      "sha256": "98CECA66EB5526C521E6C967BBC187D51A7CF57AECA84311B5CEF8B08B6A41D6"
+    },
+    {
+      "path": "StarBridge.HostRuntime/AccountBridgeRuntime.cs",
+      "sha256": "BBCD6DDE3069310EA970C8F4C7F05AC7909C1DACD981113F67982B40905FFD48"
+    },
+    {
+      "path": "StarBridge.NativeBridge/BridgeWireCodec.cs",
+      "sha256": "6F3BBA34F0B6AEF0AB6C0D0B41DC22502270D3EE5DDF9717D90002C1943C6401"
+    }
+  ],
+  "existingSyntheticAuthorityWireSha256": "72A94DF063A7500ECD063D03EE6C0FDF9CBACA280437A9510A0A3CFA277F2F1B",
+  "validation": {
+    "restoreExit": 0,
+    "releaseNoIncrementalExit": 0,
+    "releaseWarnings": 0,
+    "releaseErrors": 0,
+    "focusedExit": 0,
+    "retiredResponse": {
+      "status": "cancelled",
+      "errorCode": "bridge.cancelled",
+      "payloadKind": "Object",
+      "payloadCount": 0
+    }
+  },
+  "rights": "Internal regression fixture: synthetic data, no media, no real account or production request. It adds no SCM/RSI scope and does not change message/profile disclosure authority."
+}

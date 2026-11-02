@@ -1,6 +1,9 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import 'menu_chat_widgets.dart';
 import 'menu_comms_view.dart';
 import 'menu_comms_composer.dart';
@@ -65,12 +68,14 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
     super.dispose();
   }
 
-  Widget action(String key, String title) => OutlinedButton(
-    key: ValueKey('menu-comms-$key'),
-    onPressed: widget.view.busy ? null : () => widget.onAction(key, ''),
+  Widget action(String key, String title) => StarBridgeActionButton(
+    controlKey: ValueKey('menu-comms-$key'),
+    semanticLabel: title,
+    onActivate: widget.view.busy ? null : (_) => widget.onAction(key, ''),
     child: Text(title),
   );
   Widget portrait() => MenuAvatarActions(
+    identity: ('peer', widget.view.profileKey),
     name: widget.view.name ?? '',
     onProfile: widget.onProfile == null || widget.view.profileKey == null
         ? null
@@ -80,13 +85,23 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
   @override
   Widget build(BuildContext context) {
     final view = widget.view;
-    if (view.name == null) return const Center(child: Text('选择一个会话开始聊天'));
+    if (view.name == null) {
+      return Center(
+        child: Text(menuText(context, 'menu.overlay.comms.select')),
+      );
+    }
     final status = switch (view.conversationState) {
-      'request_incoming' => '消息请求 · 回复后建立会话',
-      'request_outgoing' => '消息请求已发出，等待对方回应',
-      'friend' => '好友',
-      'accepted' => '已建立会话',
-      _ => view.request ? '消息请求' : '',
+      'request_incoming' => menuText(
+        context,
+        'menu.overlay.comms.incomingRequest',
+      ),
+      'request_outgoing' => menuText(
+        context,
+        'menu.overlay.comms.outgoingRequest',
+      ),
+      'friend' => menuText(context, 'menu.tools.friends'),
+      'accepted' => menuText(context, 'menu.overlay.comms.accepted'),
+      _ => view.request ? menuText(context, 'menu.overlay.comms.request') : '',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -101,17 +116,29 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
           spacing: 8,
           runSpacing: 4,
           children: [
-            action('back', '返回会话列表'),
-            if (view.hasOlder) action('older', '较早消息'),
-            action('latest', view.olderPage ? '最新消息' : '刷新消息'),
+            action('back', menuText(context, 'menu.overlay.comms.back')),
+            if (view.hasOlder)
+              action('older', menuText(context, 'menu.overlay.comms.older')),
+            action(
+              'latest',
+              view.olderPage
+                  ? menuText(context, 'menu.overlay.comms.latest')
+                  : menuText(context, 'menu.overlay.comms.refreshMessages'),
+            ),
             if (view.inviteAvailable && view.canSend)
-              action('inviteSend', '邀请加入组织'),
+              action(
+                'inviteSend',
+                menuText(context, 'menu.overlay.comms.invite'),
+              ),
             if (view.archiveAvailable)
               MenuFeatureAction(
+                identity: view.profileKey ?? view.pageKey,
                 action: (
                   key: 'clearLocal',
-                  label: '清除本机记录',
-                  confirm: '清除此会话的本机缓存？在线消息不会删除，后续读取可再次缓存。',
+                  role: 'clearLocalHistory',
+                  secret: false,
+                  label: menuText(context, 'menu.overlay.comms.clearLocal'),
+                  confirm: menuText(context, 'menu.overlay.comms.clearConfirm'),
                   input: null,
                   limit: 128,
                 ),
@@ -131,16 +158,16 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
                     style: TextStyle(color: context.tokens.colors.warning),
                   ),
                 ),
-                action('retry', '重新读取'),
+                action('retry', menuText(context, 'menu.display.reload')),
               ],
             ),
           ),
         if (view.readStatus == 'failed')
           Text(
-            '已读状态未同步，请刷新消息重试。',
+            menuText(context, 'menu.overlay.comms.readSyncFailed'),
             style: TextStyle(color: context.tokens.colors.warning),
           ),
-        if (view.refreshing) const MenuLoading(),
+        if (view.refreshing) MenuLoading(feedback: view.readFeedback),
         Divider(color: context.tokens.surfaces.panel.border),
         Expanded(
           child: MenuVisibleReceipts(
@@ -148,7 +175,9 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
             tokens: view.receipts,
             onRead: (key) => widget.onAction('read', key),
             builder: (anchors) => view.messages.isEmpty
-                ? const Center(child: Text('暂无消息，可以从下面开始聊天。'))
+                ? Center(
+                    child: Text(menuText(context, 'menu.overlay.comms.empty')),
+                  )
                 : MenuChatScroll(
                     controller: _scroll,
                     child: ListView.builder(
@@ -165,18 +194,27 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
                           key: anchors[index],
                           child: MenuChatMessage(
                             incoming: message.incoming,
-                            sender: message.incoming ? view.name! : '我',
+                            sender: message.incoming
+                                ? view.name!
+                                : menuText(context, 'menu.overlay.comms.me'),
                             time:
                                 '${time.year}/${time.month}/${time.day} ${pad(time.hour)}:${pad(time.minute)}',
                             portrait: message.incoming
                                 ? portrait()
                                 : MenuAvatarActions(
-                                    name: '我',
+                                    identity: ('self', view.pageKey),
+                                    name: menuText(
+                                      context,
+                                      'menu.overlay.comms.me',
+                                    ),
                                     onProfile: widget.onProfile == null
                                         ? null
                                         : () => widget.onProfile!('self'),
                                     child: MenuInlineAvatar(
-                                      name: '我',
+                                      name: menuText(
+                                        context,
+                                        'menu.overlay.comms.me',
+                                      ),
                                       source: view.ownAvatar,
                                     ),
                                   ),
@@ -191,18 +229,32 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
                                   Text(view.attachments[index]!),
                                 ],
                                 if (view.attachmentKeys[index] case final key?)
-                                  OutlinedButton(
-                                    onPressed:
+                                  StarBridgeActionButton(
+                                    semanticLabel: menuText(
+                                      context,
+                                      'menu.overlay.comms.viewInvite',
+                                    ),
+                                    onActivate:
                                         view.busy || view.notice.isNotEmpty
                                         ? null
-                                        : () => widget.onAction(
+                                        : (_) => widget.onAction(
                                             'attachment',
                                             key,
                                           ),
-                                    child: const Text('查看组织邀请'),
+                                    child: Text(
+                                      menuText(
+                                        context,
+                                        'menu.overlay.comms.viewInvite',
+                                      ),
+                                    ),
                                   )
                                 else if (message.attachment)
-                                  const Text('此附件类型暂不支持在菜单内操作。'),
+                                  Text(
+                                    menuText(
+                                      context,
+                                      'menu.overlay.comms.unsupportedAttachment',
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
@@ -215,13 +267,18 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
         if (_newMessages)
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton(
-              key: const ValueKey('menu-comms-new-messages'),
-              onPressed: () {
+            child: StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const ValueKey('menu-comms-new-messages'),
+              semanticLabel: menuText(
+                context,
+                'menu.overlay.comms.newMessages',
+              ),
+              onActivate: (_) {
                 if (_scroll.hasClients) _scroll.jumpTo(0);
                 setState(() => _newMessages = false);
               },
-              child: const Text('有新消息 · 回到底部'),
+              child: Text(menuText(context, 'menu.overlay.comms.newMessages')),
             ),
           ),
         if (view.compose && view.profileKey != null && widget.onCompose != null)
@@ -232,7 +289,10 @@ class _MenuCommsHistoryState extends State<MenuCommsHistory> {
             disconnected: widget.disconnected,
           )
         else
-          const Padding(padding: EdgeInsets.all(12), child: Text('当前会话不可发送消息')),
+          Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(menuText(context, 'menu.overlay.comms.cannotSend')),
+          ),
       ],
     );
   }

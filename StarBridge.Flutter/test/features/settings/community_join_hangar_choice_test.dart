@@ -45,8 +45,9 @@ class JoinHangarFixture implements CommunityHangarSharingPort {
   @override
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> refs,
-  ) async {
+    List<String> refs, {
+    bool includeImages = false,
+  }) async {
     writes++;
     savedRefs = List.of(refs);
     if (outcome.status == 'accepted') {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/legal/starbridge_third_party_licenses.dart';
+import 'package:starbridge_flutter/app/legal/third_party_license_browser.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 
 void main() {
@@ -14,11 +15,14 @@ void main() {
       StarBridgeThirdPartyLicenses.registerAtStartup();
       Future<void> verifyNotices() async {
         final entries = await LicenseRegistry.licenses.toList();
-        expect(entries, hasLength(3));
+        expect(entries, hasLength(6));
         expect(entries.expand((entry) => entry.packages), [
           'Source Sans 3',
           'Source Han Sans CN',
           'Source Code Pro',
+          'Saira',
+          'Rajdhani',
+          'Trading weapon icon / John Colburn / Game-icons.net',
         ]);
         for (final entry in entries) {
           expect(entry.paragraphs.map((p) => p.text).join(), isNotEmpty);
@@ -47,8 +51,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
         await tester.runAsync(verifyNotices);
         await tester.pump(const Duration(milliseconds: 400));
-        expect(find.byType(LicensePage), findsOneWidget);
-        await tester.pageBack();
+        expect(find.byType(ThirdPartyLicenseBrowser), findsOneWidget);
+        await tester.tap(find.byKey(const Key('license-back')));
         await tester.pumpAndSettle();
       }
       await tester.runAsync(verifyNotices);

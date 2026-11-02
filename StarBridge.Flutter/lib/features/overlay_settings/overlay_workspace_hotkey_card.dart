@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -17,6 +19,8 @@ class OverlayWorkspaceHotkeyCard extends StatefulWidget {
     this.defaultBinding = 'Alt+O',
     this.enabledLabel,
     this.embedded = false,
+    this.onRegisterHotKeyChanged,
+    this.registrationFailures,
     super.key,
   });
 
@@ -26,6 +30,11 @@ class OverlayWorkspaceHotkeyCard extends StatefulWidget {
   final String defaultBinding;
   final String? enabledLabel;
   final bool embedded;
+
+
+  /// Shown only when the Host reports the choice and a caller saves it.
+  final ValueChanged<bool>? onRegisterHotKeyChanged;
+  final String? registrationFailures;
 
   @override
   State<OverlayWorkspaceHotkeyCard> createState() =>
@@ -165,21 +174,26 @@ class _OverlayWorkspaceHotkeyCardState
                   Wrap(
                     spacing: tokens.space.sm,
                     children: [
-                      OutlinedButton.icon(
+                      StarBridgeActionButton(
                         key: const Key('overlay-hotkey-record'),
-                        onPressed: _capturing ? null : _startCapture,
-                        icon: const StarBridgeIcon(
-                          StarBridgeIconSemantic.tools,
-                        ),
-                        label: Text(
-                          _copy(context, 'overlay.workspace.hotkeyRecord'),
+                        onActivate: _capturing ? null : (_) => _startCapture(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const StarBridgeIcon(StarBridgeIconSemantic.tools),
+                            SizedBox(width: tokens.space.xs),
+                            Text(
+                              _copy(context, 'overlay.workspace.hotkeyRecord'),
+                            ),
+                          ],
                         ),
                       ),
-                      TextButton(
+                      StarBridgeActionButton(
                         key: const Key('overlay-hotkey-reset'),
-                        onPressed: _capturing
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: _capturing
                             ? null
-                            : () => widget.onBindingChanged(
+                            : (_) => widget.onBindingChanged(
                                 widget.defaultBinding,
                               ),
                         child: Text(
@@ -197,20 +211,39 @@ class _OverlayWorkspaceHotkeyCardState
               ),
             ),
           );
-          final enabled = SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              widget.enabledLabel ??
-                  _copy(context, 'overlay.workspace.hotkeyEnabled'),
-            ),
-            subtitle: Text(
-              _hotkeyState(context, widget.hotkey.runtimeState),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: tokens.colors.textSecondary),
-            ),
+          final enabledSwitch = StarBridgeSwitch.tile(
+            key: const Key('overlay-hotkey-enabled'),
+            label:
+                widget.enabledLabel ??
+                _copy(context, 'overlay.workspace.hotkeyEnabled'),
+            subtitle: _hotkeyState(context, widget.hotkey.runtimeState),
             value: widget.hotkey.enabled,
             onChanged: widget.onEnabledChanged,
           );
+          final registered = widget.hotkey.registerHotKey;
+          final enabled = registered == null || widget.onRegisterHotKeyChanged == null
+              ? enabledSwitch
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    enabledSwitch,
+                    SizedBox(height: tokens.space.xs),
+                    StarBridgeSwitch.tile(
+                      key: const Key('overlay-hotkey-register'),
+                      label: _copy(context, 'overlay.workspace.registerHotKey'),
+                      subtitle: [
+                        _copy(context, 'overlay.workspace.registerHotKey.help'),
+                        if (widget.registrationFailures case final failures?)
+                          _copy(
+                            context,
+                            'overlay.workspace.registerHotKey.failed',
+                          ).replaceAll('{keys}', failures),
+                      ].join('\n'),
+                      value: registered,
+                      onChanged: widget.onRegisterHotKeyChanged,
+                    ),
+                  ],
+                );
           if (constraints.maxWidth < 640) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

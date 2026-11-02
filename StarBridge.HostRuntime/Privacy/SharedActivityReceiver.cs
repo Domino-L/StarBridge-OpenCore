@@ -48,17 +48,23 @@ internal sealed class SharedActivityReceiver(ISharedActivityReader reader, IShar
         }, clock) { }
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly CancellationTokenSource _lifetime = new();
+    private readonly Lifecycle.AsyncWorkRetirement _retirement = new();
+    private readonly object _timerGate = new();
     private ITimer? _timer;
     private HashSet<string> _seen = [];
     private HashSet<string> _available = [];
     private SharedActivitySubscription? _context;
     private (BridgeAccountContext? Owner, long Generation, string? Scope, string? Id) _retryScope;
-    private bool _baseline, _disposed;
+    private bool _baseline;
+    private volatile bool _disposed;
     private long _epoch;
     private int _failures;
     private DateTimeOffset _nextAttempt;
-    internal void Start() => _timer ??= _clock.CreateTimer(_ => _ = TickAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    internal void Start()
+    {
+        lock (_timerGate)
+            if (!_disposed) _timer ??= _clock.CreateTimer(_ => _ = TickAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+    }
     private SharedActivitySubscription SafeCurrent()
     {
         try { return current(); }
@@ -71,7 +77,8 @@ internal sealed class SharedActivityReceiver(ISharedActivityReader reader, IShar
     }
     internal async Task TickAsync()
     {
-        if (_disposed || !await _gate.WaitAsync(0)) return;
+        using var work = _retirement.Enter(default);
+        if (work is null || _disposed || !await _gate.WaitAsync(0)) return;
         try
         {
             var context = SafeCurrent();
@@ -88,7 +95,7 @@ internal sealed class SharedActivityReceiver(ISharedActivityReader reader, IShar
             if (_timer is not null && _clock.GetUtcNow() < _nextAttempt) return;
             var result = await Overlay.OverlayDemandRead.RunAsync(token =>
                 reader.ReadActivityAsync(context.Owner, context.Generation, context.Scope, context.Id, token),
-                () => StillCurrent(context), _lifetime.Token);
+                () => StillCurrent(context), work.Token);
             if (!StillCurrent(context)) return;
             _failures = 0; _nextAttempt = default;
             var epoch = _epoch;
@@ -109,7 +116,7 @@ internal sealed class SharedActivityReceiver(ISharedActivityReader reader, IShar
                 {
                     PublisherKey = entry.PublisherKey,
                     SourceKey = context.Scope switch { "room" => "Room:" + context.Id, "organization" => "Community:" + context.Id, _ => null }
-                }, _lifetime.Token);
+                }, work.Token);
             }
         }
         catch (OperationCanceledException) when (_disposed || _context is null || !StillCurrent(_context))
@@ -125,5 +132,10 @@ internal sealed class SharedActivityReceiver(ISharedActivityReader reader, IShar
         }
         finally { _gate.Release(); }
     }
-    public void Dispose() { _disposed = true; _epoch++; _timer?.Dispose(); _lifetime.Cancel(); }
+    internal Task RetireAsync() { Dispose(); return _retirement.Close(); }
+    public void Dispose()
+    {
+        lock (_timerGate) { _disposed = true; Interlocked.Increment(ref _epoch); _timer?.Dispose(); }
+        _ = _retirement.Close();
+    }
 }

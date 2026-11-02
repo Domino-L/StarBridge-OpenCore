@@ -8,6 +8,19 @@ internal static class ShipNameIndexTests
 {
     public static void RunAll()
     {
+        using var pack = typeof(ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
+        using var reader = new StreamReader(pack);
+        var shipped = ShipNameIndex.Parse(reader.ReadToEnd());
+        Require(shipped.Find("Anvil Carrack")?.RuntimeId == "ANVL_Carrack",
+            "SCM manufacturer-qualified model names reuse the exact catalog identity");
+        Require(shipped.Find("ANVL_Carrack_BIS2950")?.RuntimeId != "ANVL_Carrack",
+            "SCM limited editions never resolve to the base ship through a runtime prefix");
+        Require(shipped.Find("RSI_Constellation_Mk5_Centaurus")?.EnglishName == "Constellation Mk V Centaurus",
+            "Observed Mk5 runtime code maps exactly to the Mk V model");
+        Require(shipped.Find("Constellation Mk V Centaurus")?.ChineseName == "星座 Mk V 半人马座",
+            "Confirmed model retains the approved Chinese name");
+        Require(shipped.Find("RSI_Constellation_Mk5_Centaurus_Special") is null,
+            "Unobserved variants cannot inherit the confirmed model");
         const string fixture = """
           {"schemaVersion":1,"entries":[
             {"runtimeId":"TEST_A","englishName":"Test Ship","chineseName":"测试舰船","aliases":["Model Mk I","shared"]},

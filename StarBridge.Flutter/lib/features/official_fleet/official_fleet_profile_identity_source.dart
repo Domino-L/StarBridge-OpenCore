@@ -11,11 +11,13 @@ class OfficialFleetProfileIdentitySource extends StatelessWidget {
   const OfficialFleetProfileIdentitySource({
     required this.fleet,
     required this.observedAtUtc,
+    this.profileObservedAtUtc,
     super.key,
   });
 
   final OfficialFleetSummary fleet;
   final DateTime? observedAtUtc;
+  final DateTime? profileObservedAtUtc;
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +46,11 @@ class OfficialFleetProfileIdentitySource extends StatelessWidget {
             lines: [
               strings.text('officialFleet.source'),
               if (observedAtUtc != null)
-                '${strings.text('officialFleet.profile.observedAt')} · ${_formatObservedAt(context, observedAtUtc!)}',
+                '${strings.text('officialFleet.profile.identityObservedAt')} · ${_formatObservedAt(context, observedAtUtc!)}',
+              if (fleet.profile != null)
+                profileObservedAtUtc == null
+                    ? strings.text('officialFleet.profile.readTimeUnknown')
+                    : '${strings.text('officialFleet.profile.profileObservedAt')} · ${_formatObservedAt(context, profileObservedAtUtc!)}',
             ],
           );
           if (constraints.maxWidth < 700) {

@@ -7,6 +7,11 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
+import 'help_support_action.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class HelpSupportFeedbackContent extends StatelessWidget {
   const HelpSupportFeedbackContent({
@@ -86,13 +91,12 @@ class HelpSupportFeedbackContent extends StatelessWidget {
                     strings.text('help.feedback.group.number'),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  FilledButton.icon(
-                    key: const Key('help-copy-feedback-group'),
-                    onPressed: () => _copyGroup(context),
-                    icon: const StarBridgeIcon(
-                      StarBridgeIconSemantic.notifications,
-                    ),
-                    label: Text(strings.text('help.feedback.group.copy')),
+                  HelpSupportAction(
+                    kind: StarBridgeActionKind.primary,
+                    controlKey: const Key('help-copy-feedback-group'),
+                    onActivate: (source) => _copyGroup(context, source),
+                    icon: StarBridgeIconSemantic.notifications,
+                    child: Text(strings.text('help.feedback.group.copy')),
                   ),
                 ],
               ),
@@ -103,16 +107,23 @@ class HelpSupportFeedbackContent extends StatelessWidget {
     );
   }
 
-  Future<void> _copyGroup(BuildContext context) async {
+  Future<void> _copyGroup(
+    BuildContext context,
+    InteractionSource source,
+  ) async {
     await Clipboard.setData(const ClipboardData(text: _groupNumber));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(
-            AppStrings.of(context).text('help.feedback.group.copied'),
+        starBridgeSnackBarFromContext(
+          context,
+          starBridgeTimedSnackBar(
+            content: Text(
+              AppStrings.of(context).text('help.feedback.group.copied'),
+            ),
           ),
+          source: source,
         ),
       );
   }

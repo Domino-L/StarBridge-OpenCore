@@ -19,6 +19,7 @@ import 'package:starbridge_flutter/features/friends/bridge_friends_adapter.dart'
 import 'package:starbridge_flutter/features/friends/example_friends_adapter.dart';
 import 'package:starbridge_flutter/features/friends/friends_module.dart';
 import 'package:starbridge_flutter/features/friends/friends_page.dart';
+import 'package:starbridge_flutter/features/friends/friends_search_sections.dart';
 
 Map<String, Object?> directory({String? query}) => {
   'schemaVersion': 1,
@@ -70,6 +71,37 @@ class PendingPort implements FriendsPort {
 }
 
 void main() {
+  test('Handle privacy refresh replaces visible value and outage clears stale snapshot', () async {
+    final port = PendingPort();
+    final model = FriendsModule(port);
+    addTearDown(model.dispose);
+    var reading = model.refresh();
+    port.requests.last.complete(ready('Aurora'));
+    await reading;
+    expect(model.rows.single.gameId, 'Example');
+    reading = model.refresh(silent: true);
+    port.requests.last.complete(
+      FriendsReadResult(
+        FriendsReadState.ready,
+        snapshot: parseFriendsSnapshot(
+          directory()
+            ..['friends'] = [
+              {...row('Aurora'), 'gameId': ''},
+            ],
+        ),
+      ),
+    );
+    await reading;
+    expect(model.rows.single.gameId, isEmpty);
+    expect(model.rows.single.name, 'Aurora');
+    reading = model.refresh(silent: true);
+    port.requests.last.complete(
+      const FriendsReadResult(FriendsReadState.unavailable),
+    );
+    await reading;
+    expect(model.snapshot, isNull);
+    expect(model.rows, isEmpty);
+  });
   test('friend chat carries only explicitly shared coarse presence', () {
     for (final entry in <String, String>{
       'AppOnline': 'online',
@@ -209,7 +241,11 @@ void main() {
         throwsFormatException,
       );
       expect(
-        () => parseFriendsSnapshot({...data, 'query': 'xx'}),
+        () => parseFriendsSnapshot({
+          ...data,
+          'query': 'xx',
+          'incoming': [row('x')..['relationship'] = 'incoming'],
+        }),
         throwsFormatException,
       );
       expect(
@@ -339,7 +375,9 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
       expect(
-        find.text(AppStrings.resolve(locale).text('friends.noResults')),
+        find.text(
+          friendsSearchEmptyMessage(AppStrings.resolve(locale), 'no-match'),
+        ),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
@@ -366,6 +404,8 @@ void main() {
     for (final font in {
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
       'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+      'Saira': 'assets/fonts/Saira-VF.ttf',
+      'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
     }.entries) {
@@ -409,7 +449,7 @@ void main() {
             : AppComposition.forTest(windowChrome: InMemoryWindowChrome());
         await tester.pumpWidget(StarBridgeApp(composition: composition));
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('好友'));
+        await tester.tap(find.byKey(const ValueKey('top-action-friends')));
         await tester.pumpAndSettle();
         expect(find.byType(FriendsPage), findsOneWidget);
         expect(

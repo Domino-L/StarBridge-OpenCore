@@ -8,7 +8,7 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
     FlutterUpdateStartupReporter? startupReporter = null,
     FlutterUpdateInstallation? installation = null,
     Func<long, object, BridgeEnvelope>? progressEvent = null,
-    Action? firstFrameReady = null) : IBridgeRequestDispatcher
+    Action? firstFrameReady = null, Lifecycle.DeviceNetworkAdmission? network = null) : IBridgeRequestDispatcher
 {
     public const string RequestName = "applicationUpdates.check";
     public const string ReadyRequestName = "applicationUpdates.firstFrameReady";
@@ -20,6 +20,8 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
     public event Action<BridgeEnvelope>? EventReady;
     public async ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken cancellationToken = default)
     {
+        Lifecycle.DeviceNetworkAdmission.Lease? networkWork = null;
+        CancellationTokenSource? networkDeadline = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -34,6 +36,13 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
                 !schema.TryGetInt32(out var version) || version != 1)
                 return new(BridgeEnvelope.ErrorResponse(request,
                     new BridgeError(BridgeErrorCodes.InvalidEnvelope, "Invalid update check request.")), []);
+            if (request.Name is RequestName or PrepareRequestName)
+            {
+                networkWork = network?.Enter(cancellationToken);
+                if (network is not null && networkWork is null) return Error(request);
+                networkDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, networkWork?.Token ?? CancellationToken.None);
+                cancellationToken = networkDeadline.Token;
+            }
             if (installing)
             {
                 if (installation is null) return Error(request);
@@ -53,7 +62,7 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
                     void Progress(FlutterUpdateProgress update)
                     {
                         if (!active || _disposed || cancellationToken.IsCancellationRequested ||
-                            request.SessionGeneration != generation() || progressEvent is null ||
+                            request.SessionGeneration != generation() || networkWork?.IsCurrent == false || progressEvent is null ||
                             update.Phase is not ("downloading" or "verifying" or "verified") ||
                             update.ReceivedBytes < lastBytes || update.ReceivedBytes < 0 ||
                             update.ReceivedBytes > 1024L * 1024 * 1024 ||
@@ -72,9 +81,10 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
                     FlutterUpdatePrepared prepared;
                     try {
                         prepared = await installation.PrepareAsync(value,
-                            () => !_disposed && request.SessionGeneration == generation(), cancellationToken, Progress);
+                            () => !_disposed && request.SessionGeneration == generation() && networkWork?.IsCurrent != false, cancellationToken, Progress);
                     }
                     finally { active = false; }
+                    networkWork?.RequireCurrent();
                     return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, ticket = prepared.Ticket,
                         version = prepared.Version }, preserveRequestAccountContext: false), []);
                 }
@@ -106,6 +116,7 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
                 result = new("verification-failed");
             }
             cancellationToken.ThrowIfCancellationRequested();
+            networkWork?.RequireCurrent();
             if (_disposed || request.SessionGeneration != generation()) return Error(request);
             // Dictionary values retain explicit nulls even when the envelope's
             // object serializer omits null properties. Flutter expects all five keys.
@@ -115,7 +126,14 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
             }, preserveRequestAccountContext: false), []);
         }
         catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
+        catch (InstalledUpdateVersionMismatchException) when (request.Name is PrepareRequestName or HandoffRequestName)
+        {
+            if (_disposed || request.SessionGeneration != generation()) return Error(request);
+            return new(BridgeEnvelope.ErrorResponse(request,
+                new BridgeError(InstalledUpdateVersionMismatchException.Code, "Installed version verification failed.")), []);
+        }
         catch { return Error(request); }
+        finally { networkDeadline?.Dispose(); networkWork?.Dispose(); }
     }
     private static BridgeDispatchBatch Error(BridgeEnvelope request) => new(
         BridgeEnvelope.ErrorResponse(request, new BridgeError("applicationUpdates.unavailable", "Update check unavailable.", true)), []);

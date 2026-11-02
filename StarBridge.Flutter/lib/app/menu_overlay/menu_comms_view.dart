@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../platform/window/menu_read_feedback.dart';
+
 import 'menu_feature_view.dart';
 
 typedef MenuConversation = ({
@@ -25,6 +27,7 @@ final class MenuCommsView {
     this.avatar,
     this.ownAvatar,
     this.refreshing = false,
+    this.readFeedback,
     this.profileKey,
     this.request = false,
     this.hasOlder = false,
@@ -55,6 +58,7 @@ final class MenuCommsView {
   final String? name, avatar, profileKey;
   final String? ownAvatar;
   final bool refreshing;
+  final MenuReadFeedback? readFeedback;
   final bool request, hasOlder, olderPage;
   final List<MenuMessage> messages;
   final bool compose, canSend, locked;
@@ -88,7 +92,10 @@ final class MenuCommsView {
         throw const FormatException();
       }
       if (data['state'] != 'ready') {
-        return MenuCommsView(data['state'] as String);
+        return MenuCommsView(
+          data['state'] as String,
+          readFeedback: MenuReadFeedback.parse(data['readFeedback']),
+        );
       }
       final rows = data['rows'] ?? const [];
       if (rows is! List || rows.length > 5000) throw const FormatException();
@@ -142,6 +149,7 @@ final class MenuCommsView {
           avatars: avatars,
           notice: notice,
           refreshing: data['refreshing'] == true,
+          readFeedback: MenuReadFeedback.parse(data['readFeedback']),
           ownAvatar: ownAvatar as String?,
           busy: data['busy'] == true,
           invitation: data['invitation'] == null
@@ -206,6 +214,7 @@ final class MenuCommsView {
       }
       return MenuCommsView(
         'ready',
+        readFeedback: MenuReadFeedback.parse(data['readFeedback']),
         name: _text(data, 'name', 128),
         rows: directory,
         previews: previews,

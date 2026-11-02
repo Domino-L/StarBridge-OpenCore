@@ -205,7 +205,9 @@ public static class InformationOverlayLayoutGeometry
         return key switch
         {
             "Notice" => new OverlayModuleConstraints(420, isWide ? 1040 : 1120, 52, 118),
-            "Squads" => new OverlayModuleConstraints(240, isWide ? 460 : 540, 150, 620),
+            // The overview scales down to one line, so it may be dragged shorter than the other modules.
+            // Never below the 5% a saved layout item keeps, or a tall screen would jump back on reload.
+            "Squads" => new OverlayModuleConstraints(240, isWide ? 460 : 540, Math.Max(72, surfaceHeight * 0.05), 620),
             "Members" => new OverlayModuleConstraints(240, isWide ? 480 : 520, 140, 440),
             "Chat" => new OverlayModuleConstraints(240, isWide ? 760 : 680, 104, 440),
             _ => new OverlayModuleConstraints(80, surfaceWidth, 50, surfaceHeight)

@@ -207,6 +207,7 @@ OverlayWorkspaceSettings _settings() {
             ? f.minimum.round()
             : f.minimum,
       OverlayWorkspaceFieldKind.color => '#FFFFFF',
+      OverlayWorkspaceFieldKind.hotkey => '',
       OverlayWorkspaceFieldKind.eventTypes => 0,
       OverlayWorkspaceFieldKind.eventDurations => <String, Object?>{},
     };

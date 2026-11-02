@@ -36,9 +36,11 @@ public sealed class LocalPrivacyDispatcher(LocalPrivacyStore store,
                     if (settings is null) return Error(request, "privacy_local.invalid_request");
                     // Event publication has its own contract; the realtime writer
                     // must not acknowledge event settings it cannot publish.
-                    if (settings.Events is not null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
-                    snapshot = store.Save(owner.Context, body.GetProperty("expectedRevision").GetInt64(),
-                        body.GetProperty("operationId").GetString()!, settings, CanCommit);
+                    if (settings.Events is not null || settings.OfficialFleet is not null) return Error(request, BridgeErrorCodes.CapabilityUnavailable);
+                    // This generic editor may retain, never create/rebind, the separate official choice.
+                    snapshot = store.SaveMerged(owner.Context, body.GetProperty("expectedRevision").GetInt64(),
+                        body.GetProperty("operationId").GetString()!,
+                        saved => settings with { OfficialFleet = saved.Settings?.OfficialFleet }, CanCommit, cancellation);
                 }
                 else
                 {
@@ -48,9 +50,11 @@ public sealed class LocalPrivacyDispatcher(LocalPrivacyStore store,
                 }
                 if (!CanCommit()) return Error(request, "privacy_local.account_changed");
                 return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, snapshot.Revision,
-                    snapshot.SavedAt, snapshot.OperationId, snapshot.Settings, publicationAvailable = false }), []);
+                    snapshot.SavedAt, snapshot.OperationId, Settings = snapshot.Settings is null ? null : snapshot.Settings with { OfficialFleet = null }, publicationAvailable = false }), []);
             }
             catch (LocalPrivacyException error) { return Error(request, error.Code); }
+            catch (TimeoutException) { return Error(request, "privacy_publication.timeout"); }
+            catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
             catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or
                 FormatException or OverflowException or BridgeProtocolException or ArgumentException)
             { return Error(request, "privacy_local.invalid_request"); }

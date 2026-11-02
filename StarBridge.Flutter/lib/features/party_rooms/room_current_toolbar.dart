@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
 import 'room_feedback.dart';
@@ -18,14 +19,10 @@ class RoomCurrentToolbar extends StatelessWidget {
     runSpacing: 8,
     children: [
       if (module.supportsInvitations)
-        OutlinedButton(
-          style: semanticActionStyle(
-            context,
-            ActionTone.info,
-            emphasis: ActionEmphasis.outlined,
-          ),
-          onPressed: module.canCommand
-              ? () => showRoomInvitations(context, module)
+        StarBridgeActionButton(
+          tone: ActionTone.info,
+          onActivate: module.canCommand
+              ? (source) => showRoomInvitations(context, module, source: source)
               : null,
           child: Text(
             '${roomActionText(context, 'invitations')} · ${module.directory?.receivedInvitations.length ?? 0}',
@@ -33,21 +30,23 @@ class RoomCurrentToolbar extends StatelessWidget {
         ),
       if (module.supportsInvitations &&
           module.selectedRoom?.viewerIsHost == true)
-        OutlinedButton(
-          onPressed: module.canInvite
-              ? () => showRoomInvitations(context, module, host: true)
+        StarBridgeActionButton(
+          onActivate: module.canInvite
+              ? (source) => showRoomInvitations(
+                  context,
+                  module,
+                  host: true,
+                  source: source,
+                )
               : null,
           child: Text(roomActionText(context, 'inviteFriends')),
         ),
       leaveAction ??
-          OutlinedButton(
-            style: semanticActionStyle(
-              context,
-              roomLeaveTone(module.selectedRoom),
-              emphasis: ActionEmphasis.outlined,
-            ),
-            onPressed: module.canCommand
-                ? () => leaveRoomDialog(context, module)
+          StarBridgeActionButton(
+            controlKey: const Key('room-leave-open'),
+            tone: roomLeaveTone(module.selectedRoom),
+            onActivate: module.canCommand
+                ? (source) => leaveRoomDialog(context, module, source: source)
                 : null,
             child: Text(roomActionText(context, 'leave')),
           ),

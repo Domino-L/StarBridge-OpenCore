@@ -10,12 +10,18 @@ internal static class AccountBridgeSchema
 
 internal static class AccountBridgeRequestNames
 {
+    internal const string ReadFriendsPage = "friends.readPage";
     internal const string GetCurrent = "account.getCurrent";
     internal const string UpdateAvatar = "account.updateAvatar";
+    internal const string ReadAvatar = "account.readAvatar";
+    internal const string UpdateCallSign = "account.updateCallSign";
     internal const string Login = "account.login";
     internal const string CancelLogin = "account.cancelLogin";
     internal const string Logout = "account.logout";
     internal const string GetProfile = "profile.getSelf";
+    internal const string ReadProfileDisplayCache = "profile.readDisplayCache";
+    internal const string GetProfileDisplayData = "profile.getDisplayData";
+    internal const string GetProfileTimeZoneDirectory = "profile.getTimeZoneDirectory";
     internal const string GetPersonalProfile = "personalProfile.getSelf";
     internal const string ReadMigrationHangar = "hangar.migrationRead";
     internal const string UpdatePersonalProfile = "personalProfile.updateSelf";
@@ -23,6 +29,38 @@ internal static class AccountBridgeRequestNames
     internal const string PreviewLegacyProfileMigration = "personalProfile.migrationPreview";
     internal const string ConfirmLegacyProfileMigration = "personalProfile.migrationConfirm";
     internal const string GetOfficialFleet = "officialFleet.getCurrent";
+    internal const string GetOfficialFleetIdentity = "officialFleet.getIdentity";
+    internal const string GetOfficialFleetPublicProfile = "officialFleet.getPublicProfile";
+    internal const string GetOfficialFleetRuntimeMembers = "officialFleet.getRuntimeMembers";
+    internal const string WaitOfficialFleetRuntimeActivity = "officialFleet.waitRuntimeActivity";
+    internal const string GetOfficialFleetMembers = "officialFleet.getMembers";
+    internal const string ReadOfficialFleetShips = "officialFleet.ships";
+    internal const string ReadOfficialFleetShipImage = "officialFleet.shipImage";
+    internal const string ReportOfficialFleetShipImage = "officialFleet.reportShipImage";
+    internal const string ReadOfficialFleetShipImageReportStatus = "officialFleet.shipImageReportStatus";
+    internal const string ReadOfficialFleetHangarSharing = "officialFleet.hangarSharing";
+    internal const string ReadOfficialFleetHangarSharingPage = "officialFleet.hangarSharingPage";
+    internal const string SaveOfficialFleetHangarSharing = "officialFleet.saveHangarSharing";
+    internal const string OfficialFleetCommunication = "officialFleet.communication";
+    internal const string ReadOfficialFleetGovernanceContext = "officialFleet.readGovernanceContext";
+    internal const string ReadOfficialFleetRankPolicy = "officialFleet.readRankPolicy";
+    internal const string WriteOfficialFleetRankPolicy = "officialFleet.writeRankPolicy";
+    internal const string UpdateOfficialFleetRolePermissions = "officialFleet.updateRolePermissions";
+    internal const string ReadOfficialFleetMemberRoles = "officialFleet.readMemberRoles";
+    internal const string AssignOfficialFleetRole = "officialFleet.assignRole";
+    internal const string RevokeOfficialFleetRole = "officialFleet.revokeRole";
+    internal const string ReadOfficialFleetGovernanceAudit = "officialFleet.readGovernanceAudit";
+    internal const string ReadOfficialFleetGovernanceOutcome = "officialFleet.readGovernanceOutcome";
+    internal const string ActivateOfficialFleetGovernance = "officialFleet.governance.activate";
+    internal const string RevokeOfficialFleetGovernanceActivation = "officialFleet.governance.revokeActivation";
+    internal const string ReadOfficialFleetRoleTemplates = "officialFleet.readRoleTemplates";
+    internal const string ManageOfficialFleetRoleTemplates = "officialFleet.manageRoleTemplates";
+    internal const string ReadOfficialFleetRoleTemplateOutcome = "officialFleet.readRoleTemplateOutcome";
+    internal const string ReadOfficialFleetAnnouncementEditor = "officialFleet.readAnnouncementEditor";
+    internal const string ManageOfficialFleetAnnouncements = "officialFleet.manageAnnouncements";
+    internal const string ReadOfficialFleetAnnouncementOutcome = "officialFleet.readAnnouncementOutcome";
+    internal const string WaitOfficialFleetActivity = "officialFleet.wait";
+    internal const string OfficialFleetRally = "officialFleet.rally";
     internal const string GetPartyRooms = "partyRooms.getDirectory";
     internal const string ReadFriends = "friends.read";
     internal const string ReadAccountSafety = "accountSafety.read";
@@ -106,20 +144,30 @@ internal static class AccountBridgeStableErrors
     internal const string ReauthorizationRequired = "account.reauthorization_required";
     internal const string OperationInProgress = "account.operation_in_progress";
     internal const string ProfileReadUnavailable = "profile.read_unavailable";
+    internal const string ProfileReadTransient = "profile.read_transient";
+    internal const string ProfileReadForbidden = "profile.read_forbidden";
+    internal const string ProfileDataInvalid = "profile.data_invalid";
     internal const string ProfileWriteForbidden = "profile.write_forbidden";
     internal const string ProfileWriteConflict = "profile.write_conflict";
     internal const string ProfileDirectoryUnavailable = "profile.directory_unavailable";
     internal const string GameIdentityReadUnavailable = "game_identity.read_unavailable";
     internal const string CompatibilityReadUnavailable = "account.compatibility_read_unavailable";
     internal const string CompatibilityWriteUnavailable = "account.compatibility_write_unavailable";
+    internal const string LegacyProofUnavailable = "account.legacy_proof_unavailable";
     internal const string CompatibilityConflict = "account.compatibility_conflict";
+    internal const string CompatibilityProofRejected = "account.compatibility_proof_rejected";
     internal const string CompatibilityExistingLinkMismatch = "account.compatibility_existing_link_mismatch";
     internal const string LegacyCredentialsRequired = "account.legacy_credentials_required";
     internal const string LegacyCredentialsRejected = "account.legacy_credentials_rejected";
     internal const string PersonalProfileReadUnavailable = "personal_profile.read_unavailable";
+    internal const string PersonalProfileReadTransient = "personal_profile.read_transient";
+    internal const string PersonalProfileReadForbidden = "personal_profile.read_forbidden";
+    internal const string PersonalProfileDataInvalid = "personal_profile.data_invalid";
     internal const string PersonalProfileWriteForbidden = "personal_profile.write_forbidden";
     internal const string PersonalProfileWriteConflict = "personal_profile.write_conflict";
     internal const string OfficialFleetReadUnavailable = "official_fleet.read_unavailable";
+    internal const string OfficialFleetReadTransient = "official_fleet.read_transient";
+    internal const string OfficialFleetReadForbidden = "official_fleet.read_forbidden";
     internal const string OfficialFleetDataInvalid = "official_fleet.data_invalid";
 }
 
@@ -149,7 +197,35 @@ internal sealed record AccountBridgeProfileProjection(
     string Source,
     DateTimeOffset? CachedAtUtc,
     IReadOnlyList<string> Locales,
-    IReadOnlyList<AccountBridgeTimeZone> TimeZones);
+    IReadOnlyList<AccountBridgeTimeZone> TimeZones,
+    DateTimeOffset? ObservedAtUtc = null);
+
+internal interface IAccountBridgeCurrentProjection
+{
+    // In-memory only: no IO, restore, owner check, loop start or observation.
+    // Returns null whenever the full GetCurrentAsync path would do more than
+    // project unchanged state; the caller then takes the ordinary queue.
+    AccountBridgeSessionProjection? TryProjectCurrent();
+}
+
+internal interface IAccountBridgeConcurrentResourceReads
+{
+    // DL-129 option 3: an SCM session may overlap the audited friend and
+    // organization directory/workspace/media reads. OAuth refresh is single-
+    // flight under its own gate, and each read commits its session only when it
+    // is newer. Account projection reads and every write stay exclusive.
+    bool SupportsConcurrentResourceReads { get; }
+}
+
+internal interface IAccountBridgeStagedProfileReader
+{
+    // Display only, bounded local IO; no credential refresh or account mutation.
+    AccountBridgeProfileProjection? ReadProfileDisplayCache(BridgeAccountContext context, CancellationToken token);
+    // Authenticated read stays on the normal exclusive account queue.
+    Task<AccountBridgeProfileProjection> GetProfileDisplayDataAsync(BridgeAccountContext context, CancellationToken token);
+    // Public auxiliary IO, no bearer/refresh/account mutation; recheck owner after IO.
+    Task<IReadOnlyList<AccountBridgeTimeZone>> GetProfileTimeZoneDirectoryAsync(BridgeAccountContext context, CancellationToken token);
+}
 
 internal readonly record struct AccountBridgePatchField(
     bool IsSpecified,
@@ -187,14 +263,29 @@ internal sealed record AccountBridgeOfficialFleetSummary(
     string Name,
     string? LogoUrl,
     string? OfficialRankName,
-    int? OfficialRankValue);
+    int? OfficialRankValue,
+    OfficialFleet.OfficialFleetProfile? Profile = null);
 
 internal sealed record AccountBridgeOfficialFleetProjection(
     string State,
     AccountBridgeOfficialFleetSummary? Fleet,
     string Freshness,
     long? ResourceVersion,
-    DateTimeOffset ObservedAtUtc);
+    DateTimeOffset ObservedAtUtc,
+    AccountBridgeOfficialFleetProfileRead? ProfileRead = null);
+
+internal sealed record AccountBridgeOfficialFleetProfileRead(string State, DateTimeOffset? ObservedAtUtc = null);
+
+internal sealed record AccountBridgeOfficialFleetPublicProfile(string SourceRef, string Sid,
+    OfficialFleet.OfficialFleetProfile? Profile, AccountBridgeOfficialFleetProfileRead ProfileRead);
+
+// Pure PermitAll public content IO. Implementations must not refresh credentials,
+// mutate account state or publish account transitions while executing this read.
+internal interface IAccountBridgeOfficialFleetProfileReader
+{
+    Task<AccountBridgeOfficialFleetPublicProfile> GetOfficialFleetPublicProfileAsync(
+        BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token);
+}
 
 internal sealed record AccountBridgeLegacyCredential(
     string AccountName,
@@ -202,8 +293,40 @@ internal sealed record AccountBridgeLegacyCredential(
 
 internal interface IAccountBridgeHost
 {
+    Task<object> OfficialFleetGovernanceManagementAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
+        string action, CancellationToken token) => throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> TradeProfileAsync(BridgeAccountContext context, bool write, System.Text.Json.JsonElement changes, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceListingsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceTradeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceRecordsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceChatAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceContractsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceWarehouseAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> MarketplaceNoticesAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<object> ReadMarketplaceReputationAsync(BridgeAccountContext context, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("marketplace.unavailable"));
+    Task<Achievements.ScmAchievementCatalog> ReadScmAchievementsAsync(BridgeAccountContext context, CancellationToken token) =>
+        Task.FromException<Achievements.ScmAchievementCatalog>(new AccountBridgeHostException("scmAchievements.unavailable"));
+    Task TriggerScmAchievementsAsync(BridgeAccountContext context, CancellationToken token) =>
+        Task.FromException(new AccountBridgeHostException("scmAchievements.unavailable"));
+    Task<object> SubmitAchievementIdeaAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("ideas.unavailable"));
+    Task<object> DailySupportAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, bool claim, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("support.unavailable"));
     Task<object> UpdateAvatarAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         Task.FromException<object>(new AccountBridgeHostException("account.avatar_unavailable"));
+    Task<object> ReadAvatarAsync(BridgeAccountContext context, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("account.avatar_unavailable"));
+    Task<object> UpdateCallSignAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("account.callsign_unavailable"));
     bool PresenceRequiresSessionConfirmation => true;
     Task<StarBridge.Core.Presence.PlayerPresenceVisibilityMode> SetPresenceVisibilityAuthorityAsync(
         BridgeAccountContext owner, long generation, StarBridge.Core.Presence.PlayerPresenceVisibilityMode mode,
@@ -281,7 +404,8 @@ internal interface IAccountBridgeHost
 
     Task<StarBridge.HostRuntime.Auth.LegacyProfileMigrationView> MigrateLegacyProfileAsync(
         BridgeAccountContext context, string action, string? previewId, bool replaceExisting,
-        CancellationToken cancellationToken, StarBridge.HostRuntime.Auth.LegacyProfileCredential? credentials = null) =>
+        CancellationToken cancellationToken, StarBridge.HostRuntime.Auth.LegacyProfileCredential? credentials = null,
+        StarBridge.HostRuntime.Auth.LegacyProfileImportSelection? selection = null) =>
         Task.FromResult(new StarBridge.HostRuntime.Auth.LegacyProfileMigrationView("sourceUnavailable"));
 
     Task<PersonalProfileDocumentContract> UpdatePersonalProfileAsync(
@@ -289,14 +413,74 @@ internal interface IAccountBridgeHost
         PersonalProfilePresentationUpdateContract update,
         CancellationToken cancellationToken);
 
+    Task<PersonalProfileDocumentContract> UpdatePagePresentationAsync(
+        BridgeAccountContext context, PersonalProfilePageEditContract edit, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("personal_profile.write_unavailable");
+
     Task<AccountBridgeOfficialFleetProjection> GetOfficialFleetAsync(
         BridgeAccountContext context,
         CancellationToken cancellationToken);
+
+    Task<AccountBridgeOfficialFleetProjection> GetOfficialFleetIdentityAsync(
+        BridgeAccountContext context, CancellationToken token) => GetOfficialFleetAsync(context, token);
+
+    Task<object> OfficialFleetCommunicationAsync(BridgeAccountContext context,
+        System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException(AccountBridgeStableErrors.OfficialFleetReadUnavailable);
+
+    Task<object> ReadOfficialFleetRoleTemplatesAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+
+    Task<object> ManageOfficialFleetRoleTemplatesAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+
+    Task<object> ReadOfficialFleetRoleTemplateOutcomeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+
+    Task<object> ReadOfficialFleetGovernanceContextAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ActivateOfficialFleetGovernanceAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> RevokeOfficialFleetGovernanceActivationAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+
+    Task<object> ReadOfficialFleetAnnouncementEditorAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ManageOfficialFleetAnnouncementsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ReadOfficialFleetAnnouncementOutcomeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+
+    Task<object> ReadOfficialFleetShipsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ReadOfficialFleetShipImageAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ReportOfficialFleetShipImageAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ReadOfficialFleetShipImageReportStatusAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> ReadOfficialFleetHangarSharingAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("officialFleet.unavailable");
+    Task<object> ReadOfficialFleetHangarSharingPageAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("officialFleet.unavailable");
+    Task<object> SaveOfficialFleetHangarSharingAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("officialFleet.unavailable");
+    Task<object> WaitOfficialFleetRuntimeActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException("official_fleet.runtime_unavailable");
+    Task<object> GetOfficialFleetRuntimeMembersAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("official_fleet.runtime_unavailable");
+    Task<object> GetOfficialFleetMembersAsync(BridgeAccountContext context,
+        System.Text.Json.JsonElement payload, CancellationToken cancellationToken) =>
+        throw new AccountBridgeHostException(AccountBridgeStableErrors.OfficialFleetReadUnavailable);
 
     Task<object> WaitSocialActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new NotSupportedException();
     Task<object> WaitCommunityActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new NotSupportedException();
+    Task<object> WaitOfficialFleetActivityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
+    Task<object> OfficialFleetRallyAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        throw new AccountBridgeHostException("communities.unavailable");
     Task<object> ReadDirectMessagesAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new AccountBridgeHostException("directMessages.unavailable");
 
@@ -341,6 +525,7 @@ internal interface IAccountBridgeHost
     Task<object> ReadCommunityHangarSharingAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         Task.FromException<object>(new AccountBridgeHostException("communities.unavailable"));
     void ConfigureHangarSharingSource(Func<BridgeAccountContext, StarBridge.HostRuntime.Hangar.LocalHangarSnapshot> read) { }
+    void ConfigureHangarSharingImages(Func<BridgeAccountContext, long, string, string?> read) { }
     Task<StarBridge.HostRuntime.Hangar.HangarPublicationOutcome> UpdateSharedHangarAfterSaveAsync(
         BridgeAccountContext context, long generation, long revision, CancellationToken token) =>
         Task.FromResult(StarBridge.HostRuntime.Hangar.HangarPublicationOutcome.Rejected);
@@ -479,6 +664,9 @@ internal interface IAccountBridgeHost
     // Implementations must not restore credentials, read files or perform HTTP.
     AccountBridgeIdentityProjection? ReadCurrentGameIdentityPolicy(BridgeAccountContext context) => null;
 
+    // Host-only storage ownership, not a replacement Bridge authentication identity.
+    BridgeAccountContext ResolveLocalDataOwner(BridgeAccountContext context) => context;
+
     Task<object> PrepareHandleChangeAsync(BridgeAccountContext context, CancellationToken token) =>
         throw new AccountBridgeHostException("identity.unavailable");
     Task<object> ConfirmHandleChangeAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
@@ -490,10 +678,12 @@ internal interface IAccountBridgeHost
 internal sealed class AccountBridgeHostException(
     string code,
     bool retryable = false,
-    System.Net.HttpStatusCode? httpStatus = null) : Exception(code)
+    System.Net.HttpStatusCode? httpStatus = null,
+    string? membershipUpdatedAt = null) : Exception(code)
 {
     internal string Code { get; } = code;
 
     internal bool Retryable { get; } = retryable;
     internal System.Net.HttpStatusCode? HttpStatus { get; } = httpStatus;
+    internal string? MembershipUpdatedAt { get; } = membershipUpdatedAt;
 }

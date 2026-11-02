@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_page_route.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/routing/open_destination_intent.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -62,12 +65,12 @@ class GeneralSettingsDataSections extends StatelessWidget {
           spacing: context.tokens.space.sm,
           runSpacing: context.tokens.space.sm,
           children: [
-            OutlinedButton(
-              key: const Key('general-overlay-settings'),
-              onPressed:
+            StarBridgeActionButton(
+              controlKey: const Key('general-overlay-settings'),
+              onActivate:
                   Actions.maybeFind<OpenDestinationIntent>(context) == null
                   ? null
-                  : () => Actions.invoke(
+                  : (_) => Actions.invoke(
                       context,
                       const OpenDestinationIntent('/overlay'),
                     ),
@@ -76,25 +79,28 @@ class GeneralSettingsDataSections extends StatelessWidget {
             ClientVersionButton(
               open: SettingsEntryOverrides.of(context)['client-version'],
             ),
-            OutlinedButton(
-              key: const Key('general-about-application'),
-              onPressed: () {
+            StarBridgeActionButton(
+              controlKey: const Key('general-about-application'),
+              onActivate: (source) {
                 final openers = SettingsEntryOverrides.of(context);
                 Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  StarBridgePageRoute<void>.fromContext(
+                    context,
+                    source: source,
                     builder: (_) => SettingsEntryOverrides(
                       openers: openers,
                       child: Scaffold(
                         appBar: AppBar(
                           leading: Builder(
-                            builder: (routeContext) => IconButton(
-                              key: const Key('general-about-back'),
-                              tooltip: MaterialLocalizations.of(routeContext)
+                            builder: (routeContext) => StarBridgeIconAction(
+                              controlKey: const Key('general-about-back'),
+                              label: MaterialLocalizations.of(routeContext)
                                   .closeButtonTooltip,
                               icon: const StarBridgeIcon(
                                 StarBridgeIconSemantic.windowClose,
                               ),
-                              onPressed: () => Navigator.of(routeContext).pop(),
+                              onActivate: (_) =>
+                                  Navigator.of(routeContext).pop(),
                             ),
                           ),
                           title: Text(

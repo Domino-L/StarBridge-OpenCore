@@ -18,6 +18,7 @@ internal sealed class GameLogLocationNameIndex
     private readonly List<(Regex Pattern, GameLogLocationName Name)> _dynamic = [];
     private readonly Dictionary<string, string> _canonicalCodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _compatibilityNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _parents = new(StringComparer.OrdinalIgnoreCase);
     private Regex _instanceSuffix = new(@"\s*\[\d+\]\s*$", RegexOptions.CultureInvariant, PatternTimeout);
     private string _optionalPrefix = "LOC_";
 
@@ -29,7 +30,16 @@ internal sealed class GameLogLocationNameIndex
             .GetManifestResourceStream("StarBridge.LocationCatalog.json");
         using var compatibility = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream("StarBridge.LocationCompatibilityNames.txt");
-        return Load(stream, compatibility);
+        var index = Load(stream, compatibility);
+        using var hierarchy = Assembly.GetExecutingAssembly().GetManifestResourceStream("StarBridge.LocationHierarchy.json");
+        if (hierarchy is not null)
+        {
+            // The shared display pack omits parentCode. Reuse this loader with the source catalog.
+            var catalog = Load(hierarchy);
+            foreach (var entry in catalog._parents) index._parents[entry.Key] = entry.Value;
+            foreach (var entry in catalog._canonicalCodes) index._canonicalCodes[entry.Key] = entry.Value;
+        }
+        return index;
     }
 
     // Caller owns the stream. Keeps optional-data behavior testable without
@@ -87,6 +97,8 @@ internal sealed class GameLogLocationNameIndex
                     return new GameLogLocationNameIndex();
                 }
                 index.Add(code, new(english, Safe(chinese, 256) ? chinese : null));
+                var parent = Text(entry, "parentCode");
+                index._parents[code] = Safe(parent, 256) ? parent : null;
             }
 
             if (root.TryGetProperty("aliases", out var aliases))
@@ -143,6 +155,25 @@ internal sealed class GameLogLocationNameIndex
         {
             return new GameLogLocationNameIndex();
         }
+    }
+
+    internal string? FindCity(string raw)
+    {
+        var code = _instanceSuffix.Replace(raw.Trim(), string.Empty);
+        if (!_canonicalCodes.TryGetValue(code, out var canonical))
+        {
+            var alternate = code.StartsWith(_optionalPrefix, StringComparison.OrdinalIgnoreCase)
+                ? code[_optionalPrefix.Length..] : _optionalPrefix + code;
+            if (!_canonicalCodes.TryGetValue(alternate, out canonical)) return null;
+        }
+        var hierarchy = new List<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (canonical is not null && visited.Add(canonical) && _parents.TryGetValue(canonical, out var parent))
+        {
+            hierarchy.Add(canonical);
+            canonical = parent;
+        }
+        return Core.Achievements.JourneyAchievementPolicy.ResolveCity(hierarchy);
     }
 
     internal GameLogLocationName? Find(string raw)

@@ -84,6 +84,52 @@ internal static class CommunityClientTests
         try { await client.ReadAsync("test-bearer", new("discover", "", null, null), "A:2", default); throw new Exception("Expected old-service gate"); }
         catch (AccountBridgeHostException e) when (e.Code == "communities.upgradeRequired") { }
         Check(writes == 2, "Old service does not trigger a fallback write");
+        await VerifyDeparture();
+    }
+    private static async Task VerifyDeparture()
+    {
+        foreach (var scenario in new[] { "confirmed", "private-hidden", "reply-lost", "still-member", "identity-failed" })
+        {
+            var member = true;
+            var writes = 0;
+            var reads = 0;
+            using var handler = new Handler(async request =>
+            {
+                Check(request.Headers.Authorization?.Parameter == "scm-only", "Departure uses SCM bearer only");
+                if (request.Method == HttpMethod.Post)
+                {
+                    writes++;
+                    Check(request.RequestUri!.AbsolutePath == "/api/fleets/leave" && request.RequestUri.Query == "",
+                        "Departure uses ordinary exit, not ownership transfer or disband");
+                    var body = await request.Content!.ReadFromJsonAsync<JsonElement>();
+                    Check(body.EnumerateObject().Count() == 1 && body.GetProperty("fleetCode").GetString() == "SCM",
+                        "Departure sends only the Host-resolved organization code");
+                    member = scenario == "still-member";
+                    if (scenario == "reply-lost") throw new HttpRequestException("Synthetic lost response");
+                    return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { schemaVersion = 1, status = "accepted" }) };
+                }
+                reads++;
+                if (scenario == "identity-failed" && reads > 1) return new(HttpStatusCode.Unauthorized);
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new {
+                    schemaVersion = 1, membershipModelVersion = 2, view = "discover", query = "", next = (string?)null,
+                    items = !member && scenario == "private-hidden" ? [] : new[] { new {
+                        code = "SCM", name = "Synthetic organization", description = "", language = "", activeTime = "",
+                        memberCount = 1, relationship = member ? "member" : "none", joinMode = "direct",
+                        actions = member ? new[] { "leave" } : new[] { "join" }, logoImageData = (string?)null
+                    } }
+                }) };
+            });
+            using var client = new CommunityClient(new Uri("https://communities.invalid"), handler);
+            var page = await client.ReadAsync("scm-only", new("discover", "", null, null), "SCM:1", default);
+            var command = JsonSerializer.SerializeToElement(new { schemaVersion = 1, action = "leave", targetRef = page.Items[0].TargetRef });
+            var result = await client.ExecuteAsync("scm-only", command, "SCM:1", () => { }, default);
+            var expected = scenario is "confirmed" or "private-hidden" ? "accepted" : scenario == "identity-failed" ? "rejected" : "unknown";
+            Check(result.Status == expected && writes == (scenario == "identity-failed" ? 0 : 1),
+                "Departure outcome requires authoritative membership confirmation: " + scenario);
+            var replay = await client.ExecuteAsync("scm-only", command, "SCM:1", () => { }, default);
+            Check(replay.Status == "rejected" && writes == (scenario == "identity-failed" ? 0 : 1),
+                "Departure cannot replay a consumed or identity-rejected command");
+        }
     }
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler

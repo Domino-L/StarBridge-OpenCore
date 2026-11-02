@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/account/account_models.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_caption_action.dart';
 import 'package:starbridge_flutter/app/startup/startup_brand_logo.dart';
 import 'package:starbridge_flutter/app/startup/startup_loading_page.dart';
 import 'package:starbridge_flutter/app/startup/startup_motion_spec.dart';
@@ -16,12 +17,78 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
+import 'package:starbridge_flutter/features/onboarding/connection_mode_controller.dart';
+
+import '../features/onboarding/connection_mode_test.dart'
+    show ModePort, modeFact;
 
 void main() {
+  testWidgets(
+    'pending recovery names the required action, not an unavailable account',
+    (tester) async {
+      final port = ModePort()..current = modeFact('signInRequired');
+      final mode = ConnectionModeController(port);
+      await tester.runAsync(mode.refresh);
+      final session = StartupSession();
+      await _pump(tester, session, confirmed: true);
+      session.resolveAccount(
+        const AccountProjection.loading().copyWith(
+          operation: AccountOperation.none,
+          failure: const AccountFailure(
+            code: 'account.local_mode',
+            messageKey: 'account.error.unavailable',
+            retryable: false,
+          ),
+        ),
+        connectionMode: mode,
+      );
+      await tester.pump();
+      expect(find.text('恢复在线尚未完成'), findsOneWidget);
+      expect(find.text('暂时无法确认账号状态'), findsNothing);
+      expect(find.byKey(const Key('startup-retry')), findsNothing);
+      expect(find.byKey(const Key('startup-enter')), findsOneWidget);
+      expect(mode.allowsOnlineTraffic, false);
+      expect(port.writes, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      session.dispose();
+      mode.dispose();
+      await port.events.close();
+    },
+  );
+  testWidgets('confirmed offline cold start does not show account failure', (
+    tester,
+  ) async {
+    final port = ModePort()..current = modeFact('offline');
+    final mode = ConnectionModeController(port);
+    await tester.runAsync(mode.refresh);
+    final session = StartupSession();
+    await _pump(tester, session, confirmed: true);
+    session.resolveAccount(
+      const AccountProjection.loading().copyWith(
+        operation: AccountOperation.none,
+        sessionState: AccountSessionState.credentialTemporarilyUnavailable,
+        failure: const AccountFailure(
+          code: 'account.local_mode',
+          messageKey: 'account.error.unavailable',
+          retryable: false,
+        ),
+      ),
+      connectionMode: mode,
+    );
+    await tester.pump();
+    expect(find.text('暂时无法确认账号状态'), findsNothing);
+    expect(session.value, StartupPhase.ready);
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+    mode.dispose();
+    await port.events.close();
+  });
   setUpAll(() async {
     if (const bool.fromEnvironment('STARTUP_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       }.entries) {
         await (FontLoader(
@@ -165,9 +232,17 @@ void main() {
     addTearDown(session.dispose);
     final chrome = InMemoryWindowChrome();
     await _pump(tester, session, chrome: chrome);
-    await tester.tap(find.byTooltip('最小化'));
+    await tester.tap(
+      find.byWidgetPredicate(
+        (w) => w is StarBridgeCaptionAction && w.label == '最小化',
+      ),
+    );
     await tester.tap(find.byKey(const Key('window-maximize-control')));
-    await tester.tap(find.byTooltip('关闭'));
+    await tester.tap(
+      find.byWidgetPredicate(
+        (w) => w is StarBridgeCaptionAction && w.label == '关闭',
+      ),
+    );
     expect(chrome.commands, ['minimize', 'toggleMaximize', 'close']);
   });
 

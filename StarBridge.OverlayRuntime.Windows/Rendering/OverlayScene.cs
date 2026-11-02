@@ -26,6 +26,12 @@ public sealed record OverlaySceneContext(
     string? ChatChannelTitle = null,
     bool IsLocalOnly = false)
 {
+    // A complete privacy projection, including self; no local enrichment downstream.
+    internal bool SharedFieldsOnly { get; init; }
+    // The viewer's own place from the local game log, for the "you are here" line on
+    // their own screen. Never counted into the organization's numbers or sent anywhere.
+    internal string? LocalOwnPlace { get; init; }
+
     public static OverlaySceneContext Fleet(OverlayScenePreference preference, bool isFallback = false) =>
         new(preference, OverlaySceneKind.Fleet, "舰队", isFallback);
 
@@ -69,40 +75,44 @@ internal sealed record OverlayModuleScene(OverlaySceneSnapshot Scene, OverlayCom
     IReadOnlyList<OverlayChatMessage> Chat, string? SourceLabel, bool Available, string? Identity)
 {
     internal string? ResourceKey { get; init; }
-    internal string? EmptyMessage { get; init; }
+    internal OverlayModuleEmptyState? EmptyMessage { get; init; }
     internal IReadOnlyList<string>? ChatSourceKeys { get; init; }
+    // The module has its own source instead of following the shared choice.
+    internal bool OwnSource { get; init; }
 }
 
 // Status is presentation metadata, never an announcement, event or chat row.
 // In particular it cannot acquire a countdown, receipt or replay identity.
-internal sealed record OverlayModuleEmptyStates(string? Notice = null, string? Overview = null,
-    string? Members = null, string? Chat = null, string? Events = null)
+internal sealed record OverlayModuleEmptyStates(OverlayModuleEmptyState? Notice = null, OverlayModuleEmptyState? Overview = null,
+    OverlayModuleEmptyState? Members = null, OverlayModuleEmptyState? Chat = null, OverlayModuleEmptyState? Events = null)
 {
     internal static readonly OverlayModuleEmptyStates Empty = new();
     internal static OverlayModuleEmptyStates From(OverlayModulePresentation? modules) => modules is null ? Empty :
         new(modules.Notice.EmptyMessage, modules.Overview.EmptyMessage, modules.Members.EmptyMessage,
             modules.Chat.EmptyMessage, modules.Events.EmptyMessage);
-    internal static string? Message(OverlayResolvedSource source, string language)
-    {
-        if (source.Available || source.UnavailableReason == "module_hidden") return null;
-        var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-        var traditional = language is "zh-Hant" or "zh-TW";
-        return source.Mode switch
-        {
-            OverlaySourceMode.Room => zh ? traditional ? "房間資訊暫不可用" : "房间信息暂不可用" : "Room information unavailable",
-            OverlaySourceMode.Community => zh ? traditional ? "此組織暫不可用" : "该组织暂不可用" : "Organization unavailable",
-            _ => zh ? traditional ? "資訊暫不可用" : "信息暂不可用" : "Information unavailable"
-        };
-    }
 }
 
+// Every visible module names its source; Own marks modules that do not follow
+// the shared choice, which the renderer accents and which keep row prefixes.
 internal sealed record OverlayModuleSourceLabels(string? Notice = null, string? Overview = null,
     string? Members = null, string? Chat = null, string? Events = null)
 {
+    internal OverlayModuleFlags Own { get; init; }
     internal static readonly OverlayModuleSourceLabels Empty = new();
     internal static OverlayModuleSourceLabels From(OverlayModulePresentation? modules) => modules is null ? Empty :
         new(modules.Notice.SourceLabel, modules.Overview.SourceLabel, modules.Members.SourceLabel,
-            modules.Chat.SourceLabel, modules.Events.SourceLabel);
+            modules.Chat.SourceLabel, modules.Events.SourceLabel)
+        {
+            Own = (modules.Notice.OwnSource ? OverlayModuleFlags.Notice : 0) |
+                (modules.Overview.OwnSource ? OverlayModuleFlags.Overview : 0) |
+                (modules.Members.OwnSource ? OverlayModuleFlags.Members : 0) |
+                (modules.Chat.OwnSource ? OverlayModuleFlags.Chat : 0) |
+                (modules.Events.OwnSource ? OverlayModuleFlags.Events : 0)
+        };
+    internal bool IsOwn(OverlayModuleFlags module) => (Own & module) != 0;
+    // Event cards and barrage rows have no title, so only an own source is
+    // repeated on each row; a shared source is already named by the header.
+    internal string? RowPrefix(OverlayModuleFlags module, string? label) => IsOwn(module) ? label : null;
     internal static string Prefix(string title, string? label, bool deviceLocal) =>
         deviceLocal || string.IsNullOrWhiteSpace(label) ? title : $"[{label}] {title}";
 }
@@ -119,6 +129,7 @@ internal sealed record OverlayModulePresentation(OverlayModuleScene Notice, Over
 
     private static bool Same(OverlayModuleScene left, OverlayModuleScene right) =>
         left.Available == right.Available && left.Identity == right.Identity && left.ResourceKey == right.ResourceKey && left.SourceLabel == right.SourceLabel && left.EmptyMessage == right.EmptyMessage &&
+        left.OwnSource == right.OwnSource &&
         (left.ChatSourceKeys ?? []).SequenceEqual(right.ChatSourceKeys ?? []) &&
         left.Scene.HasContent == right.Scene.HasContent && left.Scene.Context == right.Scene.Context &&
         left.Scene.Players.SequenceEqual(right.Scene.Players) && left.Command == right.Command && left.Chat.SequenceEqual(right.Chat);
@@ -136,7 +147,11 @@ public static partial class OverlaySceneResolver
         var callsign = FirstNonEmpty(member.Callsign, member.GameId, name);
         var presence = ResolveRoomPresence(member.PresenceText);
         var online = PlayerPresence.IsOnline(presence);
-        var liveStatus = PlayerPresence.ToWireValue(presence);
+        // Preserve the paused wire fact for comparison without changing the
+        // public/shared offline presentation policy.
+        var liveStatus = PlayerPresence.ToWireValue(
+            PlayerPresencePresentation.Resolve(member.PresenceText, "Online") == PlayerPresenceKind.Paused
+                ? PlayerPresenceKind.Paused : presence);
         var rawLocation = NormalizeRoomValue(member.LocationText, "等待位置同步");
         var location = FormatRoomLocation(rawLocation);
         var ship = ShipDisplayNamePresentation.ResolveChinese(

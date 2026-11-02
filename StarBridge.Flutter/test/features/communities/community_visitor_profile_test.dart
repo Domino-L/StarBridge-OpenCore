@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,6 +91,177 @@ class DelayedAvatarVisitorPort extends VisitorPort {
 
 void main() {
   setUpAll(loadFonts);
+  const wirePath = String.fromEnvironment('STARBRIDGE_VISITOR_BRIDGE_INPUT');
+  test(
+    'Java runtime to Host bridge fixture reaches Flutter read-only projection',
+    () async {
+      final file = File(wirePath);
+      expect(file.isAbsolute, isTrue);
+      expect(file.lengthSync(), lessThanOrEqualTo(64 * 1024));
+      final payload = (jsonDecode(file.readAsStringSync()) as Map)
+          .cast<String, Object?>();
+      final snapshot = parsePersonalProfileSnapshot(payload);
+      final projection = PersonalProfileProjection.fromSnapshot(snapshot);
+      expect(snapshot.availability, PersonalProfileAvailability.available);
+      expect(snapshot.callSign, 'Synthetic Visitor');
+      expect(snapshot.gameHandle, '');
+      final identity = (payload['profile'] as Map)['identity'] as Map;
+      expect(projection.avatarImageData, identity['avatarAssetId']);
+      expect(projection.avatarImageData, startsWith('data:image/png;base64,'));
+      final codec = await ui.instantiateImageCodec(
+        base64Decode(projection.avatarImageData!.split(',').last),
+      );
+      try {
+        final frame = await codec.getNextFrame();
+        try {
+          expect(frame.image.width, 1);
+          expect(frame.image.height, 1);
+          final pixels = await frame.image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          expect(pixels!.buffer.asUint8List(), [0x34, 0x56, 0x78, 0xff]);
+        } finally {
+          frame.image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+      expect(projection.canEdit, isFalse);
+      expect(snapshot.presentation, isNull);
+      expect(projection.moduleLayout, hasLength(64));
+      for (var index = 0; index < 64; index++) {
+        final module = projection.moduleLayout[index];
+        expect(module.moduleId, 'favorite-ships-${index + 1}');
+        expect(module.isVisible, isFalse);
+        expect(module.favoriteShipIds, [
+          (index + 1).toRadixString(16).padLeft(32, '0'),
+        ]);
+      }
+    },
+    skip: wirePath.isEmpty
+        ? 'Requires the synthetic Java -> Host fixture path'
+        : false,
+  );
+  test('authorized visitor may redact Handle without losing the page', () {
+    final profile = Map<String, Object?>.from(
+      visitorPayload['profile']! as Map,
+    );
+    profile['identity'] = {'callSign': 'Visitor Pilot', 'gameHandle': ''};
+    final result = parsePersonalProfileSnapshot({
+      ...visitorPayload,
+      'profile': profile,
+    });
+    expect(result.gameHandle, '');
+    expect(result.allowEditing, isFalse);
+    expect(result.availability, PersonalProfileAvailability.available);
+  });
+  test('read-only visitor retains 64 modules without owner edit metadata', () {
+    final profile = Map<String, Object?>.from(
+      visitorPayload['profile']! as Map,
+    );
+    profile['identity'] = {'callSign': 'Visitor Pilot', 'gameHandle': ''};
+    profile['content'] = {
+      'introduction': 'Shared layout',
+      'modules': [
+        for (var index = 0; index < 64; index++)
+          {
+            'id': 'favorite-ships-${index + 1}',
+            'span': 1,
+            'order': index,
+            'position': -1,
+            'isVisible': false,
+            'favoriteShipIds': [(index + 1).toRadixString(16).padLeft(32, '0')],
+          },
+      ],
+    };
+    final result = parsePersonalProfileSnapshot({
+      ...visitorPayload,
+      'profile': profile,
+    });
+    final projection = PersonalProfileProjection.fromSnapshot(result);
+    expect(projection.moduleLayout, hasLength(64));
+    expect(projection.moduleLayout.last.moduleId, 'favorite-ships-64');
+    expect(projection.moduleLayout.last.favoriteShipIds, [
+      '00000000000000000000000000000040',
+    ]);
+    expect(
+      projection.moduleLayout.every((module) => !module.isVisible),
+      isTrue,
+    );
+    expect(result.presentation, isNull);
+    expect(projection.canEdit, isFalse);
+    expect(result.gameHandle, '');
+  });
+  test(
+    'visitor Handle redaction does not accept missing or malformed identity',
+    () {
+      for (final handle in [null, 42, ' ']) {
+        final profile = Map<String, Object?>.from(
+          visitorPayload['profile']! as Map,
+        );
+        profile['identity'] = {
+          'callSign': 'Visitor Pilot',
+          'gameHandle': handle,
+        };
+        expect(
+          () => parsePersonalProfileSnapshot({
+            ...visitorPayload,
+            'profile': profile,
+          }),
+          throwsA(isA<BridgeFormatException>()),
+        );
+      }
+      final profile = Map<String, Object?>.from(
+        visitorPayload['profile']! as Map,
+      );
+      profile['identity'] = {'callSign': 'Owner Pilot', 'gameHandle': ''};
+      expect(
+        () => parsePersonalProfileSnapshot({
+          ...visitorPayload,
+          'editable': true,
+          'profile': profile,
+        }),
+        throwsA(isA<BridgeFormatException>()),
+      );
+    },
+  );
+  testWidgets('fresh visitor profile avatar wins over the entry thumbnail', (
+    tester,
+  ) async {
+    final p = VisitorPort();
+    addTearDown(p.changes.close);
+    const currentAvatar =
+        'data:image/png;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+    final profile = Map<String, Object?>.from(
+      visitorPayload['profile']! as Map,
+    );
+    profile['identity'] = {
+      'callSign': 'Visitor Pilot',
+      'gameHandle': 'Visitor_Handle',
+      'avatarAssetId': currentAvatar,
+    };
+    p.pending = Completer<PersonalProfileSnapshot>()
+      ..complete(
+        parsePersonalProfileSnapshot({...visitorPayload, 'profile': profile}),
+      );
+    await tester.pumpWidget(
+      app(
+        UserProfilePage(
+          port: p,
+          target: UserTarget.community('a' * 32, 'b' * 32),
+          avatarImageData: 'stale-entry-avatar',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<PersonalProfileAvatar>(find.byType(PersonalProfileAvatar))
+          .imageData,
+      currentAvatar,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'visitor without an entry photo loads its authorized avatar without blocking profile content',
     (tester) async {
@@ -120,6 +294,85 @@ void main() {
             .imageData,
         'authorized-avatar-fixture',
       );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final failureKey in [
+    'profile.visitor.notVisible',
+    'profile.error.unavailable',
+  ]) {
+    testWidgets(
+      'visitor refresh clears stale content and avatar on $failureKey',
+      (tester) async {
+        final p = VisitorPort();
+        addTearDown(p.changes.close);
+        await tester.pumpWidget(
+          app(
+            UserProfilePage(
+              port: p,
+              target: UserTarget.community('a' * 32, 'b' * 32),
+              avatarImageData: 'entry-avatar',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Authorized shared introduction'), findsOneWidget);
+        expect(find.byType(PersonalProfileAvatar), findsOneWidget);
+
+        p.pending = Completer<PersonalProfileSnapshot>();
+        await tester.tap(find.byKey(const Key('visitor-profile-refresh')));
+        await tester.pump();
+        expect(find.text('Authorized shared introduction'), findsNothing);
+        expect(find.byType(PersonalProfileAvatar), findsNothing);
+        p.pending!.complete(
+          PersonalProfileSnapshot.unavailable(failureKey: failureKey),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Visitor Pilot'), findsNothing);
+        expect(find.byType(PersonalProfileAvatar), findsNothing);
+
+        p.pending = null;
+        await tester.tap(find.byKey(const Key('visitor-profile-refresh')));
+        await tester.pumpAndSettle();
+        expect(find.text('Authorized shared introduction'), findsOneWidget);
+        expect(p.reads, 3);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'late refreshed visitor profile cannot return after account invalidation',
+    (tester) async {
+      final p = VisitorPort();
+      addTearDown(p.changes.close);
+      await tester.pumpWidget(
+        app(
+          UserProfilePage(
+            port: p,
+            target: UserTarget.community('a' * 32, 'b' * 32),
+            avatarImageData: 'retired-entry-avatar',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      p.pending = Completer<PersonalProfileSnapshot>();
+      await tester.tap(find.byKey(const Key('visitor-profile-refresh')));
+      await tester.pump();
+      p.changes.add(null);
+      await tester.pump();
+      p.pending!.complete(parsePersonalProfileSnapshot(visitorPayload));
+      await tester.pumpAndSettle();
+      expect(find.text('Visitor Pilot'), findsNothing);
+      expect(find.text('Authorized shared introduction'), findsNothing);
+      expect(find.byType(PersonalProfileAvatar), findsNothing);
+      await tester.tap(find.byKey(const Key('visitor-profile-refresh')));
+      await tester.pumpAndSettle();
+      expect(p.reads, 2);
+      expect(find.text('Visitor Pilot'), findsNothing);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
   );

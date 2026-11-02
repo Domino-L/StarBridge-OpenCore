@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:starbridge_flutter/features/settings/community_sharing.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_page.dart';
@@ -78,7 +79,7 @@ void main() {
         );
         expect(
           tester
-              .widget<SwitchListTile>(
+              .widget<StarBridgeSwitch>(
                 find.byKey(const Key('privacy-location-confidence')),
               )
               .onChanged,

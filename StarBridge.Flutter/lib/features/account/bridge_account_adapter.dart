@@ -5,13 +5,25 @@ import '../../platform/bridge/bridge_envelope.dart';
 import 'account_models.dart';
 import 'account_port.dart';
 import 'account_payload_decoder.dart';
+import 'account_preference_confirmation.dart';
 import 'legacy_profile_migration.dart';
 import 'password_recovery.dart';
 import 'legacy_password_login.dart';
+import 'bridge_account_profile_read_failure.dart';
+import 'bridge_account_failure.dart';
+import 'account_read_preparation.dart';
+import 'bridge_account_staged_read.dart';
+import 'bridge_account_legacy_snapshot.dart';
+import 'bridge_account_legacy_presentation.dart';
+import 'account_avatar_read_preparation.dart';
+import 'account_restore_display.dart';
 
 final class BridgeAccountAdapter
     implements
         AccountPort,
+        AccountReadPreparationPort,
+        AccountAvatarReadPreparationPort,
+        AccountRestoreDisplayPort,
         LegacyProfileMigrationPort,
         PasswordRecoveryPort,
         LegacyPasswordLoginPort {
@@ -25,6 +37,89 @@ final class BridgeAccountAdapter
   late final StreamSubscription<BridgeEnvelope> _eventSubscription;
   BridgeAccountContext? _accountContext;
   AccountHostSnapshot? _lastSnapshot;
+  AccountProfileReadSnapshot? _profileReadSnapshot;
+  late final _stagedReads = AccountStagedRead(_session);
+  late final _avatarReads = AccountAvatarReadPreparation(_session);
+  late final _restoreDisplay = AccountRestoreDisplay(_session);
+  @override
+  AccountRestoreDisplay get restoreDisplay => _restoreDisplay;
+  @override
+  bool get supportsAvatarReadPreparation =>
+      supportsStagedReads &&
+      _session.hostCapabilities.contains('account.avatar.read');
+  @override
+  void cancelAvatarReadPreparation() => _avatarReads.cancel();
+  @override
+  Future<AccountAvatarReadResult?> prepareAvatarRead({
+    bool retry = false,
+  }) async {
+    final snapshot = _lastSnapshot, owner = _accountContext;
+    if (!supportsAvatarReadPreparation ||
+        snapshot == null ||
+        owner == null ||
+        snapshot.sessionState != AccountSessionState.signedIn) {
+      return null;
+    }
+    final result = await _avatarReads.read(
+      owner,
+      snapshot.generation,
+      retry: retry,
+    );
+    final latest = _lastSnapshot;
+    if (result?.hasPresentation == true &&
+        latest != null &&
+        result!.matches(latest.route, latest.generation)) {
+      _lastSnapshot = latest.copyWith(profile: result.apply(latest.profile));
+    }
+    return result;
+  }
+
+  @override
+  bool get supportsStagedReads => _stagedReads.supported;
+  @override
+  bool get hasPendingReadPreparation => _stagedReads.hasPending;
+  @override
+  bool get shouldRetryReadPreparation => _stagedReads.shouldRetry;
+  @override
+  void cancelReadPreparation() => _stagedReads.cancel();
+  @override
+  Future<AccountPortResult?> prepareNextRead({bool retry = false}) async {
+    final current = _lastSnapshot;
+    if (current == null || !supportsStagedReads) return null;
+    final revision = _stagedReads.revision;
+    final result = await _stagedReads.prepare(
+      current,
+      _profileReadSnapshot,
+      retry: retry,
+    );
+    var next = result?.snapshot;
+    if (revision != _stagedReads.revision ||
+        next != null && next.generation != _session.activeGeneration) {
+      return null;
+    }
+    if (next == null) return result;
+    final avatar = _avatarReads.confirmed;
+    if (next.sessionState != AccountSessionState.signedIn ||
+        next.profile == null && result?.failure != null) {
+      _avatarReads.invalidate();
+    } else if (avatar != null && avatar.matches(next.route, next.generation)) {
+      next = next.copyWith(profile: avatar.apply(next.profile));
+    }
+    _lastSnapshot = next;
+    if (next.sessionState != AccountSessionState.signedIn) {
+      _accountContext = null;
+    }
+    _profileReadSnapshot = AccountProfileReadSnapshot.capture(
+      next,
+      _stagedReads.observedAtUtc,
+    );
+    return AccountPortResult(
+      outcome: result!.outcome,
+      snapshot: next,
+      failure: result.failure,
+    );
+  }
+
   BridgeRequestOperation? _compatibilityOperation;
   BridgeRequestOperation? _recoveryOperation;
   BridgeRequestOperation? _legacyLoginOperation;
@@ -67,6 +162,8 @@ final class BridgeAccountAdapter
       const outcomes = {
         'verified',
         'rejected',
+        'scmRequired',
+        'retired',
         'invalidInput',
         'throttled',
         'unavailable',
@@ -83,7 +180,7 @@ final class BridgeAccountAdapter
       // Older verification-only Hosts do not promise an account.changed event.
       if (outcome == 'verified' &&
           _session.hostCapabilities.contains('account.legacySession')) {
-        await _waitForGenerationAdvance(operationGeneration);
+        await waitForAccountGenerationAdvance(_session, operationGeneration);
       }
       // Never parse an SCM session/context from a legacy-password response.
       return LegacyPasswordLoginResult(
@@ -184,9 +281,11 @@ final class BridgeAccountAdapter
   @override
   Future<LegacyProfileMigrationView> previewMigration({
     LegacyAccountCredential? credential,
+    LegacyProfileImportSelection? selection,
   }) => _migration('migrationPreview', {
     if (credential != null) 'accountName': credential.accountName,
     if (credential != null) 'password': credential.password,
+    if (selection != null) 'selection': selection.toJson(),
   });
   @override
   Future<LegacyProfileMigrationView> confirmMigration(
@@ -235,19 +334,34 @@ final class BridgeAccountAdapter
   Stream<AccountInvalidation> get invalidations => _invalidations.stream;
 
   @override
-  Future<AccountPortResult> read() => _read(retryGenerationChange: true);
+  Future<AccountPortResult> read() {
+    _avatarReads.allowReread();
+    return _read(retryGenerationChange: true);
+  }
 
   Future<AccountPortResult> _read({required bool retryGenerationChange}) async {
     final generation = _session.activeGeneration;
     try {
-      final accountEnvelope = await _session.request(
-        'account.getCurrent',
-        payload: const {'schemaVersion': 1},
-        timeout: _snapshotReadTimeout,
-      );
+      final accountEnvelope = await _restoreDisplay.read(_snapshotReadTimeout);
       final snapshot = await _readSnapshot(accountEnvelope);
+      _restoreDisplay.confirmSnapshot(snapshot);
       _lastSnapshot = snapshot;
+      if (snapshot.sessionState != AccountSessionState.signedIn) {
+        _profileReadSnapshot = null;
+      }
       return AccountPortResult.completed(snapshot);
+    } on AccountProfileSnapshotFailure catch (error) {
+      _restoreDisplay.confirmSnapshot(error.snapshot);
+      _lastSnapshot = error.snapshot;
+      if (error.snapshot.profile == null) _profileReadSnapshot = null;
+      if (error.snapshot.sessionState != AccountSessionState.signedIn) {
+        _accountContext = null;
+      }
+      return AccountPortResult(
+        outcome: AccountActionOutcome.failed,
+        snapshot: error.snapshot,
+        failure: mapAccountBridgeFailure(error.cause),
+      );
     } on Object catch (error) {
       // Restoring the Host can invalidate an in-flight read before the async
       // account.changed notification reaches the Module. Retry that read once
@@ -258,14 +372,22 @@ final class BridgeAccountAdapter
           error.code == 'bridge.stale_generation') {
         return _read(retryGenerationChange: false);
       }
-      return AccountPortResult.failed(_mapFailure(error));
+      return AccountPortResult.failed(mapAccountBridgeFailure(error));
     }
   }
 
   @override
   Future<AccountPortResult> execute(AccountPortCommand command) async {
     try {
+      _restoreDisplay.withdraw();
+      if (command is SaveAccountPreferences) {
+        _stagedReads.cancel();
+      } else {
+        _stagedReads.clear();
+      }
       final generationBeforeCommand = _session.activeGeneration;
+      final commandContext = _accountContext;
+      AccountCompatibilityProjection? confirmedCompatibility;
       final advancesGeneration =
           command is BeginAccountLogin || command is LogoutAccount;
       switch (command) {
@@ -308,21 +430,16 @@ final class BridgeAccountAdapter
             timeout: const Duration(minutes: 4),
           );
           final current = _requireActionSnapshot(generationBeforeCommand);
-          final data = AccountPayloadDecoder.profile(response.payload);
-          _lastSnapshot = AccountHostSnapshot(
-            generation: current.generation,
-            sessionState: current.sessionState,
-            route: current.route,
-            profile: data.profile,
-            profileFreshness: data.freshness,
-            cachedAt: data.cachedAt,
-            identity: current.identity,
-            compatibility: current.compatibility,
-            localeOptions: data.localeOptions,
-            timeZoneOptions: data.timeZoneOptions,
-            supportsPreferenceWrite: data.supportsPreferenceWrite,
-            supportsCacheClear: data.supportsCacheClear,
+          final confirmation = decodeAccountPreferenceConfirmation(
+            current,
+            response.payload,
           );
+          _lastSnapshot = confirmation.snapshot;
+          _profileReadSnapshot = AccountProfileReadSnapshot.capture(
+            _lastSnapshot!,
+            confirmation.observedAtUtc,
+          );
+          _stagedReads.observedAtUtc = _profileReadSnapshot?.observedAtUtc;
           return AccountPortResult.completed(_lastSnapshot!);
         case ClearAccountProfileCache():
           if (_lastSnapshot?.supportsCacheClear != true) {
@@ -337,9 +454,21 @@ final class BridgeAccountAdapter
           if (response.payload['cleared'] is! bool) {
             throw const BridgeFormatException('Cache clear result is missing.');
           }
-          return AccountPortResult.completed(
-            _requireActionSnapshot(generationBeforeCommand),
-          );
+          _profileReadSnapshot = null;
+          _avatarReads.invalidate();
+          final current = _requireActionSnapshot(generationBeforeCommand);
+          _lastSnapshot =
+              supportsStagedReads &&
+                  current.profileFreshness == AccountProfileFreshness.cached
+              ? current.copyWith(
+                  clearProfile: true,
+                  profileFreshness: AccountProfileFreshness.unavailable,
+                  clearCachedAt: true,
+                  timeZoneOptions: const [],
+                  supportsPreferenceWrite: false,
+                )
+              : current;
+          return AccountPortResult.completed(_lastSnapshot!);
         case LinkLegacyAccount(:final credential):
           if (!_session.hostCapabilities.contains(
                 'account.compatibility.linkExisting',
@@ -376,12 +505,13 @@ final class BridgeAccountAdapter
           try {
             final response = await operation.future;
             _requireActionSnapshot(generationBeforeCommand);
-            if (AccountPayloadDecoder.compatibility(
-                  response.payload,
-                  canLinkExisting: _session.hostCapabilities.contains(
-                    'account.compatibility.linkExisting',
-                  ),
-                ).identityState !=
+            confirmedCompatibility = AccountPayloadDecoder.compatibility(
+              response.payload,
+              canLinkExisting: _session.hostCapabilities.contains(
+                'account.compatibility.linkExisting',
+              ),
+            );
+            if (confirmedCompatibility.identityState !=
                 AccountCompatibilityIdentityState.linked) {
               throw const BridgeFormatException(
                 'Existing-account link was not confirmed.',
@@ -405,9 +535,26 @@ final class BridgeAccountAdapter
           throw const BridgeClientException('bridge.capability_unavailable');
       }
       if (advancesGeneration) {
-        await _waitForGenerationAdvance(generationBeforeCommand);
+        await waitForAccountGenerationAdvance(
+          _session,
+          generationBeforeCommand,
+        );
       }
       final refreshed = await read();
+      final next = refreshed.snapshot;
+      if (confirmedCompatibility != null &&
+          commandContext != null &&
+          refreshed.outcome == AccountActionOutcome.completed &&
+          next != null &&
+          next.sessionState == AccountSessionState.signedIn &&
+          next.generation == generationBeforeCommand &&
+          _session.activeGeneration == generationBeforeCommand &&
+          next.route?.environment == commandContext.environment &&
+          next.route?.authority == commandContext.authority &&
+          next.route?.subject == commandContext.subject) {
+        _lastSnapshot = next.copyWith(compatibility: confirmedCompatibility);
+        return AccountPortResult.completed(_lastSnapshot!);
+      }
       return refreshed;
     } on BridgeCancelledException {
       final snapshot = _lastSnapshot;
@@ -421,34 +568,7 @@ final class BridgeAccountAdapter
             )
           : AccountPortResult.cancelled(snapshot);
     } on Object catch (error) {
-      return AccountPortResult.failed(_mapFailure(error));
-    }
-  }
-
-  Future<void> _waitForGenerationAdvance(int previousGeneration) async {
-    if (_session.activeGeneration > previousGeneration) {
-      return;
-    }
-
-    final completion = Completer<void>();
-    late final StreamSubscription<BridgeEnvelope> subscription;
-    subscription = _session.events.listen((_) {
-      if (_session.activeGeneration > previousGeneration &&
-          !completion.isCompleted) {
-        completion.complete();
-      }
-    });
-    if (_session.activeGeneration > previousGeneration &&
-        !completion.isCompleted) {
-      completion.complete();
-    }
-    try {
-      await completion.future.timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw const BridgeTimeoutException('account.changed'),
-      );
-    } finally {
-      await subscription.cancel();
+      return AccountPortResult.failed(mapAccountBridgeFailure(error));
     }
   }
 
@@ -468,70 +588,44 @@ final class BridgeAccountAdapter
   Future<AccountHostSnapshot> _readSnapshot(
     BridgeEnvelope accountEnvelope,
   ) async {
+    if (accountEnvelope.sessionGeneration != _session.activeGeneration) {
+      throw BridgeStaleGenerationException(
+        accountEnvelope.sessionGeneration,
+        _session.activeGeneration,
+      );
+    }
     final sessionState = AccountPayloadDecoder.sessionState(
       accountEnvelope.payload,
     );
     if (sessionState == AccountSessionState.legacySignedIn ||
         sessionState == AccountSessionState.legacyUnavailable) {
-      final context = accountEnvelope.accountContext;
-      if (context == null ||
-          !context.authority.startsWith('starbridge-relay-')) {
-        throw const BridgeFormatException(
-          'Legacy account requires a distinct Relay authority.',
-        );
-      }
-      _accountContext = context;
-      var identity = const AccountIdentityProjection.unavailable();
-      if (_session.hostCapabilities.contains('account.read')) {
-        try {
-          final policy = await _session.request(
-            'gameIdentity.getPolicy',
-            payload: const {'schemaVersion': 1},
-            accountContext: context,
-            timeout: _snapshotReadTimeout,
-          );
-          identity = AccountPayloadDecoder.identity(policy.payload);
-        } on BridgeRemoteException {
-          // Optional local identity must not invalidate a restored Relay session.
-        }
-      }
-      if (_session.activeGeneration != accountEnvelope.sessionGeneration) {
-        throw BridgeStaleGenerationException(
-          accountEnvelope.sessionGeneration,
-          _session.activeGeneration,
-        );
-      }
-      return AccountHostSnapshot(
-        generation: accountEnvelope.sessionGeneration,
-        sessionState: sessionState,
-        route: AccountRoute(
-          environment: context.environment,
-          authority: context.authority,
-          subject: context.subject,
-        ),
-        profile: AccountProfile(
-          displayName: accountEnvelope.payload['displayName'] as String?,
-          maskedAccount: accountEnvelope.payload['maskedAccount'] as String?,
-          avatarImageData:
-              accountEnvelope.payload['avatarImageData'] as String?,
-        ),
-        profileFreshness: sessionState == AccountSessionState.legacySignedIn
-            ? AccountProfileFreshness.live
-            : AccountProfileFreshness.cached,
-        identity: identity,
-        compatibility: const AccountCompatibilityProjection.unavailable(),
-        localeOptions: const [],
-        timeZoneOptions: const [],
+      _stagedReads.clear();
+      return readLegacyAccountSnapshot(
+        _session,
+        accountEnvelope,
+        sessionState,
+        (context) => _accountContext = context,
       );
     }
     if (sessionState == AccountSessionState.signedOut ||
         sessionState == AccountSessionState.credentialTemporarilyUnavailable ||
         sessionState == AccountSessionState.reauthorizationRequired) {
       _accountContext = null;
+      _stagedReads.clear();
+      final retained = AccountPayloadDecoder.retainedDisplay(
+        accountEnvelope,
+        sessionState,
+      );
       return AccountHostSnapshot(
         generation: accountEnvelope.sessionGeneration,
         sessionState: sessionState,
-        profileFreshness: AccountProfileFreshness.unavailable,
+        profile: retained?.profile,
+        cachedAt: retained?.cachedAt,
+        retainedReadId: retained?.readId,
+        retainedPreviousReadId: retained?.previousReadId,
+        profileFreshness: retained == null
+            ? AccountProfileFreshness.unavailable
+            : AccountProfileFreshness.cached,
         identity: const AccountIdentityProjection.unavailable(),
         compatibility: const AccountCompatibilityProjection.unavailable(),
         localeOptions: const [],
@@ -546,6 +640,18 @@ final class BridgeAccountAdapter
       );
     }
     _accountContext = context;
+    if (supportsStagedReads) {
+      final snapshot = await _stagedReads.readCached(
+        accountEnvelope,
+        _lastSnapshot,
+        _profileReadSnapshot,
+      );
+      _profileReadSnapshot = AccountProfileReadSnapshot.capture(
+        snapshot,
+        _stagedReads.observedAtUtc,
+      );
+      return snapshot;
+    }
     final route = AccountRoute(
       environment: context.environment,
       authority: context.authority,
@@ -559,19 +665,59 @@ final class BridgeAccountAdapter
     var timeZoneOptions = const <AccountTimeZoneOption>[];
     var identity = const AccountIdentityProjection.unavailable();
 
-    final profileEnvelope = await _session.request(
-      'profile.getSelf',
-      payload: const {'schemaVersion': 1},
-      accountContext: context,
-      timeout: _snapshotReadTimeout,
+    AccountProfilePayload profileData;
+    try {
+      final profileEnvelope = await _session.request(
+        'profile.getSelf',
+        payload: const {'schemaVersion': 1},
+        accountContext: context,
+        timeout: _snapshotReadTimeout,
+      );
+      profileData = AccountPayloadDecoder.profile(profileEnvelope.payload);
+    } on Object catch (error) {
+      if (error is BridgeStaleGenerationException ||
+          _session.activeGeneration != accountEnvelope.sessionGeneration) {
+        rethrow;
+      }
+      throw AccountProfileSnapshotFailure(
+        accountProfileReadFailureSnapshot(
+          error: error,
+          generation: accountEnvelope.sessionGeneration,
+          route: route,
+          previous: _profileReadSnapshot,
+        ),
+        error,
+      );
+    }
+    final profileObservedAtUtc =
+        profileData.observedAt ??
+        profileData.cachedAt ??
+        DateTime.now().toUtc();
+    _profileReadSnapshot = AccountProfileReadSnapshot(
+      route,
+      accountEnvelope.sessionGeneration,
+      profileData.profile,
+      profileObservedAtUtc,
     );
-    final profileData = AccountPayloadDecoder.profile(profileEnvelope.payload);
     profile = profileData.profile;
+    profile = await readLegacyAccountAvatar(
+      _session,
+      context,
+      accountEnvelope,
+      profile,
+      _snapshotReadTimeout,
+    );
     freshness = profileData.freshness;
     cachedAt = profileData.cachedAt;
     localeOptions = profileData.localeOptions;
     timeZoneOptions = profileData.timeZoneOptions;
 
+    _profileReadSnapshot = AccountProfileReadSnapshot(
+      route,
+      accountEnvelope.sessionGeneration,
+      profile,
+      profileObservedAtUtc,
+    );
     final identityEnvelope = await _session.request(
       'gameIdentity.getPolicy',
       payload: const {'schemaVersion': 1},
@@ -581,30 +727,11 @@ final class BridgeAccountAdapter
     );
     identity = AccountPayloadDecoder.identity(identityEnvelope.payload);
 
-    var compatibility = const AccountCompatibilityProjection.retired();
-    if (_session.hostCapabilities.contains('account.compatibility.read')) {
-      compatibility = const AccountCompatibilityProjection.unavailable();
-      try {
-        final response = await _session.request(
-          'account.getCompatibilityState',
-          payload: const {'schemaVersion': 1},
-          accountContext: context,
-          timeout: _snapshotReadTimeout,
-        );
-        compatibility = AccountPayloadDecoder.compatibility(
-          response.payload,
-          canLinkExisting: _session.hostCapabilities.contains(
-            'account.compatibility.linkExisting',
-          ),
-        );
-      } on BridgeRemoteException catch (error) {
-        if (error.code != 'account.compatibility_read_unavailable' &&
-            error.code != 'bridge.capability_unavailable') {
-          rethrow;
-        }
-        // A compatibility service outage does not invalidate the SCM session.
-      }
-    }
+    final compatibility = await readLegacyAccountCompatibility(
+      _session,
+      context,
+      _snapshotReadTimeout,
+    );
 
     if (_session.activeGeneration != accountEnvelope.sessionGeneration) {
       throw BridgeStaleGenerationException(
@@ -635,70 +762,34 @@ final class BridgeAccountAdapter
   }
 
   void _onBridgeEvent(BridgeEnvelope event) {
+    _restoreDisplay.observeEvent(event);
+    if (event.name == 'account.changed' ||
+        event.name == 'bootstrap.invalidated') {
+      _profileReadSnapshot = null;
+      _stagedReads.clear();
+      _avatarReads.cancel();
+      if (event.sessionGeneration != _lastSnapshot?.generation) {
+        _lastSnapshot = null;
+      }
+    }
     if (event.name == 'account.changed' ||
         event.name == 'account.avatarChanged' ||
+        event.name == 'account.presentationChanged' ||
+        event.name == 'personalProfile.changed' ||
         event.name == 'bootstrap.invalidated' ||
         event.name == 'gameIdentity.changed') {
+      _avatarReads.invalidate();
       _invalidations.add(
         AccountInvalidation(generation: event.sessionGeneration),
       );
     }
   }
 
-  AccountFailure _mapFailure(Object error) {
-    if (error is BridgeClientException) {
-      return AccountFailure(
-        code: error.code,
-        messageKey: _messageKeyForCode(error.code),
-        retryable: error.retryable,
-      );
-    }
-    if (error is BridgeFormatException) {
-      return const AccountFailure(
-        code: 'bridge.invalid_envelope',
-        messageKey: 'account.error.invalidResponse',
-        retryable: false,
-      );
-    }
-    return const AccountFailure(
-      code: 'account.unexpected',
-      messageKey: 'account.error.unavailable',
-      retryable: true,
-    );
-  }
-
-  static String _messageKeyForCode(String code) => switch (code) {
-    'bridge.disconnected' => 'account.error.hostUnavailable',
-    'bridge.timeout' || 'account.login_timeout' => 'account.error.timeout',
-    'bridge.cancelled' ||
-    'account.login_cancelled' => 'account.login.cancelled',
-    'bridge.stale_generation' => 'account.error.sessionChanged',
-    'account.environment_not_enabled' => 'account.error.environmentNotEnabled',
-    'account.reauthorization_required' =>
-      'account.error.reauthorizationRequired',
-    'profile.write_forbidden' => 'account.error.writeForbidden',
-    'bridge.capability_unavailable' => 'account.action.unavailable',
-    'profile.cache_clear_unavailable' => 'account.cache.failed',
-    'profile.write_conflict' => 'account.error.writeConflict',
-    'profile.directory_unavailable' => 'account.error.directoryUnavailable',
-    'account.compatibility_read_unavailable' =>
-      'account.error.compatibilityUnavailable',
-    'account.compatibility_write_unavailable' =>
-      'account.error.compatibilityWriteUnavailable',
-    'account.compatibility_conflict' => 'account.error.compatibilityConflict',
-    'account.compatibility_existing_link_mismatch' =>
-      'account.error.compatibilityExistingLinkMismatch',
-    'account.legacy_credentials_required' =>
-      'account.error.legacyCredentialsRequired',
-    'account.legacy_credentials_rejected' =>
-      'account.error.legacyCredentialsRejected',
-    'bridge.invalid_envelope' ||
-    'bridge.protocol_incompatible' => 'account.error.invalidResponse',
-    _ => 'account.error.unavailable',
-  };
-
   @override
   Future<void> close() async {
+    _restoreDisplay.dispose();
+    _stagedReads.clear();
+    _avatarReads.cancel();
     await cancelLegacyPasswordLogin();
     await cancelPasswordRecovery();
     await _compatibilityOperation?.cancel();

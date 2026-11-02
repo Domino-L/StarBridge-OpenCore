@@ -19,14 +19,24 @@ MenuFeatureView organization() => MenuFeatureView.parse({
       'detail': '当前组织频道',
       'avatar': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
       'buttons': [
-        {'key': 'a8', 'label': '打开组织会话', 'limit': 128},
+        {
+          'key': 'a8',
+          'label': '打开组织会话',
+          'role': 'openOrganizationChat',
+          'limit': 128,
+        },
       ],
     },
     {
       'title': '深空探索协会',
       'detail': '组织频道',
       'buttons': [
-        {'key': 'a9', 'label': '打开组织会话', 'limit': 128},
+        {
+          'key': 'a9',
+          'label': '打开组织会话',
+          'role': 'openOrganizationChat',
+          'limit': 128,
+        },
       ],
     },
   ],

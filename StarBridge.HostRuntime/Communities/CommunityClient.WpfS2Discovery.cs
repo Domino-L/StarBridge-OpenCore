@@ -24,27 +24,45 @@ internal sealed partial class CommunityClient
     private readonly Dictionary<string, (string Data, DateTimeOffset Expires)> _directoryLogos = new();
     private readonly object _directoryLogoGate = new();
 
-    private void ClearDirectoryLogos() { lock (_directoryLogoGate) _directoryLogos.Clear(); }
+    internal void ClearDownloadableImageReadCaches() => ClearDirectoryLogos();
 
-    private string? CacheSharingLogo(string scope, string code, string? data)
+    private int ImageReadEpoch { get { lock (_directoryLogoGate) return _sharingLogoEpoch; } }
+
+    private void ClearDirectoryLogos()
+    {
+        lock (_directoryLogoGate)
+        {
+            _sharingLogoEpoch++;
+            _sharingLogoChunks.Clear();
+            _directoryLogos.Clear();
+        }
+    }
+
+    private string? CacheSharingLogo(string scope, string code, string? data, int epoch)
     {
         var key = "sharing\0" + scope + "\0" + code.ToUpperInvariant();
-        if (data is null) { lock (_directoryLogoGate) _directoryLogos.Remove(key); }
-        else StoreDirectoryLogo(key, data, DateTimeOffset.MaxValue);
+        lock (_directoryLogoGate)
+        {
+            if (epoch != _sharingLogoEpoch) return data;
+            if (data is null) _directoryLogos.Remove(key);
+            else StoreDirectoryLogo(key, data, DateTimeOffset.MaxValue, epoch);
+        }
         return data;
     }
 
     internal string? CachedSharingLogo(string scope, string code)
     {
         lock (_directoryLogoGate)
-            return _directoryLogos.TryGetValue("sharing\0" + scope + "\0" + code.ToUpperInvariant(), out var image)
+            return _directoryLogos.TryGetValue("sharing\0" + scope + "\0" + code.ToUpperInvariant(), out var image) &&
+                image.Expires > _targetClock.GetUtcNow()
                 ? image.Data : null;
     }
 
-    private void StoreDirectoryLogo(string reference, string data, DateTimeOffset expires)
+    private void StoreDirectoryLogo(string reference, string data, DateTimeOffset expires, int epoch)
     {
         lock (_directoryLogoGate)
         {
+            if (epoch != _sharingLogoEpoch) return;
             foreach (var old in _directoryLogos.Where(x => x.Value.Expires <= _targetClock.GetUtcNow()).ToArray())
                 _directoryLogos.Remove(old.Key);
             // At most 64 original images, each bounded to 512 KiB decoded.
@@ -69,6 +87,7 @@ internal sealed partial class CommunityClient
 
     private async Task<CommunityPage> ReadWpfS2Discovery(string bearer, CommunityQuery query, string scope, string viewerId, CancellationToken token)
     {
+        var imageEpoch = ImageReadEpoch;
         if (string.IsNullOrWhiteSpace(viewerId) || query.View != "discover") throw Invalid();
         var requested = query.TargetRef is null ? null : ResolveForRead(query.TargetRef, scope, allowWpfS2: true);
         if (requested is not null && (requested.WpfS2ViewerId != viewerId || query.After is not null ||
@@ -94,7 +113,7 @@ internal sealed partial class CommunityClient
             var applications = await WorkspaceJson(bearer, "/api/fleets/applications/mine", token);
             if (applications.ValueKind != JsonValueKind.Array || applications.GetArrayLength() > 10000) throw Invalid();
             var pending = applications.EnumerateArray().Select(row => Text(row, "fleetCode", 256).Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var root = await WorkspaceJson(bearer, "/api/fleets", token, 8 * 1024 * 1024);
+            var root = await WorkspaceJson(bearer, "/api/fleets?projection=metadata", token, 8 * 1024 * 1024);
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() > 10000) throw Invalid();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var candidates = new List<(string Code, CommunityView Row, int Score, int Online, DateTimeOffset Updated)>();
@@ -118,6 +137,7 @@ internal sealed partial class CommunityClient
                     WpfS2AdmissionActions(member, pending.Contains(code), admissionBlocked, WpfS2JoinMode(WpfText(fleet, "joinPolicy", 32))),
                     RoomAvatarProjection.Normalize(Optional(fleet, "logoImageData", 1024 * 1024), 512 * 1024), "")
                 {
+                    LogoDeferred = WpfS2HasMedia(fleet, "logo"),
                     Tags = WpfFlag(fleet, "publicShowTags", true) ? WpfText(fleet, "type", 2048) : "",
                     MemberScale = scaleMode != "hidden" ? CommunityDirectoryFilters.Scale(count) : "",
                     Recruiting = recruiting, RecruitingTarget = recruiting ? WpfText(fleet, "recruitingTarget", 512, fallback: "所有玩家") : "",
@@ -160,9 +180,11 @@ internal sealed partial class CommunityClient
             var result = rows.Select(x =>
             {
                 var reference = Guid.NewGuid().ToString("N");
-                _targets[reference] = new(x.Code, scope, now.AddMinutes(5), x.Row.Name, viewerId, true);
-                if (x.Row.LogoImageData is { } logo) StoreDirectoryLogo(reference, logo, now.AddMinutes(5));
-                return x.Row with { LogoImageData = null, LogoDeferred = x.Row.LogoImageData is not null,
+                var metadata = root.EnumerateArray().Single(fleet => Text(fleet, "code", 256) == x.Code);
+                _targets[reference] = new(x.Code, scope, now.AddMinutes(5), x.Row.Name, viewerId, true,
+                    WpfS2RemoteMedia: WpfS2HasMediaProjection(metadata));
+                if (x.Row.LogoImageData is { } logo) StoreDirectoryLogo(reference, logo, now.AddMinutes(5), imageEpoch);
+                return x.Row with { LogoImageData = null, LogoDeferred = x.Row.LogoDeferred || x.Row.LogoImageData is not null,
                     TargetRef = reference, OrganizationRef = _organizationRefs.GetOrAdd(scope + "\0" + x.Code, _ => Guid.NewGuid().ToString("N")) };
             }).ToArray();
             string? next = null;

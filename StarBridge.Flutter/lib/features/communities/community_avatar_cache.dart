@@ -9,14 +9,28 @@ import 'community_own_avatar.dart';
 /// Reuse requires the same authorized opaque member reference and image version,
 /// never a display name or a matching picture belonging to a different user.
 class CommunityAvatarCache {
-  final _entries = <(String, String), Future<Uint8List?>>{};
+  CommunityAvatarCache({this.now = DateTime.now})
+    : images = CommunityImageDecodeCache(now: now, capacity: decodedFrames);
+  final DateTime Function() now;
+  final _entries = <(String, String), _CommunityAvatarRead>{};
   final _byteSizes = <(String, String), int>{};
+  final _retryAt = <(String, String), DateTime>{};
   int _retainedBytes = 0;
   static const _maximumRetainedBytes = 16 * 1024 * 1024;
+  static const _maximumEntries = 96, _maximumActive = 3;
+
+  /// Decoded portraits (about 36 KB each at 96 px), so a large member list
+  /// scrolled back shows already seen avatars in the same frame.
+  static const decodedFrames = 256;
   final _waiting = <Completer<void>>[];
-  CommunityImageDecodeCache images = CommunityImageDecodeCache();
+  CommunityImageDecodeCache images;
   int _generation = 0, _active = 0;
   bool _disposed = false;
+
+  /// Downloadable decorations share the existing physical media budget without
+  /// becoming avatar cache entries. Retiring a view cannot release active IO.
+  Future<Uint8List?> readUncachedMedia(Future<Uint8List?> Function() read) =>
+      _read(read, _generation);
 
   Future<Uint8List?> get(
     String identity,
@@ -26,34 +40,62 @@ class CommunityAvatarCache {
   }) {
     if (_disposed) return Future.error(StateError('Disposed avatar scope'));
     final key = (identity, version ?? '');
-    if (retry) _remove(key);
+    final retryAt = _retryAt[key];
+    if (retry || retryAt != null && !now().isBefore(retryAt)) _remove(key);
     final existing = _entries.remove(key);
     if (existing != null) {
       _entries[key] = existing;
-      return existing;
+      return existing.future;
     }
-    if (_entries.length >= 96) _remove(_entries.keys.first);
-    late final Future<Uint8List?> pending;
-    pending = _read(read, _generation).then((bytes) {
-      // A cleared, evicted or retried request must not charge a newer entry.
-      if (identical(_entries[key], pending)) {
-        final size = bytes?.lengthInBytes ?? 0;
-        _byteSizes[key] = size;
-        _retainedBytes += size;
-        while (_retainedBytes > _maximumRetainedBytes && _entries.isNotEmpty) {
-          _remove(_entries.keys.first);
-        }
-      }
-      return bytes;
-    });
-    _entries[key] = pending;
-    return pending;
+    if (_entries.length >= _maximumEntries) _remove(_entries.keys.first);
+    final entry = _CommunityAvatarRead();
+    entry.future =
+        _read(() async {
+          if (entry.retired) return null;
+          return await read();
+        }, _generation).then(
+          (bytes) {
+            if (entry.retired) return null;
+            // A cleared, evicted or retried request must not charge a newer entry.
+            if (identical(_entries[key], entry)) {
+              final size = bytes?.lengthInBytes ?? 0;
+              _byteSizes[key] = size;
+              _retainedBytes += size;
+              while (_retainedBytes > _maximumRetainedBytes &&
+                  _entries.isNotEmpty) {
+                _remove(_entries.keys.first);
+              }
+            }
+            return bytes;
+          },
+          onError: (Object error, StackTrace stack) {
+            if (entry.retired) return null;
+            if (identical(_entries[key], entry)) {
+              _retryAt[key] = now().add(const Duration(seconds: 10));
+            }
+            Error.throwWithStackTrace(error, stack);
+          },
+        );
+    _entries[key] = entry;
+    return entry.future;
+  }
+
+  /// Explicit person retirement only. Ordinary eviction/retry keep their
+  /// historical Future semantics and do not mark an entry retired.
+  void retire(String identity, String? version) {
+    final key = (identity, version ?? '');
+    final entry = _entries[key];
+    if (entry == null) return;
+    entry.retired = true;
+    _remove(key);
   }
 
   void _remove((String, String) key) {
     _entries.remove(key);
+    _retryAt.remove(key);
     _retainedBytes -= _byteSizes.remove(key) ?? 0;
   }
+
 
   Future<Uint8List?> member(
     CommunityWorkspacePort port,
@@ -102,7 +144,10 @@ class CommunityAvatarCache {
     }
 
     current();
-    if (_active >= 3) {
+    if (_active >= _maximumActive) {
+      if (_waiting.length >= _maximumEntries - _maximumActive) {
+        throw StateError('Avatar read queue is full');
+      }
       final ready = Completer<void>();
       _waiting.add(ready);
       await ready.future;
@@ -127,9 +172,10 @@ class CommunityAvatarCache {
     _generation++;
     _entries.clear();
     _byteSizes.clear();
+    _retryAt.clear();
     _retainedBytes = 0;
     images.dispose();
-    images = CommunityImageDecodeCache();
+    images = CommunityImageDecodeCache(now: now, capacity: decodedFrames);
   }
 
   /// Reference renewal may keep verified, versioned bytes, never an old
@@ -141,9 +187,17 @@ class CommunityAvatarCache {
     }
   }
 
+  /// Reference renewal may keep verified, versioned bytes, never an old
+  /// request or a failed/unversioned entry tied to the previous access ref.
+
   void dispose() {
     clear();
     _disposed = true;
     images.dispose();
   }
+}
+
+final class _CommunityAvatarRead {
+  late final Future<Uint8List?> future;
+  bool retired = false;
 }

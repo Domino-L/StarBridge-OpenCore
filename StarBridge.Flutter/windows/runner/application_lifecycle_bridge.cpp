@@ -12,6 +12,7 @@
 #include "resource.h"
 #include "tray_surface_bridge.h"
 #include "small_application_icon.h"
+#include "taskbar_attention.h"
 
 namespace {
 
@@ -72,6 +73,7 @@ class ApplicationLifecycleBridge::Impl {
     tray_surface_ = std::make_unique<TraySurfaceBridge>(window_, messenger,
         [this]() { ShowMainWindow(); }, [this]() { ExitApplication(); },
         [this]() { ShowSystemTrayMenu(); });
+    attention_ = std::make_unique<TaskbarAttention>(window_);
     native_preparing_ = false;
     if (deferred_show_) ShowMainWindow();
   }
@@ -107,6 +109,7 @@ class ApplicationLifecycleBridge::Impl {
   bool HandleWindowMessage(UINT message,
                            WPARAM wparam,
                            LPARAM lparam) noexcept {
+    if (attention_ && attention_->HandleMessage(message, wparam)) return true;
     if ((IsSmallIconThemeMessage(message) || message == WM_DPICHANGED ||
          message == WM_DISPLAYCHANGE) && tray_icon_added_) {
       RefreshTrayIcon();
@@ -153,6 +156,7 @@ class ApplicationLifecycleBridge::Impl {
       return;
     }
     shutting_down_ = true;
+    attention_.reset();
     tray_surface_.reset();
     KillTimer(window_, kStartupFallbackTimer);
     RemoveTrayIcon();
@@ -167,6 +171,16 @@ class ApplicationLifecycleBridge::Impl {
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<MethodResult> result) {
     const auto& method = call.method_name();
+    if (method == "setTaskbarAttention") {
+      const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
+      const bool* pending = args ? ReadBool(*args, "pending") : nullptr;
+      const bool* reduce = args ? ReadBool(*args, "reduceMotion") : nullptr;
+      if (!args || args->size() != 2 || !pending || !reduce || !attention_) {
+        result->Error("attention.invalid_arguments", "Invalid taskbar state"); return;
+      }
+      attention_->Set(*pending, *reduce);
+      result->Success(); return;
+    }
     if (method == "clearDesktopNotification") {
       ClearDesktopNotification();
       result->Success();
@@ -421,6 +435,7 @@ class ApplicationLifecycleBridge::Impl {
   }
 
   HWND window_ = nullptr;
+  std::unique_ptr<TaskbarAttention> attention_;
   bool native_preparing_ = true;
   bool deferred_show_ = false;
   bool startup_launch_ = false;

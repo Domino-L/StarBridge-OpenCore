@@ -15,12 +15,61 @@ import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/in_memory_personal_profile_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_avatar.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_wallpaper_catalog.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final requiresReload in [true, false]) {
+    testWidgets('failed editor preserves draft; reload gate: $requiresReload', (
+      tester,
+    ) async {
+      final port = _FailedEditPort(requiresReload);
+      await _pumpSignedInShell(tester, personalProfilePort: port);
+      await tester.tap(find.byKey(const Key('account-command')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('profile-edit')));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('profile-call-sign-field'));
+      await tester.ensureVisible(field);
+      await tester.enterText(field, 'Retained draft');
+      final save = find.byKey(const Key('profile-save'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(find.text('Retained draft'), findsOneWidget);
+      expect(find.byKey(const Key('profile-save-error')), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(save).onPressed == null,
+        requiresReload,
+      );
+      await Scrollable.ensureVisible(tester.element(save), alignment: 0.5);
+      await tester.pumpAndSettle();
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(port.saves, requiresReload ? 1 : 2);
+      if (requiresReload) {
+        await tester.tap(find.byKey(const Key('profile-edit-cancel')));
+        await tester.pumpAndSettle();
+        final refresh = find.byKey(const Key('profile-refresh'));
+        await Scrollable.ensureVisible(tester.element(refresh), alignment: 0.5);
+        await tester.pumpAndSettle();
+        await tester.tap(refresh);
+        await tester.pumpAndSettle();
+        expect(port.reads, 2);
+        await tester.tap(find.byKey(const Key('profile-edit')));
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+        expect(find.text('Retained draft'), findsNothing);
+        expect(port.saves, 1); // A fresh read is not an automatic replay.
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   test('background image labels are numeric while saved IDs stay stable', () {
     final images = PersonalProfileWallpaperCatalog.presets
         .where((preset) => preset.hasImage)
@@ -674,15 +723,24 @@ void main() {
 
     expect(find.byKey(const Key('profile-wallpaper-none')), findsOneWidget);
     expect(find.text('仅自己可见'), findsOneWidget);
+    // The owner is told what visitors still see.
+    expect(find.byKey(const Key('profile-public-header-note')), findsOneWidget);
 
     await tester.ensureVisible(find.byKey(const Key('profile-preview')));
     await tester.tap(find.byKey(const Key('profile-preview')));
     await tester.pumpAndSettle();
+    // Not a blank page any more (user rule, 2026-10-20): the always-public
+    // header stays, and only the content below is shielded.
+    expect(find.byKey(const Key('profile-identity-header')), findsOneWidget);
+    expect(find.text('Aster Lin'), findsWidgets);
+    expect(find.text('@Aster-Lin'), findsNothing);
     expect(
       find.byKey(const Key('profile-private-visitor-view')),
       findsOneWidget,
     );
-    expect(find.text('这个主页暂未公开'), findsOneWidget);
+    expect(find.text('其余内容未公开'), findsOneWidget);
+    expect(find.textContaining('头像、名字和交易时段始终公开'), findsOneWidget);
+    expect(find.byKey(const Key('profile-public-header-note')), findsNothing);
     expect(
       find.byKey(const Key('profile-module-favorite-ships')),
       findsNothing,
@@ -864,6 +922,7 @@ Future<void> _pumpSignedInShell(
   Size size = const Size(1280, 720),
   InMemoryAppPreferences? preferences,
   InMemoryShellChrome? shellChrome,
+  PersonalProfilePort? personalProfilePort,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
@@ -874,10 +933,40 @@ Future<void> _pumpSignedInShell(
     preferences: preferences,
     shellChrome: shellChrome,
     accountPort: InMemoryAccountAdapter.forReview(AccountReviewState.signedIn),
-    personalProfilePort: InMemoryPersonalProfileAdapter.forReview(
-      signedIn: true,
-    ),
+    personalProfilePort:
+        personalProfilePort ??
+        InMemoryPersonalProfileAdapter.forReview(signedIn: true),
   );
   await tester.pumpWidget(StarBridgeApp(composition: composition));
   await tester.pumpAndSettle();
+}
+
+class _FailedEditPort implements PersonalProfilePort {
+  _FailedEditPort(this.requiresReload);
+  final bool requiresReload;
+  final source = InMemoryPersonalProfileAdapter.forReview(signedIn: true);
+  int saves = 0;
+  int reads = 0;
+  @override
+  Stream<void> get invalidations => const Stream.empty();
+  @override
+  Future<PersonalProfileSnapshot> read() {
+    reads++;
+    return source.read();
+  }
+
+  @override
+  Future<PersonalProfileActionResult> save(PersonalProfileEdit edit) async {
+    saves++;
+    return PersonalProfileActionResult(
+      PersonalProfileActionOutcome.failed,
+      requiresReload: requiresReload,
+      failureKey: requiresReload
+          ? 'profile.error.writeUnconfirmed'
+          : 'profile.local.failed',
+    );
+  }
+
+  @override
+  Future<void> close() => source.close();
 }

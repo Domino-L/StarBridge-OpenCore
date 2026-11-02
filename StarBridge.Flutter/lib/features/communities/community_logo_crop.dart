@@ -1,19 +1,28 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import 'community_logo_port.dart';
 import 'community_creation_copy.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../common/social_read_activity.dart';
 
 class CommunityLogoCrop extends StatefulWidget {
   const CommunityLogoCrop({
     required this.port,
     required this.source,
+    this.title,
     super.key,
   });
   final CommunityLogoPort port;
   final CommunityLogoSource source;
+  final String? title;
   @override
   State<CommunityLogoCrop> createState() => _CommunityLogoCropState();
 }
@@ -21,11 +30,18 @@ class CommunityLogoCrop extends StatefulWidget {
 class _CommunityLogoCropState extends State<CommunityLogoCrop> {
   double size = 1, horizontal = .5, vertical = .5;
   bool busy = false, failed = false;
+  InteractionSource _activitySource = InteractionSource.programmatic;
+  int _activityRevision = 0;
   late final bytes = base64Decode(
     widget.source.previewImageData.split(',').last,
   );
   Future<void> apply() async {
+    if (!mounted || busy) return;
+    final finishSource = captureStarBridgeActivationCompletion();
+    final sourceOfAction = currentStarBridgeActivationSource;
     setState(() {
+      _activitySource = sourceOfAction;
+      _activityRevision++;
       busy = true;
       failed = false;
     });
@@ -38,7 +54,14 @@ class _CommunityLogoCropState extends State<CommunityLogoCrop> {
         vertical * (source.height - side) / source.height,
         size,
       );
-      if (mounted) Navigator.pop(context, result);
+      if (mounted) {
+        finishSource(sourceOfAction);
+        dismissStarBridgeDialog(
+          context,
+          source: sourceOfAction,
+          result: result,
+        );
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -58,7 +81,7 @@ class _CommunityLogoCropState extends State<CommunityLogoCrop> {
         child: Column(
           children: [
             Text(
-              creationText(context, 'crop'),
+              widget.title ?? creationText(context, 'crop'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(creationText(context, 'cropHint')),
@@ -89,9 +112,11 @@ class _CommunityLogoCropState extends State<CommunityLogoCrop> {
                             width: side,
                             height: side,
                             child: GestureDetector(
+                              key: const Key('community-crop-drag'),
                               onPanUpdate: busy
                                   ? null
                                   : (details) => setState(() {
+                                      if (busy) return;
                                       if (width > side) {
                                         horizontal =
                                             (horizontal +
@@ -137,22 +162,36 @@ class _CommunityLogoCropState extends State<CommunityLogoCrop> {
                     child: Text(creationText(context, entry.$1)),
                   ),
                   Expanded(
-                    child: Slider(
-                      key: ValueKey('crop-${entry.$1}'),
-                      value: entry.$2,
-                      min: entry.$3,
-                      onChanged: busy
-                          ? null
-                          : (value) => setState(() {
-                              switch (entry.$1) {
-                                case 'size':
-                                  size = value;
-                                case 'horizontal':
-                                  horizontal = value;
-                                case 'vertical':
-                                  vertical = value;
-                              }
-                            }),
+                    child: StarBridgeFieldFrame(
+                      enabled: !busy,
+                      cursor: SystemMouseCursors.click,
+                      builder: (_, focus) => Semantics(
+                        key: ValueKey('crop-${entry.$1}-semantics'),
+                        container: true,
+                        label: creationText(context, entry.$1),
+                        child: KeyedSubtree(
+                          key: ValueKey(('crop-slider', entry.$1, busy)),
+                          child: Slider(
+                            focusNode: focus,
+                            key: ValueKey('crop-${entry.$1}'),
+                            value: entry.$2,
+                            min: entry.$3,
+                            onChanged: busy
+                                ? null
+                                : (value) => setState(() {
+                                    if (busy) return;
+                                    switch (entry.$1) {
+                                      case 'size':
+                                        size = value;
+                                      case 'horizontal':
+                                        horizontal = value;
+                                      case 'vertical':
+                                        vertical = value;
+                                    }
+                                  }),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -162,15 +201,37 @@ class _CommunityLogoCropState extends State<CommunityLogoCrop> {
                 creationText(context, 'imageFailed'),
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
+            SizedBox(
+              height: 4,
+              child: busy
+                  ? KeyedSubtree(
+                      key: ValueKey(('profile-crop', _activityRevision)),
+                      child: SocialReadActivity(
+                        key: const ValueKey('profile-crop-activity'),
+                        source: _activitySource,
+                        opening: false,
+                        label: creationText(context, 'cropping'),
+                        height: 4,
+                      ),
+                    )
+                  : null,
+            ),
             OverflowBar(
               spacing: 8,
               children: [
-                TextButton(
-                  onPressed: busy ? null : () => Navigator.pop(context),
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('community-crop-cancel'),
+                  onActivate: busy
+                      ? null
+                      : (source) =>
+                            dismissStarBridgeDialog(context, source: source),
                   child: Text(creationText(context, 'cancel')),
                 ),
-                FilledButton(
-                  onPressed: busy ? null : apply,
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.primary,
+                  controlKey: const Key('community-crop-apply'),
+                  onActivate: busy ? null : (_) => apply(),
                   child: Text(creationText(context, 'useImage')),
                 ),
               ],

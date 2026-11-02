@@ -15,12 +15,62 @@ AccountProjection accountState(
 );
 
 void main() {
+  testWidgets(
+    'each interaction defers preparation for the full idle deadline',
+    (tester) async {
+      final account = ValueNotifier(accountState(AccountSessionState.signedIn));
+      var reads = 0;
+      final warmup = SessionWarmup(
+        account: account,
+        now: tester.binding.clock.now,
+        jobs: [
+          () async {
+            reads++;
+          },
+        ],
+      );
+      addTearDown(account.dispose);
+      addTearDown(warmup.dispose);
+      warmup.start();
+      warmup.deferForInteraction();
+      await tester.pump(const Duration(milliseconds: 799));
+      expect(reads, 0);
+      warmup.deferForInteraction();
+      await tester.pump(const Duration(milliseconds: 799));
+      expect(reads, 0);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(reads, 1);
+    },
+  );
+  testWidgets('retired idle owner cannot cancel work owned by its successor', (
+    tester,
+  ) async {
+    final account = ValueNotifier(accountState(AccountSessionState.signedIn));
+    var cancellations = 0;
+    final warmup = SessionWarmup(
+      now: tester.binding.clock.now,
+      account: account,
+      jobs: const [],
+      cancelWork: () {
+        cancellations++;
+      },
+    );
+    warmup.start();
+    warmup.dispose();
+    final retired = cancellations;
+    warmup.dispose();
+    warmup.setForeground(false);
+    warmup.deferForInteraction();
+    expect(cancellations, retired);
+    account.dispose();
+  });
   testWidgets('failed startup job does not discard remaining idle work', (
     tester,
   ) async {
     final account = ValueNotifier(accountState(AccountSessionState.signedIn));
     var calls = 0;
     final warmup = SessionWarmup(
+      now: tester.binding.clock.now,
       account: account,
       jobs: [() async => throw StateError('offline')],
       continueWork: () async {
@@ -42,6 +92,7 @@ void main() {
       final changes = ChangeNotifier();
       var remaining = 5, startup = 0, batches = 0;
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {
@@ -88,6 +139,7 @@ void main() {
       final calls = <int>[];
       final pending = Completer<void>();
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {
@@ -129,6 +181,7 @@ void main() {
       );
       var reads = 0;
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {
@@ -158,6 +211,7 @@ void main() {
       final pending = Completer<void>();
       final calls = <String>[];
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {
@@ -193,6 +247,7 @@ void main() {
       final account = ValueNotifier(accountState(AccountSessionState.signedIn));
       var reads = 0;
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {
@@ -226,6 +281,7 @@ void main() {
       final account = ValueNotifier(accountState(state));
       var reads = 0;
       final warmup = SessionWarmup(
+        now: tester.binding.clock.now,
         account: account,
         jobs: [
           () async {

@@ -8,6 +8,18 @@ internal static class AccountSafetyRequest
 {
     internal static void Read(JsonElement payload) => ValidateEnvelope(payload, false);
 
+    internal static bool InboxRead(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) throw Invalid();
+        var names = payload.EnumerateObject().Select(p => p.Name).ToArray();
+        if (names.Length is < 1 or > 2 || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
+            names.Any(n => n is not ("schemaVersion" or "allowScmCache")) ||
+            !payload.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number ||
+            !schema.TryGetInt32(out var version) || version != 1) throw Invalid();
+        if (!payload.TryGetProperty("allowScmCache", out var cache)) return false;
+        return cache.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => throw Invalid() };
+    }
+
     internal static CreateSanctionAppealRequestContract Appeal(JsonElement payload)
     {
         ValidateEnvelope(payload, true);

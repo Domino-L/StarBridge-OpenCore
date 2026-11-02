@@ -18,7 +18,9 @@ import 'package:starbridge_flutter/features/overlay_settings/menu_settings_scrol
 import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
 import 'package:starbridge_flutter/platform/window/menu_window_preferences.dart';
 import 'package:starbridge_flutter/platform/window/menu_display_preferences.dart';
+import 'package:starbridge_flutter/platform/window/menu_desktop_widgets.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_settings_save_bar.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_select_form_field.dart';
 
 import '../friends/social_layout_test.dart' show app, size, loadFonts, capture;
 
@@ -76,14 +78,83 @@ Future<void> category(WidgetTester tester, String name) async {
     await tester.pumpAndSettle();
     return;
   }
-  await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+  await tester.tap(find.byKey(const Key('menu-workspace-section-command')));
   await tester.pumpAndSettle();
-  await tester.tap(find.text(name).last);
+  final field = tester.widget<StarBridgeSelectFormField<String>>(
+    find.byWidgetPredicate((w) => w is StarBridgeSelectFormField<String>),
+  );
+  final option = field.items!.singleWhere(
+    (item) => (item.child as Text).data == name,
+  );
+  await tester.tap(
+    find.byKey(ValueKey<Object>((field.identity, option.value))),
+  );
   await tester.pumpAndSettle();
 }
 
 void main() {
   setUpAll(loadFonts);
+  test('widget default normalization merges visibility with external placement and preserves layout', () async {
+    final port = Port();
+    port.value = MenuWindowPreferences(
+      0,
+      port.value.layout,
+      {...port.value.settings}..remove('widgets'),
+    );
+    final draft = MenuSettingsDraft(port);
+    await draft.initialize();
+    expect(MenuDesktopWidgets.parse(draft.settings['widgets'])!.hangar, true);
+    draft.change({'widgets': const MenuDesktopWidgets(hangar: false).toMap()});
+    port.value = MenuWindowPreferences(
+      5,
+      {'version': 1, 'panels': [], 'open': []},
+      {
+        ...port.value.settings,
+        'widgets': const MenuDesktopWidgets(x: 1, y: 1).toMap(),
+      },
+    );
+    expect(await draft.save(), true);
+    final saved = MenuDesktopWidgets.parse(port.value.settings['widgets'])!;
+    expect(saved.hangar, false);
+    expect(saved.x, 1);
+    expect(saved.y, 1);
+    expect(port.value.revision, 6);
+    expect(draft.dirty, false);
+    draft.dispose();
+  });
+  testWidgets(
+    'display switch updates fixed rail preview and writes only on save',
+    (tester) async {
+      size(tester, const Size(1440, 900));
+      final port = Port();
+      final draft = MenuSettingsDraft(port);
+      await tester.pumpWidget(app(MenuSettingsWorkspace(draft: draft)));
+      await tester.pumpAndSettle();
+      await category(tester, '显示与操作');
+      final widget = find.byKey(const Key('menu-hangar-widget'));
+      expect(widget, findsOneWidget);
+      final toggle = find.byKey(const Key('menu-widget-visible'));
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(
+        MenuDesktopWidgets.parse(draft.settings['widgets'])!.hangar,
+        false,
+      );
+      expect(widget, findsNothing);
+      expect(port.writes, 0);
+      expect(draft.dirty, true);
+      expect(find.byKey(const Key('menu-widget-Horizontal')), findsNothing);
+      expect(await draft.save(), true);
+      expect(port.writes, 1);
+      expect(
+        MenuDesktopWidgets.parse(port.value.settings['widgets'])!.hangar,
+        false,
+      );
+      await tester.pumpWidget(const SizedBox());
+      draft.dispose();
+    },
+  );
   test(
     'save merges unrelated external fields and keeps latest layout',
     () async {
@@ -172,10 +243,10 @@ void main() {
         tester.getBottomRight(find.byType(OverlaySettingsSaveBar)).dy,
         900,
       );
-      await tester.tap(find.byTooltip('撤销'));
+      await tester.tap(find.byKey(const Key('overlay-save-bar-undo')));
       await tester.pumpAndSettle();
       expect(state.dirty, false);
-      await tester.tap(find.byTooltip('重做'));
+      await tester.tap(find.byKey(const Key('overlay-save-bar-redo')));
       await tester.pumpAndSettle();
       port.fail = true;
       await tester.tap(find.byKey(const Key('menu-workspace-save')));
@@ -450,7 +521,7 @@ void main() {
       final scroll = find.byType(MenuSettingsScroll);
       final bar = find.descendant(of: scroll, matching: find.byType(Scrollbar));
       expect(tester.getRect(bar).right, tester.getRect(panel).right);
-      final field = find.byKey(const ValueKey('menu-display-interfaceScale-0'));
+      final field = find.byKey(const ValueKey('menu-display-interfaceScale'));
       expect(tester.getRect(panel).right - tester.getRect(field).right, 24);
       expect(find.text('菜单显示与交互'), findsNothing);
       final help = find

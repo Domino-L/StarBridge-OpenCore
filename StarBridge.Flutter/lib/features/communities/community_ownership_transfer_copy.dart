@@ -3,6 +3,12 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityOwnershipTransferCopy = <String, (String, String, String)>{
+  'activityLoading': (
+    '正在读取移交确认…',
+    '正在讀取移交確認…',
+    'Loading transfer confirmation…',
+  ),
+  'activitySending': ('正在移交负责人…', '正在移交負責人…', 'Transferring ownership…'),
   'transfer': ('移交负责人', '移交負責人', 'Transfer ownership'),
   'confirm': ('确认移交', '確認移交', 'Confirm transfer'),
   'cancel': ('取消', '取消', 'Cancel'),

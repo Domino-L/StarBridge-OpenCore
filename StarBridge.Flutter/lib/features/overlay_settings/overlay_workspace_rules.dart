@@ -28,12 +28,6 @@ const overlayWorkspaceAppearanceRules =
         locksTheme: true,
         supportsBloom: true,
       ),
-      'LagrangeWeave': OverlayWorkspaceAppearanceRule(
-        theme: 'LagrangeWeave',
-        startupTransition: 'LagrangeWeaveEquilibrium',
-        locksTheme: true,
-        supportsBloom: true,
-      ),
       'Verdict': OverlayWorkspaceAppearanceRule(
         theme: 'Verdict',
         startupTransition: 'VerdictProtocol',
@@ -114,27 +108,13 @@ OverlayWorkspaceSettings applyOverlayWorkspaceSettingChange(
 
 bool overlayWorkspaceFieldVisible(
   String field,
-  OverlayWorkspaceSettings settings,
-) {
-  final barrage = settings['chatDisplayMode'] == 'FullScreenBarrage';
-  if (const {
-    'chatDurationSeconds',
-    'chatBarrageFontSize',
-    'chatBarrageRegion',
-    'chatBarrageDensity',
-    'chatBarrageAvoidCenter',
-    'chatTextEdgeStrength',
-  }.contains(field)) {
-    return barrage;
-  }
+  OverlayWorkspaceSettings settings, {
+  OverlayWorkspaceAppearanceRule? appearanceRule,
+}) {
+  // Settings that apply only in some mode stay visible and explain when they
+  // apply (overlayWorkspaceFieldDisabledReason). Only retired or internal
+  // fields are hidden.
   if (const {'chatSide', 'chatMaxVisibleCount'}.contains(field)) {
-    return false;
-  }
-  if (field == 'nightShadowBloom') {
-    return overlayWorkspaceAppearanceRule(settings).supportsBloom;
-  }
-  if ((field == 'theme' || field == 'autoThemeByShip') &&
-      overlayWorkspaceAppearanceRule(settings).locksTheme) {
     return false;
   }
   if (field == 'requestedSkin') return false;
@@ -147,16 +127,34 @@ bool overlayWorkspaceFieldVisible(
 
 bool overlayWorkspaceFieldEnabled(
   String field,
-  OverlayWorkspaceSettings settings,
-) => overlayWorkspaceFieldDisabledReason(field, settings) == null;
+  OverlayWorkspaceSettings settings, {
+  OverlayWorkspaceAppearanceRule? appearanceRule,
+}) =>
+    overlayWorkspaceFieldDisabledReason(
+      field,
+      settings,
+      appearanceRule: appearanceRule,
+    ) ==
+    null;
+
+const _barrageFields = {
+  'chatDurationSeconds',
+  'chatBarrageFontSize',
+  'chatBarrageRegion',
+  'chatBarrageDensity',
+  'chatBarrageAvoidCenter',
+  'chatTextEdgeStrength',
+};
 
 /// One policy drives both availability and its explanation.
 String? overlayWorkspaceFieldDisabledReason(
   String field,
-  OverlayWorkspaceSettings settings,
-) {
+  OverlayWorkspaceSettings settings, {
+  OverlayWorkspaceAppearanceRule? appearanceRule,
+}) {
+  final profile = appearanceRule ?? overlayWorkspaceAppearanceRule(settings);
   const prefix = 'overlay.workspace.disabled.';
-  if (overlayWorkspaceAppearanceRule(settings).locksTheme &&
+  if (profile.locksTheme &&
       const {'theme', 'autoThemeByShip'}.contains(field)) {
     return '${prefix}fixedPalette';
   }
@@ -190,6 +188,13 @@ String? overlayWorkspaceFieldDisabledReason(
       field != 'chatDisplayMode' &&
       settings['showChat'] != true) {
     return '${prefix}chat';
+  }
+  if (_barrageFields.contains(field) &&
+      settings['chatDisplayMode'] != 'FullScreenBarrage') {
+    return '${prefix}barrage';
+  }
+  if (field == 'nightShadowBloom' && !profile.supportsBloom) {
+    return '${prefix}bloom';
   }
   if (field == 'hideMemberOnlineStatus' &&
       settings['hideOfflineMembers'] != true) {

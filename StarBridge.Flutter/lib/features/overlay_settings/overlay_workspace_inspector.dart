@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_slider.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -46,21 +51,23 @@ class OverlayWorkspaceLayoutInspector extends StatelessWidget {
       children: [
         Material(
           type: MaterialType.transparency,
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(
+          child: StarBridgeSwitch.tile(
+            preserveNativeTile: true,
+            controlKey: Key('overlay-layout-lock-${item.key}'),
+            label: embedded
+                ? _copy(context, 'overlay.workspace.layout.lockPositionSize')
+                : _moduleName(context, item.key),
+            titleWidget: Text(
               embedded
                   ? _copy(context, 'overlay.workspace.layout.lockPositionSize')
                   : _moduleName(context, item.key),
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-            subtitle: Text(
-              _copy(
-                context,
-                (item.isLocked || layoutLocked)
-                    ? 'overlay.workspace.layout.locked'
-                    : 'overlay.workspace.layout.adjustable',
-              ),
+            subtitle: _copy(
+              context,
+              (item.isLocked || layoutLocked)
+                  ? 'overlay.workspace.layout.locked'
+                  : 'overlay.workspace.layout.adjustable',
             ),
             value: item.isLocked,
             onChanged: (value) =>
@@ -125,11 +132,12 @@ class OverlayWorkspaceLayoutInspector extends StatelessWidget {
         ),
         Align(
           alignment: Alignment.centerLeft,
-          child: TextButton(
-            key: Key('overlay-layout-reset-${item.key}'),
-            onPressed: item.isLocked || layoutLocked
+          child: StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: Key('overlay-layout-reset-${item.key}'),
+            onActivate: item.isLocked || layoutLocked
                 ? null
-                : () => onChanged(
+                : (_) => onChanged(
                     OverlayWorkspaceLayoutGeometry.resetPosition(
                       item,
                       presetId,
@@ -221,11 +229,11 @@ class OverlayWorkspaceLayoutInspector extends StatelessWidget {
     String action,
     String property,
     double delta,
-  ) => OutlinedButton(
-    key: Key('overlay-layout-nudge-$action-${item.key}'),
-    onPressed: (item.isLocked || layoutLocked)
+  ) => StarBridgeActionButton(
+    controlKey: Key('overlay-layout-nudge-$action-${item.key}'),
+    onActivate: (item.isLocked || layoutLocked)
         ? null
-        : () => onChanged(
+        : (_) => onChanged(
             OverlayWorkspaceLayoutGeometry.nudge(
               item,
               property,
@@ -246,8 +254,11 @@ class OverlayWorkspaceLayoutInspector extends StatelessWidget {
     required ValueChanged<String>? onChanged,
   }) => SizedBox(
     width: 240,
-    child: DropdownButtonFormField<String>(
+    child: StarBridgeSelectFormField<String>(
       key: Key(key),
+      identity: key,
+      controlKey: ValueKey('$key-command'),
+      semanticLabel: _copy(context, labelKey),
       initialValue: value,
       decoration: InputDecoration(labelText: _copy(context, labelKey)),
       items: values
@@ -277,7 +288,8 @@ class OverlayWorkspaceLayoutInspector extends StatelessWidget {
     children: [
       SizedBox(width: 140, child: Text(label)),
       Expanded(
-        child: Slider(
+        child: StarBridgeSlider(
+          semanticLabel: label,
           value: value.clamp(minimum, 1),
           min: minimum,
           max: 1,

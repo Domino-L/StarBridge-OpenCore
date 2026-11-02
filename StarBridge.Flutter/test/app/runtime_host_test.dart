@@ -1,9 +1,14 @@
 import 'dart:async';
 
 import 'package:starbridge_flutter/app/routing/exit_application_intent.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_activation_origin.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show InteractionSource;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/bootstrap/shell_review_configuration.dart';
 import 'package:starbridge_flutter/app/runtime/starbridge_runtime_host.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
@@ -17,6 +22,54 @@ import 'package:starbridge_flutter/features/settings/settings_entry_dialog.dart'
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'declining mandatory terms completely exits despite tray preference',
+    (tester) async {
+      _startupViewport(tester);
+      final requests = <BridgeEnvelope>[];
+      final lease = _createSignedOutLease(
+        startupChoiceMade: true,
+        legalRequests: requests,
+      );
+      lease.session.acceptHostCapabilities(['legal.testBuildNotice']);
+      final lifecycle = InMemoryApplicationLifecycle();
+      addTearDown(lifecycle.dispose);
+      await tester.pumpWidget(
+        StarBridgeRuntimeHost(
+          environment: const {},
+          windowChrome: InMemoryWindowChrome(),
+          nativeHostConnector: _CallbackNativeHostConnector(() async => lease),
+          applicationLifecycle: lifecycle,
+          reconnectDelay: const Duration(hours: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('usage-terms-pending')), findsOneWidget);
+      for (
+        var i = 0;
+        i < 30 && find.byKey(const Key('test-build-notice')).evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
+      lifecycle.requestClose();
+      await tester.pumpAndSettle();
+      expect(lifecycle.exitCount, 0);
+      expect(lifecycle.hideCount, 0);
+      await tester.tap(find.byKey(const Key('test-build-exit')));
+      await tester.pumpAndSettle();
+      expect(lifecycle.exitCount, 1);
+      expect(lifecycle.hideCount, 0);
+      expect(
+        requests.where((r) => r.name == 'legal.acceptTestBuildNotice'),
+        isEmpty,
+      );
+      expect(lease.preferencesUpdateCount, 0);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'menu one-shot request runs at app startup without opening menu or reading account data',
     (tester) async {
@@ -59,6 +112,53 @@ void main() {
         isEmpty,
       );
       await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets(
+    'saved legal receipt unlocks the shell only after explicit acceptance',
+    (tester) async {
+      _startupViewport(tester);
+      final requests = <BridgeEnvelope>[];
+      final lease = _createSignedOutLease(
+        startupChoiceMade: true,
+        legalRequests: requests,
+      );
+      lease.session.acceptHostCapabilities(['legal.testBuildNotice']);
+      await tester.pumpWidget(
+        StarBridgeRuntimeHost(
+          environment: const {},
+          windowChrome: InMemoryWindowChrome(),
+          nativeHostConnector: _CallbackNativeHostConnector(() async => lease),
+          applicationLifecycle: InMemoryApplicationLifecycle(),
+          reconnectDelay: const Duration(hours: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('usage-terms-pending')), findsOneWidget);
+      for (
+        var i = 0;
+        i < 30 && find.byKey(const Key('test-build-notice')).evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.pumpAndSettle();
+      final scroll = tester.widget<SingleChildScrollView>(
+        find.byKey(const Key('usage-terms-scroll')),
+      );
+      scroll.controller!.jumpTo(scroll.controller!.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('usage-terms-consent')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('test-build-accept')));
+      await tester.pumpAndSettle();
+      expect(
+        requests.where((r) => r.name == 'legal.acceptTestBuildNotice'),
+        hasLength(1),
+      );
+      expect(find.byKey(const Key('usage-terms-pending')), findsNothing);
+      expect(find.byKey(const Key('test-build-notice')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
     },
   );
   testWidgets(
@@ -159,6 +259,48 @@ void main() {
             2,
           );
         }
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+  for (final source in InteractionSource.values) {
+    testWidgets(
+      'explicit exit keeps $source through asynchronous original guards',
+      (tester) async {
+        _startupViewport(tester);
+        final connector = _ConnectedNativeHostConnector();
+        final lifecycle = InMemoryApplicationLifecycle();
+        addTearDown(lifecycle.dispose);
+        await tester.pumpWidget(
+          StarBridgeRuntimeHost(
+            environment: const {},
+            windowChrome: InMemoryWindowChrome(),
+            nativeHostConnector: connector,
+            applicationLifecycle: lifecycle,
+            reconnectDelay: const Duration(hours: 1),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final pending = Completer<bool>(), origins = <InteractionSource>[];
+        Actions.invoke(
+          tester.element(find.byKey(const Key('application-window-frame'))),
+          ExitApplicationIntent(
+            source: source,
+            beforeExit: () async {
+              origins.add(currentStarBridgeActivationSource);
+              await Future<void>.value();
+              origins.add(currentStarBridgeActivationSource);
+              return pending.future;
+            },
+          ),
+        );
+        await tester.pump();
+        expect(origins, [source, source]);
+        expect(lifecycle.exitCount, 0);
+        pending.complete(false);
+        await tester.pumpAndSettle();
+        expect(lifecycle.exitCount, 0);
+        expect(lifecycle.hideCount, 0);
         await tester.pumpWidget(const SizedBox.shrink());
       },
     );
@@ -271,7 +413,7 @@ void main() {
             find.byKey(const Key('notification-play-enabled')),
             findsOneWidget,
           );
-          await tester.tap(find.byKey(const Key('notification-play-enabled')));
+          await _tapSwitchOwner(tester, const Key('notification-play-enabled'));
           await tester.pumpAndSettle();
           expect(requests.map((r) => r.name), [
             'playReminder.read',
@@ -310,9 +452,19 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('startup-retry')), findsOneWidget);
+    final originalApp = tester.widget<StarBridgeApp>(
+      find.byType(StarBridgeApp),
+    );
+    final taskbarScope = originalApp.taskbarAttentionScope;
+    expect(taskbarScope, isNotNull);
     await tester.tap(find.byKey(const Key('startup-retry')));
     await tester.pumpAndSettle();
     expect(attempts, 2);
+    final recoveredApp = tester.widget<StarBridgeApp>(
+      find.byType(StarBridgeApp),
+    );
+    expect(recoveredApp.key, isNot(originalApp.key));
+    expect(recoveredApp.taskbarAttentionScope, same(taskbarScope));
     expect(find.byKey(const Key('startup-loading-page')), findsNothing);
     expect(find.byKey(const Key('account-command')), findsOneWidget);
   });
@@ -371,10 +523,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('正在读取应用设置'), findsOneWidget);
-      expect(
-        find.byKey(const Key('first-startup-choice-dialog')),
-        findsNothing,
-      );
+      expect(find.byKey(const Key('app-behavior-prompt')), findsNothing);
       expect(lease.preferencesUpdateCount, 0);
       settings.complete();
       await tester.pump();
@@ -388,14 +537,14 @@ void main() {
       }
       expect(find.byKey(const Key('startup-loading-page')), findsOneWidget);
       expect(find.text('正在读取账号状态'), findsOneWidget);
-      expect(find.byKey(const Key('first-startup-continue')), findsNothing);
+      expect(find.byKey(const Key('app-behavior-prompt-save')), findsNothing);
       expect(find.byKey(const Key('account-command')), findsNothing);
       account.complete();
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('startup-loading-page')), findsNothing);
-      expect(find.byKey(const Key('first-startup-continue')), findsOneWidget);
+      expect(find.byKey(const Key('app-behavior-prompt-save')), findsOneWidget);
       expect(lease.preferencesUpdateCount, 0);
       await tester.pumpWidget(const SizedBox());
     },
@@ -590,7 +739,9 @@ void main() {
     tester.view.physicalSize = const Size(1440, 900);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    final connector = _ConnectedNativeHostConnector();
+    final connector = _ConnectedNativeHostConnector(
+      closeBehaviorChoiceMade: false,
+    );
     final lifecycle = InMemoryApplicationLifecycle();
     addTearDown(lifecycle.dispose);
 
@@ -604,6 +755,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.text('关闭主窗口时怎么处理？'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('app-behavior-prompt-later')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-behavior-prompt')), findsNothing);
 
     expect(lifecycle.behavior, isNotNull);
     expect(lifecycle.behavior!.keepRunningInBackground, isTrue);
@@ -631,7 +788,9 @@ void main() {
     tester.view.physicalSize = const Size(1440, 900);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    final connector = _ConnectedNativeHostConnector();
+    final connector = _ConnectedNativeHostConnector(
+      closeBehaviorChoiceMade: false,
+    );
     final lifecycle = InMemoryApplicationLifecycle();
     addTearDown(lifecycle.dispose);
 
@@ -645,6 +804,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.text('关闭主窗口时怎么处理？'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('app-behavior-prompt-later')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-behavior-prompt')), findsNothing);
 
     lifecycle.requestClose();
     await tester.pumpAndSettle();
@@ -663,7 +828,7 @@ void main() {
   });
 
   testWidgets(
-    'first visible entry recommends startup without writing before continue',
+    'first visible entry asks startup and close once without writing before save',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1440, 900);
@@ -686,10 +851,8 @@ void main() {
 
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('first-startup-choice-dialog')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('app-behavior-prompt')), findsOneWidget);
+      expect(find.text('启动与关闭方式'), findsOneWidget);
       expect(connector.firstLease.preferencesUpdateCount, 0);
       Actions.invoke(
         tester.element(find.byKey(const Key('application-window-frame'))),
@@ -707,31 +870,34 @@ void main() {
       );
       expect(
         tester
-            .widget<SwitchListTile>(
-              find.byKey(const Key('first-startup-enabled')),
+            .widget<FilledButton>(
+              find.byKey(const Key('app-behavior-prompt-save')),
             )
-            .value,
-        isTrue,
+            .onPressed,
+        isNull,
+        reason: 'nothing is preselected',
       );
 
-      await tester.tap(find.byKey(const Key('first-startup-continue')));
+      await tester.tap(find.byKey(const Key('app-behavior-startup-auto')));
+      await tester.tap(find.byKey(const Key('app-behavior-close-tray')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('app-behavior-prompt-save')));
       await tester.pumpAndSettle();
 
+      final saved = connector.firstLease.applicationBehavior;
       expect(connector.firstLease.preferencesUpdateCount, 1);
-      expect(connector.firstLease.applicationBehavior['launchAtStartup'], true);
-      expect(connector.firstLease.applicationBehavior['startMinimized'], true);
-      expect(
-        connector.firstLease.applicationBehavior['startupChoiceMade'],
-        true,
-      );
-      expect(
-        find.byKey(const Key('first-startup-choice-dialog')),
-        findsNothing,
-      );
+      expect(saved['launchAtStartup'], true);
+      expect(saved['startMinimized'], true);
+      expect(saved['startupChoiceMade'], true);
+      expect(saved['keepRunningInBackground'], true);
+      expect(saved['closeBehaviorChoiceMade'], true);
+      await tester.tap(find.byKey(const Key('app-behavior-prompt-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app-behavior-prompt')), findsNothing);
     },
   );
 
-  testWidgets('first startup choice can be explicitly declined', (
+  testWidgets('startup and close can both be explicitly declined', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -755,15 +921,65 @@ void main() {
 
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('first-startup-enabled')));
+    await tester.tap(find.byKey(const Key('app-behavior-startup-manual')));
+    await tester.tap(find.byKey(const Key('app-behavior-close-exit')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('first-startup-continue')));
+    await tester.tap(find.byKey(const Key('app-behavior-prompt-save')));
     await tester.pumpAndSettle();
 
-    expect(connector.firstLease.applicationBehavior['launchAtStartup'], false);
-    expect(connector.firstLease.applicationBehavior['startMinimized'], false);
-    expect(connector.firstLease.applicationBehavior['startupChoiceMade'], true);
+    final saved = connector.firstLease.applicationBehavior;
+    expect(saved['launchAtStartup'], false);
+    expect(saved['startMinimized'], false);
+    expect(saved['startupChoiceMade'], true);
+    expect(saved['keepRunningInBackground'], false);
+    expect(saved['closeBehaviorChoiceMade'], true);
   });
+
+  testWidgets('deferring the prompt writes nothing and does not repeat', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final connector = _ConnectedNativeHostConnector(startupChoiceMade: false);
+    final lifecycle = InMemoryApplicationLifecycle();
+    addTearDown(lifecycle.dispose);
+
+    await tester.pumpWidget(
+      StarBridgeRuntimeHost(
+        environment: const {},
+        windowChrome: InMemoryWindowChrome(),
+        nativeHostConnector: connector,
+        applicationLifecycle: lifecycle,
+        reconnectDelay: const Duration(hours: 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('app-behavior-prompt-later')));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-behavior-prompt')), findsNothing);
+    expect(connector.firstLease.preferencesUpdateCount, 0);
+    expect(
+      connector.firstLease.applicationBehavior['startupChoiceMade'],
+      false,
+    );
+  });
+}
+
+Future<void> _tapSwitchOwner(WidgetTester tester, Key key) async {
+  // The keyed native switch is decorative inside the single row input owner.
+  // Tap that real owner, retaining the original post-command assertions.
+  final owner = find.byWidgetPredicate(
+    (widget) => widget is StarBridgeSwitch && widget.controlKey == key,
+  );
+  expect(owner, findsOneWidget);
+  await tester.ensureVisible(owner);
+  await tester.tap(owner);
 }
 
 void _startupViewport(WidgetTester tester) {
@@ -792,8 +1008,13 @@ final class _PendingNativeHostConnector implements NativeHostConnector {
 }
 
 final class _ConnectedNativeHostConnector implements NativeHostConnector {
-  _ConnectedNativeHostConnector({bool startupChoiceMade = true})
-    : firstLease = _createSignedOutLease(startupChoiceMade: startupChoiceMade);
+  _ConnectedNativeHostConnector({
+    bool startupChoiceMade = true,
+    bool? closeBehaviorChoiceMade,
+  }) : firstLease = _createSignedOutLease(
+         startupChoiceMade: startupChoiceMade,
+         closeBehaviorChoiceMade: closeBehaviorChoiceMade,
+       );
 
   final _TestNativeHostLease firstLease;
   final Completer<NativeHostLease> _later = Completer();
@@ -808,6 +1029,7 @@ final class _ConnectedNativeHostConnector implements NativeHostConnector {
 
 _TestNativeHostLease _createSignedOutLease({
   required bool startupChoiceMade,
+  bool? closeBehaviorChoiceMade,
   Future<void>? preferencesGate,
   Future<void>? accountGate,
   Future<void>? retryAccountGate,
@@ -820,6 +1042,7 @@ _TestNativeHostLease _createSignedOutLease({
   bool failMigrationOnce = false,
   List<BridgeEnvelope>? menuStartupRequests,
   List<String>? startupEvents,
+  List<BridgeEnvelope>? legalRequests,
 }) {
   final pair = InMemoryBridgeConnection.createPair();
   final preferenceState = _TestPreferenceState(
@@ -828,7 +1051,7 @@ _TestNativeHostLease _createSignedOutLease({
       'keepRunningInBackground': true,
       'startMinimized': false,
       'startupChoiceMade': startupChoiceMade,
-      'closeBehaviorChoiceMade': false,
+      'closeBehaviorChoiceMade': closeBehaviorChoiceMade ?? startupChoiceMade,
       'backgroundHintShown': false,
     },
   );
@@ -836,10 +1059,39 @@ _TestNativeHostLease _createSignedOutLease({
   var accountReads = 0;
   var migrationReads = 0;
   var migrationAcks = 0;
+  var legalAcknowledged = false;
   unawaited(
     pair.host.incoming.forEach((request) async {
       startupEvents?.add(request.name);
       if (request.name == 'bridge.cancel') return;
+      if (legalRequests != null && request.name.startsWith('legal.')) {
+        legalRequests.add(request);
+        if (request.name == 'legal.acceptTestBuildNotice') {
+          legalAcknowledged = true;
+        }
+        await pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            correlationId: request.correlationId,
+            sessionGeneration: request.sessionGeneration,
+            status: 'ok',
+            payload: request.name == 'legal.getClientLicense'
+                ? const {
+                    'schemaVersion': 1,
+                    'state': 'ready',
+                    'text': 'Synthetic complete license.',
+                  }
+                : {
+                    'schemaVersion': 1,
+                    'termsVersion': '2026-10-31-v4',
+                    'acknowledged': legalAcknowledged,
+                  },
+          ),
+        );
+        return;
+      }
       if (request.name == 'applicationPreferences.menu.startup') {
         menuStartupRequests?.add(request);
         await pair.host.send(

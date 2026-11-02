@@ -9,6 +9,18 @@
 
   <ItemGroup>
     <ProjectReference Include="..\StarBridge.Core\StarBridge.Core.csproj" />
+    <Compile Include="../StarBridge.Server/FleetProfileUpdatePolicy.cs" Link="FleetProfileUpdatePolicy.cs" Condition="Exists('../StarBridge.Server/FleetProfileUpdatePolicy.cs')" />
+    <Compile Include="../shared/community-queries/CommunityImageUpload.cs" Link="CommunityImageUpload.cs" />
+    <Compile Include="../shared/test-fixtures/CommunityImageFixtures.cs" Link="CommunityImageFixtures.cs" />
+    <ProjectReference Include="..\StarBridge.NativeBridge\StarBridge.NativeBridge.csproj" />
+    <Compile Include="../StarBridge.Desktop/OverlayCompositionViewport.cs" Link="DesktopGeometry/OverlayCompositionViewport.cs"
+             Condition="Exists('../StarBridge.Desktop/OverlayCompositionViewport.cs')" />
+    <Compile Include="../StarBridge.OverlayRuntime.Windows/Rendering/OverlayCompositionViewport.cs" Link="DesktopGeometry/OverlayCompositionViewport.cs"
+             Condition="!Exists('../StarBridge.Desktop/OverlayCompositionViewport.cs')" />
+    <Compile Include="../StarBridge.Desktop/OverlayAppearanceActivity.cs" Link="DesktopPresentation/OverlayAppearanceActivity.cs"
+             Condition="Exists('../StarBridge.Desktop/OverlayAppearanceActivity.cs')" />
+    <Compile Include="../StarBridge.OverlayRuntime.Windows/Rendering/OverlayAppearanceActivity.cs" Link="DesktopPresentation/OverlayAppearanceActivity.cs"
+             Condition="!Exists('../StarBridge.Desktop/OverlayAppearanceActivity.cs')" />
     <!-- Exercise the platform-free desktop geometry without moving UI into Core. -->
     <Compile Include="../StarBridge.OverlayRuntime.Windows/Rendering/OverlayEventStackLayout.cs" Link="DesktopGeometry/OverlayEventStackLayout.cs"
              Condition="Exists('../StarBridge.OverlayRuntime.Windows/Rendering/OverlayEventStackLayout.cs')" />
@@ -22,4 +34,7 @@
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <PropertyGroup Condition="Exists('../StarBridge.Server/FleetProfileUpdatePolicy.cs')">
+    <DefineConstants>$(DefineConstants);STARBRIDGE_SERVER_POLICY</DefineConstants>
+  </PropertyGroup>
 </Project>

@@ -6,6 +6,8 @@ const simplifiedSyncPrivacyStrings = <String, String>{
   'settings.privacy.gameId.title': '游戏 ID 展示',
   'settings.privacy.gameId.help': '选择在哪里展示你的游戏 ID。保存更改后生效，不改变身份验证和共享范围。',
   'settings.privacy.gameId.required': '尚无可替代的独立呼号，游戏 ID 需要在各处展示。',
+  'settings.privacy.gameId.unverified':
+      '游戏身份尚未确认，Handle 暂不公开。请在“账号与识别”完成验证后设置。',
   'settings.privacy.gameId.unavailable': '暂时无法确认游戏 ID 展示设置，正在自动重新检查。',
   'settings.privacy.gameId.organization': '组织',
   'settings.privacy.gameId.room': '房间',
@@ -99,6 +101,7 @@ const simplifiedSyncPrivacyStrings = <String, String>{
   'settings.privacy.friendExceptions.body':
       '在好友详情中可分别设置在线、服务器详情、舰船、位置和最后在线为“继承 / 允许 / 不允许”；本页不复制第二套管理器。',
   'settings.privacy.events.title': '协作活动事件',
+  'settings.privacy.events.pending': '正在处理…',
   'settings.privacy.events.description': '事件播报与当前状态可见性分开控制，关闭事件不会改写好友长期默认。',
   'settings.privacy.events.enabled': '共享协作活动事件',
   'settings.privacy.events.enabledDescription': '总开关关闭时不发布下列事件，但保留各类别选择。',
@@ -158,6 +161,8 @@ const traditionalSyncPrivacyStrings = <String, String>{
   'settings.privacy.gameId.title': '遊戲 ID 顯示',
   'settings.privacy.gameId.help': '選擇在哪裡顯示你的遊戲 ID。儲存變更後生效，不改變身分驗證和共享範圍。',
   'settings.privacy.gameId.required': '尚無可替代的獨立呼號，遊戲 ID 需要在各處顯示。',
+  'settings.privacy.gameId.unverified':
+      '遊戲身分尚未確認，Handle 暫不公開。請在「帳號與識別」完成驗證後設定。',
   'settings.privacy.gameId.unavailable': '暫時無法確認遊戲 ID 顯示設定，正在自動重新檢查。',
   'settings.privacy.gameId.organization': '組織',
   'settings.privacy.gameId.room': '房間',
@@ -251,6 +256,7 @@ const traditionalSyncPrivacyStrings = <String, String>{
   'settings.privacy.friendExceptions.body':
       '在好友詳情可分別設定上線、伺服器詳情、艦船、位置與最後上線為「繼承 / 允許 / 不允許」；本頁不複製第二套管理器。',
   'settings.privacy.events.title': '協作活動事件',
+  'settings.privacy.events.pending': '正在處理…',
   'settings.privacy.events.description': '事件播報與目前狀態可見性分開控制，關閉事件不會改寫好友長期預設。',
   'settings.privacy.events.enabled': '分享協作活動事件',
   'settings.privacy.events.enabledDescription': '總開關關閉時不發佈下列事件，但保留各類別選擇。',
@@ -306,10 +312,12 @@ const englishSyncPrivacyStrings = <String, String>{
   'settings.privacy.page.save': 'Save changes',
   'settings.privacy.page.saved': 'All changes saved',
   'settings.privacy.page.leave': 'Changes across the three tabs have not been saved. Save to apply them, or discard them.',
-  'settings.privacy.page.failed': 'Some changes could not be confirmed. Your draft has been kept.',
+  'settings.privacy.page.failed':
+      'Some changes could not be confirmed. Your draft has been kept.',
   'settings.privacy.gameId.title': 'Game ID visibility',
   'settings.privacy.gameId.help': 'Choose where your game ID appears. Save to apply changes without changing identity verification or sharing permissions.',
   'settings.privacy.gameId.required': 'Without a distinct callsign, your game ID must remain visible in all locations.',
+  'settings.privacy.gameId.unverified': 'Your game identity is not verified, so your Handle stays hidden. Verify it in Account & identity before changing visibility.',
   'settings.privacy.gameId.unavailable': 'Unable to confirm game ID visibility settings. Checking again automatically.',
   'settings.privacy.gameId.organization': 'Organizations',
   'settings.privacy.gameId.room': 'Rooms',
@@ -410,6 +418,7 @@ const englishSyncPrivacyStrings = <String, String>{
   'settings.privacy.friendExceptions.title': 'Per-friend exceptions',
   'settings.privacy.friendExceptions.body': 'Friend details can set presence, server details, ship, location, and last online to Inherit, Allow, or Deny. This page does not duplicate that manager.',
   'settings.privacy.events.title': 'Collaboration activity events',
+  'settings.privacy.events.pending': 'Working…',
   'settings.privacy.events.description': 'Event broadcasts are separate from current-state visibility. Disabling events does not rewrite friend defaults.',
   'settings.privacy.events.enabled': 'Share collaboration activity events',
   'settings.privacy.events.enabledDescription': 'The master switch stops publishing these events while preserving each category choice.',

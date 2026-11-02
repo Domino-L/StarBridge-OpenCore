@@ -9,7 +9,7 @@ internal static class BridgeWireCodec
     {
         BridgeEnvelopeValidator.ValidateWireShape(envelope);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, BridgeProtocol.JsonOptions);
-        if (bytes.Length == 0 || bytes.Length > BridgeProtocol.MaximumFrameBytes)
+        if (bytes.Length == 0 || bytes.Length > BridgeProtocol.FrameLimit(envelope))
         {
             throw new BridgeProtocolException(
                 BridgeErrorCodes.Backpressure,
@@ -21,7 +21,7 @@ internal static class BridgeWireCodec
 
     internal static BridgeEnvelope Decode(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length == 0 || bytes.Length > BridgeProtocol.MaximumFrameBytes)
+        if (bytes.Length == 0 || bytes.Length > BridgeProtocol.MaximumCommunityProfileFrameBytes)
         {
             throw new BridgeProtocolException(
                 BridgeErrorCodes.InvalidEnvelope,
@@ -31,6 +31,8 @@ internal static class BridgeWireCodec
         var envelope = JsonSerializer.Deserialize<BridgeEnvelope>(bytes, BridgeProtocol.JsonOptions)
             ?? throw new BridgeProtocolException(BridgeErrorCodes.InvalidEnvelope, "Bridge envelope is empty.");
         BridgeEnvelopeValidator.ValidateWireShape(envelope);
+        if (bytes.Length > BridgeProtocol.FrameLimit(envelope))
+            throw new BridgeProtocolException(BridgeErrorCodes.InvalidEnvelope, "Bridge message exceeds its frame limit.");
         return envelope;
     }
 
@@ -64,7 +66,7 @@ internal static class BridgeWireCodec
         }
 
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
-        if (length <= 0 || length > BridgeProtocol.MaximumFrameBytes)
+        if (length <= 0 || length > BridgeProtocol.MaximumCommunityProfileFrameBytes)
         {
             throw new BridgeProtocolException(
                 BridgeErrorCodes.InvalidEnvelope,

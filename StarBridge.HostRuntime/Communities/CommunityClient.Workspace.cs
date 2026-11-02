@@ -61,6 +61,16 @@ internal sealed partial class CommunityClient
             foreach (var key in new[] { "isSelf", "isOwner", "online", "hasAvatar", "arrivalPendingConfirmation" }) fields[key] = member.GetProperty(key).GetBoolean();
             foreach (var key in new[] { "ship", "location", "locationConfidence", "serverRegion", "serverShard", "arrivalTargetCode" }) fields[key] = Optional(member, key, 512);
             fields["hasServerSession"] = OptionalServerSession(member);
+            var offline = StarBridge.Core.Presence.OrganizationMemberPresence.IsOffline(
+                fields["liveStatus"] as string, (bool)fields["online"]!);
+            if (offline)
+            {
+                fields["online"] = false;
+                fields["liveStatus"] = "Offline";
+                fields["arrivalPendingConfirmation"] = false;
+                foreach (var key in new[] { "ship", "location", "locationConfidence", "serverRegion", "serverShard", "hasServerSession", "arrivalTargetCode" })
+                    fields[key] = null;
+            }
             var visibleGame = (bool)fields["online"]! &&
                 string.Equals(fields["liveStatus"] as string, "InGame", StringComparison.OrdinalIgnoreCase) &&
                 fields["hasServerSession"] is not false;
@@ -81,6 +91,7 @@ internal sealed partial class CommunityClient
                 (bool)fields["online"]! && string.Equals(fields["liveStatus"] as string, "InGame", StringComparison.OrdinalIgnoreCase),
                 (bool)fields["arrivalPendingConfirmation"]!);
             foreach (var key in new[] { "lastUpdated", "joinedAt" }) fields[key] = Timestamp(member, key);
+            if (offline) fields["lastUpdated"] = null;
             return fields;
         }).ToArray();
         var response = Strings(root, ("code", 256), ("name", 512), ("tags", 2048), ("language", 512), ("activeTime", 1024));
@@ -117,6 +128,8 @@ internal sealed partial class CommunityClient
         response["fetchedAt"] = Timestamp(root, "fetchedAt") ?? throw Invalid();
         response["hasLogo"] = root.GetProperty("hasLogo").GetBoolean();
         response["hasBanner"] = root.GetProperty("hasBanner").GetBoolean();
+        response["hasBackground"] = root.TryGetProperty("hasBackground", out var background) && background.GetBoolean();
+        response["wideImagesSupported"] = SupportsWideImages(root);
         response["activeSystemIds"] = ParseSystems(root.GetProperty("activeSystemIds"));
         response["externalContacts"] = Rows(root, "externalContacts", 100).Select(row => Strings(row, ("platform", 128), ("value", 2048))).ToArray();
         response["activityWindows"] = Rows(root, "activityWindows", 3).Select(row => new
@@ -133,23 +146,20 @@ internal sealed partial class CommunityClient
         token.ThrowIfCancellationRequested();
         RenewTarget(reference, target, token);
         // Only a fully validated, authorized read may renew opaque identities.
-        // Reuse is bounded by organization, account generation (scope) and lease;
+        // Identity retention is separate from the five-minute authorization lease;
         // never match by display names or expose the underlying account ID.
         lock (_workspaceMemberGate)
         {
             var now = DateTimeOffset.UtcNow;
-            foreach (var old in _memberTargets.Where(p => p.Value.Expires <= now).ToArray())
-                _memberTargets.TryRemove(old.Key, out _);
-            if (_memberTargets.Count > 10000) _memberTargets.Clear();
+            var pending = new Dictionary<string, MemberTarget>();
             for (var i = 0; i < members.Length; i++)
             {
                 var id = memberIds[i];
-                var existing = _memberTargets.FirstOrDefault(p => p.Value.MemberId == id &&
-                    p.Value.Code == target.Code && p.Value.Scope == scope && p.Value.Expires > now);
-                var memberRef = existing.Key ?? Guid.NewGuid().ToString("N");
-                _memberTargets[memberRef] = new(id, target.Code, scope, now.AddMinutes(5));
+                var memberRef = MemberReferenceFor(id, target.Code, scope)!;
+                pending[memberRef] = new(id, target.Code, scope, now.AddMinutes(5));
                 members[i]["memberRef"] = memberRef;
             }
+            PublishMemberTargets(pending);
         }
         // Only a fully validated workspace may queue an auxiliary observation.
         if (activityFleets is not null)
@@ -174,6 +184,7 @@ internal sealed partial class CommunityClient
 
     private async Task<object> ReadMediaCore(string bearer, JsonElement body, string scope, CancellationToken token)
     {
+        var sharingLogoEpoch = Volatile.Read(ref _sharingLogoEpoch);
         Validate(body, "targetRef", "kind", "memberRef", "offset", "version");
         var reference = Text(body, "targetRef", 32);
         var target = Resolve(reference, scope, allowWpfS2: true);
@@ -181,7 +192,7 @@ internal sealed partial class CommunityClient
         var memberRef = Optional(body, "memberRef", 32);
         var version = Optional(body, "version", 64);
         var offset = Number(body, "offset", 0, 2 * 1024 * 1024);
-        if (kind is not ("logo" or "banner" or "avatar" or "applicant") || (kind is "avatar" or "applicant") != !string.IsNullOrEmpty(memberRef) ||
+        if (kind is not ("logo" or "banner" or "background" or "avatar" or "applicant") || (kind is "avatar" or "applicant") != !string.IsNullOrEmpty(memberRef) ||
             offset % (192 * 1024) != 0 || offset > 0 && version is null || version is not null &&
             (version.Length != 64 || version.Any(c => !Uri.IsHexDigit(c)))) throw Invalid();
         string? memberId = null;
@@ -201,7 +212,7 @@ internal sealed partial class CommunityClient
         var path = $"/api/fleets/media?code={Uri.EscapeDataString(target.Code)}&kind={kind}&offset={offset}";
         if (memberId is not null) path += "&memberId=" + Uri.EscapeDataString(memberId);
         if (version is not null) path += "&version=" + Uri.EscapeDataString(version);
-        var root = target.WpfS2Directory && kind == "logo"
+        var root = target.WpfS2Directory && kind == "logo" && !target.WpfS2RemoteMedia
             ? ReadDirectoryLogo(reference, offset, version, token)
             : target.WpfS2ViewerId is not null
             ? await WpfS2Media(bearer, target, kind, memberId, offset, version, token)
@@ -211,28 +222,46 @@ internal sealed partial class CommunityClient
         if (Number(root, "schemaVersion", 1, 1) != 1 || Text(root, "kind", 16) != kind || Optional(root, "memberId", 512) != memberId ||
             hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c)) || version is not null && hash != version ||
             Number(root, "offset", 0, 2 * 1024 * 1024) != offset || mime is not ("image/png" or "image/jpeg" or "image/bmp" or "image/gif" or "image/webp")) throw Invalid();
-        var total = Number(root, "totalBytes", 1, kind == "banner" ? 2 * 1024 * 1024 : 512 * 1024);
+        var total = Number(root, "totalBytes", 1, kind is "banner" or "background" ? 2 * 1024 * 1024 : 512 * 1024);
         var data = Text(root, "data", 256 * 1024);
         var count = Convert.FromBase64String(data).Length;
         int? next = root.GetProperty("next").ValueKind == JsonValueKind.Null ? null : Number(root, "next", 0, total);
         if (offset >= total || count != Math.Min(192 * 1024, total - offset) || next != (offset + count < total ? offset + count : null)) throw Invalid();
+        if (kind == "logo")
+            RememberSharingLogoChunk(reference, target, sharingLogoEpoch, hash, mime, total, offset, data, token);
         return new { schemaVersion = 1, kind, memberRef, version = hash, mimeType = mime, totalBytes = total, offset, next, data };
     }
 
-    private async Task<JsonElement> WorkspaceJson(string bearer, string path, CancellationToken token, int maximumBytes = 960 * 1024)
+    private async Task<JsonElement> WorkspaceJson(string bearer, string path, CancellationToken token, int maximumBytes = 960 * 1024, bool officialImages = false)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        int? status = null;
+        // Classify from fixed route names only: never pass query strings or response data to diagnostics.
+        var route = path.Split('?', 2)[0];
+        var stage = route switch {
+            "/api/fleets/workspace" => "workspace-http",
+            "/api/fleets/media" => "workspace-media-http",
+            "/api/fleets/membership" => "workspace-membership-http",
+            "/api/fleets" => "workspace-snapshot-http",
+            "/api/auth/session" => "workspace-session-http",
+            _ => null
+        };
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        if (officialImages) request.Headers.Add(OfficialImageHeader, "2");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
         try
         {
+            Privacy.OfficialAnnouncementReadObservation.Sending();
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            Privacy.OfficialAnnouncementReadObservation.Response(response.StatusCode);
+            status = (int)response.StatusCode;
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw new AccountBridgeHostException("communities.identityUnavailable");
             if (response.StatusCode == HttpStatusCode.Forbidden) throw new AccountBridgeHostException("communities.notAllowed");
             if (response.StatusCode == HttpStatusCode.Conflict) throw new AccountBridgeHostException("communities.mediaChanged");
             if (response.StatusCode == HttpStatusCode.NotFound) throw new AccountBridgeHostException("communities.notFound");
-            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("communities.unavailable", true);
+            if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("communities.unavailable", true, response.StatusCode);
             using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var buffer = new MemoryStream();
             var chunk = new byte[8192];
@@ -246,8 +275,19 @@ internal sealed partial class CommunityClient
             return document.RootElement.Clone();
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw new AccountBridgeHostException("communities.unavailable", true); }
-        catch (Exception e) when (e is HttpRequestException or IOException) { throw new AccountBridgeHostException("communities.unavailable", true); }
+        catch (InvalidDataException) { throw Invalid(); }
+        catch (HttpRequestException error) { throw new AccountBridgeHostException("communities.unavailable", true, error.StatusCode); }
+        catch (IOException) { throw new AccountBridgeHostException("communities.unavailable", true); }
         catch (JsonException) { throw Invalid(); }
+        finally
+        {
+            if (stage is not null)
+            {
+                try { ReadDiagnostic?.Invoke(stage, status is >= 200 and <= 299 ? "ok" : status is null ? "network" : "http-error",
+                    status, (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds); }
+                catch (Exception) { /* Diagnostics cannot change authorization or read outcomes. */ }
+            }
+        }
     }
 
     private static int Number(JsonElement value, string key, int min, int max)

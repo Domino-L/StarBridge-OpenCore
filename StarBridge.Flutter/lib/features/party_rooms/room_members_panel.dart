@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/shell/chrome/presence_color.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../common/social_identity_text.dart';
 
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -26,8 +28,8 @@ class RoomMembersPanel extends StatefulWidget {
   });
   final PartyRoom room;
   final DateTime serverTime;
-  final void Function(RoomMember)? onRemove;
-  final void Function(RoomMember)? onTransfer;
+  final void Function(RoomMember, InteractionSource)? onRemove;
+  final void Function(RoomMember, InteractionSource)? onTransfer;
 
   /// A transport-specific renderer may supply an already-authorized row without
   /// giving this presentation widget command tokens or account references.
@@ -57,8 +59,9 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
-              TextButton(
-                onPressed: () => setState(() => _details = !_details),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate: (_) => setState(() => _details = !_details),
                 child: Text(t(_details ? 'hideDetails' : 'roomDetails')),
               ),
             ],
@@ -71,8 +74,9 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
                 SelectableText(
                   '${roomActionText(context, 'code')}：${room.roomCode}',
                 ),
-                TextButton(
-                  onPressed: () {
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: (_) {
                     if (!mounted || !widget.showRoomCode) return;
                     Clipboard.setData(
                       ClipboardData(text: widget.room.roomCode),
@@ -185,10 +189,16 @@ class _RoomMembersPanelState extends State<RoomMembersPanel> {
                         ? RoomMemberMenu(
                             onRemove: widget.onRemove == null
                                 ? null
-                                : () => widget.onRemove!(room.members[index]),
+                                : (source) => widget.onRemove!(
+                                    room.members[index],
+                                    source,
+                                  ),
                             onTransfer: widget.onTransfer == null
                                 ? null
-                                : () => widget.onTransfer!(room.members[index]),
+                                : (source) => widget.onTransfer!(
+                                    room.members[index],
+                                    source,
+                                  ),
                           )
                         : null,
                   ),

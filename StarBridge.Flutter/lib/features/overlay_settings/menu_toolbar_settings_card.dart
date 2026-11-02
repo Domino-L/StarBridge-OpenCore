@@ -15,7 +15,10 @@ class MenuToolbarSettingsCard extends StatelessWidget {
         section: 'toolbar',
         read: (settings) => MenuToolbarPreferences.parse(settings['toolbar'])!,
         patch: (value) => {'toolbar': value.toMap()},
-        editor: (value, onChanged) =>
-            MenuToolbarEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuToolbarEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

@@ -68,6 +68,13 @@ internal sealed record RoomDirectoryView(
     DateTimeOffset ServerTime, RoomView[] Rooms)
 {
     public int SchemaVersion => 1;
+    // Trusted Relay response identity, never a Flutter-supplied ID or a display handle.
+    [JsonIgnore]
+    public string? ViewerAccountId { get; init; }
+    [JsonIgnore]
+    public string? ViewerMembershipToken { get; init; }
+    [JsonIgnore]
+    public bool SupportsMembershipKeepalive { get; init; }
     public bool SupportsHostTransfer { get; init; }
     public string[]? ViewerPendingRoomIds { get; init; }
     public RoomInvitationView[] ReceivedInvitations { get; init; } = [];
@@ -100,7 +107,10 @@ internal sealed partial class PartyRoomReader : IDisposable
             (baseUri.Scheme != "https" && !(baseUri.Scheme == "http" && baseUri.IsLoopback)))
             throw new ArgumentException("A trusted HTTPS or loopback Relay origin is required.", nameof(baseUri));
         _endpoint = new Uri(baseUri, "/api/party-rooms");
-        _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
+        _http = new HttpClient(handler ?? new HttpClientHandler {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+        })
             { Timeout = TimeSpan.FromSeconds(12) };
     }
 
@@ -203,7 +213,20 @@ internal sealed partial class PartyRoomReader : IDisposable
             // A current membership is authoritative. Do not expose other rooms to
             // the client while joined, even if the old directory includes them.
             var visible = current is null ? rooms : rooms.Where(room => room.RoomId == current).ToArray();
+            var viewer = root.TryGetProperty("viewerAccountId", out var viewerValue) && viewerValue.ValueKind != JsonValueKind.Null
+                ? Text(root, "viewerAccountId", true) : null;
+            if (viewer is not null && (viewer.Length > 256 || viewer.Any(char.IsControl) ||
+                current is not null && visible.Single().Members.Count(member => member.AccountId == viewer) != 1)) throw Invalid();
+            var keepalive = root.TryGetProperty("supportsMembershipKeepalive", out var capability) &&
+                capability.ValueKind == JsonValueKind.True;
+            var membershipToken = root.TryGetProperty("viewerMembershipToken", out var membership) &&
+                membership.ValueKind != JsonValueKind.Null ? Text(root, "viewerMembershipToken", true) : null;
+            if (keepalive && (current is null ? membershipToken is not null :
+                !Guid.TryParseExact(membershipToken, "N", out _))) throw Invalid();
             return new(current, now, visible) {
+                ViewerAccountId = viewer,
+                SupportsMembershipKeepalive = keepalive,
+                ViewerMembershipToken = keepalive ? membershipToken : null,
                 SupportsHostTransfer = root.TryGetProperty("supportsHostTransfer", out var transfer) &&
                     transfer.ValueKind == JsonValueKind.True,
                 ViewerPendingRoomIds = ReadPendingRoomIds(root),

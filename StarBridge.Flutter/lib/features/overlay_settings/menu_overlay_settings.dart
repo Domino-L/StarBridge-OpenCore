@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import 'overlay_settings_command_feedback.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../platform/window/menu_preview_window_port.dart';
 import '../../platform/window/menu_window_preferences.dart';
 import '../../platform/window/menu_shortcut_settings.dart';
 import '../../platform/window/menu_browser_resume.dart';
 import '../../platform/window/menu_screenshot_directory.dart';
+import '../../platform/window/method_channel_menu_preview_window.dart';
 import 'menu_settings_draft.dart';
 import 'menu_additional_settings_draft.dart';
 import 'menu_additional_settings_editors.dart';
@@ -26,6 +30,8 @@ class MenuOverlaySettings extends StatefulWidget {
 
 class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
   bool _opening = false, _failed = false;
+  int _openEpoch = 0;
+  Object _openOwner = Object();
   MenuSettingsDraft? _owned;
   MenuShortcutSummaryState? _shortcuts;
   MenuSettingsDraft? get draft => widget.draft ?? _owned;
@@ -76,7 +82,11 @@ class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
   @override
   void didUpdateWidget(MenuOverlaySettings old) {
     super.didUpdateWidget(old);
-    if (old.preview != widget.preview || old.draft != widget.draft) {
+    if (!identical(old.preview, widget.preview) ||
+        !identical(old.draft, widget.draft)) {
+      ++_openEpoch;
+      _openOwner = Object();
+      _opening = _failed = false;
       _owned?.dispose();
       _shortcuts?.dispose();
       _shortcuts = null;
@@ -95,6 +105,7 @@ class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
   Future<void> _open() async {
     final port = widget.preview;
     if (port is! MenuLiveWindowPort || !port.liveAvailable || _opening) return;
+    final epoch = ++_openEpoch, owner = widget.draft;
     final strings = AppStrings.of(context);
     setState(() {
       _opening = true;
@@ -110,7 +121,10 @@ class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
     } on Object {
       shown = false;
     }
-    if (mounted) {
+    if (mounted &&
+        epoch == _openEpoch &&
+        identical(port, widget.preview) &&
+        identical(owner, widget.draft)) {
       setState(() {
         _opening = false;
         _failed = !shown;
@@ -171,13 +185,23 @@ class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
                         state: extra.savedShortcut?.state ?? 'unavailable',
                       ),
                     ),
-                  FilledButton(
-                    key: const Key('menu-overlay-open-live'),
-                    onPressed: available && !_opening ? _open : null,
-                    child: Text(
-                      strings.text(
-                        _opening ? 'overlay.menu.opening' : 'menu.product.open',
-                      ),
+                  OverlaySettingsCommandFeedback(
+                    owner: _openOwner,
+                    builder: (context, run, source) => StarBridgeActionButton(
+                      kind: StarBridgeActionKind.primary,
+                      controlKey: const Key('menu-overlay-open-live'),
+                      nativeStyle: _opening
+                          ? const ButtonStyle(animationDuration: Duration.zero)
+                          : null,
+                      onActivate: available && !_opening
+                          ? (origin) => run(origin, _open)
+                          : null,
+                      child: _opening
+                          ? OverlaySettingsCommandWait(
+                              label: strings.text('overlay.menu.opening'),
+                              source: source(),
+                            )
+                          : Text(strings.text('menu.product.open')),
                     ),
                   ),
                 ],
@@ -210,6 +234,11 @@ class _MenuOverlaySettingsState extends State<MenuOverlaySettings> {
                 screenshotDirectory: value.additional?.directoryPort == null
                     ? null
                     : MenuAdditionalDirectoryEditor(draft: value.additional!),
+                execHangar: switch (widget.preview) {
+                  MethodChannelMenuPreviewWindow window =>
+                    window.execHangarProvider,
+                  _ => null,
+                },
               ),
             ),
           if (draft == null)

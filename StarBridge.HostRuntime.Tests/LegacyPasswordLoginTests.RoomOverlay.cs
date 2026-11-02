@@ -10,6 +10,8 @@ internal static partial class LegacyPasswordLoginTests
 {
     internal static async Task RoomOverlayIdentityPipeline()
     {
+        await ScmRoomOverlayIdentityPipeline();
+        await ScmRoomKeepaliveGenerationPipeline();
         using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
         using var roomTransport = new OverlayRoomTransport();
         using var rooms = new PartyRoomReader(new Uri("https://example.invalid/"), roomTransport);
@@ -79,33 +81,174 @@ internal static partial class LegacyPasswordLoginTests
 
     private sealed class OverlayRoomTransport : HttpMessageHandler
     {
+        internal string? ViewerAccountId;
+        internal bool SupportsMembershipKeepalive;
+        internal int KeepaliveCalls;
+        internal string? LastKeepaliveBearer;
+        internal TaskCompletionSource<bool> KeepaliveSeen = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource<HttpResponseMessage>? HeldDirectory;
+        internal TaskCompletionSource<bool> DirectoryHeld = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool Joined = true;
         internal HttpStatusCode? DirectoryFailure;
         internal HttpStatusCode? ChatFailure;
         internal bool InvalidDirectory;
         internal bool InvalidChat;
+        internal object[] ChatMessages = [];
+        internal object? SentMessage;
+        internal string? SentChatBody;
+        internal string? SentChatBearer;
         internal bool CancelDirectory;
         internal Action? CancelDirectoryAction;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/keepalive"))
+            {
+                LastKeepaliveBearer = request.Headers.Authorization?.Parameter;
+                Interlocked.Increment(ref KeepaliveCalls);
+                KeepaliveSeen.TrySetResult(true);
+                return Task.FromResult(new HttpResponseMessage(Joined ? HttpStatusCode.NoContent : HttpStatusCode.Conflict));
+            }
+            if (request.RequestUri!.AbsolutePath.EndsWith("/chat") && request.Method == HttpMethod.Post && SentMessage is not null)
+            {
+                SentChatBody = request.Content!.ReadAsStringAsync(token).GetAwaiter().GetResult();
+                SentChatBearer = request.Headers.Authorization?.Parameter;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                    JsonSerializer.Serialize(new { message = SentMessage }), Encoding.UTF8, "application/json") });
+            }
             if (request.RequestUri!.AbsolutePath.EndsWith("/chat"))
                 return Task.FromResult(new HttpResponseMessage(ChatFailure ?? HttpStatusCode.OK) { Content = new StringContent(
-                    InvalidChat ? "{}" : "{\"messages\":[],\"latestSequence\":0,\"oldestSequence\":0,\"hasOlder\":false}", Encoding.UTF8, "application/json") });
+                    InvalidChat ? "{}" : JsonSerializer.Serialize(new { messages = ChatMessages,
+                        latestSequence = ChatMessages.Length, oldestSequence = ChatMessages.Length == 0 ? 0 : 1,
+                        hasOlder = false }), Encoding.UTF8, "application/json") });
+            if (HeldDirectory is { } held)
+            {
+                DirectoryHeld.TrySetResult(true);
+                return held.Task; // Deliberately ignores cancellation to exercise late completion.
+            }
             if (DirectoryFailure is { } failure)
                 return Task.FromResult(new HttpResponseMessage(failure));
             if (CancelDirectory) { CancelDirectoryAction?.Invoke(); return Task.FromException<HttpResponseMessage>(new OperationCanceledException(token)); }
             if (InvalidDirectory)
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}", Encoding.UTF8, "application/json") });
             var now = DateTimeOffset.UtcNow;
-            var room = new PartyRoomSnapshot("fixture-room", "fixture-code", "legacy-synthetic", "Fixture", "", [], [], 4,
+            var room = new PartyRoomSnapshot("fixture-room", "fixture-code", ViewerAccountId ?? "legacy-synthetic", "Fixture", "", [], [], 4,
                 true, "everyone", "direct", false, "recommended", "zh", null, now.AddHours(1),
-                [new("", "Same callsign", "Self_Handle", null, true, "游戏中 · LIVE", "尚未识别", "", "US", now) { PublicProfileId = "legacy-synthetic" },
+                [new("", "Same callsign", "Self_Handle", null, true, "游戏中 · LIVE", "尚未识别", "", "US", now) { PublicProfileId = ViewerAccountId ?? "legacy-synthetic" },
                  new("", "Same callsign", "Peer_Handle", null, false, "遊戲中 · PTU", "", "", "EU", now) { PublicProfileId = "peer-fixture" }], now, now, 1)
                 { ViewerIsHost = true };
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
-                JsonSerializer.Serialize(new PartyRoomDirectoryResponse([room], Joined ? room.RoomId : null, now),
+                JsonSerializer.Serialize(new { Rooms = new[] { room }, CurrentRoomId = Joined ? room.RoomId : null, ServerTime = now,
+                    ViewerAccountId, SupportsMembershipKeepalive,
+                    ViewerMembershipToken = SupportsMembershipKeepalive && Joined ? "0123456789abcdef0123456789abcdef" : null },
                     new JsonSerializerOptions(JsonSerializerDefaults.Web)), Encoding.UTF8, "application/json") });
         }
+    }
+
+    private static async Task ScmRoomOverlayIdentityPipeline()
+    {
+        using var loginTransport = new Transport();
+        using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), loginTransport);
+        using var transport = new OverlayRoomTransport { ViewerAccountId = "scm-v1:" + new string('a', 64) };
+        using var rooms = new PartyRoomReader(new Uri("https://example.invalid/"), transport);
+        using var host = CreateHost(login, new StarBridge.HostRuntime.Auth.ScmOAuthSession(
+            "scm-development", "synthetic", "Synthetic", "synthetic-bearer", DateTimeOffset.UtcNow.AddMinutes(5), []), partyRooms: rooms);
+        var context = host.CurrentContext!;
+        var directory = await host.GetPartyRoomsAsync(context, default);
+        Check(directory.Rooms.Single().Members[0].IsSelf && !directory.Rooms.Single().Members[1].IsSelf,
+            "Pure SCM identifies self by authoritative Relay identity, never matching callsigns.");
+        Check(host.CurrentRoomOverlay?.Members[0].IsSelf == true, "Pure SCM identity reaches native room overlay.");
+        object Message(int sequence, string sender) => new { sequence, messageId = "scm-message-" + sequence,
+            kind = "player", senderCallsign = "Same callsign", senderGameId = "", senderAccountId = sender,
+            text = "Synthetic", createdAt = DateTimeOffset.UtcNow };
+        transport.ChatMessages = [Message(1, transport.ViewerAccountId), Message(2, "peer-fixture")];
+        var chatRead = await host.ExecutePartyRoomAsync(context, BridgePayload.From(new { schemaVersion = 1, operation = "chatRead",
+            data = new { roomId = "fixture-room", after = 0L, before = 0L } }), default);
+        Check(chatRead.AuthorizedOverlayDirectory?.ViewerAccountId == transport.ViewerAccountId &&
+            chatRead.Chat!.Messages[0].SenderAccountId == transport.ViewerAccountId,
+            "authenticated viewer and sender survive transport to Host projection");
+        Check(chatRead.Chat!.Messages[0].IsSelf && !chatRead.Chat.Messages[1].IsSelf,
+            "pure SCM history identifies self by authenticated business subject without RSI Handle");
+        Check(!BridgePayload.From(chatRead).GetRawText().Contains(transport.ViewerAccountId, StringComparison.Ordinal),
+            "chat self projection does not disclose the private business identity to Flutter");
+        Check(host.CurrentRoomOverlay?.Members[0].IsSelf == true, "SCM chat preflight preserves self identity.");
+        var package = new StarBridge.HostRuntime.Overlay.OverlaySharedPreset(1, "Synthetic preset",
+            "0,CallsignAndGameName,0,0,0", "Chat,0,0,0.2,0.2").Serialize();
+        var attachment = new StarBridge.Core.Chat.ChatAttachmentContract("overlay_preset", "Synthetic preset", "Layout", package);
+        transport.SentMessage = new { sequence = 3, messageId = "scm-preset-3", kind = "player",
+            senderCallsign = "Same callsign", senderGameId = "", senderAccountId = transport.ViewerAccountId,
+            text = "", createdAt = DateTimeOffset.UtcNow, attachment };
+        var sentPreset = await host.ExecutePartyRoomAsync(context, BridgePayload.From(new { schemaVersion = 1,
+            operation = "chatSend", data = new { roomId = "fixture-room", text = "", attachment } }), default);
+        Check(sentPreset.Message?.IsSelf == true && sentPreset.Message.Attachment?.OverlayPresetPackage == package,
+            "pure SCM Host accepts authenticated preset acknowledgement without RSI or legacy identity");
+        Check(transport.SentChatBearer == "synthetic-bearer" && transport.SentChatBody is not null,
+            "preset send uses current SCM bearer");
+        using (var posted = JsonDocument.Parse(transport.SentChatBody!))
+            Check(posted.RootElement.GetProperty("attachment").GetProperty("overlayPresetPackage").GetString() == package,
+                "actual Host sends the selected local preset package");
+        Check(!BridgePayload.From(sentPreset).GetRawText().Contains(transport.ViewerAccountId, StringComparison.Ordinal),
+            "preset acknowledgement does not disclose business identity");
+        Check(loginTransport.Calls == 0, "SCM room use does not authenticate or create a legacy account.");
+        Check(!BridgePayload.From(directory).GetRawText().Contains(transport.ViewerAccountId, StringComparison.Ordinal),
+            "SCM business identity never crosses the Flutter bridge.");
+        transport.SupportsMembershipKeepalive = true;
+        host.EnableRoomMembershipKeepalive(TimeSpan.FromMilliseconds(30));
+        await transport.KeepaliveSeen.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Check(transport.KeepaliveCalls > 0, "SCM Host renews with no Flutter page or overlay demand");
+        transport.Joined = false;
+        await Task.Delay(150);
+        var count = Volatile.Read(ref transport.KeepaliveCalls);
+        await Task.Delay(150);
+        Check(transport.KeepaliveCalls == count && host.CurrentRoomOverlay is null,
+            "authoritative room departure stops renewals and clears stale room content");
+        transport.HeldDirectory = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        await transport.DirectoryHeld.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        host.Dispose();
+        transport.HeldDirectory.TrySetResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        await host.RoomKeepaliveCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+        Check(transport.KeepaliveCalls == count, "disposal cancels background liveness even when a late read ignores cancellation");
+        Check(host.HangarIdentity is null, "disposed SCM Host cannot authorize a continuing local hangar scan");
+    }
+
+    private static async Task ScmRoomKeepaliveGenerationPipeline()
+    {
+        foreach (var nextSubject in new[] { "synthetic", "different-subject" })
+        {
+            using var login = new LegacyPasswordLoginClient(new Uri("https://example.invalid/"), new Store(), new Transport());
+            var held = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var transport = new OverlayRoomTransport {
+                ViewerAccountId = "scm-v1:" + new string('a', 64), SupportsMembershipKeepalive = true, HeldDirectory = held };
+            using var rooms = new PartyRoomReader(new Uri("https://example.invalid/"), transport);
+            using var host = CreateHost(login, new StarBridge.HostRuntime.Auth.ScmOAuthSession(
+                "scm-development", "synthetic", "Synthetic", "old-generation-bearer", DateTimeOffset.UtcNow.AddMinutes(5), []), partyRooms: rooms);
+            host.EnableRoomMembershipKeepalive(TimeSpan.FromMilliseconds(30));
+            await transport.DirectoryHeld.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var oldCompletion = host.RoomKeepaliveCompletion;
+            transport.HeldDirectory = null;
+            // Exercise the actual private login publication boundary with synthetic sessions,
+            // not a fake authorization server or a new production bypass/test API.
+            var publish = typeof(ScmAccountBridgeHost).GetMethod("PublishSession",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var replacement = new StarBridge.HostRuntime.Auth.ScmOAuthSession(
+                "scm-development", nextSubject, "Synthetic", "new-generation-bearer", DateTimeOffset.UtcNow.AddMinutes(5), []);
+            // Real login commits OAuth before Host publication. This fixture's
+            // existing reflection publication must reproduce both owner states.
+            var oauth = typeof(ScmAccountBridgeHost).GetField("_oauth",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(host)!;
+            oauth.GetType().GetField("_currentSession",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(oauth, replacement);
+            publish.Invoke(host, [replacement, false, null, false, null, null, null, null]);
+            held.TrySetResult(new HttpResponseMessage(HttpStatusCode.OK) {
+                Content = new ByteArrayContent(PartyRoomReaderTests.Wire("one", PartyRoomReaderTests.Room("one"))) });
+            await oldCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+            await transport.KeepaliveSeen.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Check(host.Generation == 1 && host.CurrentContext?.Subject == nextSubject &&
+                transport.LastKeepaliveBearer == "new-generation-bearer",
+                "late room read cannot restore old session or bearer after same-subject login or account change");
+            host.Dispose();
+            await host.RoomKeepaliveCompletion.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        Console.WriteLine("PASS SCM keepalive generation: cancelled late read, same-account relogin and different account");
     }
 
     internal static async Task RoomOverlayTransientReadPipeline()

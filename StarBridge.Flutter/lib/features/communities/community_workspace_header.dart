@@ -1,3 +1,4 @@
+import '../common/organization_workspace_frame.dart';
 import '../../design_system/icons/standard_icon.dart';
 
 import 'dart:typed_data';
@@ -5,12 +6,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_passive_count.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import 'community_workspace_copy.dart';
 import 'community_compact_header.dart';
 import 'community_workspace_image.dart';
 import 'community_workspace_port.dart';
 import 'community_profile_copy.dart';
 import 'community_activity_time.dart';
+import '../../design_system/typography/cjk_line_break.dart';
 
 /// A stable overview: identity/presence first, collaboration information second.
 /// Long-form data stays accessible through details, never through a nested fold.
@@ -44,10 +50,8 @@ class CommunityWorkspaceHeader extends StatelessWidget {
     String t(String key) => workspaceText(context, key);
     final colors = context.tokens.colors;
     final text = Theme.of(context).textTheme;
-    final online = workspace.members.where((m) => m.online).length;
-    final gaming = workspace.members
-        .where((m) => m.online && m.liveStatus.toLowerCase() == 'ingame')
-        .length;
+    final online = workspace.members.where((m) => m.publicOnline).length;
+    final gaming = workspace.members.where((m) => m.publicInGame).length;
     final scoped =
         workspace.query.isNotEmpty ||
         workspace.members.length != workspace.totalCount;
@@ -59,14 +63,19 @@ class CommunityWorkspaceHeader extends StatelessWidget {
     final contactSummary = contacts.isEmpty
         ? t('hidden')
         : '${contacts.first.$1} · ${contacts.first.$2}';
-    final activity = [
+    // QualityPass ③: one line when it fits; otherwise break only between
+    // segments, so the time zone never drops to a line of its own.
+    final activity = metaLine([
       if (workspace.activityWindows.isNotEmpty)
-        communityActivitySummary(context, workspace.activityWindows)
+        ...communityActivitySummary(
+          context,
+          workspace.activityWindows,
+        ).split(RegExp(r'[;；]\s*'))
       else if (workspace.activeTime.isNotEmpty)
         workspace.activeTime,
       if (workspace.timeZoneId?.isNotEmpty == true)
         communityTimeZoneSummary(context, workspace),
-    ].join(' · ');
+    ]);
 
     String metricLabel(String key) =>
         key == 'online' ? t(scoped ? 'onlinePage' : 'onlineTotal') : t(key);
@@ -74,7 +83,8 @@ class CommunityWorkspaceHeader extends StatelessWidget {
       value,
       style: text.labelMedium?.copyWith(color: colors.textSecondary),
       maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+      overflow: TextOverflow.fade,
+      softWrap: false,
     );
     final identity = Row(
       children: [
@@ -94,13 +104,14 @@ class CommunityWorkspaceHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Tooltip(
+              StarBridgeTooltip(
                 message: workspace.name,
                 child: Text(
                   workspace.name,
                   style: text.titleLarge,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                 ),
               ),
               const SizedBox(height: 3),
@@ -119,7 +130,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
             Flexible(child: heading(t('onlineInfo'))),
             if (scoped) ...[
               const SizedBox(width: 6),
-              Tooltip(
+              StarBridgeTooltip(
                 message: t('presencePageScope'),
                 child: Text(
                   t('currentPage'),
@@ -134,7 +145,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final metric in [
-              ('online', online, colors.accent),
+              ('online', online, colors.stateAccent),
               ('gaming', gaming, colors.success),
               ('member', workspace.totalCount, colors.textPrimary),
             ])
@@ -153,9 +164,9 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              '${metric.$2}',
-                              key: ValueKey(
+                            child: StarBridgePassiveCount(
+                              value: metric.$2,
+                              valueKey: ValueKey(
                                 'community-presence-value-${metric.$1}',
                               ),
                               style: text.headlineSmall?.copyWith(
@@ -171,7 +182,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        Tooltip(
+                        StarBridgeTooltip(
                           message: metricLabel(metric.$1),
                           child: Text(
                             metricLabel(metric.$1),
@@ -179,7 +190,8 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                               'community-presence-label-${metric.$1}',
                             ),
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            overflow: TextOverflow.fade,
+                            softWrap: false,
                             style: text.labelMedium?.copyWith(
                               fontSize: 12,
                               height: 1.15,
@@ -202,12 +214,13 @@ class CommunityWorkspaceHeader extends StatelessWidget {
       children: [
         heading(t('activity')),
         const SizedBox(height: 5),
-        Tooltip(
+        StarBridgeTooltip(
           message: activity,
           child: Text(
             activity.isEmpty ? t('hidden') : activity,
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            overflow: TextOverflow.fade,
+            softWrap: false,
             style: text.bodyMedium,
           ),
         ),
@@ -217,21 +230,29 @@ class CommunityWorkspaceHeader extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (expanded && onToggleExpansion != null)
-          IconButton(
-            key: const Key('community-header-collapse'),
-            onPressed: onToggleExpansion,
-            tooltip: profileText(context, 'collapseHeader'),
+          StarBridgeIconAction(
+            controlKey: const Key('community-header-collapse'),
+            onActivate: (_) => onToggleExpansion!(),
+            label: profileText(context, 'collapseHeader'),
             icon: const StandardIcon(StandardIconSemantic.unfoldLess, size: 18),
           ),
-        TextButton.icon(
-          key: const Key('community-open-details'),
-          onPressed: onDetails,
-          icon: const StandardIcon(StandardIconSemantic.info, size: 18),
-          label: Text(t('viewDetails')),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('community-open-details'),
+          onActivate: (_) => onDetails(),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const StandardIcon(StandardIconSemantic.info, size: 18),
+              const SizedBox(width: 8),
+              Text(t('viewDetails')),
+            ],
+          ),
         ),
-        IconButton(
-          onPressed: onRefresh,
-          tooltip: t('refresh'),
+        StarBridgeIconAction(
+          controlKey: const Key('community-workspace-refresh'),
+          onActivate: (_) => onRefresh(),
+          label: t('refresh'),
           icon: const StandardIcon(StandardIconSemantic.refresh, size: 20),
         ),
       ],
@@ -256,7 +277,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Tooltip(
+                child: StarBridgeTooltip(
                   message: contactSummary,
                   child: SelectableText(
                     contactSummary,
@@ -270,21 +291,24 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                 ),
               ),
               if (contacts.length > 1)
-                TextButton(
-                  onPressed: onDetails,
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('community-header-more-contacts'),
+                  onActivate: (_) => onDetails(),
                   child: Text('+${contacts.length - 1}'),
                 ),
               if (contacts.isNotEmpty)
-                IconButton(
-                  onPressed: () => onCopyContact(contacts.first.$2),
-                  tooltip: t('copy'),
+                StarBridgeIconAction(
+                  controlKey: const Key('community-header-copy-contact'),
+                  onActivate: (_) => onCopyContact(contacts.first.$2),
+                  label: t('copy'),
                   icon: const StandardIcon(StandardIconSemantic.copy, size: 18),
                 ),
               if (contacts.isNotEmpty)
-                IconButton(
-                  key: const Key('community-copy-all-contacts'),
-                  onPressed: onCopyContacts,
-                  tooltip: t('copyAll'),
+                StarBridgeIconAction(
+                  controlKey: const Key('community-copy-all-contacts'),
+                  onActivate: (_) => onCopyContacts(),
+                  label: t('copyAll'),
                   icon: const StandardIcon(
                     StandardIconSemantic.copyAll,
                     size: 18,
@@ -295,81 +319,17 @@ class CommunityWorkspaceHeader extends StatelessWidget {
         ),
       ],
     );
-    return LayoutBuilder(
-      builder: (context, available) {
-        final compact =
-            !expanded &&
-            (available.maxWidth < 1000 ||
-                MediaQuery.sizeOf(context).height <= 800);
-        return Container(
-          key: const Key('community-header-information'),
-          padding: compact
-              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 7)
-              : const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: context.tokens.surfaces.raised.fill,
-            border: Border.all(color: context.tokens.surfaces.panel.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: compact
-              ? _compactHeader(
-                  context,
-                  online,
-                  gaming,
-                  scoped,
-                  available.maxWidth < 650,
-                )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 1000;
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(flex: 4, child: identity),
-                            if (wide) ...[
-                              const SizedBox(width: 24),
-                              Expanded(flex: 4, child: presence),
-                              const SizedBox(width: 24),
-                              Expanded(flex: 3, child: activeHours),
-                              const SizedBox(width: 16),
-                            ],
-                            actions,
-                          ],
-                        ),
-                        if (!wide) ...[
-                          const SizedBox(height: 16),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(flex: 3, child: presence),
-                              const SizedBox(width: 16),
-                              Expanded(flex: 2, child: activeHours),
-                            ],
-                          ),
-                        ],
-                        const Divider(height: 24),
-                        if (constraints.maxWidth >= 650)
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(flex: 6, child: announcementCell),
-                              const SizedBox(width: 24),
-                              Expanded(flex: 4, child: contactsCell),
-                            ],
-                          )
-                        else ...[
-                          announcementCell,
-                          const SizedBox(height: 12),
-                          contactsCell,
-                        ],
-                      ],
-                    );
-                  },
-                ),
-        );
-      },
+    return OrganizationWorkspaceHeaderLayout(
+      key: const Key('community-header-information'),
+      expanded: expanded,
+      compactBuilder: (narrow) =>
+          _compactHeader(context, online, gaming, scoped, narrow),
+      identity: identity,
+      presence: presence,
+      activity: activeHours,
+      actions: actions,
+      announcement: announcementCell,
+      contacts: contactsCell,
     );
   }
 

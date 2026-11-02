@@ -2,87 +2,56 @@ import 'community_workspace_port.dart';
 
 import 'dart:ui' show Locale;
 
-import '../common/runtime_name_labels.dart';
+import '../common/organization_member_runtime.dart';
+export '../common/organization_member_runtime.dart'
+    show recognizedCommunityRuntime;
+import '../common/organization_member_runtime_cells.dart';
 
 /// WPF S2 PlayerSessionStatePresentation / GameServerRegionPresentation
 /// semantics, applied only to the privacy-filtered workspace projection.
+MemberRuntimeCells communityMemberRuntimeCells(
+  CommunityWorkspaceMember member, {
+  required String Function(String) text,
+  required String Function(String) regionText,
+  Locale locale = const Locale('en'),
+}) {
+  return organizationMemberRuntimeCells(
+    OrganizationMemberRuntimeFacts(
+      publicInGame: member.publicInGame,
+      serverRegion: member.serverRegion,
+      hasServerSession: member.hasServerSession,
+      ship: member.ship,
+      location: member.location,
+      locationHiddenReason: member.locationHiddenReason,
+      arrivalPendingConfirmation: member.arrivalPendingConfirmation,
+      arrivalTargetCode: member.arrivalTargetCode,
+      shipLabels: member.shipLabels,
+      locationLabels: member.locationLabels,
+      arrivalTargetLabels: member.arrivalTargetLabels,
+    ),
+    text: text,
+    regionText: regionText,
+    locale: locale,
+  );
+}
+
+/// Compatibility record for older consumers. Both representations use the same
+/// runtime mapping, so privacy, factual state and localized wording cannot drift.
 ({String server, String ship, String location}) communityMemberRuntime(
   CommunityWorkspaceMember member, {
   required String Function(String) text,
   required String Function(String) regionText,
   Locale locale = const Locale('en'),
 }) {
-  final status = member.liveStatus.toLowerCase();
-  if (const {'paused', 'hidden', 'unknown', ''}.contains(status)) {
-    final hidden = text('hidden');
-    return (server: hidden, ship: hidden, location: hidden);
-  }
-  if (!member.online || status != 'ingame') {
-    final value = text('notInGame');
-    return (server: value, ship: value, location: value);
-  }
-  final region = switch (member.serverRegion?.toUpperCase()) {
-    'USA' => 'US',
-    'EUROPE' => 'EU',
-    'AUSTRALIA' => 'AU',
-    final value => value,
-  };
-  final session =
-      member.hasServerSession ??
-      (recognizedCommunityRuntime(region) ? true : null);
-  String runtime(String? value, {bool location = false}) {
-    // Null means withheld, not evidence of an unknown location or session.
-    if (value == null) return text('hidden');
-    if (session == false) return text('notInServer');
-    if (location && member.arrivalPendingConfirmation) {
-      final target = member.arrivalTargetCode;
-      final pending = text('locationPending');
-      return recognizedCommunityRuntime(target)
-          ? '${runtimeNameLabel(target!, member.arrivalTargetLabels, locale)} · $pending'
-          : pending;
-    }
-    if (recognizedCommunityRuntime(value)) {
-      return location
-          ? runtimeNameLabel(value.trim(), member.locationLabels, locale)
-          : value.trim();
-    }
-    if (location &&
-        member.locationHiddenReason == 'lowConfidence' &&
-        value.trim().toLowerCase() == 'unknown') {
-      return text('lowConfidenceLocation');
-    }
-    return text(session == true ? 'waitingRecognition' : 'waitingServerSync');
-  }
-
-  return (
-    server: region == null
-        ? text('hidden')
-        : recognizedCommunityRuntime(region) && session != false
-        ? regionText(region)
-        : '—',
-    ship: runtime(
-      member.ship == null || !recognizedCommunityRuntime(member.ship)
-          ? member.ship
-          : runtimeNameLabel(member.ship!, member.shipLabels, locale),
-    ),
-    location: runtime(member.location, location: true),
+  final cells = communityMemberRuntimeCells(
+    member,
+    text: text,
+    regionText: regionText,
+    locale: locale,
   );
-}
-
-bool recognizedCommunityRuntime(String? value) {
-  final normalized = value?.trim().toLowerCase() ?? '';
-  return !const {
-        '',
-        'unknown',
-        'none',
-        'n/a',
-        '未知',
-        '无',
-        '未连接',
-        '地点：未知星域',
-        '飞船：未知',
-        '未进入游戏',
-        '未进入服务器',
-      }.contains(normalized) &&
-      !normalized.startsWith('等待');
+  return (
+    server: cells.server.text,
+    ship: cells.ship.text,
+    location: cells.location.text,
+  );
 }

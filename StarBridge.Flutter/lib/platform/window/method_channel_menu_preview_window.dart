@@ -3,10 +3,15 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import '../../shared/diagnostics/menu_open_trace.dart';
 import 'menu_preview_window_port.dart';
 import 'menu_action_validation.dart';
+import 'menu_window_transport.dart';
+import 'menu_interaction_presentation.dart';
 import 'menu_profile_navigation.dart';
 import 'menu_feature_lease.dart';
+import 'menu_feature_sessions.dart';
+import '../../shared/downloadable_image_cache.dart';
 import 'menu_window_preferences.dart';
 import 'menu_screenshot_directory.dart';
 import 'menu_screenshot_directory_request.dart';
@@ -20,40 +25,17 @@ import 'menu_notice.dart';
 import 'menu_live_presentation_feeds.dart';
 import 'menu_recovery.dart';
 import 'menu_recovery_decision.dart';
-import 'menu_recovery_lifecycle.dart';
-import 'menu_startup_lifecycle.dart';
-import '../bridge/bridge_client_session.dart';
+import '../../features/tools/exec_hangar_port.dart';
+import 'menu_exec_hangar_summary.dart';
+import 'menu_engine_prewarm.dart';
 
-/// Owned by the primary application runtime and shared by its compositions.
-/// Contains no account data; a replaced composition cannot clear the next one.
-final class MenuWindowLifetime {
-  MethodChannelMenuPreviewWindow? _owner;
-  int _nextRequest = 0;
-  final _recovery = MenuRecoveryLifecycle();
-  final startup = MenuStartupLifecycle();
-  Future<void> prepareStartup(BridgeClientSession session) =>
-      startup.prepare(session);
-
-  /// Explicit normal application exit only, never hide, logout or disposal.
-  Future<void> completeExit() async {
-    try {
-      final owner = _owner;
-      if (owner != null && !owner._disposed) {
-        owner._preferencesTimer?.cancel();
-        await owner._preferencesWork;
-        await owner._savePreferences();
-        if (owner.preferences != null && owner._preferences == null) return;
-      }
-      await _recovery.finish();
-    } on Object {
-      // A failed flush/confirmation remains interrupted. Do not block exit.
-    }
-  }
-}
+import 'method_channel_menu_window_lifetime.dart';
+export 'method_channel_menu_window_lifetime.dart' show MenuWindowLifetime;
 
 /// Uses the application's existing native menu window, not a second process.
 final class MethodChannelMenuPreviewWindow
     implements
+        DownloadableImageOwner,
         MenuLiveWindowPort,
         MenuNoticeDeliveryOwner,
         MenuWindowStartupPort,
@@ -68,6 +50,7 @@ final class MethodChannelMenuPreviewWindow
     this.profiles,
     this.features = const {},
     this.preferences,
+    this.interaction,
     this.contextValues,
     this.hotkeys,
     this.hotkeyLabels,
@@ -78,6 +61,7 @@ final class MethodChannelMenuPreviewWindow
     MenuScreenshotDirectoryPort? screenshotDirectory,
     this.browserResumeProvider,
     this.screenshotDirectoryProvider,
+    this.execHangarProvider,
     // Preserve the existing public constructor argument names for callers.
     // ignore: prefer_initializing_formals
   }) : _browserResume = browserResume,
@@ -95,6 +79,7 @@ final class MethodChannelMenuPreviewWindow
   final MenuScreenshotDirectoryPort? _screenshotDirectory;
   final MenuBrowserResumePort? Function()? browserResumeProvider;
   final MenuScreenshotDirectoryPort? Function()? screenshotDirectoryProvider;
+  final ExecHangarPort? Function()? execHangarProvider;
   late final _screenshotRequests = MenuScreenshotDirectoryRequest(
     null,
     sourceProvider: () => screenshotDirectory,
@@ -117,11 +102,12 @@ final class MethodChannelMenuPreviewWindow
       _ownsChannel && _live && _generation != null && _feeds.hasNotices;
   Future<void> _windowStateWork = Future.value();
   @override
-  void initialize() => hotkeys?.initialize(
-    () => ++lifetime._nextRequest,
-    _hotkey,
-    _revokeHotkeySession,
-  );
+  void initialize() {
+    hotkeys?.initialize(lifetime.nextRequest, _hotkey, _revokeHotkeySession);
+    if (hotkeys != null && liveAvailable) _prewarm.start(() => !_opening);
+  }
+
+  late final _prewarm = MenuEnginePrewarm(_channel);
 
   void _revokeHotkeySession() {
     _suspend();
@@ -129,10 +115,10 @@ final class MethodChannelMenuPreviewWindow
     final shown = _shown;
     if (shown != null && !shown.isCompleted) shown.complete(false);
     if (_ownsChannel) {
-      lifetime._owner = null;
+      lifetime.owner = null;
       _channel.setMethodCallHandler(null);
     }
-    if (_request != null) unawaited(_detach(_request));
+    if (_request != null) unawaited(detachMenuWindow(_channel, _request));
   }
 
   Future<void> _hotkey(MenuHotkeyIntent intent) async {
@@ -166,6 +152,8 @@ final class MethodChannelMenuPreviewWindow
 
   final Map<String, MenuFeatureFactory> features;
   final MenuWindowPreferencesPort? preferences;
+  final MenuInteractionFeed? interaction;
+  bool _interactionVisible = false;
   @override
   MenuWindowPreferencesPort? get menuPreferences => preferences;
   final List<String> Function()? contextValues;
@@ -175,7 +163,13 @@ final class MethodChannelMenuPreviewWindow
   bool _savingPreferences = false;
   Timer? _preferencesTimer;
   Future<void>? _preferencesWork;
-  final _features = <String, MenuFeatureLease>{};
+  late final _features = MenuFeatureSessions(
+    features,
+    (view) => _publish(view, method: 'featureView'),
+    retirement: lifetime.imagesFor(this, () => _request),
+  );
+  @override
+  DownloadableImageCache get downloadableImages => _features;
   final MenuFriendsReadLease Function(void Function(Map<String, Object?>))?
   friends;
   final MenuCommsReadLease Function(void Function(Map<String, Object?>))? comms;
@@ -190,7 +184,7 @@ final class MethodChannelMenuPreviewWindow
   Completer<bool>? _shown;
   static const _channel = MethodChannel('starbridge/menu-primary');
   int? _request;
-  bool get _ownsChannel => identical(lifetime._owner, this);
+  bool get _ownsChannel => identical(lifetime.owner, this);
   bool _opening = false;
   @override
   bool get liveAvailable => friends != null && !_disposed;
@@ -206,6 +200,19 @@ final class MethodChannelMenuPreviewWindow
   Future<Object?> _handleMethod(MethodCall call) async {
     final generation = _generation, request = _request;
     bool current() => _currentOpening(generation, request);
+    if (lifetime.toolPages.accepts(call.method)) {
+      return lifetime.toolPages.handle(call, generation, current);
+    }
+    if (MenuExecHangarRequest.accepts(call.method)) {
+      return MenuExecHangarRequest.handle(
+        method: call.method,
+        arguments: call.arguments,
+        opening: generation,
+        isCurrent: current,
+        port: execHangarProvider?.call(),
+        openTool: () => lifetime.execHangarRequests.value++,
+      );
+    }
     if (call.method == 'screenshotDirectory' ||
         call.method == 'screenshotDestination') {
       return _screenshotRequests.dispatch(
@@ -232,7 +239,7 @@ final class MethodChannelMenuPreviewWindow
         isCurrent: current,
       );
       _preferences = value;
-      lifetime._recovery.resolved();
+      lifetime.recovery.resolved();
       return value.encode();
     }
     if (call.method == 'shortcutSettings') {
@@ -262,7 +269,9 @@ final class MethodChannelMenuPreviewWindow
         return;
       }
       final state = args['state'];
+      MenuOpenTrace.windowState(_request!, state, args['reason']);
       if (state == 'visible') {
+        _interactionVisible = true;
         unawaited(
           _reportWindow(
             _request!,
@@ -344,13 +353,7 @@ final class MethodChannelMenuPreviewWindow
       final tool = args['tool'] as String;
       if (call.method == 'featureVisible' && args['visible'] is bool) {
         if (args['visible'] == true) {
-          _features.putIfAbsent(
-            tool,
-            () => features[tool]!(
-              (view) =>
-                  _publish({...view, 'tool': tool}, method: 'featureView'),
-            ),
-          );
+          _features.obtain(tool);
         }
         _features[tool]?.show(args['visible'] as bool);
       } else if (call.method == 'featureAction' &&
@@ -359,13 +362,7 @@ final class MethodChannelMenuPreviewWindow
           args['value'] is String &&
           (args['value'] as String).length <= 2048) {
         if (tool == 'hud' && args['key'] == 'toggle' && args['value'] == '') {
-          _features.putIfAbsent(
-            tool,
-            () => features[tool]!(
-              (view) =>
-                  _publish({...view, 'tool': tool}, method: 'featureView'),
-            ),
-          );
+          _features.obtain(tool);
         }
         _features[tool]?.act(args['key'] as String, args['value'] as String);
       }
@@ -455,7 +452,7 @@ final class MethodChannelMenuPreviewWindow
         _disposed) {
       return;
     }
-    final payload = MenuLivePresentationFeeds.contextPayload(contextValues!());
+    final payload = _feeds.changedContext(contextValues!());
     if (payload == null) return;
     unawaited(
       _send({
@@ -518,11 +515,7 @@ final class MethodChannelMenuPreviewWindow
   }
 
   Future<void> _profile(Object? arguments) async {
-    if (arguments is! Map ||
-        arguments['opening'] != _generation ||
-        arguments['window'] is! String ||
-        !RegExp(r'^p[1-9][0-9]{0,8}$')
-            .hasMatch(arguments['window'] as String)) {
+    if (arguments is! Map || !validMenuProfileWindow(arguments, _generation)) {
       return;
     }
     final window = arguments['window'] as String;
@@ -535,21 +528,13 @@ final class MethodChannelMenuPreviewWindow
       return;
     }
     if (arguments['action'] != 'open' || arguments['key'] is! String) return;
-    final owner = switch (arguments['source']) {
-      'friends' => _social,
-      'comms' => _communications,
-      'organizations' => _features['organizations'],
-      'organizationChat' => _features['organizationChat'],
-      _ => null,
-    };
-    final key = arguments['key'] as String;
-    final target = owner is MenuProfileTargets
-        ? owner.profileTarget(key)
-        : null;
-    if (key.length > 64 ||
-        target == null ||
-        !target.isCurrent() ||
-        profiles == null) {
+    final target = resolveMenuProfileTarget(
+      arguments,
+      _social,
+      _communications,
+      _features.current,
+    );
+    if (target == null || profiles == null) {
       _publish({
         'window': window,
         'state': 'unavailable',
@@ -567,43 +552,35 @@ final class MethodChannelMenuPreviewWindow
       _send({
         'opening': generation,
         'revision': ++_revision,
-        'payload': _encode(view),
+        'payload': encodeMenuWindowView(view),
+        'resourceEpoch': lifetime.imageEpoch,
       }, method),
     );
   }
 
-  String _encode(Map<String, Object?> view) {
-    final payload = jsonEncode(view);
-    return utf8.encode(payload).length <= 1048576
-        ? payload
-        : '{"state":"unavailable"}';
-  }
-
   Future<void> _send(Map<String, Object?> view, String method) async {
-    try {
-      await _channel.invokeMethod<void>(method, view);
-    } on PlatformException {
-      _feeds.stop();
-      _social?.show(false);
-      _communications?.show(false);
-      _profiles?.hide();
-      for (final feature in _features.values) {
-        feature.show(false);
-      }
-    } on MissingPluginException {
-      _feeds.stop();
-      _social?.show(false);
-      _communications?.show(false);
-      _profiles?.hide();
-      for (final feature in _features.values) {
-        feature.show(false);
-      }
-    }
+    await sendMenuWindowView(
+      _channel,
+      method,
+      view,
+      unavailable: () {
+        interaction?.stop();
+        _feeds.stop();
+        _social?.show(false);
+        _communications?.show(false);
+        _profiles?.hide();
+        for (final feature in _features.values) {
+          feature.show(false);
+        }
+      },
+    );
   }
 
   // A hidden or failed opening has no authority to keep feature reads alive.
   // Share this cleanup between native hide, failed open and account detach.
   void _suspend() {
+    _interactionVisible = false;
+    interaction?.stop();
     _screenshotRequests.retire();
     _feeds.stop();
     _generation = null;
@@ -656,16 +633,17 @@ final class MethodChannelMenuPreviewWindow
     _shown = shown;
     // A replaced account can finish disposing after the next one has attached.
     // Only the latest owner may remove the handler or control the native menu.
-    final previous = lifetime._owner;
+    final previous = lifetime.owner;
     if (previous != null && !identical(previous, this)) {
       previous._suspend();
       final pending = previous._shown;
       if (pending != null && !pending.isCompleted) pending.complete(false);
     }
-    lifetime._owner = this;
-    final request = ++lifetime._nextRequest;
+    lifetime.owner = this;
+    final request = lifetime.nextRequest();
+    MenuOpenTrace.request(request);
     _request = request;
-    _channel.setMethodCallHandler(_handleMethod);
+    _channel.setMethodCallHandler(menuReadMethodHandler(_handleMethod));
     var visible = false;
     try {
       var preferencesFailed = false;
@@ -685,8 +663,9 @@ final class MethodChannelMenuPreviewWindow
       // Reads may finish after logout/disposal. Never recreate the detached
       // native workspace using this account's labels or capability factories.
       if (_disposed || !_ownsChannel) return false;
+      MenuOpenTrace.preferences(request);
       _recoveryPending = false;
-      final opening = await lifetime._recovery.prepare(
+      final opening = await lifetime.recovery.prepare(
         live: live && !lifetime.startup.protectsLayout,
         preferences: live ? _preferences : null,
         preferencesPort: preferences,
@@ -697,12 +676,16 @@ final class MethodChannelMenuPreviewWindow
       if (live) _preferences = opening.preferences;
       _recoveryPending = opening.pending;
       preferencesFailed |= opening.failed;
-      if (live) await _reportWindow(request, 'opening');
+      MenuOpenTrace.recovery(request);
+      if (live) await boundedHostAck(_reportWindow(request, 'opening'));
       if (_disposed || !_ownsChannel) return false;
+      MenuOpenTrace.hostReport(request);
+      MenuOpenTrace.nativeRequest(request);
       final generation = await _channel
           .invokeMethod<int>('preview', {
             'schemaVersion': 1,
             'request': request,
+            'resourceEpoch': lifetime.imageEpoch,
             if (target != null) 'targetWindow': target.targetWindow,
             if (target != null) 'targetProcessId': target.targetProcessId,
             'contextLabel': contextLabel,
@@ -714,10 +697,15 @@ final class MethodChannelMenuPreviewWindow
             'shortcutSettings': live && shortcutSettings != null,
             'browserResume': live && browserResume != null,
             'screenshotDirectory': live && screenshotDirectory != null,
+            ...MenuExecHangarRequest.presentation(
+              live ? execHangarProvider?.call() : null,
+            ),
             'preferences': lifetime.startup
                 .presentation(opening.presentation)
                 .encode(),
             'startupMode': lifetime.startup.mode,
+            if (interaction != null)
+              'interactionPresentation': interaction!.read().encode(),
             'preferencesFailed': preferencesFailed,
             'recoveryPending': live && _recoveryPending,
           })
@@ -725,14 +713,27 @@ final class MethodChannelMenuPreviewWindow
       if (_disposed || !_ownsChannel || generation == null || generation <= 0) {
         return false;
       }
+      MenuOpenTrace.nativeReply(request, generation);
       if (shown.isCompleted && !await shown.future) return false;
       _generation = generation;
       // A successful request is not evidence that Windows revealed the menu.
       visible = await shown.future.timeout(const Duration(seconds: 6));
       // The visible acknowledgement can precede the preview response.
       if (visible && !_feeds.active) _startAttention();
+      if (visible && _interactionVisible) {
+        interaction?.startForOpening(
+          _channel,
+          generation,
+          isCurrent: () =>
+              !_disposed &&
+              _ownsChannel &&
+              _interactionVisible &&
+              _generation == generation &&
+              _request == request,
+        );
+      }
       if (visible) {
-        lifetime._recovery.visible(live: live, pending: _recoveryPending);
+        lifetime.recovery.visible(live: live, pending: _recoveryPending);
       }
       return visible && !_disposed && _ownsChannel;
     } on TimeoutException {
@@ -751,6 +752,7 @@ final class MethodChannelMenuPreviewWindow
     } on MissingPluginException {
       return false;
     } finally {
+      MenuOpenTrace.settled(request, visible && !_disposed && _ownsChannel);
       if (!visible && !_disposed) {
         _suspend();
         unawaited(_reportWindow(request, 'closed'));
@@ -760,10 +762,20 @@ final class MethodChannelMenuPreviewWindow
     }
   }
 
+  Future<bool> flushPreferencesForExit() async {
+    if (_disposed) return true;
+    _preferencesTimer?.cancel();
+    await _preferencesWork;
+    await _savePreferences();
+    return preferences == null || _preferences != null;
+  }
+
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _prewarm.dispose();
+    interaction?.stop();
     _screenshotRequests.retire();
     _feeds.stop();
     hotkeys?.dispose();
@@ -772,29 +784,17 @@ final class MethodChannelMenuPreviewWindow
     _social?.dispose();
     _communications?.dispose();
     _profiles?.dispose();
-    for (final feature in _features.values) {
-      feature.dispose();
-    }
+    _features.dispose();
     _generation = null;
     final shown = _shown;
     if (shown != null && !shown.isCompleted) shown.complete(false);
     if (_ownsChannel) {
-      lifetime._owner = null;
+      lifetime.owner = null;
       _channel.setMethodCallHandler(null);
     }
     // Native independently checks the request: a previous owner may still be
     // displayed while its replacement reads preferences, but can never detach
     // a newer native opening.
-    if (_request != null) unawaited(_detach(_request));
-  }
-
-  Future<void> _detach(int? request) async {
-    try {
-      await _channel.invokeMethod<void>('detach', {'request': request});
-    } on PlatformException {
-      /* Native lifetime ended. */
-    } on MissingPluginException {
-      /* No native window. */
-    }
+    if (_request != null) unawaited(detachMenuWindow(_channel, _request));
   }
 }

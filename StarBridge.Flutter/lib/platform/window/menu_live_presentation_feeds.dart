@@ -25,11 +25,24 @@ final class MenuLivePresentationFeeds {
   bool get active => _attention != null || _notices != null;
   bool get hasNotices => _notices != null;
   void updateSettings(Map settings) {
+    // Geometry-only preference updates arrive while a window is dragged; only
+    // an actual settings change may dismiss the visible notice.
+    final changed = jsonEncode(settings) != jsonEncode(_settings);
     _settings = settings;
-    _notices?.clear();
+    if (changed) _notices?.clear();
     for (final target in _avatarTargets) {
       target.showAvatars = _showAvatars;
     }
+  }
+
+  String? _context;
+
+  /// The status row is polled; an unchanged row would only rebuild and
+  /// repaint the whole full-screen menu surface. Resets with each opening.
+  String? changedContext(List<String> values) {
+    final payload = contextPayload(values);
+    if (payload == null || payload == _context) return null;
+    return _context = payload;
   }
 
   static String? contextPayload(List<String> values) =>
@@ -90,6 +103,7 @@ final class MenuLivePresentationFeeds {
   void stop() {
     _epoch++;
     _settings = null;
+    _context = null;
     _avatarTargets.clear();
     _attention?.dispose();
     _notices?.dispose();

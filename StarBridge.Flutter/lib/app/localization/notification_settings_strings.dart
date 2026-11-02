@@ -37,6 +37,7 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.local.windowsDescription':
       '后台显示已开启的桌面提醒；游戏、全屏或系统免打扰时保持安静。',
   'settings.notification.local.desktopTest': '测试 Windows 通知',
+  'settings.notification.local.desktopSubmitting': '正在提交…',
   'settings.notification.local.desktopTestBody': '这是一条桌面测试通知。点击可打开星海舰桥。',
   'settings.notification.local.desktopSubmitted': '已提交桌面提醒卡。关闭提醒不会标记已读。',
   'settings.notification.local.desktopFailed':
@@ -81,6 +82,19 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.channels.directMessage.description':
       '桌面提醒开启后，在后台收到新私信时显示提醒；开启前的消息不会补弹。',
   'settings.notification.channels.directMessage.defaultOff': '默认关闭',
+  'settings.notification.channels.trade.title': '交易提醒',
+  'settings.notification.channels.trade.description':
+      '有人申请交易、对方发货、交易完成或取消、收到交易私信时提醒你。',
+  'settings.notification.channels.trade.defaultOn': '默认开启',
+  'settings.notification.channels.windows.recommended': '推荐开启',
+  'settings.notification.channels.rally.title': '主舰队召集提醒',
+  'settings.notification.channels.rally.description':
+      '主舰队召集时播放提示音、发 Windows 通知并在任务栏提示，游戏中开着浮层时也会显示。不受“游戏内浮层主动提醒”开关影响。',
+  'settings.notification.channels.rally.preview': '试听召集提醒',
+  'settings.notification.channels.rally.previewHint':
+      '播放一次召集提示音和提醒，不会真的发起召集',
+  'settings.notification.channels.rally.sampleTitle': '舰队召集（示例）',
+  'settings.notification.channels.rally.sampleBody': '「这是一条示例召集」 · 剩余 30 分钟',
   'settings.notification.channels.overlay.title': '游戏内浮层主动提醒',
   'settings.notification.channels.overlay.description': '游戏中显示邀请、提及和与你有关的重要提醒。',
   'settings.notification.channels.sound.title': '简短提示音',
@@ -107,6 +121,7 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.preview.hidden.description': '外部只显示“StarBridge 有新提醒”。',
   'settings.notification.sources.title': '按舰队、组织、房间和行动分别管理',
   'settings.notification.sources.description': '为每个来源选择不同的提醒方式。',
+  'settings.notification.organization.description': '选择这个组织的提醒方式。',
   'settings.notification.sources.count': '{count} 个来源',
   'settings.notification.sources.mode': '提醒模式',
   'settings.notification.sources.noGlobalDnd': '可在每个舰队、组织、房间或行动中单独设置免打扰。',
@@ -197,6 +212,7 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.local.windowsDescription':
       '背景顯示已開啟的桌面提醒；遊戲、全螢幕或系統勿擾時保持安靜。',
   'settings.notification.local.desktopTest': '測試 Windows 通知',
+  'settings.notification.local.desktopSubmitting': '正在提交…',
   'settings.notification.local.desktopTestBody': '這是一則桌面測試通知。點擊可開啟星海艦橋。',
   'settings.notification.local.desktopSubmitted': '已提交桌面提醒卡。關閉提醒不會標記已讀。',
   'settings.notification.local.desktopFailed':
@@ -241,6 +257,19 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.channels.directMessage.description':
       '桌面提醒開啟後，在背景收到新私訊時顯示提醒；開啟前的訊息不會補跳。',
   'settings.notification.channels.directMessage.defaultOff': '預設關閉',
+  'settings.notification.channels.trade.title': '交易提醒',
+  'settings.notification.channels.trade.description':
+      '有人申請交易、對方出貨、交易完成或取消、收到交易私訊時提醒你。',
+  'settings.notification.channels.trade.defaultOn': '預設開啟',
+  'settings.notification.channels.windows.recommended': '推薦開啟',
+  'settings.notification.channels.rally.title': '主艦隊召集提醒',
+  'settings.notification.channels.rally.description':
+      '主艦隊召集時播放提示音、發送 Windows 通知並在工作列提示，遊戲中開著浮層時也會顯示。不受「遊戲內浮層主動提醒」開關影響。',
+  'settings.notification.channels.rally.preview': '試聽召集提醒',
+  'settings.notification.channels.rally.previewHint':
+      '播放一次召集提示音和提醒，不會真的發起召集',
+  'settings.notification.channels.rally.sampleTitle': '艦隊召集（範例）',
+  'settings.notification.channels.rally.sampleBody': '「這是一則範例召集」 · 剩餘 30 分鐘',
   'settings.notification.channels.overlay.title': '遊戲內浮層主動提醒',
   'settings.notification.channels.overlay.description': '遊戲中顯示邀請、提及和與你有關的重要提醒。',
   'settings.notification.channels.sound.title': '簡短提示音',
@@ -267,6 +296,7 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.preview.hidden.description': '外部只顯示「StarBridge 有新提醒」。',
   'settings.notification.sources.title': '按艦隊、組織、房間和行動分別管理',
   'settings.notification.sources.description': '為每個來源選擇不同的提醒方式。',
+  'settings.notification.organization.description': '選擇這個組織的提醒方式。',
   'settings.notification.sources.count': '{count} 個來源',
   'settings.notification.sources.mode': '提醒模式',
   'settings.notification.sources.noGlobalDnd': '可在每個艦隊、組織、房間或行動中單獨設定勿擾。',
@@ -363,6 +393,7 @@ const englishNotificationSettingsStrings = <String, String>{
   'settings.notification.local.overlayDescription': 'Show new room invitations and join requests while the game is foreground and overlay announcements are enabled. Direct messages also require friend communication events; text follows both message preview and privacy settings. Does not open the overlay automatically.',
   'settings.notification.local.windowsDescription': 'Show enabled desktop alerts in the background. Stay quiet during games, full-screen apps and system Do Not Disturb.',
   'settings.notification.local.desktopTest': 'Test Windows notification',
+  'settings.notification.local.desktopSubmitting': 'Submitting…',
   'settings.notification.local.desktopTestBody':
       'This is a desktop test notification. Click to open StarBridge.',
   'settings.notification.local.desktopSubmitted':
@@ -420,6 +451,19 @@ const englishNotificationSettingsStrings = <String, String>{
       'Use Windows alerts for direct messages',
   'settings.notification.channels.directMessage.description': 'With desktop alerts enabled, show new direct messages in the background. Earlier messages will not trigger alerts.',
   'settings.notification.channels.directMessage.defaultOff': 'Off by default',
+  'settings.notification.channels.trade.title': 'Trade alerts',
+  'settings.notification.channels.trade.description':
+      'Alert you when someone requests a trade, the other side ships, a trade completes or is cancelled, or a trade message arrives.',
+  'settings.notification.channels.trade.defaultOn': 'On by default',
+  'settings.notification.channels.windows.recommended': 'Recommended',
+  'settings.notification.channels.rally.title': 'Main fleet rally alerts',
+  'settings.notification.channels.rally.description':
+      'When the main fleet rallies, play a sound, send a Windows notification and mark the taskbar; also shown in the overlay while it is open in game. Independent of the in-game overlay alerts switch.',
+  'settings.notification.channels.rally.preview': 'Preview rally alert',
+  'settings.notification.channels.rally.previewHint':
+      'Plays the rally sound and alert once. No real rally is started.',
+  'settings.notification.channels.rally.sampleTitle': 'Fleet rally (sample)',
+  'settings.notification.channels.rally.sampleBody': '“This is a sample rally” · 30 min left',
   'settings.notification.channels.overlay.title':
       'Proactive in-game overlay alerts',
   'settings.notification.channels.overlay.description':
@@ -454,6 +498,8 @@ const englishNotificationSettingsStrings = <String, String>{
       'External alerts only say that StarBridge has a new update.',
   'settings.notification.sources.title':
       'Manage fleets, communities, rooms, and operations separately',
+  'settings.notification.organization.description':
+      'Choose how this organization notifies you.',
   'settings.notification.sources.description':
       'Choose a different alert mode for each source.',
   'settings.notification.sources.count': '{count} sources',

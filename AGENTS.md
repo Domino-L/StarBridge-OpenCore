@@ -2,7 +2,7 @@
 
 Flutter owns UI/state; the local .NET Host owns Windows capabilities and local
 persistence. NativeBridge is the client/Host contract. Hosted backend code,
-production deployment, private credentials and commercial appearance
+production deployment, private credentials and proprietary appearance
 implementations do not belong here. The retired Desktop app is not a dependency.
 
 Read README.md, CONTRIBUTING.md and ASSET_POLICY.md before editing. Run the

@@ -1,10 +1,20 @@
+import 'community_tag_localization.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_expansion_tile.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_removable_chip_group.dart';
 import 'community_tag_picker.dart';
 import 'legacy_community_tag_catalog.dart';
 
@@ -46,7 +56,9 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
   final language = TextEditingController();
   Map<String, dynamic> draft = {};
   StreamSubscription<void>? subscription;
-  DialogRoute<List<String>>? picker;
+  StarBridgeDialogRoute<List<String>>? picker;
+  final languageFocus = FocusNode(debugLabel: 'community-filter-language');
+  InteractionSource? tagSource;
   bool invalidated = false;
   String t(String key) => AppStrings.of(context).text('communities.$key');
   @override
@@ -65,8 +77,9 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
   @override
   void dispose() {
     language.dispose();
+    languageFocus.dispose();
     unawaited(subscription?.cancel());
-    scheduleMicrotask(closePicker);
+    closePicker();
     super.dispose();
   }
 
@@ -80,8 +93,8 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
   Future<void> chooseTags() async {
     if (invalidated || picker != null) return;
     final current = List<String>.from(draft['tags'] as List? ?? []);
-    final route = DialogRoute<List<String>>(
-      context: context,
+    final selected = await showStarBridgeDialog<List<String>>(
+      context,
       builder: (_) => CommunityTagPicker(
         options: LegacyCommunityTagCatalog.options,
         selected: [
@@ -89,15 +102,12 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
             if (current.contains(tag.name) || current.contains(tag.id)) tag.id,
         ],
       ),
+      onRouteCreated: (route) => picker = route,
     );
-    picker = route;
-    final selected = await Navigator.of(
-      context,
-      rootNavigator: true,
-    ).push(route);
     picker = null;
     if (!mounted || invalidated || selected == null) return;
     // The existing directory wire contract filters public tag names, not IDs.
+    tagSource = currentStarBridgeActivationSource;
     setState(
       () => draft['tags'] = [
         for (final tag in LegacyCommunityTagCatalog.tags)
@@ -107,8 +117,7 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
   }
 
   void closePicker() {
-    final route = picker;
-    if (route?.isActive == true) route!.navigator?.removeRoute(route);
+    retireStarBridgeDialog(picker);
   }
 
   @override
@@ -131,8 +140,10 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              TextButton(
-                onPressed: () {
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('community-filter-reset'),
+                onActivate: (_) {
                   if (invalidated) return;
                   setState(() {
                     draft = {};
@@ -142,7 +153,12 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
                 },
                 child: Text(t('reset')),
               ),
-              FilledButton(onPressed: apply, child: Text(t('applyFilters'))),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.primary,
+                controlKey: const Key('community-filter-apply'),
+                onActivate: (_) => apply(),
+                child: Text(t('applyFilters')),
+              ),
             ],
           ),
         ),
@@ -152,22 +168,27 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
             padding: const EdgeInsets.only(bottom: 12),
             children: [
               for (final group in communityFilterGroups.entries)
-                ExpansionTile(
+                StarBridgeExpansionTile(
                   key: ValueKey('org-filter-${group.key}'),
                   initiallyExpanded: const [
                     'join',
                     'status',
                     'scale',
                   ].contains(group.key),
-                  title: Text(
-                    t('filter.${group.key}'),
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
+                  title: t('filter.${group.key}'),
+                  titleStyle: Theme.of(context).textTheme.bodyMedium,
+                  headerPadding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
                     if (group.key == 'period') ...[
-                      CheckboxListTile(
+                      StarBridgeCheckboxTile(
+                        controlKey: const Key('community-filter-same-zone'),
+                        label: t('sameZone'),
+                        trailingControl: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                        ),
                         dense: true,
-                        title: Text(
+                        titleWidget: Text(
                           t('sameZone'),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
@@ -183,10 +204,16 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
                       ),
                     ],
                     for (final option in group.value)
-                      CheckboxListTile(
+                      StarBridgeCheckboxTile(
+                        controlKey: ValueKey(
+                          'community-filter-${group.key}-$option',
+                        ),
+                        label: t('option.${group.key}.$option'),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                        ),
                         dense: true,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Text(
+                        titleWidget: Text(
                           t('option.${group.key}.$option'),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
@@ -209,44 +236,57 @@ class _CommunityFilterPanelState extends State<CommunityFilterPanel> {
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   children: [
-                    TextField(
-                      controller: language,
-                      maxLength: 128,
-                      decoration: InputDecoration(
-                        labelText: t('language'),
-                        counterText: '',
+                    StarBridgeFieldFrame(
+                      focusNode: languageFocus,
+                      builder: (_, focus) => TextField(
+                        focusNode: focus,
+                        controller: language,
+                        maxLength: 128,
+                        decoration: InputDecoration(
+                          labelText: t('language'),
+                          counterText: '',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: OutlinedButton(
-                        key: const ValueKey('choose-filter-tags'),
-                        onPressed: chooseTags,
+                      child: StarBridgeActionButton(
+                        controlKey: const ValueKey('choose-filter-tags'),
+                        onActivate: (_) => chooseTags(),
                         child: Text(t('tagPicker.title')),
                       ),
                     ),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
+                    StarBridgeRemovableChipGroup(
+                      fallbackFocus: languageFocus,
+                      changeSource: tagSource,
+                      onRemove: (id, source) => setState(() {
+                        tagSource = source;
+                        draft['tags'] = List<String>.from(draft['tags'] as List)
+                          ..remove(id.substring('filter-tag-'.length));
+                      }),
+                      chips: [
                         for (final name in List<String>.from(
                           draft['tags'] as List? ?? [],
                         ))
-                          InputChip(
-                            key: ValueKey('filter-tag-$name'),
-                            label: Text(name),
-                            onDeleted: () => setState(() {
-                              draft['tags'] = List<String>.from(
-                                draft['tags'] as List,
-                              )..remove(name);
-                            }),
+                          SuiteChipData(
+                            id: 'filter-tag-$name',
+                            label: communityTagDisplayName(context, name),
+                            removable: true,
+                            removeLabel:
+                                '${MaterialLocalizations.of(context).deleteButtonTooltip} ${communityTagDisplayName(context, name)}',
                           ),
                       ],
                     ),
-                    CheckboxListTile(
+                    StarBridgeCheckboxTile(
+                      controlKey: const Key('community-filter-all-tags'),
+                      label: t('allTags'),
+                      trailingControl: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                      ),
                       dense: true,
-                      title: Text(
+                      titleWidget: Text(
                         t('allTags'),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),

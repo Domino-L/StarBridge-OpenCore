@@ -6,6 +6,7 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/style_registry.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
 
 class GeneralSettingsAppearanceChoices extends StatelessWidget {
   const GeneralSettingsAppearanceChoices({
@@ -83,56 +84,61 @@ class _AppearanceChoice extends StatelessWidget {
           ? tokens.surfaces.selected.fill
           : tokens.surfaces.raised.fill,
       borderRadius: tokens.shape.medium,
-      child: InkWell(
-        key: Key('general-appearance-${mode.name}'),
-        onTap: enabled ? onTap : null,
-        borderRadius: tokens.shape.medium,
-        child: Container(
-          padding: EdgeInsets.all(tokens.space.sm),
-          decoration: BoxDecoration(
-            borderRadius: tokens.shape.medium,
-            border: Border.all(
-              color: selected
-                  ? tokens.colors.accent
-                  : tokens.surfaces.raised.border,
-              width: selected ? tokens.stroke.strong : tokens.stroke.regular,
-            ),
-          ),
-          child: Row(
-            children: [
-              _MiniAppearancePreview(tokens: preview),
-              SizedBox(width: tokens.space.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      strings.text(
-                        dark
-                            ? 'settings.general.appearance.dark'
-                            : 'settings.general.appearance.light',
-                      ),
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    SizedBox(height: tokens.space.xxs),
-                    Text(
-                      strings.text(
-                        dark
-                            ? 'settings.general.appearance.darkDescription'
-                            : 'settings.general.appearance.lightDescription',
-                      ),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+      child: StarBridgeActionRow(
+        controlKey: Key('general-appearance-${mode.name}'),
+        semanticLabel:
+            '${strings.text(dark ? 'settings.general.appearance.dark' : 'settings.general.appearance.light')}\n${strings.text(dark ? 'settings.general.appearance.darkDescription' : 'settings.general.appearance.lightDescription')}',
+        semanticSelected: selected,
+        onActivate: enabled ? (_, _) => onTap() : null,
+        baseRadius: tokens.shape.radiusMedium,
+        child: ExcludeSemantics(
+          child: Container(
+            padding: EdgeInsets.all(tokens.space.sm),
+            decoration: BoxDecoration(
+              borderRadius: tokens.shape.medium,
+              border: Border.all(
+                color: selected
+                    ? tokens.colors.accent
+                    : tokens.surfaces.raised.border,
+                width: selected ? tokens.stroke.strong : tokens.stroke.regular,
               ),
-              if (selected)
-                StarBridgeIcon(
-                  StarBridgeIconSemantic.connected,
-                  size: tokens.icons.medium,
-                  color: tokens.colors.accent,
+            ),
+            child: Row(
+              children: [
+                _MiniAppearancePreview(tokens: preview),
+                SizedBox(width: tokens.space.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        strings.text(
+                          dark
+                              ? 'settings.general.appearance.dark'
+                              : 'settings.general.appearance.light',
+                        ),
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      SizedBox(height: tokens.space.xxs),
+                      Text(
+                        strings.text(
+                          dark
+                              ? 'settings.general.appearance.darkDescription'
+                              : 'settings.general.appearance.lightDescription',
+                        ),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
-            ],
+                if (selected)
+                  StarBridgeIcon(
+                    StarBridgeIconSemantic.connected,
+                    size: tokens.icons.medium,
+                    color: tokens.colors.accent,
+                  ),
+              ],
+            ),
           ),
         ),
       ),

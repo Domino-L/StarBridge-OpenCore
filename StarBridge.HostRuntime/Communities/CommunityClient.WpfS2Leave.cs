@@ -72,9 +72,7 @@ internal sealed partial class CommunityClient
         foreach (var pair in _targets.Where(x => x.Value.Scope == target.Scope &&
                      x.Value.Code.Equals(target.Code, StringComparison.OrdinalIgnoreCase)).ToArray())
             _targets.TryRemove(pair.Key, out _);
-        foreach (var pair in _memberTargets.Where(x => x.Value.Scope == target.Scope &&
-                     x.Value.Code.Equals(target.Code, StringComparison.OrdinalIgnoreCase)).ToArray())
-            _memberTargets.TryRemove(pair.Key, out _);
+        ClearMemberReferences(target.Scope, target.Code);
         foreach (var pair in _shipTargets.Where(x => x.Value.Scope == target.Scope &&
                      x.Value.Code.Equals(target.Code, StringComparison.OrdinalIgnoreCase)).ToArray())
             _shipTargets.TryRemove(pair.Key, out _);

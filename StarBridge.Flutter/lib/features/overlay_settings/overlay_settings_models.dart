@@ -11,6 +11,7 @@ enum OverlaySettingsFailure {
   writeConflict,
   invalidValue,
   invalidResponse,
+  versionUnsupported,
 }
 
 enum OverlaySettingsPosition { topLeft, topRight, bottomLeft, bottomRight }

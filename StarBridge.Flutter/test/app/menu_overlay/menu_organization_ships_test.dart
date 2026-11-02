@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -145,7 +147,7 @@ void main() {
         () {},
       );
       expect(result.statistics, isNull);
-      expect(result.notice, contains('重试'));
+      expect(resolvedMenuCopy(result.notice), contains('重试'));
       port.denied = true;
       ships.statisticsOpen = true;
       await expectLater(
@@ -164,6 +166,7 @@ void main() {
         (data['buttons'] as List).add({
           'key': 'a7',
           'label': '舰队统计',
+          'role': 'fleetStatistics',
           'limit': 128,
         });
         final org = data['organization'] as Map;
@@ -224,6 +227,7 @@ void main() {
         (data['buttons'] as List).add({
           'key': 'a8',
           'label': '关闭统计',
+          'role': 'closeStatistics',
           'limit': 128,
         });
         await tester.pumpWidget(

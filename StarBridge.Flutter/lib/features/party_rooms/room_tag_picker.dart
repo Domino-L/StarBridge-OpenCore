@@ -1,10 +1,21 @@
+import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_tag_catalog.dart';
 import 'room_tag_colors.dart';
+import 'room_selected_tags.dart';
 
 String tagCopy(BuildContext context, String key) {
   final locale = Localizations.localeOf(context);
@@ -71,11 +82,18 @@ Future<Set<String>?> showRoomTagPicker(
   required List<RoomTag> options,
   required Set<String> selected,
   bool filter = false,
-}) => showDialog<Set<String>>(
-  context: context,
+  InteractionSource? source,
+  ValueChanged<InteractionSource>? onConfirmed,
+}) => showStarBridgeDialog<Set<String>>(
+  context,
+  source: source,
   useRootNavigator: false,
-  builder: (_) =>
-      _TagPicker(options: options, selected: selected, filter: filter),
+  builder: (_) => _TagPicker(
+    options: options,
+    selected: selected,
+    filter: filter,
+    onConfirmed: onConfirmed,
+  ),
 );
 
 class _TagPicker extends StatefulWidget {
@@ -83,10 +101,12 @@ class _TagPicker extends StatefulWidget {
     required this.options,
     required this.selected,
     required this.filter,
+    this.onConfirmed,
   });
   final List<RoomTag> options;
   final Set<String> selected;
   final bool filter;
+  final ValueChanged<InteractionSource>? onConfirmed;
   @override
   State<_TagPicker> createState() => _TagPickerState();
 }
@@ -97,12 +117,22 @@ class _TagPickerState extends State<_TagPicker> {
   List<String> path = [];
   String query = '';
   String? error;
+  final _searchFocus = FocusNode(debugLabel: 'room-tag-search');
+  InteractionSource _tagSource = InteractionSource.programmatic;
+
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   void add(String id) {
     final next = catalog.adding(selected, id);
     final failure = widget.filter
         ? null
         : catalog.invalid(next, requireGameplay: false);
     setState(() {
+      _tagSource = StarBridgeActivationOrigin.sourceOf(context);
       error = failure;
       if (failure == null) selected = next;
     });
@@ -130,41 +160,40 @@ class _TagPickerState extends State<_TagPicker> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final tag in RoomTagCatalog.ordered(
-                    catalog.options.values.where(
-                      (tag) =>
-                          selected.contains(RoomTagCatalog.normalize(tag.id)),
-                    ),
-                  ))
-                    InputChip(
-                      key: ValueKey('selected-tag-${tag.id}'),
-                      label: Text(RoomTagCatalog.fullText(tag)),
-                      backgroundColor: roomTagColors(context, tag.id).soft,
-                      labelStyle: TextStyle(
-                        color: roomTagColors(context, tag.id).foreground,
-                      ),
-                      onDeleted: () => setState(
-                        () => selected.remove(RoomTagCatalog.normalize(tag.id)),
-                      ),
-                    ),
-                ],
+              RoomSelectedTags(
+                changeSource: _tagSource,
+                fallbackFocus: _searchFocus,
+                tags: catalog.options.values.where(
+                  (tag) => selected.contains(RoomTagCatalog.normalize(tag.id)),
+                ),
+                onRemove: (id, source) => setState(() {
+                  _tagSource = source;
+                  selected.remove(RoomTagCatalog.normalize(id));
+                }),
               ),
               const SizedBox(height: 12),
               Text(
                 path.isEmpty
                     ? t('browse')
-                    : path.map(catalog.label).join(' / '),
+                    : path
+                          .map(
+                            (id) => catalog.label(
+                              id,
+                              strings: AppStrings.of(context),
+                            ),
+                          )
+                          .join(' / '),
               ),
               const SizedBox(height: 8),
-              TextField(
-                key: const Key('tag-catalog-search'),
-                decoration: InputDecoration(labelText: t('searchTags')),
-                onChanged: (value) =>
-                    setState(() => query = value.trim().toLowerCase()),
+              StarBridgeFieldFrame(
+                focusNode: _searchFocus,
+                builder: (_, focus) => TextField(
+                  focusNode: focus,
+                  key: const Key('tag-catalog-search'),
+                  decoration: InputDecoration(labelText: t('searchTags')),
+                  onChanged: (value) =>
+                      setState(() => query = value.trim().toLowerCase()),
+                ),
               ),
               const SizedBox(height: 8),
               if (query.isNotEmpty)
@@ -180,24 +209,36 @@ class _TagPickerState extends State<_TagPicker> {
                                   .toLowerCase()
                                   .contains(query),
                         ))
-                          ListTile(
-                            key: ValueKey('search-tag-${tag.id}'),
-                            title: Text(
-                              RoomTagCatalog.fullText(tag),
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(
-                                    color: roomTagColors(
-                                      context,
-                                      tag.id,
-                                    ).foreground,
-                                  ),
+                          StarBridgeActionRow(
+                            controlKey: ValueKey('search-tag-${tag.id}'),
+                            semanticLabel: RoomTagCatalog.fullText(
+                              tag,
+                              strings: AppStrings.of(context),
                             ),
-                            selected: selected.contains(tag.id),
-                            selectedTileColor: roomTagColors(
-                              context,
-                              tag.id,
-                            ).soft,
-                            onTap: () => add(tag.id),
+                            semanticSelected: selected.contains(tag.id),
+                            onActivate: (_, _) => add(tag.id),
+                            child: ExcludeSemantics(
+                              child: ListTile(
+                                title: Text(
+                                  RoomTagCatalog.fullText(
+                                    tag,
+                                    strings: AppStrings.of(context),
+                                  ),
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: roomTagColors(
+                                          context,
+                                          tag.id,
+                                        ).foreground,
+                                      ),
+                                ),
+                                selected: selected.contains(tag.id),
+                                selectedTileColor: roomTagColors(
+                                  context,
+                                  tag.id,
+                                ).soft,
+                              ),
+                            ),
                           ),
                       ],
                     ),
@@ -219,44 +260,57 @@ class _TagPickerState extends State<_TagPicker> {
                             child: ListView(
                               children: [
                                 for (final id in levels[level])
-                                  ListTile(
-                                    dense: true,
-                                    key: ValueKey('browse-tag-$id'),
-                                    selected: path.contains(id),
-                                    title: Text(
-                                      catalog.label(id),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            color: roomTagColors(
-                                              context,
-                                              id,
-                                            ).foreground,
-                                          ),
+                                  StarBridgeActionRow(
+                                    controlKey: ValueKey('browse-tag-$id'),
+                                    semanticLabel: catalog.label(
+                                      id,
+                                      strings: AppStrings.of(context),
                                     ),
-                                    textColor: roomTagColors(
-                                      context,
-                                      id,
-                                    ).foreground,
-                                    selectedColor: roomTagColors(
-                                      context,
-                                      id,
-                                    ).foreground,
-                                    selectedTileColor: roomTagColors(
-                                      context,
-                                      id,
-                                    ).soft,
-                                    trailing: catalog.children(id).isEmpty
-                                        ? null
-                                        : const StandardIcon(
-                                            StandardIconSemantic.chevronRight,
-                                            size: 16,
-                                          ),
-                                    onTap: () => setState(() {
+                                    semanticSelected: path.contains(id),
+                                    onActivate: (_, _) => setState(() {
                                       path = [...path.take(level), id];
                                       error = null;
                                     }),
+                                    child: ExcludeSemantics(
+                                      child: ListTile(
+                                        dense: true,
+                                        selected: path.contains(id),
+                                        title: Text(
+                                          catalog.label(
+                                            id,
+                                            strings: AppStrings.of(context),
+                                          ),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: roomTagColors(
+                                                  context,
+                                                  id,
+                                                ).foreground,
+                                              ),
+                                        ),
+                                        textColor: roomTagColors(
+                                          context,
+                                          id,
+                                        ).foreground,
+                                        selectedColor: roomTagColors(
+                                          context,
+                                          id,
+                                        ).foreground,
+                                        selectedTileColor: roomTagColors(
+                                          context,
+                                          id,
+                                        ).soft,
+                                        trailing: catalog.children(id).isEmpty
+                                            ? null
+                                            : const StandardIcon(
+                                                StandardIconSemantic
+                                                    .chevronRight,
+                                                size: 16,
+                                              ),
+                                      ),
+                                    ),
                                   ),
                               ],
                             ),
@@ -273,11 +327,11 @@ class _TagPickerState extends State<_TagPicker> {
                 ),
               Align(
                 alignment: Alignment.centerLeft,
-                child: OutlinedButton(
-                  key: const Key('room-tag-add-current'),
-                  onPressed:
+                child: StarBridgeActionButton(
+                  controlKey: const Key('room-tag-add-current'),
+                  onActivate:
                       path.isNotEmpty && catalog.options.containsKey(path.last)
-                      ? () => add(path.last)
+                      ? (_) => add(path.last)
                       : null,
                   child: Text(t('add')),
                 ),
@@ -305,21 +359,27 @@ class _TagPickerState extends State<_TagPicker> {
                             !tag.isGameplay &&
                             RoomTagCatalog.group(tag.id) == group,
                       ))
-                        FilterChip(
-                          key: ValueKey('context-tag-${tag.id}'),
-                          label: Text(tag.text),
+                        StarBridgeChoiceChip.filter(
+                          controlKey: ValueKey('context-tag-${tag.id}'),
+                          label: RoomTagCatalog.fullText(
+                            tag,
+                            strings: AppStrings.of(context),
+                          ),
                           selected: selected.contains(tag.id),
                           selectedColor: roomTagColors(context, tag.id).soft,
-                          checkmarkColor: roomTagColors(
+                          foregroundColor: roomTagColors(
                             context,
                             tag.id,
                           ).foreground,
-                          labelStyle: TextStyle(
-                            color: roomTagColors(context, tag.id).foreground,
-                          ),
                           onSelected: (value) => value
                               ? add(tag.id)
-                              : setState(() => selected.remove(tag.id)),
+                              : setState(() {
+                                  _tagSource =
+                                      StarBridgeActivationOrigin.sourceOf(
+                                        context,
+                                      );
+                                  selected.remove(tag.id);
+                                }),
                         ),
                     ],
                   ),
@@ -337,19 +397,23 @@ class _TagPickerState extends State<_TagPicker> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(t('cancel')),
         ),
-        FilledButton(
-          key: const Key('room-tags-confirm'),
-          onPressed: () {
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('room-tags-confirm'),
+          onActivate: (source) {
             final failure = widget.filter ? null : catalog.invalid(selected);
             if (failure != null) {
               setState(() => error = failure);
               return;
             }
-            Navigator.pop(context, selected);
+            widget.onConfirmed?.call(source);
+            dismissStarBridgeDialog(context, source: source, result: selected);
           },
           child: Text(t('confirm')),
         ),

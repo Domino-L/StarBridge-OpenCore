@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/components/coming_soon.dart';
 import '../../app/feature_registry.dart' show FeatureAvailability;
 import 'settings_capability_catalog.dart';
@@ -34,12 +37,14 @@ class SettingsEntryOverrides extends InheritedWidget {
 /// data. Feature-specific services must be connected before enabling actions.
 Future<void> showSettingsCapabilityEntry(
   BuildContext context,
-  SettingsCapabilityDefinition capability,
-) {
+  SettingsCapabilityDefinition capability, {
+  InteractionSource? source,
+}) {
   final opener = SettingsEntryOverrides.of(context)[capability.id];
   if (opener != null) return opener(context);
-  return showDialog<void>(
-    context: context,
+  return showStarBridgeDialog<void>(
+    context,
+    source: source,
     builder: (_) => SettingsCapabilityEntryDialog(capability: capability),
   );
 }
@@ -73,9 +78,11 @@ class SettingsCapabilityEntryDialog extends StatelessWidget {
         child: ComingSoonSection(title: strings.text(capability.titleKey)),
       ),
       actions: [
-        TextButton(
-          key: const Key('settings-entry-close'),
-          onPressed: () => Navigator.of(context).pop(),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('settings-entry-close'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(t('close')),
         ),
       ],

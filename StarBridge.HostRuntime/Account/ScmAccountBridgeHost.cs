@@ -12,7 +12,7 @@ using System.Net.Http;
 /// Native account owner for the Flutter bridge. OAuth, token persistence,
 /// cache access and Game.log-derived identity stay inside this process.
 /// </summary>
-internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDisposable
+internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IAccountBridgeConcurrentResourceReads, IDisposable
 {
     private static readonly IReadOnlyList<string> SupportedLocales = ["zh-CN", "en-US"];
 
@@ -24,14 +24,17 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     private readonly StarBridge.HostRuntime.PartyRooms.PartyRoomReader? _partyRooms;
     private readonly StarBridge.HostRuntime.Friends.FriendsReader? _friends;
     private readonly AccountSafetyClient? _accountSafety;
+    private readonly DailySupportClient? _dailySupport;
+    private readonly AchievementIdeaClient? _achievementIdeas;
     private readonly StarBridge.HostRuntime.Communities.CommunityClient? _communities;
+    private readonly StarBridge.HostRuntime.Hangar.HangarMediaClient? _hangarMedia;
     private readonly IProfileWriteAuthorizationClient _profileAuthorization;
     private readonly ScmProfileCacheStore _profileCache;
     private readonly string _environment;
     private readonly Func<string?> _detectedGameIdentity;
     private readonly Func<string?>? _recentGameIdentity;
     private readonly Func<LocalIdentityCheckState> _lastGameIdentityCheck;
-    private readonly SemaphoreSlim _mutationGate = new(1, 1);
+    private readonly AccountMutationGate _mutationGate;
     private readonly object _loginGate = new();
     private ScmOAuthSession? _session;
     private LegacyMigrationCredential? _legacySession;
@@ -43,6 +46,11 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     private CancellationTokenSource? _loginCancellation;
     private CancellationTokenSource? _compatibilityCancellation;
     private bool _restoreAttempted;
+    private bool _freshSignInPending;
+    private readonly bool _freshSignInOnly;
+    private readonly bool _retainedFirstUseOnly;
+    private readonly bool _businessStartupDeferred;
+    internal bool BusinessStartupDeferred => IsBusinessStartupDeferred;
     private bool _credentialTemporarilyUnavailable;
     private bool _reauthorizationRequired;
     private bool _disposed;
@@ -64,16 +72,35 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         LegacyPasswordRecoveryClient? passwordRecovery = null,
         LegacyPasswordLoginClient? legacyPasswordLogin = null,
         AccountSafetyClient? accountSafety = null,
-        Func<string?>? recentGameIdentity = null)
+        Func<string?>? recentGameIdentity = null,
+        StarBridge.HostRuntime.Hangar.HangarMediaClient? hangarMedia = null,
+        DailySupportClient? dailySupport = null,
+        bool requireFreshSignIn = false,
+        bool deferBusinessStartup = false,
+        bool requireRetainedFirstUseSession = false,
+        AchievementIdeaClient? achievementIdeas = null,
+        Func<Uri, CancellationToken, Task<byte[]?>>? rsiAvatarDownload = null,
+        PublicOrganizationLogoReader? publicOrganizationLogos = null)
     {
+        _rsiAvatarDownload = rsiAvatarDownload ?? RsiAvatarImage.DownloadAsync;
+        if (requireFreshSignIn && initialSession is not null)
+            throw new ArgumentException("Fresh sign-in cannot accept a preloaded session.", nameof(initialSession));
+        if (requireRetainedFirstUseSession && (requireFreshSignIn || !deferBusinessStartup || initialSession is not null))
+            throw new ArgumentException("Retained resume requires a separate deferred, empty authorization owner.",
+                nameof(requireRetainedFirstUseSession));
         _oauth = oauth ?? throw new ArgumentNullException(nameof(oauth));
+        _mutationGate = new(RecoverInstalledFirstUseRefresh);
+        _publicOrganizationLogos = publicOrganizationLogos ?? new PublicOrganizationLogoReader(_oauth);
         _compatibilityReader = compatibilityReader;
         _passwordRecovery = passwordRecovery;
         _legacyPasswordLogin = legacyPasswordLogin;
         _partyRooms = partyRooms;
         _friends = friends;
         _accountSafety = accountSafety;
+        _dailySupport = dailySupport;
+        _achievementIdeas = achievementIdeas;
         _communities = communities;
+        _hangarMedia = hangarMedia;
         _profileAuthorization = profileAuthorization ?? oauth;
         _profileCache = profileCache ?? throw new ArgumentNullException(nameof(profileCache));
         _environment = string.IsNullOrWhiteSpace(environment)
@@ -85,14 +112,32 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         _lastGameIdentityCheck = lastGameIdentityCheck ??
             (() => LocalIdentityCheckState.NotObserved);
         _session = initialSession;
-        _restoreAttempted = initialSession is not null;
+        // Fresh-login and retained-resume candidates suppress ordinary restore.
+        // The latter uses only its explicit Native resume operation; neither a
+        // general account read nor legacy fallback may select its credentials.
+        _restoreAttempted = requireFreshSignIn || requireRetainedFirstUseSession || initialSession is not null;
+        _freshSignInPending = requireFreshSignIn;
+        _freshSignInOnly = requireFreshSignIn;
+        _retainedFirstUseOnly = requireRetainedFirstUseSession;
+        _businessStartupDeferred = deferBusinessStartup;
         _generation = initialGeneration >= 0
             ? initialGeneration
             : throw new ArgumentOutOfRangeException(nameof(initialGeneration));
         _oauth.SessionInvalidated += OnSessionInvalidated;
+        _oauth.StoredCredentialRejected += OnStoredCredentialRejected;
+        _oauth.StationTradeDiscovered += OnStationTradeDiscovered;
     }
 
     public long Generation => Interlocked.Read(ref _generation);
+
+    // Native-only display selection; never substitute it for CurrentContext.
+    internal (BridgeAccountContext Owner, ScmOfflineDisplayOwner Credential)? ReadOfflineDisplaySelection()
+    {
+        if (_disposed || !_credentialTemporarilyUnavailable || _reauthorizationRequired ||
+            _legacySession is not null || _localModeSessionLoopsStopped || IsBusinessStartupDeferred) return null;
+        var selected = _oauth.ReadOfflineDisplayOwner();
+        return selected is null ? null : (new(_environment, selected.Authority, selected.Subject), selected);
+    }
 
     // Legacy reads do not refresh or replace credentials. SCM resource reads
     // still share mutable refresh state, so retain their serialized dispatch.
@@ -100,9 +145,16 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         _session is null && _legacySession is not null &&
         !_reauthorizationRequired && !_credentialTemporarilyUnavailable && !_legacyRestoreUnavailable;
     public bool IsLegacyCompatibilitySession => SupportsConcurrentReads;
+    // DL-129 option 3: friend and organization resource reads only. Refresh is
+    // single-flight inside OAuth, and those reads commit sessions monotonically
+    // (CommitSharingSession), as the sharing and fleet lanes already do.
+    public bool SupportsConcurrentResourceReads => !_disposed && _restoreAttempted && _session is not null &&
+        !_reauthorizationRequired && !_credentialTemporarilyUnavailable && !_localModeSessionLoopsStopped &&
+        !IsBusinessStartupDeferred;
 
     public StarBridge.HostRuntime.Hangar.HangarAccountIdentity? HangarIdentity {
         get {
+            if (_disposed) return null;
             var session = _session;
             if (session is null && LegacyContext is { } legacy && !_legacyRestoreUnavailable)
                 return new(legacy, Generation, _legacyIdentity ?? new(ScmGameIdentityStatus.Unknown, null, null));
@@ -120,7 +172,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         ? new(_environment, _legacyPasswordLogin.AuthorityId, legacy.AccountId) : null;
 
     public BridgeAccountContext? GameplayTimeContext =>
-        _reauthorizationRequired || _credentialTemporarilyUnavailable || _legacyRestoreUnavailable ? null : CurrentContext;
+        IsBusinessStartupDeferred || _disposed || _localModeSessionLoopsStopped || _reauthorizationRequired || _credentialTemporarilyUnavailable || _legacyRestoreUnavailable ? null : CurrentContext;
 
     public IReadOnlyList<string> CurrentOverlayEntitlements
     {
@@ -129,20 +181,63 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             var session = _session;
             if (session is null && !_disposed && !_legacyRestoreUnavailable && !_reauthorizationRequired && !_credentialTemporarilyUnavailable &&
                 _legacySession is { } legacy && _legacyEntitlements?.AccountId == legacy.AccountId)
-                return _legacyEntitlements.ResolveActive(DateTimeOffset.UtcNow);
+                return _legacyEntitlements.ResolveActive(DateTimeOffset.UtcNow).Concat(SupportEntitlements()).Distinct().ToArray();
             return session is null || _reauthorizationRequired || _credentialTemporarilyUnavailable
                 ? []
-                : session.ActiveOverlayEntitlements;
+                : session.ActiveOverlayEntitlements.Concat(SupportEntitlements()).Distinct().ToArray();
         }
     }
 
     public event Action<long>? AccountChanged;
+    internal event Action<BridgeAccountContext>? AuthenticatedSessionRetired;
+
+    // Opaque authenticated transport only. Validation and storage belong to the
+    // optional private module; this value never establishes an account context.
+    internal ScmOverlayEntitlementSnapshot? ReadCurrentOfflineAppearanceSnapshot() =>
+        _disposed || _reauthorizationRequired || _credentialTemporarilyUnavailable ||
+        _localModeSessionLoopsStopped || IsBusinessStartupDeferred ||
+        _session?.OverlayEntitlements is not { Status: "ready", Entitlements: not null,
+            TemporaryEntitlements: not null, AccountId: { Length: > 0 } }
+            ? null : _session.OverlayEntitlements;
 
     public async Task<AccountBridgeSessionProjection> GetCurrentAsync(
         CancellationToken cancellationToken)
     {
-        await EnsureRestoredAsync(cancellationToken);
-        return ProjectCurrent();
+        using (var restore = AccountReadTiming.Measure(AccountReadPhase.Restore))
+        {
+            await EnsureRestoredAsync(cancellationToken);
+            restore?.Returned();
+        }
+        if (IsBusinessStartupDeferred) return ProjectCurrent();
+        using var business = _businessStartupDeferred ? _firstUseBusinessAdmission?.Enter(cancellationToken) : null;
+        if (_businessStartupDeferred && business is null) return ProjectCurrent();
+        cancellationToken = business?.Token ?? cancellationToken;
+        using (var owner = AccountReadTiming.Measure(AccountReadPhase.LocalOwner))
+        {
+            await EnsureLocalDataOwnerAsync(cancellationToken);
+            owner?.Returned();
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (business is not null && !business.IsCurrent) return ProjectCurrent();
+        // Runtime-owned discovery already has a cancellable session loop.
+        // Root readiness still verifies storage ownership above, but must not
+        // wait for this optional registration or steal it from that loop.
+        if (!Volatile.Read(ref _participantLoopEnabled))
+        {
+            using var participation = AccountReadTiming.Measure(AccountReadPhase.Participation);
+            await EnsureParticipantEnrollmentAsync(cancellationToken);
+            participation?.Returned();
+        }
+        using var projectionTiming = AccountReadTiming.Measure(AccountReadPhase.Projection);
+        EnsureParticipantLoop();
+        EnsureAccountRealtime();
+        EnsureRoomMembershipKeepalive();
+        EnsureSupportRead();
+        var projection = ProjectCurrent();
+        AccountDisplayObserved?.Invoke(projection, cancellationToken);
+        Volatile.Write(ref _lastFullCurrent, new(projection, LocalDataOwnerClock.GetTimestamp()));
+        projectionTiming?.Returned();
+        return projection;
     }
 
     public async Task<AccountBridgeSessionProjection> LoginAsync(
@@ -170,6 +265,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             var session = await _oauth.SignInAsync(loginCancellation.Token);
             _legacyPasswordLogin?.ForgetSession();
             PublishSession(session, reauthorizationRequired: false);
+            if (!IsBusinessStartupDeferred) await EnsureLocalDataOwnerAsync(loginCancellation.Token);
             return ProjectCurrent();
         }
         catch (OperationCanceledException) when (loginCancellation.IsCancellationRequested)
@@ -211,28 +307,43 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     public async Task LogoutAsync(
         BridgeAccountContext context,
         CancellationToken cancellationToken)
+        => await LogoutCoreAsync(context, null, cancellationToken).ConfigureAwait(false);
+
+    private async Task<bool> LogoutCoreAsync(
+        BridgeAccountContext context,
+        long? expectedGeneration,
+        CancellationToken cancellationToken)
     {
         await _mutationGate.WaitAsync(cancellationToken);
         try
         {
+            // A local-mode transition may wait behind an already queued account
+            // mutation. Recheck inside the actual writer lane, not just before it.
+            if (expectedGeneration is { } generation &&
+                (_disposed || Generation != generation || CurrentContext != context)) return false;
             if (_session is null && LegacyContext is { } legacyContext && legacyContext == context)
             {
                 _legacyPasswordLogin!.ForgetSession();
                 PublishSession(null, reauthorizationRequired: false);
-                return;
+                return true;
             }
             var session = RequireSession(context);
             try
             {
                 await _oauth.RevokeAsync(session, cancellationToken);
             }
-            catch (HttpRequestException)
+            catch (ScmLocalCredentialRetirementException)
+            {
+                throw new AccountBridgeHostException("account.logout_incomplete", retryable: true);
+            }
+            catch (ScmRemoteRevocationException)
             {
                 // RevokeAsync deletes the local DPAPI-backed credential before
                 // the best-effort remote revocation request is made.
             }
 
             PublishSession(null, reauthorizationRequired: false);
+            return true;
         }
         finally
         {
@@ -240,40 +351,70 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         }
     }
 
-    public async Task<AccountBridgeProfileProjection> GetProfileAsync(
+    public Task<AccountBridgeProfileProjection> GetProfileAsync(
         BridgeAccountContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) => GetProfileCoreAsync(context, cancellationToken, includeDirectory: true);
+
+    private async Task<AccountBridgeProfileProjection> GetProfileCoreAsync(
+        BridgeAccountContext context, CancellationToken cancellationToken, bool includeDirectory)
     {
+        var generation = Generation;
         var session = RequireSession(context);
+        var route = CurrentRoute();
+        ScmProfileResult result;
         try
         {
-            var result = await _oauth.LoadProfileAsync(session, cancellationToken);
-            RequireSameSession(session, result.ActiveSession);
-            _session = result.ActiveSession;
-            var directory = await LoadDirectoryAsync(cancellationToken);
-            var route = CurrentRoute();
-            _profileCache.Save(route, result.Profile, DateTimeOffset.UtcNow);
-            return ProjectProfile(result.Profile, "live", null, directory);
+            result = await _oauth.LoadProfileAsync(session, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception exception)
         {
-            var cached = _profileCache.Load(CurrentRoute());
-            if (cached is null)
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_realtimeGate)
             {
-                throw new AccountBridgeHostException(
-                    AccountBridgeStableErrors.ProfileReadUnavailable,
-                    retryable: true);
+                RequireAccountProfileReadOwner(context, generation);
+                var failure = AccountProfileReadFailures.Classify(exception);
+                if (failure is null || !failure.Retryable)
+                {
+                    InvalidateAccountProfileCache(route);
+                    if (failure is null) throw;
+                    throw failure;
+                }
+                if (_profileReadSnapshot is { } memory && memory.Owner == context && memory.Generation == generation)
+                    return ProjectProfile(memory.Profile.ToOfflineProfile(), "cache", memory.Profile.CachedAtUtc, []);
+                var cached = _profileReadCacheSuppressed ? null : _profileCache.Load(route);
+                if (cached is null) throw failure;
+                return ProjectProfile(cached.ToOfflineProfile(), "cache", cached.CachedAtUtc, []);
             }
-
-            return ProjectProfile(
-                cached.ToOfflineProfile(),
-                "cache",
-                cached.CachedAtUtc,
-                []);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var observedAtUtc = DateTimeOffset.UtcNow;
+        lock (_realtimeGate)
+        {
+            RequireAccountProfileReadOwner(context, generation);
+            RequireSameSession(session, result.ActiveSession);
+            _session = result.ActiveSession;
+            _profileReadSnapshot = new(context, generation,
+                ScmCachedProfileContract.Create(route.Environment, route.Authority, result.Profile, observedAtUtc));
+        }
+        var directory = includeDirectory ? await LoadDirectoryAsync(cancellationToken) : [];
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_realtimeGate)
+        {
+            RequireAccountProfileReadOwner(context, generation);
+            try
+            {
+                _profileCache.Save(route, result.Profile, observedAtUtc);
+                _profileReadCacheSuppressed = false;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                ReportAccountProfileCacheFailure("write", error);
+            }
+            return ProjectProfile(result.Profile, "live", null, directory, includeDirectory ? null : observedAtUtc);
         }
     }
 
@@ -290,12 +431,14 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         var generation = Generation;
         if (_credentialTemporarilyUnavailable || _reauthorizationRequired || _compatibilityReader is null)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityReadUnavailable, true);
+        var ownerReadSequence = BeginLocalDataOwnerRead();
         AccountBridgeCompatibilityProjection result;
         try { result = await _compatibilityReader.ReadAsync(session, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is HttpRequestException or IOException or
             System.Text.Json.JsonException or InvalidOperationException or OperationCanceledException)
         {
+            ObserveLocalDataOwner(context, generation, ownerReadSequence, null);
             _compatibilityReader.Reset();
             throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityReadUnavailable, true);
         }
@@ -304,6 +447,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             _compatibilityReader.Reset();
             throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityReadUnavailable, true);
         }
+        if (!ObserveLocalDataOwner(context, generation, ownerReadSequence, result))
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityReadUnavailable, true);
         return result;
     }
 
@@ -324,6 +469,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         {
             var original = RequireSession(context);
             var generation = Generation;
+            var ownerReadSequence = BeginLocalDataOwnerRead();
             lock (_loginGate) { _compatibilityCancellation = operation; }
             if (_disposed || generation != Generation || CurrentContext != context)
                 throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityWriteUnavailable, true);
@@ -332,6 +478,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             operation.Token.ThrowIfCancellationRequested();
             if (_disposed || generation != Generation || CurrentContext != context)
                 throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityWriteUnavailable, true);
+            if (!ObserveLocalDataOwner(context, generation, ownerReadSequence, result))
+                throw new AccountBridgeHostException(AccountBridgeStableErrors.CompatibilityReadUnavailable, true);
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -369,6 +517,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         try
         {
             var originalSession = RequireSession(context);
+            var generation = Generation;
             var contract = ToProfilePatch(patch);
             try
             {
@@ -385,10 +534,26 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                     originalSession,
                     cancellationToken);
                 RequireSameSession(originalSession, confirmed.ActiveSession);
-                _session = confirmed.ActiveSession;
-                var directory = await LoadDirectoryAsync(cancellationToken);
-                _profileCache.Save(CurrentRoute(), confirmed.Profile, DateTimeOffset.UtcNow);
-                return ProjectProfile(confirmed.Profile, "live", null, directory);
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (_realtimeGate)
+                {
+                    RequireAccountProfileReadOwner(context, generation);
+                    _session = confirmed.ActiveSession;
+                    var observedAtUtc = DateTimeOffset.UtcNow;
+                    var route = CurrentRoute();
+                    _profileReadSnapshot = new(context, generation,
+                        ScmCachedProfileContract.Create(route.Environment, route.Authority, confirmed.Profile, observedAtUtc));
+                    try
+                    {
+                        _profileCache.Save(route, confirmed.Profile, observedAtUtc);
+                        _profileReadCacheSuppressed = false;
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        ReportAccountProfileCacheFailure("write-confirmed", error);
+                    }
+                    return ProjectProfile(confirmed.Profile, "live", null, [], observedAtUtc);
+                }
             }
             catch (ScmApiForbiddenException)
             {
@@ -438,13 +603,14 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             return result.Result;
         }
         var session = RequireSession(context);
+        var generation = Generation;
         try
         {
             var result = await _oauth.LoadPersonalProfileAsync(session, cancellationToken)
                 .ConfigureAwait(false);
             RequireSameSession(session, result.ActiveSession);
             _session = result.ActiveSession;
-            return result.Profile;
+            return await WithRsiAvatarAsync(result.Profile, context, generation, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -456,11 +622,16 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 AccountBridgeStableErrors.ReauthorizationRequired);
         }
         catch (Exception exception) when (
-            exception is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            exception is HttpRequestException or InvalidOperationException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            throw new AccountBridgeHostException(
-                AccountBridgeStableErrors.PersonalProfileReadUnavailable,
-                retryable: true);
+            var failure = PersonalProfileReadFailures.FromException(exception, cancellationToken);
+            if (failure.Code is AccountBridgeStableErrors.PersonalProfileReadForbidden or AccountBridgeStableErrors.PersonalProfileDataInvalid &&
+                !_disposed && generation == Generation && CurrentContext == context)
+            {
+                ForgetAvatarImage(context);
+                AvatarDenied?.Invoke(context, generation);
+            }
+            throw failure;
         }
     }
 
@@ -473,6 +644,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         try
         {
             var originalSession = RequireSession(context);
+            var generation = Generation;
             try
             {
                 var writeSession = await _oauth.AuthorizeProfileWriteAsync(
@@ -485,7 +657,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                     cancellationToken);
                 RequireSameSession(originalSession, result.ActiveSession);
                 _session = result.ActiveSession;
-                return result.Profile;
+                return await WithRsiAvatarAsync(result.Profile, context, generation, cancellationToken);
             }
             catch (ScmApiForbiddenException)
             {
@@ -517,18 +689,50 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         }
     }
 
-    public async Task<AccountBridgeOfficialFleetProjection> GetOfficialFleetAsync(
+    public Task<AccountBridgeOfficialFleetProjection> GetOfficialFleetAsync(
         BridgeAccountContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) => ReadOfficialFleetAsync(context, cancellationToken, includeProfile: true);
+
+    public Task<AccountBridgeOfficialFleetProjection> GetOfficialFleetIdentityAsync(
+        BridgeAccountContext context, CancellationToken token) => ReadOfficialFleetAsync(context, token, includeProfile: false);
+
+    private async Task<AccountBridgeOfficialFleetProjection> ReadOfficialFleetAsync(
+        BridgeAccountContext context, CancellationToken cancellationToken, bool includeProfile)
     {
         var session = RequireSession(context);
+        var generation = Generation;
         try
         {
             var result = await _oauth.LoadBootstrapAsync(session, cancellationToken)
                 .ConfigureAwait(false);
+            RequireFleetReadOwner(context, generation);
             RequireSameSession(session, result.ActiveSession);
             _session = result.ActiveSession;
-            return ProjectOfficialFleet(result.Snapshot, DateTimeOffset.UtcNow);
+            var projection = ProjectOfficialFleet(result.Snapshot, DateTimeOffset.UtcNow);
+            FleetMembershipObserved?.Invoke(context, generation, projection.Fleet?.SourceRef);
+            if (projection.Fleet is { } fleet && includeProfile) {
+                try {
+                    var enriched = await AddOfficialFleetProfileAsync(fleet, context, generation, cancellationToken);
+                    projection = projection with { Fleet = enriched,
+                        ProfileRead = new("available", DateTimeOffset.UtcNow) };
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception error) {
+                    // Public profile availability must not erase verified membership.
+                    // Account changes, however, must still reject the entire old projection.
+                    RequireFleetReadOwner(context, generation);
+                    projection = projection with {
+                        ProfileRead = OfficialFleet.OfficialFleetReadFailures.ForProfile(error, cancellationToken) };
+                }
+            }
+            else if (projection.Fleet is { } identity) {
+                Volatile.Write(ref _fleetPublicSource, new(context, generation, identity.SourceRef, identity.Sid));
+                projection = projection with { ProfileRead = new("deferred") };
+            }
+            else {
+                Volatile.Write(ref _fleetPublicSource, null);
+            }
+            return projection;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -544,11 +748,11 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 AccountBridgeStableErrors.ReauthorizationRequired);
         }
         catch (Exception exception) when (
-            exception is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException)
+            exception is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException or
+                System.Text.Json.JsonException or InvalidDataException or KeyNotFoundException or FormatException or OverflowException or
+                OperationCanceledException or TimeoutException)
         {
-            throw new AccountBridgeHostException(
-                AccountBridgeStableErrors.OfficialFleetReadUnavailable,
-                retryable: true);
+            throw OfficialFleet.OfficialFleetReadFailures.FromException(exception, cancellationToken);
         }
     }
 
@@ -560,7 +764,16 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         _ = RequireSession(context);
         try
         {
-            return Task.FromResult(_profileCache.Clear(CurrentRoute()));
+            lock (_realtimeGate)
+            {
+                _ = RequireSession(context);
+                var memoryCleared = _profileReadSnapshot is { } memory &&
+                    memory.Owner == context && memory.Generation == Generation;
+                var diskCleared = _profileCache.Clear(CurrentRoute());
+                _profileReadSnapshot = null;
+                _profileReadCacheSuppressed = true;
+                return Task.FromResult(diskCleared || memoryCleared);
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -586,19 +799,23 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         if (relaySession.Scm is null && relaySession.Legacy is not null &&
             IdentityBindingPolicy.IsValidGameName(identity.Handle))
             identity = identity with { Status = ScmGameIdentityStatus.Verified };
-        // Compatibility identity comparison may use the selected existing log.
-        // SCM and live presence keep their current-session contract unchanged.
-        var detected = _detectedGameIdentity() ?? (relaySession.Legacy is not null ? _recentGameIdentity?.Invoke() : null);
+        // Recent local identity is a cross-check, not SCM authentication. Live
+        // telemetry retains its separate current-session contract.
+        var detected = _detectedGameIdentity() ?? _recentGameIdentity?.Invoke();
         var assessment = detected is null
             ? IdentityBindingPolicy.Evaluate(
                 identity,
-                _lastGameIdentityCheck())
+                // SCM absence of a fresh log observation is not a conflict.
+                // Retain the compatibility account's persisted-check semantics.
+                relaySession.Scm is not null ? LocalIdentityCheckState.NotObserved : _lastGameIdentityCheck())
             : IdentityBindingPolicy.Evaluate(
                 identity,
                 detected);
         var state = assessment.State switch
         {
             IdentityVerificationState.Verified => "match",
+            IdentityVerificationState.BindingRequired => "verificationRequired",
+            IdentityVerificationState.VerificationPending => "verificationPending",
             IdentityVerificationState.Mismatch => "mismatch",
             IdentityVerificationState.AwaitingGameIdentity => "awaitingGameIdentity",
             IdentityVerificationState.ReverificationRequired => "reverifyRequired",
@@ -608,7 +825,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         return new AccountBridgeIdentityProjection(
                 state,
                 assessment.BoundGameName,
-                assessment.CanUseIdentitySensitiveNetworkWrites,
+                assessment.CanUseIdentitySensitiveNetworkWrites &&
+                    (relaySession.Scm is not null || FirstUseGameIdentityReady),
                 IdentityBindingPolicy.IsValidGameName(detected) ? detected?.Trim() : null,
                 "unknown");
     }
@@ -660,9 +878,21 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             }
 
             ScmOAuthSession? restored;
+            AccountRestoreDisplayScope? displayScope = null;
+            void ObserveDisplay(Auth.ScmRestoreDisplayRead read) => displayScope = ObserveRestoreDisplay(read);
+            var wantsDisplay = WantsRestoreDisplay;
+            if (wantsDisplay) _oauth.RestoreDisplayPreparing += ObserveDisplay;
             try
             {
                 restored = await _oauth.TryRestoreSessionAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The waiter leaves independently, but its original display
+                // transaction cannot retire until the shared transport drains.
+                displayScope?.Dispose();
+                if (displayScope is not null) await displayScope.DrainAsync().ConfigureAwait(false);
+                throw;
             }
             catch (HttpRequestException)
             {
@@ -682,6 +912,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 restored = null;
             }
 
+            finally { if (wantsDisplay) _oauth.RestoreDisplayPreparing -= ObserveDisplay; }
+
             _restoreAttempted = true;
             _credentialTemporarilyUnavailable =
                 _oauth.LastSessionRestoreOutcome ==
@@ -690,7 +922,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 _oauth.LastSessionRestoreOutcome == ScmSessionRestoreOutcome.ReauthorizationRequired;
             if (restored is not null)
             {
-                PublishSession(restored, reauthorizationRequired: false);
+                PublishRestoredSession(restored, displayScope);
             }
         }
         finally
@@ -700,7 +932,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
     }
 
     private async Task<IReadOnlyList<AccountBridgeTimeZone>> LoadDirectoryAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool strictFailures = false)
     {
         try
         {
@@ -712,6 +944,12 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (Exception exception) when (strictFailures)
+        {
+            var failure = AccountProfileReadFailures.Directory(exception);
+            if (failure is null) throw;
+            throw failure;
         }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
         {
@@ -730,8 +968,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 "signedIn",
                 Generation,
                 ToContext(session),
-                EmptyToNull(session.DisplayName),
-                null);
+                _scmDisplayCallSign ?? EmptyToNull(session.DisplayName),
+                null, _scmAvatarImageData);
         }
 
         if (_legacySession is { } legacy)
@@ -756,7 +994,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         ScmSelfProfileContract profile,
         string source,
         DateTimeOffset? cachedAtUtc,
-        IReadOnlyList<AccountBridgeTimeZone> directory)
+        IReadOnlyList<AccountBridgeTimeZone> directory, DateTimeOffset? observedAtUtc = null)
     {
         var normalized = profile.Normalize();
         return new AccountBridgeProfileProjection(
@@ -769,7 +1007,8 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
             source,
             cachedAtUtc,
             SupportedLocales,
-            directory);
+            directory,
+            observedAtUtc);
     }
 
     internal static AccountBridgeOfficialFleetProjection ProjectOfficialFleet(
@@ -820,7 +1059,7 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         if (fleet.Id <= 0 ||
             sid is null ||
             name is null ||
-            fleet.RankValue is < 1 or > 5)
+            fleet.RankValue is < 0 or > 127)
         {
             throw InvalidOfficialFleetData();
         }
@@ -843,15 +1082,16 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
                 name,
                 logoUrl,
                 EmptyToNull(fleet.RankName),
-                fleet.RankValue),
+                // SCM custom-rank values are not normalized RSI star counts.
+                // Keep the official title; a verified star projection is unavailable.
+                null),
             "live",
             resourceVersion,
             observedAtUtc);
     }
 
     private static AccountBridgeHostException InvalidOfficialFleetData() => new(
-        AccountBridgeStableErrors.OfficialFleetDataInvalid,
-        retryable: true);
+        AccountBridgeStableErrors.OfficialFleetDataInvalid);
 
     private static ScmProfilePatchContract ToProfilePatch(
         AccountBridgePreferencePatch patch)
@@ -893,19 +1133,53 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         LegacyMigrationCredential? legacy = null, bool legacyUnavailable = false, string? legacyDisplayName = null,
         ScmGameIdentitySnapshot? legacyIdentity = null, string? legacyAvatarImageData = null, ScmOverlayEntitlementSnapshot? legacyEntitlements = null)
     {
+        lock (_realtimeGate)
+            PublishSessionCore(session, reauthorizationRequired, legacy, legacyUnavailable, legacyDisplayName,
+                legacyIdentity, legacyAvatarImageData, legacyEntitlements);
+    }
+
+    private void PublishSessionCore(ScmOAuthSession? session, bool reauthorizationRequired,
+        LegacyMigrationCredential? legacy, bool legacyUnavailable, string? legacyDisplayName,
+        ScmGameIdentitySnapshot? legacyIdentity, string? legacyAvatarImageData, ScmOverlayEntitlementSnapshot? legacyEntitlements) =>
+        PublishSessionState(session, reauthorizationRequired, legacy, legacyUnavailable, legacyDisplayName,
+            legacyIdentity, legacyAvatarImageData, legacyEntitlements, null);
+
+    private void PublishSessionState(ScmOAuthSession? session, bool reauthorizationRequired,
+        LegacyMigrationCredential? legacy, bool legacyUnavailable, string? legacyDisplayName,
+        ScmGameIdentitySnapshot? legacyIdentity, string? legacyAvatarImageData, ScmOverlayEntitlementSnapshot? legacyEntitlements,
+        AccountRestoreDisplayScope? restoredDisplay)
+    {
+        var retiredOwner = _session is { } previousSession
+            ? new BridgeAccountContext(_environment, previousSession.AuthorityId, previousSession.Subject) : null;
+        var generation = ReserveSessionGeneration(); // Exhaustion cannot partially publish new identity under an old generation.
+        ClearOfficialFleetProfileTargets();
+        Volatile.Write(ref _fleetPublicSource, null);
+        _profileReadSnapshot = null;
+        _profileReadCacheSuppressed = false;
         lock (_loginGate) { _compatibilityCancellation?.Cancel(); }
+        StopAccountRealtime();
+        StopRoomMembershipKeepalive();
+        StopParticipantLoop();
         _compatibilityReader?.Reset();
+        Volatile.Write(ref _localOwnerBinding, null);
         _legacySession = legacy;
         _legacyDisplayName = legacyDisplayName;
         _legacyIdentity = legacyIdentity;
         _legacyAvatarImageData = legacyAvatarImageData;
+        _scmAvatarImageData = null;
+        _rsiAvatarCache = null;
+        _avatarClearedOwner = null;
+        Volatile.Write(ref _keptAvatarImage, null);
+        _scmDisplayCallSign = null;
         _legacyEntitlements = legacyEntitlements;
         _legacyRestoreUnavailable = legacyUnavailable;
         _session = session;
+        if (session is not null) _freshSignInPending = false;
         _restoreAttempted = true;
         _credentialTemporarilyUnavailable = false;
         _reauthorizationRequired = reauthorizationRequired;
-        var generation = Interlocked.Increment(ref _generation);
+        Interlocked.Exchange(ref _generation, generation);
+        if (session is not null) restoredDisplay?.BindAuthenticated(ToContext(session), generation);
         _communities?.InvalidateProfileEdits();
         _communities?.InvalidateHangarEdits();
         _communities?.InvalidateRolesEdits();
@@ -913,7 +1187,11 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         _communities?.InvalidateMemberRemovalEdits();
         _communities?.InvalidateOwnershipTransferEdits();
         _communities?.InvalidateInvitePreviews();
+        if (retiredOwner is not null) AuthenticatedSessionRetired?.Invoke(retiredOwner);
         AccountChanged?.Invoke(generation);
+        EnsureAccountRealtime();
+        EnsureRoomMembershipKeepalive();
+        EnsureParticipantLoop();
     }
 
     private void PublishLegacySession(LegacyMigrationCredential credential, bool unavailable = false, string? displayName = null,
@@ -925,15 +1203,26 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
 
     private void OnSessionInvalidated(OAuthPkceClient source, ScmOAuthSession invalidated)
     {
-        var current = _session;
-        if (current is null ||
-            !current.AuthorityId.Equals(invalidated.AuthorityId, StringComparison.Ordinal) ||
-            !current.Subject.Equals(invalidated.Subject, StringComparison.Ordinal))
+        lock (_realtimeGate)
         {
-            return;
+            var current = _session;
+            if (current is null ||
+                !current.AuthorityId.Equals(invalidated.AuthorityId, StringComparison.Ordinal) ||
+                !current.Subject.Equals(invalidated.Subject, StringComparison.Ordinal) ||
+                source.CurrentCredentialVersion is { } version && version != invalidated.CredentialVersion)
+                return;
+            // Retire the rejected owner's cache before publishing a new
+            // generation makes the in-flight read's owner check fail.
+            InvalidateAccountProfileCache(CurrentRoute());
+            PublishSession(null, reauthorizationRequired: true);
         }
+    }
 
-        PublishSession(null, reauthorizationRequired: true);
+    private void OnStoredCredentialRejected(string authority, string subject)
+    {
+        // Cold restoration has no installed session to retire. The OAuth writer
+        // supplies its exact rejected owner while excluding a replacement login.
+        if (!_disposed) AuthenticatedSessionRetired?.Invoke(new(_environment, authority, subject));
     }
 
     private AccountRouteIdentity CurrentRoute()
@@ -970,26 +1259,44 @@ internal sealed partial class ScmAccountBridgeHost : IAccountBridgeHost, IDispos
         {
             if (_disposed) return;
             _disposed = true;
+            ClearOfficialFleetProfileTargets();
+            Volatile.Write(ref _fleetPublicSource, null);
+            _profileReadSnapshot = null;
             _compatibilityCancellation?.Cancel();
             _legacyLoginCancellation?.Cancel();
         }
+        var businessExit = RetireFirstUseBusinessAdmissionAsync();
+        _ = businessExit.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         _compatibilityReader?.Dispose();
+        StopParticipantLoop();
+        StopAccountRealtime();
+        StopRoomMembershipKeepalive();
         _activityLifetime.Cancel();
         _passwordRecovery?.Dispose();
         _legacyPasswordLogin?.Dispose();
         _partyRooms?.Dispose();
         _friends?.Dispose();
         _accountSafety?.Dispose();
+        _dailySupport?.Dispose();
+        _achievementIdeas?.Dispose();
         _communities?.Dispose();
+        _hangarMedia?.Dispose();
         _privacyWriter?.Dispose();
         _oauth.SessionInvalidated -= OnSessionInvalidated;
+        _oauth.StoredCredentialRejected -= OnStoredCredentialRejected;
+        _oauth.StationTradeDiscovered -= OnStationTradeDiscovered;
         lock (_loginGate)
         {
             _loginCancellation?.Cancel();
             _loginCancellation = null;
         }
 
-        _mutationGate.Dispose();
+        DisposeInstalledAccountExtensions();
+        DisposeMutationGateAfterFirstUseResume();
     }
 
+    // Optional installed account modules share disposal, never credentials or
+    // policy through this erased-on-public-build lifecycle seam.
+    partial void DisposeInstalledAccountExtensions();
 }

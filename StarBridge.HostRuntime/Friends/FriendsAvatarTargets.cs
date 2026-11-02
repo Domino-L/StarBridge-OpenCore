@@ -57,7 +57,7 @@ internal sealed partial class FriendsReader
                 current();
                 var owner = Owner(bearer, scope);
                 var reference = Guid.NewGuid().ToString("N");
-                _conversations[reference] = new(owner, id, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign);
+                _conversations[reference] = new(owner, id, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: row.Callsign, CredentialOwner: Owner(bearer, ""));
                 _friendChatTargets.Add(reference);
                 row = row with { ChatTargetRef = reference, ConversationKey = ConversationKey(owner, id, scope) };
             }

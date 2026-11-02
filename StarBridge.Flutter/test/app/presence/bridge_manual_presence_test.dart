@@ -9,6 +9,261 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  for (final scenario in [
+    'persistent',
+    'disposed',
+    'account-change',
+    'revoked',
+  ]) {
+    test('presence read recovery is bounded and scoped: $scenario', () async {
+      final pair = InMemoryBridgeConnection.createPair();
+      final session = BridgeClientSession(
+        connection: pair.client,
+        sessionGeneration: 1,
+      );
+      const first = BridgeAccountContext(
+        environment: 'test',
+        authority: 'scm.invalid',
+        subject: 'first',
+      );
+      const second = BridgeAccountContext(
+        environment: 'test',
+        authority: 'scm.invalid',
+        subject: 'second',
+      );
+      final subjects = <String>[];
+      final sub = pair.host.incoming.listen((request) async {
+        if (request.messageType != 'request') return;
+        if (request.name != 'presence.read') {
+          throw StateError('Recovery attempted a write.');
+        }
+        subjects.add(request.accountContext!.subject);
+        final success = request.accountContext!.subject == 'second';
+        await pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            sessionGeneration: request.sessionGeneration,
+            correlationId: request.correlationId,
+            accountContext: request.accountContext,
+            status: success ? 'ok' : 'error',
+            error: success
+                ? null
+                : BridgeErrorBody(
+                    code: scenario == 'revoked'
+                        ? 'presence.account_changed'
+                        : 'presence.unavailable',
+                    message: 'Synthetic failure',
+                    retryable: false,
+                  ),
+            payload: success
+                ? const {
+                    'schemaVersion': 1,
+                    'state': 'unconfirmed',
+                    'revision': 'missing',
+                    'mode': 'online',
+                    'realtimeStatus': 3,
+                  }
+                : const {},
+          ),
+        );
+      });
+      final account = ValueNotifier(
+        const PresenceAccountScope(
+          generation: 1,
+          account: first,
+          available: true,
+        ),
+      );
+      final source = BridgeManualPresence(session, account);
+      try {
+        await Future<void>.delayed(Duration.zero);
+        if (scenario == 'disposed') source.dispose();
+        if (scenario == 'account-change') {
+          account.value = const PresenceAccountScope(
+            generation: 1,
+            account: second,
+            available: true,
+          );
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: scenario == 'persistent' ? 7600 : 1200),
+        );
+        expect(
+          subjects.where((subject) => subject == 'first').length,
+          scenario == 'persistent' ? 4 : 1,
+        );
+        if (scenario == 'account-change') {
+          expect(subjects, ['first', 'second']);
+          expect(source.value.selfKey, 'presence.invisible');
+        }
+        if (scenario == 'persistent') {
+          await Future<void>.delayed(const Duration(milliseconds: 1100));
+          expect(subjects, hasLength(4));
+          expect(source.value.selfKey, 'presence.unknown');
+        }
+      } finally {
+        source.dispose();
+        account.dispose();
+        await sub.cancel();
+        await session.close();
+        await pair.host.close();
+      }
+    });
+  }
+  test('transient SCM presence read recovers without another event', () async {
+    final pair = InMemoryBridgeConnection.createPair();
+    final session = BridgeClientSession(
+      connection: pair.client,
+      sessionGeneration: 1,
+    );
+    const owner = BridgeAccountContext(
+      environment: 'test',
+      authority: 'scm.invalid',
+      subject: 'pilot',
+    );
+    var reads = 0;
+    final sub = pair.host.incoming.listen((request) async {
+      if (request.messageType != 'request') return;
+      if (request.name != 'presence.read') {
+        throw StateError('Recovery must not write.');
+      }
+      reads++;
+      await pair.host.send(
+        BridgeEnvelope(
+          protocolVersion: 1,
+          messageType: 'response',
+          name: request.name,
+          sessionGeneration: request.sessionGeneration,
+          correlationId: request.correlationId,
+          accountContext: request.accountContext,
+          status: reads == 1 ? 'error' : 'ok',
+          error: reads == 1
+              ? const BridgeErrorBody(
+                  code: 'presence.unavailable',
+                  message: 'Temporary',
+                  retryable: true,
+                )
+              : null,
+          payload: reads == 1
+              ? const {}
+              : const {
+                  'schemaVersion': 1,
+                  'state': 'unconfirmed',
+                  'revision': 'missing',
+                  'mode': 'online',
+                  'realtimeStatus': 1,
+                },
+        ),
+      );
+    });
+    final account = ValueNotifier(
+      const PresenceAccountScope(
+        generation: 1,
+        account: owner,
+        available: true,
+      ),
+    );
+    final source = BridgeManualPresence(session, account);
+    try {
+      await Future<void>.delayed(Duration.zero);
+      expect(source.value.selfKey, 'presence.unknown');
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(reads, 2);
+      expect(source.value.selfKey, 'presence.online');
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(reads, 2, reason: 'Recovery must not become a permanent poller.');
+    } finally {
+      source.dispose();
+      account.dispose();
+      await sub.cancel();
+      await session.close();
+      await pair.host.close();
+    }
+  });
+  test(
+    'SCM heartbeat confirms display without publishing a saved mode',
+    () async {
+      final pair = InMemoryBridgeConnection.createPair();
+      final session = BridgeClientSession(
+        connection: pair.client,
+        sessionGeneration: 1,
+      );
+      const owner = BridgeAccountContext(
+        environment: 'test',
+        authority: 'scm.invalid',
+        subject: 'pilot',
+      );
+      int? status = 1;
+      Completer<void>? hold;
+      final calls = <String>[];
+      final sub = pair.host.incoming.listen((request) async {
+        if (request.messageType != 'request') return;
+        calls.add(request.name);
+        final captured = status;
+        await hold?.future;
+        await pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: request.name,
+            sessionGeneration: request.sessionGeneration,
+            correlationId: request.correlationId,
+            accountContext: request.accountContext,
+            status: 'ok',
+            payload: {
+              'schemaVersion': 1,
+              'state': 'unconfirmed',
+              'revision': 'missing',
+              'mode': 'online',
+              'realtimeStatus': captured,
+            },
+          ),
+        );
+      });
+      final account = ValueNotifier(
+        const PresenceAccountScope(
+          generation: 1,
+          account: owner,
+          available: true,
+          automaticKey: 'presence.unknown',
+        ),
+      );
+      final source = BridgeManualPresence(session, account);
+      try {
+        for (var i = 0; i < 10; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(source.value.selfKey, 'presence.online');
+        expect(source.value.confirmedMode, isNull);
+        hold = Completer<void>();
+        final delayed = hold;
+        final oldRead = source.refresh();
+        await Future<void>.delayed(Duration.zero);
+        status = 3;
+        source.invalidateRealtime();
+        expect(source.value.selfKey, 'presence.unknown');
+        hold = null;
+        delayed.complete();
+        await oldRead;
+        for (var i = 0; i < 10; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(source.value.selfKey, 'presence.invisible');
+        status = null;
+        await source.refresh();
+        expect(source.value.selfKey, 'presence.unknown');
+        expect(calls.every((call) => call == 'presence.read'), isTrue);
+      } finally {
+        source.dispose();
+        account.dispose();
+        await sub.cancel();
+        await session.close();
+        await pair.host.close();
+      }
+    },
+  );
   const owner = BridgeAccountContext(
     environment: 'test',
     authority: 'presence.invalid',

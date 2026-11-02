@@ -1,5 +1,6 @@
+import 'menu_organization_page_actions.dart';
+import 'menu_overlay_text.dart';
 import 'dart:async';
-
 import '../../features/communities/communities_module.dart';
 import '../../features/communities/community_workspace_port.dart';
 import '../../features/communities/community_overview_reader.dart';
@@ -18,13 +19,15 @@ import 'menu_announcement_details_session.dart';
 import 'menu_directory_logos.dart';
 import 'menu_organization_previews.dart';
 import 'menu_chat_archive.dart';
+import 'menu_organization_images.dart';
+import '../../shared/downloadable_image_cache.dart';
 import 'menu_organization_chat_session.dart';
-
 final class MenuOrganizationsSession extends MenuFeatureSession
-    implements MenuProfileTargets {
+    implements MenuProfileTargets, DownloadableImageCache {
   MenuOrganizationsSession(
     this.port,
     void Function(Map<String, Object?>) publish, {
+    super.locale,
     this.chatOnly = false,
     this.archive,
     CommunityOverviewReader? overview,
@@ -34,36 +37,36 @@ final class MenuOrganizationsSession extends MenuFeatureSession
   }
   final bool chatOnly;
   late final _announcementDetails = MenuAnnouncementDetailsSession(
-    grant: (run) => button('详情', (_) => run(), silent: true),
-    changed: () => emit(currentView),
+    grant: (run) => button(
+      MenuOverlayText('menu.overlay.organizations.details'),
+      (_) => run(),
+      silent: true,
+      role: 'details',
+    ),
+    changed: () => emit(templateView),
     denied: _announcementDenied,
     isCurrent: (target) =>
         visible && !disposed && _tab == 'announcements' && _selected == target,
   );
   void _announcementDenied() {
     if (!visible || disposed) return;
-    // Retire the read AND its busy gate through the existing visibility path.
-    // Clear all section snapshots before re-reading the authorized directory.
-    super.show(false);
+    super.show(false); // Retire the read AND its busy gate through the existing visibility path. Clear all section snapshots before re-reading the authorized directory.
     _reset();
     emit({'state': 'unavailable'});
     super.show(true);
   }
-
   @override
   void changeScope() {
     _announcementDetails.clear();
     super.changeScope();
   }
-
   @override
   void show(bool value) {
     if (!value) _announcementDetails.clear();
     super.show(value);
   }
-
   final _shell = MenuOrganizationShell();
-  final _ships = MenuOrganizationShips();
+  late final _ships = MenuOrganizationShips(language: () => locale().toLanguageTag());
   final MenuChatArchive? archive;
   String _readStage = 'directory';
   late final _chatData = MenuOrganizationChatSession(
@@ -80,7 +83,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
   Map<String, Object?>? failedWrite() => _chatData.failedWrite();
   @override
   Map<String, Object?>? get writingView => _chatData.writingView;
-
   List<CommunityCard> _channelCards = const [];
   String? _channelNext;
   final _channelLogos = <String, String?>{};
@@ -112,7 +114,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       );
     }
     final shown = organizationVisibleNavigation(
-      currentView,
+      templateView,
       _tab,
       _navigation,
       _selectedLogo,
@@ -121,13 +123,11 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       emit(shown);
     }
   }
-
   late final _directoryLogos = MenuDirectoryLogos(port, (target, logo) {
     if (disposed || !_channelCards.any((card) => card.targetRef == target)) {
       return;
     }
     _channelLogos[target] = logo;
-    if (_selected == target) _selectedLogo = logo;
     _navigation = [
       for (var i = 0; i < _navigation.length; i++)
         {
@@ -137,14 +137,27 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     ];
     _publishNavigation();
   });
-
-  Future<String?> _directoryLogo(CommunityCard card) async {
-    if (chatOnly && card.logo != null) {
-      return await _avatars.logo(card.logo) ?? _channelLogos[card.targetRef];
-    }
-    return _directoryLogos.read(card);
+  Future<String?> _directoryLogo(CommunityCard card) =>
+      _directoryLogos.read(card, waitForImage: chatOnly);
+  late final _images = MenuOrganizationImages(port, _directoryLogos, () {
+    _channelLogos.clear();
+    _channelCards = [
+      for (final row in _channelCards) row.withoutDownloadedLogo(),
+    ];
+    _navigation = MenuOrganizationImages.navigation(_navigation);
+    _directoryView = MenuOrganizationImages.stripNullable(_directoryView);
+    _chatData.views.updateAll((_, view) => MenuOrganizationImages.strip(view));
+    _shell.retireImages();
+    super.emit(MenuOrganizationImages.strip(templateView));
+  });
+  @override
+  void beginImageMaintenance() {
+    if (!disposed) _images.beginImageMaintenance();
   }
-
+  @override
+  void endImageMaintenance() {
+    if (!disposed) _images.endImageMaintenance();
+  }
   @override
   void emit(Map<String, Object?> view) {
     view = _chatData.projectDelivery(view);
@@ -153,7 +166,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     _shell.observe(view, chatOnly ? null : port, this);
     super.emit(_chatData.projectPortraits(view));
   }
-
   Map<String, Object?>? _directoryView;
   @override
   bool get backgroundReads =>
@@ -183,7 +195,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       _previews?.clear();
       _directoryLogos.clear();
       _channelLogos.clear();
-      _selectedLogo = null;
       _navigation = const [];
       _navigationTargets = const [];
       _channelCards = const [];
@@ -202,7 +213,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     }
     return failed;
   }
-
   @override
   Map<String, Object?>? get readingView {
     if (!chatOnly) return _shell.loading(_selected, _tab, _query, _offset);
@@ -215,7 +225,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     }
     return organizationRefreshingView(source, channelRows());
   }
-
   final CommunitiesPort port;
   String? _selected, _after;
   List<Map<String, Object?>> _navigation = const [];
@@ -228,24 +237,13 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     _offset = offset;
     if (query != null) _query = query;
   }
-
-  List<Map<String, Object?>> _pageButtons(int? next) => [
-    if (next != null)
-      button('下一页', (_) async {
-        _selectPage(next);
-      }),
-    if (_offset > 0)
-      button('首页', (_) async {
-        _selectPage(0);
-      }),
-  ];
-
-  String? _selectedLogo;
+  List<Map<String, Object?>> _pageButtons(int? next) =>
+      menuOrganizationPageActions(this, next, _offset, _selectPage);
+  String? get _selectedLogo => _channelLogos[_selected];
   late final _avatars = MenuOrganizationAvatars(onChanged: _refreshPortraits);
   void _refreshPortraits() {
-    if (visible && !disposed) emit(currentView);
+    if (visible && !disposed) emit(templateView);
   }
-
   final _profiles = <String, MenuProfileTarget>{};
   int _profileSerial = 0;
   @override
@@ -255,10 +253,8 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     final target = _profiles[key];
     return target?.isCurrent() == true ? target : null;
   }
-
   @override
   void reset() => _reset();
-
   void _reset({bool keepDeliveries = false}) {
     _ships.clear();
     _shell.clear();
@@ -277,7 +273,6 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     _offset = 0;
     _query = '';
     _directoryQuery = '';
-    _selectedLogo = null;
     _avatars.clear();
     _profiles.clear();
     if (keepDeliveries) {
@@ -287,9 +282,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       _closeChats();
     }
   }
-
   void _closeChats() => _chatData.closeChats();
-
   @override
   Future<void> closePort() {
     _closeChats();
@@ -299,25 +292,25 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     _chatData.dispose();
     return port.close();
   }
-
   List<Map<String, Object?>> channelRows() => organizationChannelRows(
     _channelCards,
     _channelLogos,
     _selected,
-    (item) => button('打开组织会话', (_) async {
+    (item) => button(MenuOverlayText('menu.overlay.organizations.openChat'), (
+      _,
+    ) async {
       if (_selected == item.targetRef) return;
       changeScope();
       _chatData.active?.setReadingContext(visible: false, foreground: false);
       _chatData.active = null;
       _selected = item.targetRef;
-      _selectedLogo = _channelLogos[item.targetRef];
       _chatData.failedVisibleMessageRef = null;
       _chatData.sentRevision = 0;
       _chatData.sendStatus = 'idle';
-    }),
+    }, role: 'openOrganizationChat'),
   );
-
   Future<void> _readNavigation(int epoch) async {
+    final imageEpoch = _directoryLogos.imageEpoch;
     final cards = await _shell.readCards(
       (cursor) =>
           _directoryLogos.readDirectory(view: 'mine', query: '', after: cursor),
@@ -364,29 +357,34 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       (key, _) => !cards.any((c) => c.targetRef == key),
     );
     final navigation = <Map<String, Object?>>[];
-    // First paint uses authorized metadata; previews never hold it hostage.
-    for (final card in cards) {
-      final logo = await _directoryLogos.read(card);
+    for (final source in cards) { // First paint uses authorized metadata; previews never hold it hostage.
+      final logo = await _directoryLogos.read(source);
+      final card = source.withoutDownloadedLogo();
       if (!current(epoch)) throw StateError('retired');
       _channelLogos[card.targetRef] = logo;
-      if (card.targetRef == _selected) _selectedLogo = logo;
-      final action = button('切换组织', (_) async {
-        final active = currentMenuOrganization(_channelCards, card);
-        if (active == null || _selected == active.targetRef) return;
-        if ((_previews?.value(active.targetRef)['unread'] as int? ?? 0) > 0) {
-          _tab = 'chat';
-        }
-        _chatData.active?.setReadingContext(visible: false, foreground: false);
-        _chatData.active = null;
-        _selected = active.targetRef;
-        _chatData.sendStatus = 'idle';
-        _chatData.sentRevision = 0;
-        _selectedLogo = _channelLogos[active.targetRef];
-        _query = '';
-        _offset = 0;
-        _avatars.clear();
-        changeScope();
-      });
+      final action = button(
+        MenuOverlayText('menu.overlay.organizations.switch'),
+        (_) async {
+          final active = currentMenuOrganization(_channelCards, card);
+          if (active == null || _selected == active.targetRef) return;
+          if ((_previews?.value(active.targetRef)['unread'] as int? ?? 0) > 0) {
+            _tab = 'chat';
+          }
+          _chatData.active?.setReadingContext(
+            visible: false,
+            foreground: false,
+          );
+          _chatData.active = null;
+          _selected = active.targetRef;
+          _chatData.sendStatus = 'idle';
+          _chatData.sentRevision = 0;
+          _query = '';
+          _offset = 0;
+          _avatars.clear();
+          changeScope();
+        },
+        role: 'switchOrganization',
+      );
       navigation.add(<String, Object?>{
         'name': card.name,
         ...?_previews?.value(card.targetRef),
@@ -396,12 +394,14 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       });
     }
     if (!current(epoch)) throw StateError('retired');
-    _navigation = navigation;
+    _navigation = _directoryLogos.imagesCurrent(imageEpoch)
+        ? navigation
+        : MenuOrganizationImages.navigation(navigation);
     _navigationTargets = cards.map((card) => card.targetRef).toList();
   }
-
   @override
-  Future<Map<String, Object?>> read() async {
+  Future<Map<String, Object?>> read() => _images.read(_read);
+  Future<Map<String, Object?>> _read() async {
     final epoch = generation;
     _readStage = 'directory';
     if (!chatOnly) await _readNavigation(epoch);
@@ -429,23 +429,30 @@ final class MenuOrganizationsSession extends MenuFeatureSession
         }
       }
       actions.add(
-        button('搜索组织', (value) async {
-          _directoryQuery = value.trim();
-          _after = null;
-        }, input: '搜索已加入的组织'),
+        button(
+          MenuOverlayText('menu.overlay.organizations.searchOrganizations'),
+          (value) async {
+            _directoryQuery = value.trim();
+            _after = null;
+          },
+          input: MenuOverlayText('menu.overlay.organizations.filter'),
+          role: 'searchOrganizations',
+        ),
       );
       for (var i = 0; i < directory.items.length; i++) {
-        final item = directory.items[i];
+        final item = directory.items[i].withoutDownloadedLogo();
+        _channelLogos[item.targetRef] = logos[i];
         rows.add({
           'title': item.name,
           'detail': item.description,
           'buttons': [
-            button('打开组织', (_) async {
+            button(MenuOverlayText('menu.overlay.organizations.openAction'), (
+              _,
+            ) async {
               changeScope();
               _selected = item.targetRef;
-              _selectedLogo = logos[i];
               _offset = 0;
-            }),
+            }, role: 'openOrganization'),
           ],
         });
         presentation.add({
@@ -457,23 +464,25 @@ final class MenuOrganizationsSession extends MenuFeatureSession
           'activeTime': item.activeTime,
         });
       }
-      if (directory.next != null) {
+      if (directory.next case final next?) {
         actions.add(
-          button('下一页', (_) async {
-            _after = directory.next;
-          }),
+          button(MenuOverlayText('menu.overlay.organizations.next'), (_) async {
+            _after = next;
+          }, role: 'nextPage'),
         );
       }
       if (_after != null) {
         actions.add(
-          button('首页', (_) async {
+          button(MenuOverlayText('menu.overlay.organizations.first'), (
+            _,
+          ) async {
             _after = null;
-          }),
+          }, role: 'firstPage'),
         );
       }
       final result = <String, Object?>{
         if (chatOnly) 'channels': channelRows(),
-        'title': '我的组织',
+        'title': MenuOverlayText('menu.overlay.organizations.mine'),
         'rows': rows,
         'buttons': actions,
         'organization': {
@@ -503,7 +512,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
                     .where((c) => c.targetRef == target)
                     .firstOrNull
                     ?.name ??
-                '组织频道',
+                MenuOverlayText('menu.overlay.comms.organizationChannel'),
             'notice': '',
             'refreshing': false,
             'organization': {
@@ -553,11 +562,8 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       for (var i = 0; i < directory.items.length; i++) {
         _channelLogos[directory.items[i].targetRef] = logos[i];
       }
-      _selectedLogo = _channelLogos[target];
     }
-    // The authenticated chat endpoint checks membership itself. Chat must not
-    // wait for member presence, roster media or a second directory round trip.
-    _readStage = 'workspace';
+    _readStage = 'workspace'; // The authenticated chat endpoint checks membership itself. Chat must not wait for member presence, roster media or a second directory round trip.
     final workspace = chatOnly || _tab == 'chat'
         ? null
         : await (port as CommunityWorkspacePort).readWorkspace(
@@ -570,25 +576,29 @@ final class MenuOrganizationsSession extends MenuFeatureSession
     }
     if (!chatOnly) {
       actions.add(
-        button('返回组织列表', (_) async {
+        button(MenuOverlayText('menu.overlay.organizations.back'), (_) async {
           final query = _directoryQuery;
           _reset(keepDeliveries: true);
           _directoryQuery = query;
-        }),
+        }, role: 'organizationsHome'),
       );
     }
     if (chatOnly && _channelNext != null) {
       actions.add(
-        button('更多组织会话', (_) async {
+        button(MenuOverlayText('menu.overlay.organizations.moreChats'), (
+          _,
+        ) async {
           _after = _channelNext;
-        }),
+        }, role: 'moreOrganizationChats'),
       );
     }
     if (chatOnly && _after != null) {
       actions.add(
-        button('组织会话首页', (_) async {
+        button(MenuOverlayText('menu.overlay.organizations.firstChats'), (
+          _,
+        ) async {
           _after = null;
-        }),
+        }, role: 'organizationChatsHome'),
       );
     }
     for (final entry in organizationSections(port).entries) {
@@ -599,18 +609,25 @@ final class MenuOrganizationsSession extends MenuFeatureSession
         _tab = entry.key;
         if (_tab != 'ships') _ships.statisticsOpen = false;
         _selectPage(0, '');
-      });
+      }, role: entry.key);
       actions.add(action);
       sections[entry.key] = action['key'];
     }
-    String notice = '';
+    Object notice = '';
     var total = workspace?.totalCount ?? 0,
         matched = workspace?.matchedCount ?? 0;
     if (_tab == 'members') {
       actions.add(
-        button('搜索成员', (value) async {
-          _selectPage(0, value.trim());
-        }, input: '搜索成员、呼号或职务'),
+        button(
+          MenuOverlayText('menu.overlay.organizations.searchMembers'),
+          (value) async {
+            _selectPage(0, value.trim());
+          },
+          input: MenuOverlayText(
+            'menu.overlay.organizations.searchMembersHint',
+          ),
+          role: 'searchMembers',
+        ),
       );
       final avatars = await Future.wait(
         workspace!.members.map(
@@ -697,35 +714,34 @@ final class MenuOrganizationsSession extends MenuFeatureSession
       total = page.totalCount;
       matched = page.matchedCount;
       actions.add(
-        button('搜索舰船', (value) async {
-          _selectPage(0, value.trim());
-        }, input: '搜索舰船、所有者或用途'),
+        button(
+          MenuOverlayText('menu.overlay.organizations.searchShips'),
+          (value) async {
+            _selectPage(0, value.trim());
+          },
+          input: MenuOverlayText('menu.overlay.organizations.searchShipsHint'),
+          role: 'searchShips',
+        ),
       );
       actions.add(
-        button('舰队统计', (_) async {
+        button(MenuOverlayText('menu.overlay.organizations.statistics'), (
+          _,
+        ) async {
           _ships.statisticsOpen = true;
           _shell.sectionTransition = true;
-        }),
+        }, role: 'fleetStatistics'),
       );
       actions.add(
-        button('关闭统计', (_) async {
-          _ships.statisticsOpen = false;
-        }, silent: true),
+        button(
+          MenuOverlayText('menu.overlay.organizations.closeStatistics'),
+          (_) async {
+            _ships.statisticsOpen = false;
+          },
+          silent: true,
+          role: 'closeStatistics',
+        ),
       );
-      if (page.next != null) {
-        actions.add(
-          button('下一页', (_) async {
-            _selectPage(page.next!);
-          }),
-        );
-      }
-      if (_offset > 0) {
-        actions.add(
-          button('首页', (_) async {
-            _selectPage(0);
-          }),
-        );
-      }
+      actions.addAll(_pageButtons(page.next));
     } else {
       throw StateError('unsupported');
     }
@@ -738,7 +754,7 @@ final class MenuOrganizationsSession extends MenuFeatureSession
               .where((row) => row['selected'] == true)
               .firstOrNull?['name'] ??
           card?.name ??
-          '组织频道',
+          MenuOverlayText('menu.overlay.comms.organizationChannel'),
       'rows': rows,
       'buttons': actions,
       'notice': notice,

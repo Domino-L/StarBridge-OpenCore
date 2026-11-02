@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../direct_messages/chat_send_shortcuts.dart';
 import 'room_action_dialogs.dart';
@@ -35,18 +38,22 @@ class RoomChatComposer extends StatelessWidget {
       ChatSendShortcuts(
         controller: controller,
         onSend: onSend,
-        child: TextField(
-          key: inputKey,
-          controller: controller,
-          maxLength: 300,
-          minLines: 1,
-          maxLines: 3,
+        child: StarBridgeFieldFrame(
           enabled: enabled,
-          readOnly: readOnly,
-          onChanged: onChanged,
-          decoration: InputDecoration(
-            labelText: roomActionText(context, 'chatDraft'),
-            helperText: AppStrings.of(context).text('direct.send.shortcut'),
+          builder: (_, focus) => TextField(
+            focusNode: focus,
+            key: inputKey,
+            controller: controller,
+            maxLength: 300,
+            minLines: 1,
+            maxLines: 3,
+            enabled: enabled,
+            readOnly: readOnly,
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              labelText: roomActionText(context, 'chatDraft'),
+              helperText: AppStrings.of(context).text('direct.send.shortcut'),
+            ),
           ),
         ),
       ),
@@ -54,9 +61,10 @@ class RoomChatComposer extends StatelessWidget {
         children: [
           ?leadingAction,
           const Spacer(),
-          FilledButton(
-            key: sendKey,
-            onPressed: onSend,
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: sendKey,
+            onActivate: onSend == null ? null : (_) => onSend!(),
             child: Text(roomActionText(context, sending ? 'working' : 'send')),
           ),
         ],

@@ -38,7 +38,20 @@
           Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and '$(StarBridgePrivateAppearanceRoot)' != '' and Exists('$(StarBridgePrivateAppearanceRoot)/Runtime/StarBridge.PrivateAppearance.projitems')" />
   <ItemGroup>
     <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_mark_dark_surface.png" Link="Assets/Brand/notification_mark_dark.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_mark_transparent.png" Link="Assets/Brand/startup_meteor_mark.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_star_center.png" Link="Assets/Brand/startup_meteor_star.png" />
+    <EmbeddedResource Include="$(StarBridgeWindowsRenderingSourceRoot)/Assets/StartupHint/meteor-motion.json" LogicalName="StarBridge.GameStartupMotion.json" />
     <Resource Include="../StarBridge.Flutter/assets/brand/starbridge_mark_light_surface.png" Link="Assets/Brand/notification_mark_light.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/scm_mark.png" Link="Assets/Brand/scm_mark.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/scm_wordmark.png" Link="Assets/Brand/scm_wordmark.png" />
+    <Resource Include="../StarBridge.Flutter/assets/brand/scm_market_crate.png" Condition="Exists('../StarBridge.Flutter/assets/brand/scm_market_crate.png')" Link="Assets/Brand/scm_market_crate.png" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/first-entry-earned.png" Condition="Exists('../StarBridge.Flutter/assets/achievements/first-entry-earned.png')" Link="Assets/Achievements/first-entry-earned.png" />
+    <Content Include="../StarBridge.Flutter/assets/achievements/scm-holiday-*-512.webp" Link="Assets/Achievements/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/first-entry-locked.png" Condition="Exists('../StarBridge.Flutter/assets/achievements/first-entry-locked.png')" Link="Assets/Achievements/first-entry-locked.png" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/journey-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/home-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/collection-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/paths-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
     <Content Include="../data/ship-names/ship-name-pack.json" Link="Data/ship-name-pack.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../StarBridge.Desktop/Data/location-names-zh.txt" Link="Data/location-names-zh.txt" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/location-names-zh.txt')" />
     <Content Include="../StarBridge.Desktop/Data/starbridge_location_catalog.json" Link="Data/starbridge_location_catalog.json" CopyToOutputDirectory="PreserveNewest" Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/starbridge_location_catalog.json')" />

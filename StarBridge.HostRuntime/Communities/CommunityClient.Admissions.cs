@@ -96,6 +96,7 @@ internal sealed partial class CommunityClient
         }
         RenewTarget(reference, target, token);
         return new { schemaVersion = 1, targetRef = reference, section, offset, next, totalCount = total,
-            access = flags, items = rows, currentInviteAvailable, currentInvite, fetchedAt };
+            access = flags, items = rows, currentInviteAvailable, currentInvite, fetchedAt,
+            inviteGenerationVersion = root.TryGetProperty("inviteGenerationVersion", out var version) && version.TryGetInt32(out var supported) && supported == 1 ? 1 : 0 };
     });
 }

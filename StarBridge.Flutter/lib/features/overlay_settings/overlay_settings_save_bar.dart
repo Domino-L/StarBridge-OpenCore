@@ -1,4 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -6,7 +14,7 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 /// Shared save affordance for the information and menu settings workspaces.
-class OverlaySettingsSaveBar extends StatelessWidget {
+class OverlaySettingsSaveBar extends StatefulWidget {
   const OverlaySettingsSaveBar({
     required this.busy,
     required this.onUndo,
@@ -19,8 +27,31 @@ class OverlaySettingsSaveBar extends StatelessWidget {
     super.key,
   });
   final bool busy, dirty;
-  final VoidCallback? onUndo, onRedo, onDiscard, onSave;
+  final VoidCallback? onUndo, onRedo, onDiscard;
+  final FutureOr<void> Function()? onSave;
   final Key? saveKey, discardKey;
+
+  @override
+  State<OverlaySettingsSaveBar> createState() => _SaveBarState();
+}
+
+class _SaveBarState extends State<OverlaySettingsSaveBar> {
+  bool _saving = false;
+  InteractionSource Function() _commandSource = () =>
+      InteractionSource.programmatic;
+
+  Future<void> _save(InteractionSource source) async {
+    if (widget.busy || _saving || widget.onSave == null) return;
+    setState(() => _saving = true);
+    try {
+      await runStarBridgeActivation(source, () {
+        _commandSource = captureStarBridgeActivationSource();
+        return widget.onSave!();
+      });
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,33 +76,73 @@ class OverlaySettingsSaveBar extends StatelessWidget {
               spacing: tokens.space.xs,
               runSpacing: tokens.space.xs,
               children: [
-                if (busy)
-                  const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                if (widget.busy)
+                  StarBridgeInteractionRegion(
+                    child: Builder(
+                      builder: (context) {
+                        final data = InteractionScope.of(context);
+                        final source = _saving
+                            ? _commandSource()
+                            : resolveStarBridgeInitialReadSource(
+                                context,
+                                InteractionSource.programmatic,
+                              );
+                        return InteractionScope(
+                          data: data.copyWith(
+                            reduceMotion:
+                                data.reduceMotion ||
+                                source == InteractionSource.keyboard,
+                          ),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: SuiteBusyFrame(
+                              busy: true,
+                              child: Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: SuiteBusyLabel(
+                                  text(_saving ? 'saving' : 'working'),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 Padding(
                   padding: EdgeInsetsDirectional.only(end: tokens.space.md),
-                  child: Text(text(dirty ? 'dirty' : 'saved')),
+                  child: Text(text(widget.dirty ? 'dirty' : 'saved')),
                 ),
-                IconButton(
-                  tooltip: text('undo'),
-                  onPressed: busy ? null : onUndo,
+                StarBridgeIconAction(
+                  controlKey: const Key('overlay-save-bar-undo'),
+                  label: text('undo'),
+                  onActivate: widget.busy || widget.onUndo == null
+                      ? null
+                      : (_) => widget.onUndo!(),
                   icon: const StarBridgeIcon(StarBridgeIconSemantic.undo),
                 ),
-                IconButton(
-                  tooltip: text('redo'),
-                  onPressed: busy ? null : onRedo,
+                StarBridgeIconAction(
+                  controlKey: const Key('overlay-save-bar-redo'),
+                  label: text('redo'),
+                  onActivate: widget.busy || widget.onRedo == null
+                      ? null
+                      : (_) => widget.onRedo!(),
                   icon: const StarBridgeIcon(StarBridgeIconSemantic.redo),
                 ),
-                TextButton(
-                  key: discardKey,
-                  onPressed: busy ? null : onDiscard,
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: widget.discardKey,
+                  onActivate: widget.busy || widget.onDiscard == null
+                      ? null
+                      : (_) => widget.onDiscard!(),
                   child: Text(text('discard')),
                 ),
-                FilledButton(
-                  key: saveKey,
-                  onPressed: busy ? null : onSave,
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.primary,
+                  controlKey: widget.saveKey,
+                  onActivate: widget.busy || _saving || widget.onSave == null
+                      ? null
+                      : (source) => unawaited(_save(source)),
                   child: Text(text('save')),
                 ),
               ],

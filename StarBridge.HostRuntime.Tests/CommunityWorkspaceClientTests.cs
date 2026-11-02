@@ -27,6 +27,10 @@ internal static class CommunityWorkspaceClientTests
             if (path == "/api/fleets/media")
             {
                 mediaQuery = Uri.UnescapeDataString(request.RequestUri.Query);
+                if (state == "background") return new(HttpStatusCode.OK) { Content = JsonContent.Create(new {
+                    schemaVersion = 1, kind = "background", memberId = (string?)null, version = new string('a', 64), mimeType = "image/png",
+                    totalBytes = 2 * 1024 * 1024, offset = 0, next = 192 * 1024, data = Convert.ToBase64String(new byte[192 * 1024])
+                }) };
                 return new(HttpStatusCode.OK) { Content = JsonContent.Create(new
                 {
                     schemaVersion = 1, kind = "avatar", memberId = "account:member-one", version = new string('a', 64), mimeType = "image/png",
@@ -41,7 +45,25 @@ internal static class CommunityWorkspaceClientTests
                 payload["members"]![0]!["liveStatus"] = "InGame";
                 payload["members"]![0]!["ship"] = "ANVL_Lightning_F8C";
             }
-            if (state == "main-menu") payload["members"]![0]!["hasServerSession"] = false;
+            if (state == "main-menu")
+            {
+                payload["members"]![0]!["online"] = true;
+                payload["members"]![0]!["liveStatus"] = "InGame";
+                payload["members"]![0]!["hasServerSession"] = false;
+            }
+            if (state.StartsWith("private-", StringComparison.Ordinal))
+            {
+                var privateMember = payload["members"]![0]!;
+                privateMember["online"] = true;
+                privateMember["liveStatus"] = state["private-".Length..];
+                privateMember["ship"] = "Private ship";
+                privateMember["location"] = "Private location";
+                privateMember["serverRegion"] = "USA";
+                privateMember["hasServerSession"] = true;
+                privateMember["arrivalPendingConfirmation"] = true;
+                privateMember["arrivalTargetCode"] = "Private destination";
+                privateMember["lastUpdated"] = DateTimeOffset.UtcNow;
+            }
             if (state == "invalid-session") payload["members"]![0]!["hasServerSession"] = "false";
             if (state == "central-zone") payload["timeZoneId"] = "Central America Standard Time";
             if (state == "unknown-zone") payload["timeZoneId"] = "unknown-test-zone";
@@ -56,6 +78,8 @@ internal static class CommunityWorkspaceClientTests
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(payload) };
         });
         using var client = new CommunityClient(new Uri("https://community.invalid"), handler);
+        var diagnostics = new List<(string Stage, int? Status)>();
+        client.ReadDiagnostic = (stage, _, status, _) => diagnostics.Add((stage, status));
         var directory = await client.ReadAsync("test-bearer", new("mine", "", null, null), "one", default);
         var a = directory.Items[0].TargetRef;
         var b = directory.Items[1].TargetRef;
@@ -73,6 +97,18 @@ internal static class CommunityWorkspaceClientTests
             shipLabels.ValueKind == JsonValueKind.Object &&
             shipLabels.GetProperty("zhHans").GetString() == StarBridge.HostRuntime.Presence.GameShipNames.Find("ANVL_Lightning_F8C")!.ChineseName,
             "Real workspace read supplies the same catalog labels as room and Native.");
+        foreach (var privateState in new[] { "Offline", "ManualOffline", "Invisible", "Paused", "Unknown", "future-state" })
+        {
+            state = "private-" + privateState;
+            var privateProjection = JsonSerializer.SerializeToElement(await client.ReadWorkspaceAsync("test-bearer", query, "one", default));
+            var privateMember = privateProjection.GetProperty("members")[0];
+            Check(!privateMember.GetProperty("online").GetBoolean() && privateMember.GetProperty("liveStatus").GetString() == "Offline",
+                "Modern organization privacy choice equals offline: " + privateState);
+            foreach (var field in new[] { "ship", "location", "locationConfidence", "serverRegion", "serverShard", "hasServerSession", "arrivalTargetCode", "lastUpdated" })
+                Check(!privateMember.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null,
+                    "Modern organization offline runtime cleared: " + field);
+            Check(!privateMember.GetProperty("arrivalPendingConfirmation").GetBoolean(), "Modern organization offline arrival cleared");
+        }
         state = "ok";
         Check(memberRef.Length == 32 && member.GetProperty("gameName").GetString() == "", "opaque member ref does not reconstruct hidden game IDs");
         Check(!response.GetRawText().Contains("account:member-one") && !response.GetRawText().Contains("private-administration-data"), "whitelist excludes source identities and extra admin fields");
@@ -95,6 +131,12 @@ internal static class CommunityWorkspaceClientTests
         Check(!legacy.GetProperty("access").GetProperty("canViewLogs").GetBoolean(), "missing legacy permission does not grant log access");
         state = "ok";
         var media = JsonSerializer.SerializeToElement(new { schemaVersion = 1, targetRef = a, kind = "avatar", memberRef, offset = 0 });
+        state = "background";
+        var background = JsonSerializer.SerializeToElement(await client.ReadMediaAsync("test-bearer",
+            JsonSerializer.SerializeToElement(new { schemaVersion = 1, targetRef = a, kind = "background", offset = 0 }), "one", default));
+        Check(background.GetProperty("totalBytes").GetInt32() == 2 * 1024 * 1024 && mediaQuery!.Contains("kind=background"),
+            "background uses existing media route and 2 MiB budget");
+        state = "ok";
         var chunk = JsonSerializer.SerializeToElement(await client.ReadMediaAsync("test-bearer", media, "one", default));
         Check(chunk.GetProperty("memberRef").GetString() == memberRef && !chunk.GetRawText().Contains("account:member-one") &&
             mediaQuery!.Contains("memberId=account:member-one"), "member reference resolves only inside the Host");
@@ -123,6 +165,11 @@ internal static class CommunityWorkspaceClientTests
         state = "bad-media";
         await Error(() => client.ReadMediaAsync("test-bearer", media, "one", default), "communities.dataInvalid");
         state = "forbidden";
+        await Error(() => client.ReadWorkspaceAsync("test-bearer", query, "one", default), "communities.notAllowed");
+        await Error(() => client.ReadMediaAsync("test-bearer", media, "one", default), "communities.notAllowed");
+        Check(diagnostics.Contains(("workspace-http", 403)) && diagnostics.Contains(("workspace-media-http", 403)),
+            "Safe diagnostics distinguish workspace denial from media denial without changing access enforcement");
+        client.ReadDiagnostic = (_, _, _, _) => throw new IOException("synthetic journal failure");
         await Error(() => client.ReadWorkspaceAsync("test-bearer", query, "one", default), "communities.notAllowed");
     }
 

@@ -13,6 +13,21 @@ public sealed partial class NativeInformationOverlayRuntime
     private string? _moduleFailure;
     private bool ModuleFailureRetryable => _moduleFailure is not null and not ("overlay.sources_limit_exceeded" or "overlay.workspace_invalid_preset");
     private DispatcherTimer? _moduleExpiryTimer;
+    // Sources are re-read on open after their authorization lapsed while closed.
+    internal static readonly TimeSpan ModuleSyncWindow = TimeSpan.FromSeconds(15);
+    private DateTimeOffset? _moduleSyncStartedAt;
+    // Modules that have shown data since this window opened. A later lapse is a
+    // real "unavailable", never "syncing".
+    private readonly HashSet<string> _modulesShownSinceOpen = new(StringComparer.Ordinal);
+
+    private bool ModuleSyncing(DateTimeOffset now) =>
+        _moduleSyncStartedAt is { } started && now - started < ModuleSyncWindow;
+
+    private void StartModuleSync(DateTimeOffset? at)
+    {
+        _moduleSyncStartedAt = at;
+        _modulesShownSinceOpen.Clear();
+    }
 
     // Test observations run on the same STA and after the real window's model
     // has been updated. They neither provide content nor bypass authorization.
@@ -33,11 +48,14 @@ public sealed partial class NativeInformationOverlayRuntime
         if (!workspace.UsesModuleSources) return null;
         try
         {
-            var result = workspace.HasInvalidSourceConfiguration
+            var local = ReadLocalSource();
+            var result = workspace.HasInvalidConfiguration
                 ? new InformationOverlayModuleReadResult(null, "overlay.workspace_invalid_preset")
-                : _moduleProvider?.Invoke(workspace);
+                : local is not null ? local.ReadModules(workspace) : _moduleProvider?.Invoke(workspace);
+            var now = DateTimeOffset.UtcNow;
             if (result is { Frame: { } frame, FailureCode: null })
-                return ProjectModules(frame, workspace.Language, DateTimeOffset.UtcNow, session, presence);
+                return ExplainModules(ApplyModuleSync(ProjectModules(frame, workspace.Language, now, session, presence, local?.Read()),
+                    workspace.Language, now), workspace);
             _moduleFailure = result?.FailureCode ?? "overlay.source_unavailable";
         }
         catch
@@ -47,8 +65,37 @@ public sealed partial class NativeInformationOverlayRuntime
         }
         var empty = new OverlayModuleScene(new([], false, OverlaySceneContext.Local(OverlayScenePreference.Auto)),
             BuildCommandState(workspace.Language) with { NoticeTitle = "", NoticeText = "" }, [], null, false, null)
-        { EmptyMessage = OverlayModuleEmptyStates.Message(new(OverlaySourceMode.None, null, false), workspace.Language) };
-        return new(empty, empty, empty, empty, empty, "unavailable");
+        { EmptyMessage = OverlayModuleSourceCopy.Generic(workspace.Language) };
+        return ApplyModuleSync(new(empty, empty, empty, empty, empty, "unavailable"), workspace.Language, DateTimeOffset.UtcNow);
+    }
+
+    // The in-game menu hint names the hotkey that actually opens it.
+    private OverlayModulePresentation ExplainModules(OverlayModulePresentation modules, InformationOverlayRuntimeWorkspace workspace) =>
+        OverlayModuleSourceCopy.ExplainOnce(modules,
+            chatIsPanel: workspace.Settings.ChatDisplayMode != OverlayChatDisplayMode.FullScreenBarrage,
+            OverlayModuleSourceCopy.SwitchHint(_menuHotkey is { Enabled: false } ? null : _menuHotkey?.Binding ?? "Alt+M",
+                workspace.Language));
+
+    private OverlayModulePresentation ApplyModuleSync(OverlayModulePresentation modules, string language, DateTimeOffset now)
+    {
+        var syncing = false;
+        OverlayModuleScene Mark(string key, OverlayModuleScene scene)
+        {
+            if (scene.Available) { _modulesShownSinceOpen.Add(key); return scene; }
+            if (!ModuleSyncing(now) || _modulesShownSinceOpen.Contains(key) || scene.EmptyMessage is null) return scene;
+            syncing = true;
+            // Name what is being read, never a generic or a different source.
+            return scene with { EmptyMessage = OverlayModuleSourceCopy.Syncing(scene.SourceLabel, language) };
+        }
+        var next = modules with
+        {
+            Notice = Mark("Notice", modules.Notice), Overview = Mark("Overview", modules.Overview),
+            Members = Mark("Members", modules.Members), Chat = Mark("Chat", modules.Chat), Events = Mark("Events", modules.Events)
+        };
+        if (!syncing) return next;
+        // Re-check when the window ends so "syncing" moves on to the real state.
+        var end = _moduleSyncStartedAt!.Value + ModuleSyncWindow;
+        return next with { NextValidationAt = next.NextValidationAt is { } at && at < end ? at : end };
     }
 
     private void ScheduleModuleValidation(OverlayModulePresentation? modules)

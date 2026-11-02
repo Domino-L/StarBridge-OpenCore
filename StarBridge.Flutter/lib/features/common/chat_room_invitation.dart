@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/routing/open_destination_intent.dart';
 import '../../app/routing/room_invitation_destination.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 
 class ChatRoomInvitation {
   const ChatRoomInvitation(
@@ -66,11 +67,12 @@ class ChatRoomInvitationCard extends StatelessWidget {
             Text(value.summary),
             if (!value.expiresAt.isAfter(DateTime.now()))
               Text(roomInvitationText(context, 'expired')),
-            OutlinedButton(
-              onPressed:
+            StarBridgeActionButton(
+              controlKey: const ValueKey('chat-room-invitation-open'),
+              onActivate:
                   Actions.maybeFind<OpenDestinationIntent>(context) == null
                   ? null
-                  : () => Actions.invoke(context, intent),
+                  : (_) => Actions.invoke(context, intent),
               child: Text(strings.text('direct.viewInvite')),
             ),
           ],

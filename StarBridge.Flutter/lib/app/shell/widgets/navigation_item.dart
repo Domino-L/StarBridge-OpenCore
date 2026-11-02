@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../design_system/icons/starbridge_icon.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
+import '../../../design_system/interaction/starbridge_navigation_target.dart';
+import '../../../design_system/interaction/starbridge_tooltip.dart';
 import '../../feature_registry.dart';
 import '../../localization/app_strings.dart';
 import '../shell_layout_mode.dart';
 import 'attention_badge.dart';
+import 'attention_detail_hover.dart';
 import 'navigation_prefetch.dart';
 import '../../../design_system/components/coming_soon.dart';
 
@@ -19,6 +21,8 @@ class ShellNavigationItem extends StatelessWidget {
     required this.onKeyboardPressed,
     required this.onPrevious,
     required this.onNext,
+    this.focusNode,
+    this.sharedSelection = false,
     super.key,
   });
 
@@ -29,6 +33,8 @@ class ShellNavigationItem extends StatelessWidget {
   final VoidCallback onKeyboardPressed;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
+  final FocusNode? focusNode;
+  final bool sharedSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +52,7 @@ class ShellNavigationItem extends StatelessWidget {
       color: selected ? tokens.colors.accent : tokens.colors.textSecondary,
     );
     final count = descriptor.attentionCount;
+    final detail = descriptor.attentionDetail;
     Widget content(int value) => SizedBox(
       width: double.infinity,
       height: tokens.density.navigationItemHeight,
@@ -76,7 +83,8 @@ class ShellNavigationItem extends StatelessWidget {
                     child: Text(
                       label,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: selected
                             ? tokens.colors.accent
@@ -96,57 +104,57 @@ class ShellNavigationItem extends StatelessWidget {
               ),
       ),
     );
-    final item = Semantics(
-      button: true,
+    Widget item(int value) => StarBridgeNavigationTarget(
+      focusNode: focusNode,
+      sharedSelection: sharedSelection,
       selected: selected,
-      label: accessibleLabel,
-      child: Material(
-        color: selected
-            ? tokens.surfaces.selected.fill
-            : tokens.surfaces.navigation.fill,
-        borderRadius: tokens.shape.small,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: tokens.shape.small,
-          focusColor: tokens.colors.focusRing.withValues(alpha: 0.16),
-          child: Stack(
-            children: [
-              if (count == null)
-                content(0)
-              else
-                ValueListenableBuilder<int>(
-                  valueListenable: count,
-                  key: ValueKey('activity-${descriptor.id}'),
-                  builder: (context, value, child) => content(value),
-                ),
-              if (selected)
-                PositionedDirectional(
-                  start: 0,
-                  top: tokens.space.sm,
-                  bottom: tokens.space.sm,
-                  child: Container(
-                    width: tokens.stroke.strong + tokens.stroke.regular,
-                    decoration: BoxDecoration(
-                      color: tokens.colors.accent,
-                      borderRadius: tokens.shape.pill,
-                    ),
-                  ),
-                ),
-            ],
+      label: value > 0
+          ? '$accessibleLabel, ${detail?.describe(context) ?? value}'
+          : accessibleLabel,
+      onPressed: onPressed,
+      onKeyboardPressed: onKeyboardPressed,
+      onPrevious: onPrevious,
+      onNext: onNext,
+      selectionStripe: PositionedDirectional(
+        start: 0,
+        top: tokens.space.sm,
+        bottom: tokens.space.sm,
+        child: Container(
+          width: tokens.stroke.strong + tokens.stroke.regular,
+          decoration: BoxDecoration(
+            color: tokens.colors.accent,
+            borderRadius: tokens.shape.pill,
           ),
         ),
       ),
+      child: content(value),
     );
-    final keyboardReady = CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter): onKeyboardPressed,
-        const SingleActivator(LogicalKeyboardKey.space): onKeyboardPressed,
-        const SingleActivator(LogicalKeyboardKey.arrowUp): onPrevious,
-        const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
-      },
-      child: item,
-    );
+    // Option C: the count's breakdown beside the item. Collapsed, the card
+    // also carries the label, so it replaces the tooltip there.
+    Widget hover(int value) => detail == null
+        ? item(value)
+        : AttentionDetailHover(
+            enabled: value > 0 || mode == ShellLayoutMode.iconOnly,
+            detail: (context) => ListenableBuilder(
+              listenable: detail.listenable,
+              builder: (context, _) => detail.build(context, onPressed),
+            ),
+            child: item(value),
+          );
+    final keyboardReady = count == null
+        ? hover(0)
+        : ValueListenableBuilder<int>(
+            valueListenable: count,
+            key: ValueKey('activity-${descriptor.id}'),
+            builder: (context, value, _) => hover(value),
+          );
     if (mode != ShellLayoutMode.iconOnly) {
+      return NavigationPrefetch(
+        prepare: descriptor.prefetch,
+        child: keyboardReady,
+      );
+    }
+    if (detail != null) {
       return NavigationPrefetch(
         prepare: descriptor.prefetch,
         child: keyboardReady,
@@ -154,7 +162,11 @@ class ShellNavigationItem extends StatelessWidget {
     }
     return NavigationPrefetch(
       prepare: descriptor.prefetch,
-      child: Tooltip(message: accessibleLabel, child: keyboardReady),
+      child: StarBridgeTooltip(
+        message: accessibleLabel,
+        excludeFromSemantics: true,
+        child: keyboardReady,
+      ),
     );
   }
 }

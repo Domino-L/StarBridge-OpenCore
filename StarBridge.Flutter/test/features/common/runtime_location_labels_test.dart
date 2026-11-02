@@ -7,7 +7,7 @@ import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/party_rooms/party_rooms_module.dart';
 import 'package:starbridge_flutter/features/party_rooms/party_rooms_page.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_row.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_port.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_view.dart';
 
@@ -112,7 +112,8 @@ void main() {
         await tester.pumpWidget(host(port, locale));
         await settleCommunityImages(tester);
         String location() => tester
-            .widget<CommunityMemberBanner>(find.byType(CommunityMemberBanner))
+            .widget<OrganizationMemberRow>(find.byType(OrganizationMemberRow))
+            .entry
             .location;
         Future<void> reload() async {
           await tester
@@ -163,7 +164,7 @@ void main() {
         await reload();
         expect(
           location(),
-          contains(locale.languageCode == 'zh' ? '低可信度' : 'Low-confidence'),
+          locale.languageCode == 'zh' ? '低可信度位置' : 'Low-confidence location',
         );
         row['location'] = 'Arrival Port';
         row['locationLabels'] = row['arrivalTargetLabels'];

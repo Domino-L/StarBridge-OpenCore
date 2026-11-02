@@ -17,7 +17,7 @@ namespace StarBridge.HostRuntime.Hangar;
 /// operation IDs and 2048-character owner dimensions. Checksums detect corruption, not a
 /// malicious local writer. The caller owns authentication and scan completeness/confirmation.
 /// </summary>
-public sealed class LocalHangarStore
+public sealed partial class LocalHangarStore
 {
     private readonly string _directory;
     private const int MaximumBytes = 16 * 1024 * 1024;
@@ -30,7 +30,7 @@ public sealed class LocalHangarStore
 
     public LocalHangarStore(string root) => _directory = Path.Combine(Path.GetFullPath(root), "hangar-local-v1");
 
-    public LocalHangarSnapshot Read(BridgeAccountContext owner) => ReadFile(owner)?.Snapshot ?? new(0, null, null, Array.Empty<LocalHangarShip>());
+    private LocalHangarSnapshot ReadCore(BridgeAccountContext owner) => ReadFile(owner)?.Snapshot ?? new(0, null, null, Array.Empty<LocalHangarShip>());
 
     private SavedFile? ReadFile(BridgeAccountContext owner)
     {
@@ -52,14 +52,21 @@ public sealed class LocalHangarStore
             ValidateFile(envelope.Data);
             return envelope.Data;
         }
+        catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+        {
+            // Windows sharing/lock contention alone is safe to retry. Invalid
+            // data, redirected paths, access denial and other IO stay hard.
+            throw new LocalHangarStoreException("hangar.storage_busy", "The local hangar is temporarily in use.", error);
+        }
         catch (Exception error) when (IsStorageError(error))
         {
             throw new LocalHangarStoreException("hangar.storage_read_failed", "The local hangar could not be read safely.", error);
         }
     }
 
-    public LocalHangarSnapshot Save(BridgeAccountContext owner, long expectedRevision, string operationId,
-        IReadOnlyList<CollectedHangarShip> observations, bool partial, bool confirmEmpty, Func<bool>? canCommit = null)
+    private LocalHangarSnapshot SaveCore(BridgeAccountContext owner, long expectedRevision, string operationId,
+        IReadOnlyList<CollectedHangarShip> observations, bool partial, bool confirmEmpty, Func<bool>? canCommit = null,
+        IReadOnlyList<string>? removedShipIds = null)
     {
         _ = OwnerHash(owner);
         if (expectedRevision < 0 || expectedRevision == long.MaxValue || !ValidText(operationId, 256) || observations is null ||
@@ -67,12 +74,20 @@ public sealed class LocalHangarStore
                 !ValidText(s.Title) || !ValidOptionalText(s.Liner) || !ValidOptionalText(s.AcquiredText)))
             throw new LocalHangarStoreException("hangar.invalid_request", "Invalid or oversized local hangar save request.");
         observations = observations.ToArray();
-        var requestHash = Hash(JsonSerializer.SerializeToUtf8Bytes(new { partial, confirmEmpty,
+        var removals = (removedShipIds ?? []).ToArray();
+        if (removals.Length > MaximumShips || removals.Any(id => !Guid.TryParseExact(id, "N", out var guid) || id != guid.ToString("N")) ||
+            removals.Distinct(StringComparer.Ordinal).Count() != removals.Length)
+            throw new LocalHangarStoreException("hangar.invalid_removal_selection", "Invalid local instance selection.");
+        var inventoryHash = Hash(JsonSerializer.SerializeToUtf8Bytes(new { partial, confirmEmpty,
             observations = observations.Select(s => JsonSerializer.Serialize(new { s.PledgeKey, s.Title, s.Liner, s.AcquiredText }))
                 .OrderBy(s => s, StringComparer.Ordinal).ToArray() }));
+        // Preserve historical fingerprints when no choice was needed. Choices
+        // are a set, independent of UI order, and are part of operation identity.
+        var requestHash = removals.Length == 0 ? inventoryHash : Hash(JsonSerializer.SerializeToUtf8Bytes(new {
+            inventoryHash, removedShipIds = removals.OrderBy(id => id, StringComparer.Ordinal).ToArray() }));
         // Preflight errors must not even create a new storage directory. Repeat under
         // the OS file lock: another process may have committed since this read.
-        _ = Prepare(ReadFile(owner), expectedRevision, operationId, observations, partial, confirmEmpty, requestHash);
+        _ = Prepare(ReadFile(owner), expectedRevision, operationId, observations, partial, confirmEmpty, requestHash, removals);
         try
         {
             CheckDirectory();
@@ -82,7 +97,7 @@ public sealed class LocalHangarStore
             // Keep this file permanently: unlinking a lock can create two lock owners.
             using var writeLock = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var current = ReadFile(owner);
-            var next = Prepare(current, expectedRevision, operationId, observations, partial, confirmEmpty, requestHash);
+            var next = Prepare(current, expectedRevision, operationId, observations, partial, confirmEmpty, requestHash, removals);
             if (ReferenceEquals(next, current))
             {
                 CheckCanCommit(canCommit);
@@ -100,7 +115,7 @@ public sealed class LocalHangarStore
     }
 
     private static SavedFile Prepare(SavedFile? file, long expectedRevision, string operationId,
-        IReadOnlyList<CollectedHangarShip> observations, bool partial, bool confirmEmpty, string requestHash)
+        IReadOnlyList<CollectedHangarShip> observations, bool partial, bool confirmEmpty, string requestHash, IReadOnlyList<string> removals)
     {
         var current = file?.Snapshot ?? new(0, null, null, Array.Empty<LocalHangarShip>());
         if (current.OperationId == operationId)
@@ -114,7 +129,16 @@ public sealed class LocalHangarStore
             throw new LocalHangarStoreException("hangar.empty_confirmation_required", "A complete empty hangar requires explicit confirmation.");
         var now = DateTimeOffset.UtcNow;
         if (current.SavedAt > now) now = current.SavedAt.Value;
-        var known = current.Ships.GroupBy(s => MatchKey(s.PledgeKey, s.Title, s.Liner))
+        var groups = RemovalGroups(current, observations, partial);
+        var selected = removals.ToHashSet(StringComparer.Ordinal);
+        var candidates = groups.SelectMany(g => g.ShipIds).ToHashSet(StringComparer.Ordinal);
+        if (!selected.IsSubsetOf(candidates))
+            throw new LocalHangarStoreException("hangar.invalid_removal_selection", "Selection is not part of a reduced duplicate group.");
+        if (groups.Any(g => g.ShipIds.Count(selected.Contains) != g.RequiredCount))
+            throw new LocalHangarStoreException("hangar.removal_selection_required", "Choose exactly which local instances left each reduced group.");
+        var duplicateGroups = current.Ships.GroupBy(s => MatchKey(s.PledgeKey, s.Title, s.Liner))
+            .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
+        var known = current.Ships.Where(s => !selected.Contains(s.Id)).GroupBy(s => MatchKey(s.PledgeKey, s.Title, s.Liner))
             .ToDictionary(g => g.Key, g => new Queue<LocalHangarShip>(g));
         // An exact, unique pledge instance can return. A same-model purchase
         // under a different pledge remains a different ship.
@@ -123,16 +147,8 @@ public sealed class LocalHangarStore
             if (group.Count() == 1 && !known.ContainsKey(group.Key) &&
                 observationCounts.GetValueOrDefault(group.Key) == 1)
                 known.Add(group.Key, new Queue<LocalHangarShip>(group));
-        foreach (var observed in observations.GroupBy(s => MatchKey(s.PledgeKey, s.Title, s.Liner)))
-        {
-            if (known.TryGetValue(observed.Key, out var previous) && previous.Count != observed.Count())
-                throw new LocalHangarStoreException("hangar.ambiguous_instances", "Changed multiplicity cannot identify individual pledge children.");
-            if (previous is { Count: > 1 } && previous.Select(s => (s.CustomImagePath, s.CustomImageCrop)).Distinct().Count() != 1)
-                throw new LocalHangarStoreException("hangar.ambiguous_instances", "Distinct custom fields cannot be assigned to unverified pledge children.");
-        }
-        var duplicateGroups = known.Where(g => g.Value.Count > 1).Select(g => g.Key).ToHashSet();
-        // Equal duplicate groups provide multiset evidence, NOT verified child IDs.
-        // Preserve the entire existing group without mapping per-child observations.
+        // Counts establish a local multiset, NOT verified RSI child identities.
+        // Keep per-instance metadata attached to its ID; add only excess rows.
         // ItemIndex is intentionally absent from matching and request fingerprints.
         var ships = observations.Select(ship => known.TryGetValue(MatchKey(ship.PledgeKey, ship.Title, ship.Liner), out var group) && group.Count > 0
             ? duplicateGroups.Contains(MatchKey(ship.PledgeKey, ship.Title, ship.Liner)) ? group.Dequeue()
@@ -149,7 +165,7 @@ public sealed class LocalHangarStore
         var former = (current.FormerShips ?? []).Where(s => !retained.Contains(s.Id))
             .Concat(current.Ships.Where(s => !retained.Contains(s.Id)).Select(s => s with { RemovedAt = now })).ToArray();
         var saved = new LocalHangarSnapshot(current.Revision + 1, now, operationId, Array.AsReadOnly(ships), partial,
-            former.Length == 0 ? null : Array.AsReadOnly(former));
+            former.Length == 0 ? null : Array.AsReadOnly(former), InventorySavedAt: now);
         var data = new SavedFile(saved, expectedRevision, requestHash);
         if (ships.Length > MaximumShips || former.Length > MaximumShips)
             throw new LocalHangarStoreException("hangar.storage_write_failed", "The merged hangar exceeds the storage limit.");
@@ -208,6 +224,8 @@ public sealed class LocalHangarStore
             snapshot.Revision != file.ExpectedRevision + 1 || !IsHash(file.RequestHash) ||
             !ValidText(snapshot.OperationId, 256) || snapshot.SavedAt is null ||
             snapshot.SavedAt < DateTimeOffset.UnixEpoch || snapshot.SavedAt.Value.Offset != TimeSpan.Zero ||
+            snapshot.InventorySavedAt is { } inventoryTime && (inventoryTime < DateTimeOffset.UnixEpoch ||
+                inventoryTime > snapshot.SavedAt || inventoryTime.Offset != TimeSpan.Zero) ||
             snapshot.Ships is null || snapshot.Ships.Count > MaximumShips ||
             snapshot.FormerShips?.Count > MaximumShips || snapshot.Partial && snapshot.Ships.Count == 0)
             throw new InvalidDataException("Invalid saved snapshot.");
@@ -217,6 +235,7 @@ public sealed class LocalHangarStore
             if (ship is null || !Guid.TryParseExact(ship.Id, "N", out var id) || ship.Id != id.ToString("N") ||
                 !ids.Add(ship.Id) || !ValidText(ship.PledgeKey) || !ValidText(ship.Title) ||
                 !ValidOptionalText(ship.Liner) || !ValidOptionalText(ship.AcquiredText) ||
+                !ValidPersonalData(ship.Nickname, ship.Notes) ||
                 ship.CustomImagePath is not null && !ValidText(ship.CustomImagePath, 2048) || !ValidCrop(ship.CustomImageCrop) ||
                 ship.RemovedAt is { } removed && (removed < ship.AddedAt || removed > snapshot.SavedAt || removed.Offset != TimeSpan.Zero) ||
                 ship.AddedAt < DateTimeOffset.UnixEpoch || ship.AddedAt > snapshot.SavedAt || ship.AddedAt.Offset != TimeSpan.Zero)

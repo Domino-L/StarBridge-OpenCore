@@ -90,9 +90,10 @@ void main() {
         () => parse({...data, 'currentInvite': row}),
         throwsFormatException,
       );
+      // The Bridge drops a null currentInvite, so absent means no own invite.
       expect(
-        () => parse({...data, 'currentInviteAvailable': true}),
-        throwsFormatException,
+        parse({...data, 'currentInviteAvailable': true}).currentInvite,
+        isNull,
       );
       expect(
         () => parse({...data, 'currentInviteAvailable': 'true'}),

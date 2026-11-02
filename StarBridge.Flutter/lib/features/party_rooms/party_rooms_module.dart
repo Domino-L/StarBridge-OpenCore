@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../shared/diagnostics/loading_read_scope.dart';
+
 import 'room_commands.dart';
 import 'room_invitations.dart';
 import 'room_chat_module.dart';
@@ -196,6 +198,8 @@ final class PartyRoomsModule extends ChangeNotifier {
     _subscription = _port.invalidations.listen((_) {
       _epoch++;
       contextRevision++;
+      activityCount.value = 0;
+      pendingCount.value = 0;
       chat?.setRoom(null);
       directory = null;
       selectedRoomId = null;
@@ -243,12 +247,16 @@ final class PartyRoomsModule extends ChangeNotifier {
   int get invitationCount => state == RoomReadState.ready
       ? directory?.receivedInvitations.length ?? 0
       : 0;
-  int get applicationCount =>
-      state == RoomReadState.ready &&
-          selectedRoom?.viewerIsHost == true &&
-          directory?.currentRoomId == selectedRoom?.id
-      ? selectedRoom?.pendingApplications.length ?? 0
-      : 0;
+  int get applicationCount {
+    if (state != RoomReadState.ready) return 0;
+    final current = directory?.rooms
+        .where((room) => room.id == directory?.currentRoomId)
+        .firstOrNull;
+    return current?.viewerIsHost == true
+        ? current!.pendingApplications.length
+        : 0;
+  }
+
   bool _activityQueued = false;
   void _updateActivity() {
     if (_disposed || _activityQueued) return;
@@ -256,6 +264,15 @@ final class PartyRoomsModule extends ChangeNotifier {
     scheduleMicrotask(() {
       _activityQueued = false;
       if (_disposed) return;
+      // Unknown/loading is not an authoritative empty result. Keep attention
+      // through transient refresh failures, but drop it on access loss.
+      if (state != RoomReadState.ready) {
+        if (const ['identityUnavailable', 'forbidden'].contains(failure)) {
+          pendingCount.value = 0;
+          activityCount.value = 0;
+        }
+        return;
+      }
       pendingCount.value = invitationCount + applicationCount;
       activityCount.value =
           pendingCount.value +
@@ -267,7 +284,7 @@ final class PartyRoomsModule extends ChangeNotifier {
   void startSession() {
     if (_disposed || _sessionStarted) return;
     _sessionStarted = true;
-    if (!busy) unawaited(refresh());
+    if (!busy) unawaited(backgroundLoadingRead(refresh));
   }
 
   void stopSession() {
@@ -306,7 +323,7 @@ final class PartyRoomsModule extends ChangeNotifier {
       if (busy) {
         _scheduleRefresh();
       } else {
-        unawaited(refresh());
+        unawaited(backgroundLoadingRead(refresh));
       }
     });
   }

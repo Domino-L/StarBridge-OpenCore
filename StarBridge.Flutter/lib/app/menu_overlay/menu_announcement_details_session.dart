@@ -168,7 +168,9 @@ final class MenuAnnouncementDetailsSession {
             ...row,
             if (buttons is List)
               'buttons': buttons
-                  .where((button) => button is! Map || button['label'] != '详情')
+                  .where(
+                    (button) => button is! Map || button['role'] != 'details',
+                  )
                   .toList(),
           });
           nextPresentation.add(stripped);

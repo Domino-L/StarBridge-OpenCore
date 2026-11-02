@@ -5,6 +5,10 @@
 #define IDI_APP_ICON                    101
 #define IDI_APP_ICON_DARK_SURFACE       102
 #define IDI_APP_ICON_LIGHT_SURFACE      103
+#define IDI_APP_ICON_XMAS_DARK_SURFACE  104
+#define IDI_APP_ICON_XMAS_LIGHT_SURFACE 105
+#define IDI_APP_ICON_HALLOWEEN_DARK_SURFACE  106
+#define IDI_APP_ICON_HALLOWEEN_LIGHT_SURFACE 107
 
 // Next default values for new objects
 //

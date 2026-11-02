@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 /// Saved binding, not the editor draft. This is a hint, not another editor.
@@ -33,8 +34,9 @@ class OverlayShortcutSummary extends StatelessWidget {
       'desktopOnly',
     }.contains(status);
     final description = strings.text('overlay.runtime.hotkey.$status');
-    return Tooltip(
+    return StarBridgeTooltip(
       message: description,
+      consumeEscape: false,
       child: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 6,

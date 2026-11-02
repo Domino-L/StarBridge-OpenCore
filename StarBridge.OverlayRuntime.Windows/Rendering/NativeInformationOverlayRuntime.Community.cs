@@ -8,7 +8,8 @@ public sealed partial class NativeInformationOverlayRuntime
     internal static OverlayModulePresentation ProjectModules(InformationOverlayModuleFrame frame,
         string language, DateTimeOffset now,
         StarBridge.HostRuntime.Presence.GameLogSessionSnapshot? localSession = null,
-        StarBridge.Core.Presence.PlayerPresenceKind? localPresence = null)
+        StarBridge.Core.Presence.PlayerPresenceKind? localPresence = null,
+        InformationOverlayLocalObservation? localDisplay = null)
     {
         var contents = frame.ReadModules(now);
         var projected = new Dictionary<(OverlayResolvedSource, InformationOverlaySourceSnapshot?),
@@ -20,7 +21,7 @@ public sealed partial class NativeInformationOverlayRuntime
             if (!projected.TryGetValue(key, out var scene))
             {
                 var preference = content.Source.Mode == OverlaySourceMode.Room
-                    ? OverlayScenePreference.PartyRoom : content.Source.Mode == OverlaySourceMode.Community
+                    ? OverlayScenePreference.PartyRoom : content.Source.Mode is OverlaySourceMode.Community or OverlaySourceMode.Fleet
                     ? OverlayScenePreference.Auto : OverlayScenePreference.Fleet;
                 // v2 identities come from Host authority, not WPF's historical
                 // matching-handle fallback. In particular events cannot mistake
@@ -29,7 +30,9 @@ public sealed partial class NativeInformationOverlayRuntime
                 if (room is not null) room = room with
                 { Members = room.Members.Select(member => member with { IsSelf = member.IsSelf == true }).ToArray() };
                 scene = ProjectSource(room, content.Snapshot?.Community, preference,
-                    language, content.Source.Mode == OverlaySourceMode.Community, localSession, localPresence, explicitSelf: true);
+                    language, content.Source.Mode is OverlaySourceMode.Community or OverlaySourceMode.Fleet, localSession, localPresence, explicitSelf: true);
+                if (localDisplay is not null && content.Source.Mode == OverlaySourceMode.Local && content.Source.Available)
+                    scene = ProjectLocalOwned(localDisplay, language);
                 // In particular, a missing explicit module remains empty: it must
                 // not fall through to a room, another organization or local self.
                 if (!content.Source.Available)
@@ -38,22 +41,23 @@ public sealed partial class NativeInformationOverlayRuntime
             }
             var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
             var traditional = language is "zh-Hant" or "zh-TW";
-            var label = content.ShowSourceLabel ? content.Source.Mode switch
-            {
-                OverlaySourceMode.Room => zh ? "当前房间" : "Current room",
-                OverlaySourceMode.Community => content.Snapshot?.Community?.Name ?? (zh ? "组织" : "Organization"),
-                _ => zh ? "本地模式" : "Local"
-            } : null;
+            // Every visible module names its source, using only Host's per-read name.
+            var label = content.Source.UnavailableReason == "module_hidden" ? null
+                : OverlayModuleSourceCopy.Label(content.Source.Mode, content.Display.Name, language);
             var identity = content.Source.Available
                 ? $"{frame.OwnerKey}:{frame.Generation}:{content.Source.ResourceKey}:{content.Snapshot?.Room?.ContinuityId ?? content.Snapshot?.Community?.ContinuityId}"
                 : null;
             var chatLabel = content.Source.Mode == OverlaySourceMode.Room
                 ? $"{(traditional ? "房間" : zh ? "房间" : "Room")} · {content.Snapshot?.Room?.Title}"
                 : $"{(traditional ? "組織" : zh ? "组织" : "Organization")} · {content.Snapshot?.Community?.Name}";
-            return new(module is OverlaySourceModule.Notice or OverlaySourceModule.Chat ? scene.Scene with { Players = [] } : scene.Scene,
+            // The chat title stays semantic ("organization comms"); its trailing label names the source.
+            return new(module == OverlaySourceModule.Chat
+                    ? scene.Scene with { Players = [], Context = scene.Scene.Context with { ChatChannelTitle = null } }
+                    : module == OverlaySourceModule.Notice ? scene.Scene with { Players = [] } : scene.Scene,
                 module == OverlaySourceModule.Notice ? scene.Command : BuildCommandState(language) with { NoticeTitle = "", NoticeText = "" },
                 module == OverlaySourceModule.Chat ? scene.Chat.Select(message => message with { SourceKey = identity, SourceLabel = chatLabel }).ToArray() : [], label, content.Source.Available, identity)
-            { ResourceKey = content.Source.ResourceKey, EmptyMessage = OverlayModuleEmptyStates.Message(content.Source, language),
+            { ResourceKey = content.Source.ResourceKey, OwnSource = content.Display.OwnSource,
+                EmptyMessage = OverlayModuleSourceCopy.Unavailable(module, content.Source, content.Display, language),
                 ChatSourceKeys = module == OverlaySourceModule.Chat && identity is not null ? [identity] : [] };
         }
         var chat = Project(OverlaySourceModule.Chat);
@@ -65,15 +69,20 @@ public sealed partial class NativeInformationOverlayRuntime
             const string channel = "multi-chat";
             chat = chat with
             {
-                Scene = new([], parts.Any(p => p.Available), new(OverlayScenePreference.Auto, OverlaySceneKind.Community,
-                    zh ? "聊天" : "CHAT", false, ChatChannelId: channel, ChatChannelTitle: zh ? "聊天" : "CHAT")),
+                Scene = localDisplay is not null
+                    ? new([], false, OverlaySceneContext.Local(OverlayScenePreference.Fleet))
+                    : new([], parts.Any(p => p.Available), new(OverlayScenePreference.Auto, OverlaySceneKind.Community,
+                        zh ? "聊天" : "CHAT", false, ChatChannelId: channel, ChatChannelTitle: zh ? "聊天" : "CHAT")),
                 Chat = parts.SelectMany(p => p.Chat).Select(message => message with { ChannelId = channel }).ToArray(),
                 // Stable aggregate identity; individual membership incarnations
                 // govern queued messages and watermarks, not the whole module.
                 Identity = $"{frame.OwnerKey}:{frame.Generation}:multi-chat",
-                Available = parts.Any(p => p.Available), SourceLabel = null, ResourceKey = null,
+                Available = parts.Any(p => p.Available), ResourceKey = null, OwnSource = true,
+                SourceLabel = parts.Any(p => p.SourceLabel is not null)
+                    ? OverlayModuleSourceCopy.JoinLabels(parts.Select(p => p.SourceLabel).OfType<string>(), language) : null,
                 ChatSourceKeys = parts.SelectMany(p => p.ChatSourceKeys ?? []).Distinct().Order(StringComparer.Ordinal).ToArray(),
-                EmptyMessage = parts.Any(p => p.Available) ? null : language is "zh-Hant" or "zh-TW" ? "所選聊天來源暫不可用" : zh ? "所选聊天来源暂不可用" : "Selected chat sources unavailable"
+                EmptyMessage = parts.Any(p => p.Available) || chatContents.All(c => c.Source.UnavailableReason == "module_hidden")
+                    ? null : OverlayModuleSourceCopy.MultiChatUnavailable(language)
             };
         }
         return new(Project(OverlaySourceModule.Notice), Project(OverlaySourceModule.Overview),
@@ -90,7 +99,8 @@ public sealed partial class NativeInformationOverlayRuntime
         };
     }
 
-    private string? SafeReadSourceMode() { try { return _sceneModeProvider(); } catch { return "unavailable"; } }
+    private string? SafeReadSourceMode()
+    { if (ReadLocalSource() is not null) return "local"; try { return _sceneModeProvider(); } catch { return "unavailable"; } }
     private static OverlayScenePreference SourcePreference(string? mode, OverlayScenePreference legacy) => mode switch
     {
         null => legacy, "auto" or "community" => OverlayScenePreference.Auto,
@@ -105,6 +115,7 @@ public sealed partial class NativeInformationOverlayRuntime
     };
     private InformationOverlayCommunityContent? SafeReadCommunity()
     {
+        if (ReadLocalSource() is not null) return null;
         try { return _communityProvider(); }
         catch { return null; }
     }
@@ -138,7 +149,7 @@ public sealed partial class NativeInformationOverlayRuntime
             OverlaySceneResolver.CreateRoomPlayer(new(member.Callsign, member.GameId)
             {
                 PresenceText = member.Presence, ShipText = member.Ship,
-                LocationText = member.Location, ShardText = member.ServerRegion,
+                LocationText = member.Location, ShardText = member.ServerShard ?? member.ServerRegion,
                 LocationHiddenReason = member.LocationHiddenReason
             }, null, null) with
             {
@@ -159,7 +170,14 @@ public sealed partial class NativeInformationOverlayRuntime
         var traditional = language is "zh-Hant" or "zh-TW";
         var scene = new OverlaySceneSnapshot(players, true,
             new(preference, OverlaySceneKind.Community, community.Name, false,
-                ChatChannelId: "organization:" + community.Code, ChatChannelTitle: community.Name));
+                ChatChannelId: "organization:" + community.Code, ChatChannelTitle: community.Name)
+            {
+                SharedFieldsOnly = community.SharedFieldsOnly,
+                LocalOwnPlace = community.SharedFieldsOnly && localPresence == StarBridge.Core.Presence.PlayerPresenceKind.InGame &&
+                    localSession?.Location.State is "confirmed" or "likely" or "possible"
+                    ? (zh ? localSession.Location.ChineseName : localSession.Location.EnglishName) ?? localSession.Location.EnglishName
+                    : null
+            });
         var command = BuildCommandState(language) with
         {
             NoticeTitle = community.AnnouncementTitle,
@@ -168,7 +186,7 @@ public sealed partial class NativeInformationOverlayRuntime
         var chat = community.Messages.Select(message => new OverlayChatMessage(message.Sequence,
             "organization:" + community.Code, message.SenderCallsign, message.SenderGameId,
             OverlayMessageText(message, language), message.CreatedAt, message.IsSystem,
-            message.IsSelf == true, "")).ToArray();
-        return (ProjectLocalSelf(scene, localSession, localPresence, language), command, chat);
+            message.IsSelf == true, "") { AuthorValidUntil = message.AuthorValidUntil }).ToArray();
+        return (community.SharedFieldsOnly ? scene : ProjectLocalSelf(scene, localSession, localPresence, language), command, chat);
     }
 }

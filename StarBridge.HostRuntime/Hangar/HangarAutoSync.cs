@@ -12,7 +12,8 @@ internal sealed class HangarAutoSync : IDisposable
     private readonly Func<BridgeAccountContext, long, long, CancellationToken, Task<HangarPublicationOutcome>> _publish;
     private readonly Action<long> _changed;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
-    private CancellationTokenSource? _pending;
+    private readonly Lifecycle.AsyncWorkRetirement _retirement = new();
+    private Lifecycle.AsyncWorkRetirement.Lease? _pending;
     private Work? _last;
     private Task _running = Task.CompletedTask;
     private bool _disposed;
@@ -31,14 +32,14 @@ internal sealed class HangarAutoSync : IDisposable
             if (work == _last) return _running;
             _pending?.Cancel();
             _last = work;
-            var cancellation = _pending = new();
+            var cancellation = _pending = _retirement.Enter(default)!;
             // Never put even the initial synchronous part of a remote operation
             // on the local save response path.
             return _running = Task.Run(() => Run(work, cancellation));
         }
     }
 
-    private async Task Run(Work work, CancellationTokenSource cancellation)
+    private async Task Run(Work work, Lifecycle.AsyncWorkRetirement.Lease cancellation)
     {
         var token = cancellation.Token;
         try
@@ -79,5 +80,10 @@ internal sealed class HangarAutoSync : IDisposable
             _pending = null;
         }
     }
-    public void Dispose() { lock (_gate) { _disposed = true; Invalidate(); } }
+    internal Task RetireAsync() { Dispose(); return _retirement.Close(); }
+    public void Dispose()
+    {
+        lock (_gate) { _disposed = true; Invalidate(); }
+        _ = _retirement.Close();
+    }
 }

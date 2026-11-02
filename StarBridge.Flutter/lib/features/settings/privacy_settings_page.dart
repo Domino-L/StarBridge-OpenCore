@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import 'help_support_action.dart';
+import 'help_support_waiting.dart';
 
 import 'dart:async';
 
@@ -50,6 +59,12 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
   final drafts = PrivacyPageDrafts();
   StreamSubscription? _accountEvents;
   bool _saving = false;
+  InteractionSource _waitSource = InteractionSource.programmatic;
+  int _waitPhase = 0;
+  InteractionSource _selectionSource = InteractionSource.programmatic;
+  bool _wasPublishing = false;
+  InteractionSource _publicationSource = InteractionSource.programmatic;
+  int _publicationPhase = 0;
   bool get _dirty => drafts.dirty || widget.localPrivacy.dirty;
   bool get _canSave => _dirty || widget.localPrivacy.canSave;
 
@@ -69,6 +84,11 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
 
   void _changed() {
     if (!mounted) return;
+    if (widget.localPrivacy.publicationBusy && !_wasPublishing) {
+      _publicationSource = captureStarBridgeActivationSource()();
+      _publicationPhase++;
+    }
+    _wasPublishing = widget.localPrivacy.publicationBusy;
     if (SchedulerBinding.instance.schedulerPhase ==
         SchedulerPhase.persistentCallbacks) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,7 +106,11 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
 
   Future<bool> _save() async {
     if (_saving) return false;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _waitSource = captureStarBridgeActivationSource()();
+      _waitPhase++;
+    });
     final epoch = drafts.epoch;
     final localDraft = widget.localPrivacy.draft;
     try {
@@ -102,49 +126,69 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     }
   }
 
-  Future<bool> _confirmLeave() async {
-    if (_saving ||
-        widget.localPrivacy.saving ||
-        widget.localPrivacy.publicationBusy) {
-      return false;
-    }
-    if (!_dirty) return true;
-    final epoch = drafts.epoch;
-    final strings = AppStrings.of(context);
-    String t(String key) => strings.text('privacy.local.$key');
-    final result = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        key: const Key('privacy-leave-dialog'),
-        title: Text(t('leaveTitle')),
-        content: Text(strings.text('settings.privacy.page.leave')),
-        actions: [
-          TextButton(
-            key: const Key('privacy-leave-cancel'),
-            onPressed: () => Navigator.pop(context, 'cancel'),
-            child: Text(t('stay')),
+  Future<bool> _confirmLeave() {
+    final completeActivation = captureStarBridgeActivationCompletion();
+    return runStarBridgeActivation<bool>(
+      currentStarBridgeActivationSource,
+      () async {
+        if (_saving ||
+            widget.localPrivacy.saving ||
+            widget.localPrivacy.publicationBusy) {
+          return false;
+        }
+        if (!_dirty) return true;
+        final epoch = drafts.epoch;
+        final strings = AppStrings.of(context);
+        String t(String key) => strings.text('privacy.local.$key');
+        final result = await showStarBridgeDialog<String>(
+          context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            key: const Key('privacy-leave-dialog'),
+            title: Text(t('leaveTitle')),
+            content: Text(strings.text('settings.privacy.page.leave')),
+            actions: [
+              HelpSupportAction(
+                controlKey: const Key('privacy-leave-cancel'),
+                onActivate: (source) => dismissStarBridgeDialog<String>(
+                  context,
+                  source: source,
+                  result: 'cancel',
+                ),
+                child: Text(t('stay')),
+              ),
+              HelpSupportAction(
+                controlKey: const Key('privacy-leave-discard'),
+                onActivate: (source) => dismissStarBridgeDialog<String>(
+                  context,
+                  source: source,
+                  result: 'discard',
+                ),
+                child: Text(t('discard')),
+              ),
+              HelpSupportAction(
+                controlKey: const Key('privacy-leave-save'),
+                kind: StarBridgeActionKind.primary,
+                onActivate: (source) => dismissStarBridgeDialog<String>(
+                  context,
+                  source: source,
+                  result: 'save',
+                ),
+                child: Text(strings.text('settings.privacy.page.save')),
+              ),
+            ],
           ),
-          TextButton(
-            key: const Key('privacy-leave-discard'),
-            onPressed: () => Navigator.pop(context, 'discard'),
-            child: Text(t('discard')),
-          ),
-          FilledButton(
-            key: const Key('privacy-leave-save'),
-            onPressed: () => Navigator.pop(context, 'save'),
-            child: Text(strings.text('settings.privacy.page.save')),
-          ),
-        ],
-      ),
+        );
+        completeActivation(currentStarBridgeActivationSource);
+        if (!mounted || epoch != drafts.epoch) return false;
+        if (result == 'save') return _save();
+        if (result == 'discard') {
+          _discard();
+          return true;
+        }
+        return false;
+      },
     );
-    if (!mounted || epoch != drafts.epoch) return false;
-    if (result == 'save') return _save();
-    if (result == 'discard') {
-      _discard();
-      return true;
-    }
-    return false;
   }
 
   @override
@@ -163,7 +207,10 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     if (next == selected) return;
     if (_saving) return;
     if (!mounted) return;
-    setState(() => selected = next);
+    setState(() {
+      selected = next;
+      _selectionSource = currentStarBridgeActivationSource;
+    });
   }
 
   @override
@@ -196,42 +243,112 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                 alignment: AlignmentDirectional.centerStart,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 720),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _PrivacySectionButton(
-                          section: PrivacySettingsSection.scopes,
-                          selected: selected == PrivacySettingsSection.scopes,
-                          titleKey: 'settings.privacy.sections.scopes',
-                          descriptionKey:
-                              'settings.privacy.sections.scopesDescription',
-                          onPressed: _select,
-                        ),
-                      ),
-                      SizedBox(width: tokens.space.sm),
-                      if (widget.eventSession != null) ...[
-                        Expanded(
-                          child: _PrivacySectionButton(
-                            section: PrivacySettingsSection.events,
-                            selected: selected == PrivacySettingsSection.events,
-                            titleKey: 'settings.privacy.events.title',
-                            descriptionKey: 'settings.privacy.events.contexts',
-                            onPressed: _select,
+                  child: StarBridgeInteractionRegion(
+                    child: Builder(
+                      builder: (context) {
+                        final sections = [
+                          PrivacySettingsSection.scopes,
+                          if (widget.eventSession != null)
+                            PrivacySettingsSection.events,
+                          PrivacySettingsSection.account,
+                        ];
+                        return SuiteSelectionTrack(
+                          style: TrackStyle.tabs,
+                          items: [
+                            for (final section in sections)
+                              TrackItem(
+                                id: section.name,
+                                label: strings.text(switch (section) {
+                                  PrivacySettingsSection.scopes =>
+                                    'settings.privacy.sections.scopes',
+                                  PrivacySettingsSection.account =>
+                                    'settings.privacy.sections.account',
+                                  PrivacySettingsSection.events =>
+                                    'settings.privacy.events.title',
+                                }),
+                              ),
+                          ],
+                          selected: sections.indexOf(selected),
+                          changeSource: _selectionSource,
+                          onChanged: (index, source) =>
+                              runStarBridgeSynchronousActivation(
+                                source,
+                                () => _select(sections[index]),
+                              ),
+                          layoutBuilder: (context, layout) => Row(
+                            children: [
+                              Expanded(
+                                child: layout.anchor(
+                                  PrivacySettingsSection.scopes.name,
+                                  _PrivacySectionButton(
+                                    section: PrivacySettingsSection.scopes,
+                                    selected:
+                                        selected ==
+                                        PrivacySettingsSection.scopes,
+                                    titleKey:
+                                        'settings.privacy.sections.scopes',
+                                    descriptionKey: 'settings.privacy.sections.scopesDescription',
+                                    focusNode: layout.focusNode(
+                                      PrivacySettingsSection.scopes.name,
+                                    ),
+                                    onPressed: (section) => layout.activate(
+                                      section.name,
+                                      currentStarBridgeActivationSource,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: tokens.space.sm),
+                              if (widget.eventSession != null) ...[
+                                Expanded(
+                                  child: layout.anchor(
+                                    PrivacySettingsSection.events.name,
+                                    _PrivacySectionButton(
+                                      section: PrivacySettingsSection.events,
+                                      selected:
+                                          selected ==
+                                          PrivacySettingsSection.events,
+                                      titleKey: 'settings.privacy.events.title',
+                                      descriptionKey:
+                                          'settings.privacy.events.contexts',
+                                      focusNode: layout.focusNode(
+                                        PrivacySettingsSection.events.name,
+                                      ),
+                                      onPressed: (section) => layout.activate(
+                                        section.name,
+                                        currentStarBridgeActivationSource,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: tokens.space.sm),
+                              ],
+                              Expanded(
+                                child: layout.anchor(
+                                  PrivacySettingsSection.account.name,
+                                  _PrivacySectionButton(
+                                    section: PrivacySettingsSection.account,
+                                    selected:
+                                        selected ==
+                                        PrivacySettingsSection.account,
+                                    titleKey:
+                                        'settings.privacy.sections.account',
+                                    descriptionKey: 'settings.privacy.sections.accountDescription',
+                                    focusNode: layout.focusNode(
+                                      PrivacySettingsSection.account.name,
+                                    ),
+                                    onPressed: (section) => layout.activate(
+                                      section.name,
+                                      currentStarBridgeActivationSource,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                        SizedBox(width: tokens.space.sm),
-                      ],
-                      Expanded(
-                        child: _PrivacySectionButton(
-                          section: PrivacySettingsSection.account,
-                          selected: selected == PrivacySettingsSection.account,
-                          titleKey: 'settings.privacy.sections.account',
-                          descriptionKey:
-                              'settings.privacy.sections.accountDescription',
-                          onPressed: _select,
-                        ),
-                      ),
-                    ],
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -274,26 +391,51 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
               spacing: 12,
               runSpacing: 8,
               children: [
-                Text(
-                  strings.text(
-                    _saving
-                        ? 'privacy.local.saving'
-                        : drafts.failed
-                        ? 'settings.privacy.page.failed'
-                        : _dirty
-                        ? 'privacy.local.dirty'
-                        : 'settings.privacy.page.saved',
+                if (_saving || widget.localPrivacy.publicationBusy)
+                  SizedBox(
+                    width: 240,
+                    child: HelpSupportWaiting(
+                      key: _saving
+                          ? ValueKey(('privacy-page-saving', _waitPhase))
+                          : ValueKey((
+                              'privacy-page-publication',
+                              _publicationPhase,
+                            )),
+                      label: strings.text(
+                        _saving
+                            ? 'privacy.local.saving'
+                            : 'privacy.scope.live.publishing',
+                      ),
+                      source: _saving ? _waitSource : _publicationSource,
+                    ),
+                  )
+                else
+                  Text(
+                    strings.text(
+                      _saving
+                          ? 'privacy.local.saving'
+                          : drafts.failed
+                          ? 'settings.privacy.page.failed'
+                          : _dirty
+                          ? 'privacy.local.dirty'
+                          : 'settings.privacy.page.saved',
+                    ),
                   ),
-                ),
                 const SizedBox(width: 16),
-                TextButton(
-                  key: const Key('privacy-discard'),
-                  onPressed: _dirty && !_saving ? _discard : null,
+                HelpSupportAction(
+                  controlKey: const Key('privacy-discard'),
+                  onActivate: _dirty && !_saving ? (_) => _discard() : null,
                   child: Text(strings.text('privacy.local.discard')),
                 ),
-                FilledButton(
-                  key: const Key('privacy-save'),
-                  onPressed: _canSave && !_saving ? _save : null,
+                HelpSupportAction(
+                  controlKey: const Key('privacy-save'),
+                  kind: StarBridgeActionKind.primary,
+                  onActivate: _canSave && !_saving
+                      ? (source) =>
+                            runStarBridgeActivation<void>(source, () async {
+                              await _save();
+                            })
+                      : null,
                   child: Text(strings.text('settings.privacy.page.save')),
                 ),
               ],
@@ -312,6 +454,7 @@ class _PrivacySectionButton extends StatelessWidget {
     required this.titleKey,
     required this.descriptionKey,
     required this.onPressed,
+    required this.focusNode,
   });
 
   final PrivacySettingsSection section;
@@ -319,20 +462,24 @@ class _PrivacySectionButton extends StatelessWidget {
   final String titleKey;
   final String descriptionKey;
   final ValueChanged<PrivacySettingsSection> onPressed;
+  final FocusNode focusNode;
 
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Semantics(
-      selected: selected,
-      button: true,
-      child: Material(
-        color: selected ? tokens.colors.accentSoft : tokens.surfaces.panel.fill,
-        borderRadius: tokens.shape.small,
-        child: InkWell(
-          key: Key('privacy-section-${section.name}'),
-          onTap: () => onPressed(section),
+    return StarBridgeActionRow(
+      controlKey: Key('privacy-section-${section.name}'),
+      focusNode: focusNode,
+      semanticSelected: selected,
+      semanticLabel:
+          '${strings.text(titleKey)}. ${strings.text(descriptionKey)}',
+      onActivate: (_, source) => onPressed(section),
+      child: ExcludeSemantics(
+        child: Material(
+          color: selected
+              ? tokens.colors.accentSoft
+              : tokens.surfaces.panel.fill,
           borderRadius: tokens.shape.small,
           child: Container(
             constraints: const BoxConstraints(minHeight: 58),
@@ -360,7 +507,8 @@ class _PrivacySectionButton extends StatelessWidget {
                 Text(
                   strings.text(titleKey),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: selected
                         ? tokens.colors.accent
@@ -371,7 +519,8 @@ class _PrivacySectionButton extends StatelessWidget {
                 Text(
                   strings.text(descriptionKey),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: Theme.of(context).textTheme.bodySmall
                       ?.copyWith(color: tokens.colors.textSecondary),
                 ),

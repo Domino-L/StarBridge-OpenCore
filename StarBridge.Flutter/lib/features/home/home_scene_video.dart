@@ -1,18 +1,17 @@
 import '../../design_system/styles/home_scene_palette.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'home_scene.dart';
 
 class HomeSceneVideo extends StatefulWidget {
-  const HomeSceneVideo({
-    this.assetPath = 'assets/home-scenes/orison-night-loop-v1.mp4',
-    super.key,
-  });
+  const HomeSceneVideo({this.scene = HomeScenes.orisonNight, super.key});
 
-  final String assetPath;
+  final HomeScene scene;
 
   @override
   State<HomeSceneVideo> createState() => _HomeSceneVideoState();
@@ -21,7 +20,9 @@ class HomeSceneVideo extends StatefulWidget {
 class _HomeSceneVideoState extends State<HomeSceneVideo>
     with WidgetsBindingObserver {
   // Local diagnostic build only: isolate native video from ordinary images.
-  static const _posterOnly = bool.fromEnvironment('STARBRIDGE_HOME_POSTER_ONLY');
+  static const _posterOnly = bool.fromEnvironment(
+    'STARBRIDGE_HOME_POSTER_ONLY',
+  );
   VideoPlayerController? _controller;
   bool _failed = false;
   bool _reduceMotion = false;
@@ -52,7 +53,7 @@ class _HomeSceneVideoState extends State<HomeSceneVideo>
   }
 
   Future<void> _initialize() async {
-    final controller = VideoPlayerController.asset(widget.assetPath);
+    final controller = VideoPlayerController.asset(widget.scene.videoAsset);
     _controller = controller;
     try {
       await controller.initialize();
@@ -91,10 +92,10 @@ class _HomeSceneVideoState extends State<HomeSceneVideo>
 
   @override
   Widget build(BuildContext context) {
-    if (_posterOnly) return const _HomeSceneFallback();
+    if (_posterOnly) return _HomeSceneFallback(scene: widget.scene);
     final controller = _controller;
     if (_failed || controller == null || !controller.value.isInitialized) {
-      return const _HomeSceneFallback();
+      return _HomeSceneFallback(scene: widget.scene);
     }
     final size = controller.value.size;
     return ColoredBox(
@@ -117,7 +118,9 @@ class _HomeSceneVideoState extends State<HomeSceneVideo>
 }
 
 class _HomeSceneFallback extends StatelessWidget {
-  const _HomeSceneFallback();
+  const _HomeSceneFallback({required this.scene});
+
+  final HomeScene scene;
 
   @override
   Widget build(BuildContext context) => Stack(
@@ -129,13 +132,17 @@ class _HomeSceneFallback extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [HomeScenePalette.fallbackStart, HomeScenePalette.base, HomeScenePalette.fallbackEnd],
+            colors: [
+              HomeScenePalette.fallbackStart,
+              HomeScenePalette.base,
+              HomeScenePalette.fallbackEnd,
+            ],
             stops: [0, .58, 1],
           ),
         ),
       ),
       Image.asset(
-        'assets/home-scenes/orison-night-poster-v1.jpg',
+        scene.posterAsset,
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) => const SizedBox.shrink(),
       ),

@@ -1,65 +1,131 @@
+import 'official_fleet_activity_section.dart';
+import '../common/organization_communication.dart';
+import 'official_fleet_manage_workspace.dart';
+
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 
+import '../communities/community_visible_refresh.dart';
+import 'official_fleet_holo_deck.dart';
+import 'official_fleet_holo_header.dart';
+import 'official_fleet_holo_paint.dart';
+import 'official_fleet_command_row.dart';
+import 'official_fleet_members_fallback.dart';
+import 'official_fleet_members_models.dart';
+import 'official_fleet_rally_views.dart';
+import 'official_fleet_backdrop.dart';
+import 'official_fleet_chat_workspace.dart';
+import 'official_fleet_rail_previews.dart';
+import 'official_fleet_screen_switch.dart';
+import 'official_fleet_wheel_gate.dart';
+import 'official_fleet_section_rail.dart';
+
 import '../../app/localization/app_strings.dart';
-import '../../design_system/icons/icon_semantic.dart';
-import '../../design_system/icons/starbridge_icon.dart';
-import '../../design_system/surfaces/starbridge_surface.dart';
-import '../../design_system/tokens/color_tokens.dart';
-import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+import '../common/organization_holo_art.dart';
+import '../common/organization_section_stack.dart';
+import '../common/organization_workspace_frame.dart';
 import 'official_fleet_models.dart';
-import 'official_fleet_members_module.dart';
 import 'official_fleet_members_section.dart';
 import 'official_fleet_module.dart';
-import 'official_fleet_overview_module.dart';
-import 'official_fleet_overview_section.dart';
+import 'official_fleet_workspace_sync_notice.dart';
+import 'official_fleet_overview_models.dart';
 import 'official_fleet_profile_section.dart';
-import 'official_fleet_ships_module.dart';
-import 'official_fleet_ships_section.dart';
+import '../communities/community_ships_panel.dart';
+import '../communities/community_ships_port.dart';
+import '../communities/community_hangar_sharing_dialog.dart';
+import '../communities/community_ships_copy.dart';
+import '../common/organization_hangar_sharing.dart';
+import 'unavailable_official_fleet_shared_ships.dart';
+import 'official_fleet_ship_owner_access.dart';
+import '../communities/community_ship_avatar_access.dart';
 import 'official_fleet_support_views.dart';
+import 'official_fleet_workspace_header.dart';
+import 'official_fleet_workspace_navigation.dart';
+import '../settings/local_privacy_controller.dart';
+import 'official_fleet_first_sharing_choice.dart';
+import 'official_fleet_manual_refresh.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class OfficialFleetPage extends StatefulWidget {
-  const OfficialFleetPage({required this.module, super.key});
-
+  const OfficialFleetPage({
+    required this.module,
+    this.sharedShipsPort,
+    this.hangarSharingPort,
+    this.privacy,
+    super.key,
+  });
+  final CommunityShipsPort? sharedShipsPort;
+  final OrganizationHangarSharingPort? hangarSharingPort;
   final OfficialFleetModule module;
-
+  final LocalPrivacyController? privacy;
   @override
   State<OfficialFleetPage> createState() => _OfficialFleetPageState();
 }
 
 class _OfficialFleetPageState extends State<OfficialFleetPage> {
-  final ScrollController _scrollController = ScrollController();
   OfficialFleetWorkspaceSection _section =
-      OfficialFleetWorkspaceSection.overview;
+      OfficialFleetWorkspaceSection.members;
+  String? _sourceRef;
+  Object? _contextKey;
 
   @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return ValueListenableBuilder<OfficialFleetProjection>(
-      valueListenable: widget.module.projection,
-      builder: (context, projection, _) {
-        return Scrollbar(
-          controller: _scrollController,
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: EdgeInsetsDirectional.fromSTEB(
-              tokens.space.xl,
-              tokens.space.lg,
-              tokens.space.xl,
-              tokens.space.xxl,
-            ),
-            child: Align(
-              alignment: AlignmentDirectional.topCenter,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: tokens.density.contentMaxWidth,
+  Widget build(
+    BuildContext context,
+  ) => ValueListenableBuilder<OfficialFleetProjection>(
+    valueListenable: widget.module.projection,
+    builder: (context, projection, _) {
+      Widget content;
+      if (projection.availability == OfficialFleetAvailability.available) {
+        final sourceRef = projection.fleet!.sourceRef;
+        final contextKey = (widget.module, widget.module.contextRevision);
+        if (_sourceRef != sourceRef || _contextKey != contextKey) {
+          _sourceRef = sourceRef;
+          _contextKey = contextKey;
+          _section = OfficialFleetWorkspaceSection.members;
+        }
+        content = _FleetWorkspace(
+          key: ValueKey((contextKey, sourceRef)),
+          projection: projection,
+          module: widget.module,
+          section: _section,
+          sharedShipsPort: widget.sharedShipsPort,
+          hangarSharingPort: widget.hangarSharingPort,
+          onSectionChanged: (value) => setState(() => _section = value),
+        );
+        // The holo header is full-bleed: the workspace owns its own insets.
+        return OfficialFleetBackdrop(
+          art: OrganizationHoloArt.fromUrl(
+            projection.fleet?.profile?.backgroundUrl,
+          ),
+          child: widget.privacy == null
+              ? content
+              : OfficialFleetFirstSharingChoice(
+                  key: ValueKey((contextKey, sourceRef, widget.privacy)),
+                  controller: widget.privacy!,
+                  sourceRef: sourceRef,
+                  child: content,
                 ),
+        );
+      } else {
+        if (projection.availability != OfficialFleetAvailability.loading) {
+          _sourceRef = null;
+        }
+        content = SingleChildScrollView(
+          child: Column(
+            children: [
+              LoadingContentProbe(
+                route: '/fleet',
+                status:
+                    projection.availability == OfficialFleetAvailability.loading
+                    ? LoadingContentStatus.waiting
+                    : LoadingContentStatus.unavailable,
                 child: switch (projection.availability) {
                   OfficialFleetAvailability.loading =>
                     const OfficialFleetLoadingView(),
@@ -67,433 +133,668 @@ class _OfficialFleetPageState extends State<OfficialFleetPage> {
                     const OfficialFleetSignedOutView(),
                   OfficialFleetAvailability.notMember =>
                     OfficialFleetNotMemberView(onRetry: widget.module.refresh),
-                  OfficialFleetAvailability.unavailable =>
-                    OfficialFleetUnavailableView(
-                      failureKey:
-                          projection.failureKey ??
-                          'officialFleet.error.unavailable',
-                      onRetry: widget.module.refresh,
-                    ),
-                  OfficialFleetAvailability.available => _FleetWorkspace(
-                    projection: projection,
-                    overviewModule: widget.module.overview,
-                    membersModule: widget.module.members,
-                    shipsModule: widget.module.ships,
-                    section: _section,
-                    onSectionChanged: (value) => setState(() {
-                      _section = value;
-                    }),
-                    onRefresh: widget.module.refresh,
+                  _ => OfficialFleetUnavailableView(
+                    failureKey:
+                        projection.failureKey ??
+                        'officialFleet.error.unavailable',
+                    onRetry: widget.module.refresh,
                   ),
                 },
               ),
-            ),
+              if (projection.availability !=
+                      OfficialFleetAvailability.signedOut &&
+                  projection.availability != OfficialFleetAvailability.loading)
+                officialFleetOwnAnnouncementOutcomes(widget.module.communication),
+              if (widget.hangarSharingPort?.available == true &&
+                  projection.availability !=
+                      OfficialFleetAvailability.signedOut &&
+                  projection.availability != OfficialFleetAvailability.loading)
+                StarBridgeActionButton(
+                  controlKey: const ValueKey('official-fleet-own-sharing'),
+                  onActivate: (_) => showStarBridgeDialog<bool>(
+                    context,
+                    useRootNavigator: false,
+                    barrierDismissible: false,
+                    builder: (_) => CommunityHangarSharingDialog.editor(
+                      editor: widget.hangarSharingPort,
+                    ),
+                  ),
+                  child: Text(communityShipsText(context, 'ownSharingTitle')),
+                ),
+            ],
           ),
         );
-      },
-    );
-  }
+      }
+      return OrganizationWorkspacePage(
+        child: OrganizationWorkspaceSurface(child: content),
+      );
+    },
+  );
 }
 
-class _FleetWorkspace extends StatelessWidget {
+class _FleetWorkspace extends StatefulWidget {
   const _FleetWorkspace({
     required this.projection,
-    required this.overviewModule,
-    required this.membersModule,
-    required this.shipsModule,
+    required this.module,
     required this.section,
     required this.onSectionChanged,
-    required this.onRefresh,
+    this.sharedShipsPort,
+    this.hangarSharingPort,
+    super.key,
   });
-
   final OfficialFleetProjection projection;
-  final OfficialFleetOverviewModule overviewModule;
-  final OfficialFleetMembersModule membersModule;
-  final OfficialFleetShipsModule shipsModule;
+  final OfficialFleetModule module;
   final OfficialFleetWorkspaceSection section;
   final ValueChanged<OfficialFleetWorkspaceSection> onSectionChanged;
-  final Future<void> Function() onRefresh;
-
+  final CommunityShipsPort? sharedShipsPort;
+  final OrganizationHangarSharingPort? hangarSharingPort;
   @override
-  Widget build(BuildContext context) {
-    final fleet = projection.fleet!;
-    final tokens = context.tokens;
-    return Column(
-      key: const Key('official-fleet-workspace'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _FleetContextHeader(fleet: fleet, onRefresh: onRefresh),
-        SizedBox(height: tokens.space.md),
-        _WorkspaceNavigation(selected: section, onSelected: onSectionChanged),
-        SizedBox(height: tokens.space.lg),
-        switch (section) {
-          OfficialFleetWorkspaceSection.overview =>
-            OfficialFleetOverviewSection(
-              sourceRef: fleet.sourceRef,
-              module: overviewModule,
-              onOpenSection: onSectionChanged,
-            ),
-          OfficialFleetWorkspaceSection.profile => OfficialFleetProfileSection(
-            fleet: fleet,
-            observedAtUtc: projection.observedAtUtc,
-          ),
-          OfficialFleetWorkspaceSection.members => OfficialFleetMembersSection(
-            sourceRef: fleet.sourceRef,
-            module: membersModule,
-          ),
-          OfficialFleetWorkspaceSection.ships => OfficialFleetShipsSection(
-            sourceRef: fleet.sourceRef,
-            module: shipsModule,
-          ),
-          _ => _DeferredSection(section: section),
-        },
-      ],
-    );
-  }
+  State<_FleetWorkspace> createState() => _FleetWorkspaceState();
 }
 
-class _FleetContextHeader extends StatelessWidget {
-  const _FleetContextHeader({required this.fleet, required this.onRefresh});
-
-  final OfficialFleetSummary fleet;
-  final Future<void> Function() onRefresh;
+class _FleetWorkspaceState extends State<_FleetWorkspace>
+    with
+        CommunityVisibleRefresh<_FleetWorkspace>,
+        OfficialFleetMembersFallback<_FleetWorkspace> {
+  @override
+  Future<void> refreshMembers() => widget.module.members.refresh(silent: true);
 
   @override
-  Widget build(BuildContext context) {
+  Stream<void>? get communityChanges =>
+      widget.module.communication.backgroundAttentionManaged
+      ? null
+      : widget.module.communication.workspaceChanges;
+  // The app-owned worker now observes official events and owns its bounded
+  // compatibility fallback. The workspace must not add a second unread poll.
+  @override
+  bool get communityEventsHealthy =>
+      widget.module.communication.backgroundAttentionManaged;
+  @override
+  Future<void> refreshVisibleCommunity() =>
+      widget.module.communication.needsScopeRefresh
+      ? widget.module.refresh()
+      : widget.module.communication.refreshReadback();
+  // Two screens: false is the top screen (banner, deck, command row and the
+  // section rail); true is the detail screen (slim bar over the section).
+  bool _detail = false, _entryPlayed = false, _bodyAtTop = true;
+  final _wheel = OfficialFleetWheelGate();
+  OfficialFleetWorkspaceSection? _lastVisited;
+  double _pan = 0;
+  final _openingWebsite = ValueNotifier(false);
+  StarBridgeDialogRoute<void>? _detailsRoute;
+
+  @override
+  void dispose() {
+    retireStarBridgeDialog(_detailsRoute);
+    _openingWebsite.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openDetails() async {
+    if (_detailsRoute != null) return;
+    final fleet = widget.projection.fleet!;
+    final contextRevision = widget.module.contextRevision;
     final strings = AppStrings.of(context);
-    final tokens = context.tokens;
-    final rankName =
-        fleet.officialRankName ?? strings.text('officialFleet.rank.unknown');
-    final rankValue = fleet.officialRankValue;
-    return StarBridgeSurface(
-      key: const Key('official-fleet-context-header'),
-      role: SurfaceRole.raised,
-      padding: EdgeInsets.all(tokens.space.lg),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 720;
-          final identity = Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _FleetLogo(fleet: fleet),
-              SizedBox(width: tokens.space.md),
-              Expanded(
+    await showStarBridgeDialog<void>(
+      context,
+      useRootNavigator: false,
+      onRouteCreated: (route) => _detailsRoute = route,
+      builder: (context) => AnimatedBuilder(
+        animation: Listenable.merge([
+          _openingWebsite,
+          widget.module.projection,
+          widget.module.communication,
+        ]),
+        builder: (context, _) {
+          final current = widget.module.projection.value;
+          if (current.availability != OfficialFleetAvailability.available ||
+              current.fleet?.sourceRef != fleet.sourceRef ||
+              widget.module.contextRevision != contextRevision) {
+            return const SizedBox.shrink();
+          }
+          return AlertDialog(
+            key: const Key('official-fleet-details-dialog'),
+            title: Text(strings.text('officialFleet.workspace.details')),
+            content: SizedBox(
+              width: 760,
+              child: SingleChildScrollView(
+                key: const Key('official-fleet-profile-scroll'),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      fleet.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall,
+                    OfficialFleetProfileSection(
+                      fleet: current.fleet!,
+                      observedAtUtc: current.observedAtUtc,
+                      profileReadState: current.profileReadState,
+                      isReading: current.isProfileReading,
+                      profileObservedAtUtc: current.profileObservedAtUtc,
                     ),
-                    SizedBox(height: tokens.space.xxs),
-                    Text(
-                      fleet.sid,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: tokens.colors.textSecondary,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    SizedBox(height: tokens.space.sm),
-                    _FreshnessLabel(
-                      label: strings.text('officialFleet.fresh.live'),
-                    ),
+                    if (widget.module.communication.announcementsAvailable) ...[
+                      const SizedBox(height: 16),
+                      widget.module.communication.announcement(expanded: true),
+                    ],
                   ],
                 ),
               ),
-            ],
-          );
-          final controls = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _OfficialPosition(rankName: rankName, rankValue: rankValue),
-              SizedBox(width: tokens.space.md),
-              Tooltip(
-                message: strings.text('officialFleet.action.refresh'),
-                child: IconButton(
-                  key: const Key('official-fleet-refresh'),
-                  onPressed: onRefresh,
-                  icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
+            ),
+            actions: [
+              if (widget.module.websiteAvailable)
+                StarBridgeActionButton(
+                  controlKey: const Key('official-fleet-open-website'),
+                  onActivate: _openingWebsite.value
+                      ? null
+                      : (source) async {
+                          if (_openingWebsite.value) return;
+                          _openingWebsite.value = true;
+                          final opened = await widget.module.openWebsite();
+                          if (!mounted) return;
+                          _openingWebsite.value = false;
+                          if (!context.mounted ||
+                              widget.module.contextRevision !=
+                                  contextRevision ||
+                              widget.module.projection.value.fleet?.sourceRef !=
+                                  fleet.sourceRef) {
+                            return;
+                          }
+                          if (!opened) {
+                            showStarBridgeSnackBar(
+                              context,
+                              starBridgeTimedSnackBar(
+                                content: Text(
+                                  strings.text('officialFleet.website.openFailed'),
+                                ),
+                              ),
+                              source: source,
+                            );
+                          }
+                        },
+                  child: Text(strings.text('officialFleet.website.open')),
                 ),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('official-fleet-details-close'),
+                onActivate: (source) =>
+                    dismissStarBridgeDialog(context, source: source),
+                child: Text(strings.text('officialFleet.workspace.close')),
               ),
-            ],
-          );
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                identity,
-                SizedBox(height: tokens.space.md),
-                Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: controls,
-                ),
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: identity),
-              SizedBox(width: tokens.space.lg),
-              controls,
             ],
           );
         },
       ),
     );
+    _detailsRoute = null;
   }
-}
-
-class _FleetLogo extends StatelessWidget {
-  const _FleetLogo({required this.fleet});
-
-  final OfficialFleetSummary fleet;
 
   @override
   Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final fallback = ColoredBox(
-      color: tokens.domainColors.command.soft,
-      child: Center(
-        child: Text(
-          fleet.sid.characters.take(2).toString().toUpperCase(),
-          style: Theme.of(context).textTheme.titleMedium
-              ?.copyWith(color: tokens.domainColors.command.foreground),
-        ),
-      ),
-    );
-    return Container(
-      key: const Key('official-fleet-logo'),
-      width: 68,
-      height: 68,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: tokens.surfaces.raised.border,
-          width: tokens.stroke.regular,
-        ),
-        borderRadius: tokens.shape.medium,
-      ),
-      child: fleet.logoUrl == null
-          ? fallback
-          : Image.network(
-              fleet.logoUrl!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => fallback,
+    final fleet = widget.projection.fleet!;
+    Widget viewport(Widget child, {EdgeInsetsGeometry? padding}) =>
+        SingleChildScrollView(
+          key: PageStorageKey((
+            widget.module,
+            widget.module.contextRevision,
+            fleet.sourceRef,
+            child.runtimeType,
+          )),
+          primary: false,
+          padding: padding,
+          child: child,
+        );
+    final communication = widget.module.communication;
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        communication,
+        widget.module.members.projection,
+      ]),
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          // Narrow pages give the tabs the whole row; controls sit above.
+          final stacked = constraints.maxWidth < 700;
+          final scale = math.max(
+            1.0,
+            MediaQuery.textScalerOf(context).scale(1),
+          );
+          // RSI banners are 3:1 (1140x380): at width/3 the whole image shows.
+          // The top screen gives it that height when the command row and the
+          // section rail still fit below; smaller windows scale it down.
+          final railCompact =
+              constraints.maxWidth < OfficialFleetSectionRail.compactBelow;
+          final topChrome =
+              (240 +
+                  (stacked ? 56 : 0) +
+                  (railCompact ? OfficialFleetSectionRail.compactExtra : 0)) *
+              scale;
+          final maxBanner = math.max(
+            110.0,
+            math.min(
+              constraints.maxWidth / 3,
+              constraints.maxHeight - topChrome - 150 * scale,
             ),
+          );
+          final collapsed = _detail;
+          // A screen tall enough for the whole banner hands the rest of its
+          // height to the rail, which grows into section preview tiles.
+          final tiles =
+              !railCompact && maxBanner >= constraints.maxWidth / 3 - .5;
+          final entry = collapsed || _entryPlayed
+              ? OfficialFleetHoloEntry.none
+              : widget.module.takeFirstVisitToday()
+              ? OfficialFleetHoloEntry.full
+              : OfficialFleetHoloEntry.quick;
+          if (!collapsed) _entryPlayed = true;
+          // Whatever does not fit is clipped, never squeezed or overflowed.
+          double headerMax(bool collapsed) => math.max(
+            64.0,
+            collapsed
+                ? constraints.maxHeight -
+                      (stacked ? 56 : 0) * scale -
+                      200 * scale
+                : constraints.maxHeight,
+          );
+          return ValueListenableBuilder<OfficialFleetOverviewProjection>(
+            valueListenable: widget.module.overview.projection,
+            builder: (context, overview, _) {
+              Widget actionsFor(bool collapsed) {
+                final headerActions = OfficialFleetHeaderActions(
+                  retained:
+                      widget.projection.refreshFailed ||
+                      widget.projection.profileRetained ||
+                      overview.refreshFailed ||
+                      communication.readOnly,
+                  collapsed: collapsed,
+                  onToggleCollapsed: () => collapsed
+                      ? setState(() => _detail = false)
+                      : _enter(widget.section),
+                  onDetails: _openDetails,
+                  onRefresh: widget.projection.isRefreshing
+                      ? null
+                      : () => officialFleetRefresh(context, widget.module),
+                );
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ValueListenableBuilder<
+                      OfficialFleetMemberDirectoryProjection
+                    >(
+                      valueListenable: widget.module.members.projection,
+                      builder: (context, members, _) =>
+                          !collapsed &&
+                              OfficialFleetCommandRow.holdsPlace(members)
+                          ? const SizedBox.shrink()
+                          : OfficialFleetRallyStartButton(
+                              controller: widget.module.rally,
+                            ),
+                    ),
+                    headerActions,
+                  ],
+                );
+              }
+
+              final rail =
+                  ValueListenableBuilder<
+                    OfficialFleetMemberDirectoryProjection
+                  >(
+                    valueListenable: widget.module.members.projection,
+                    builder: (context, members, _) => ListenableBuilder(
+                      listenable: widget.module.rally,
+                      builder: (context, _) => _sectionRail(
+                        context,
+                        overview,
+                        communication,
+                        actionsFor(false),
+                        members,
+                        compact: railCompact,
+                      ),
+                    ),
+                  );
+              // Wide lower screens carry the tabs and controls in the bar.
+              final barTabs = !stacked && constraints.maxWidth >= 1100 * scale;
+              final deck = officialFleetHoloDeck(
+                context,
+                fleet: fleet,
+                overview: overview,
+                members: widget.module.members.projection.value,
+                announcementEntry: communication.announcementsAvailable
+                    ? communication.announcement()
+                    : null,
+              );
+              Widget headerFor(bool collapsed) => ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: headerMax(collapsed)),
+                child: UnconstrainedBox(
+                  constrainedAxis: Axis.horizontal,
+                  alignment: Alignment.topCenter,
+                  clipBehavior: Clip.hardEdge,
+                  child: collapsed
+                      ? OfficialFleetHoloBar(
+                          deck: deck,
+                          tabs: barTabs ? _navigation() : null,
+                          trailing: barTabs ? actionsFor(true) : null,
+                        )
+                      : OfficialFleetHoloHeader(
+                          deck: deck,
+                          maxBannerHeight: maxBanner,
+                          entry: entry,
+                        ),
+                ),
+              );
+              // The wheel (or a touchpad swipe) anywhere on the workspace,
+              // banner included, scrolls the header away; scrolling up at the
+              // top of the members list brings it back. No button needed.
+              Widget screen(bool collapsed) {
+                final header = headerFor(collapsed);
+                final actions = actionsFor(collapsed);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // The top screen's header takes what the rows below
+                    // leave, clipped rather than leaving a gap at the bottom.
+                    if (collapsed || tiles) header else Flexible(child: header),
+                    if (stacked && collapsed)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: actions,
+                        ),
+                      ),
+                    if (!collapsed)
+                      ValueListenableBuilder<
+                        OfficialFleetMemberDirectoryProjection
+                      >(
+                        valueListenable: widget.module.members.projection,
+                        builder: (context, members, _) =>
+                            OfficialFleetCommandRow(
+                              members: members,
+                              rally: widget.module.rally,
+                              sourceRef: fleet.sourceRef,
+                              onAnnounce:
+                                  communication.announcementManagementVisible
+                                  ? () => _enter(
+                                      OfficialFleetWorkspaceSection.broadcasts,
+                                    )
+                                  : null,
+                            ),
+                      ),
+                    // The activity page carries the rally itself.
+                    if (!collapsed ||
+                        widget.section !=
+                            OfficialFleetWorkspaceSection.broadcasts)
+                      OfficialFleetRallyStrip(controller: widget.module.rally),
+                    if (collapsed)
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            stacked ? 4 : 12,
+                            20,
+                            20,
+                          ),
+                          child: OrganizationWorkspaceSurface(
+                            child: _frame(
+                              fleet,
+                              viewport,
+                              actions: stacked || barTabs ? null : actions,
+                              navigation: !barTabs,
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (tiles)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                          child: rail,
+                        ),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                        child: rail,
+                      ),
+                  ],
+                );
+              }
+
+              return Listener(
+                // Blank parts of a screen hit-test through to the backdrop;
+                // the wheel still belongs to the switch (2026-10-24).
+                behavior: HitTestBehavior.translucent,
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent) {
+                    _onWheel(event.scrollDelta.dy, collapsed);
+                  }
+                },
+                onPointerPanZoomUpdate: (event) {
+                  _pan += event.panDelta.dy;
+                  if (_pan.abs() < 24) return;
+                  _onWheel(-_pan, collapsed);
+                  _pan = 0;
+                },
+                onPointerPanZoomEnd: (_) => _pan = 0,
+                child: OfficialFleetScreenSwitch(
+                  lower: collapsed,
+                  // The upper screen is what a visit lands on; the members
+                  // list (and its probe) only paints on the lower screen.
+                  upper: (_) => LoadingContentProbe(
+                    route: '/fleet',
+                    status:
+                        widget.projection.refreshFailed ||
+                            widget.projection.profileRetained
+                        ? LoadingContentStatus.partial
+                        : LoadingContentStatus.data,
+                    items: 1,
+                    child: screen(false),
+                  ),
+                  lowerBuilder: (_) => screen(true),
+                  banner: OrganizationHoloArt.fromUrl(fleet.profile?.bannerUrl),
+                  bannerHeight: math.min(maxBanner, constraints.maxWidth / 3),
+                  barHeight: 64 * scale,
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
-}
 
-class _OfficialPosition extends StatelessWidget {
-  const _OfficialPosition({required this.rankName, required this.rankValue});
+  void _onWheel(double dy, bool collapsed) {
+    if (dy > 0 && !collapsed) {
+      _enter(widget.section);
+    } else if (dy < 0 && collapsed && _wheel.up(-dy, bodyAtTop: _bodyAtTop)) {
+      setState(() => _detail = false);
+    }
+  }
 
-  final String rankName;
-  final int? rankValue;
+  void _enter(OfficialFleetWorkspaceSection section) {
+    setState(() {
+      _detail = true;
+      _bodyAtTop = true;
+      _lastVisited = section;
+    });
+    if (section != widget.section) widget.onSectionChanged(section);
+  }
+
+  bool _onBodyScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+    if (notification is ScrollUpdateNotification) _wheel.bodyMoved();
+    // Visual top: reversed lists (chat) start at their newest end.
+    _bodyAtTop =
+        (metrics.axisDirection == AxisDirection.up
+            ? metrics.extentAfter
+            : metrics.extentBefore) <=
+        0;
+    return false;
+  }
+
+  Widget _sectionRail(
+    BuildContext context,
+    OfficialFleetOverviewProjection overview,
+    OrganizationCommunication communication,
+    Widget actions,
+    OfficialFleetMemberDirectoryProjection members, {
+    required bool compact,
+  }) => OfficialFleetSectionRail(
+    enterLabel: AppStrings.of(context).text('officialFleet.rail.enter'),
+    lastVisited: _lastVisited,
+    trailing: actions,
+    compact: compact,
+    onSelected: _enter,
+    items: OfficialFleetRailPreviews.items(
+      context,
+      overview: overview,
+      communication: communication,
+      members: members,
+      sourceRef: widget.projection.fleet!.sourceRef,
+      isOwner: widget.module.rally.eligibility.canStart,
+      rally: widget.module.rally,
+      chatTileOnScreen: !_detail,
+    ),
+  );
 
   @override
-  Widget build(BuildContext context) {
-    final strings = AppStrings.of(context);
-    final tokens = context.tokens;
-    final command = tokens.domainColors.command;
-    return Container(
-      key: const Key('official-fleet-my-official-position'),
-      padding: EdgeInsetsDirectional.only(start: tokens.space.md),
-      decoration: BoxDecoration(
-        border: BorderDirectional(
-          start: BorderSide(
-            color: command.foreground,
-            width: tokens.stroke.strong,
-          ),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            strings.text('officialFleet.myOfficialPosition'),
-            style: Theme.of(context).textTheme.labelSmall
-                ?.copyWith(color: tokens.colors.textSecondary),
-          ),
-          SizedBox(height: tokens.space.xxs),
-          Text(
-            '$rankName · ${rankValue == null ? '—' : '$rankValue★'}',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: command.foreground,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
+  void didUpdateWidget(covariant _FleetWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.section != widget.section) _bodyAtTop = true;
+  }
+
+  // The same RSI count as the bar: the overview's when available, else the
+  // public profile's.
+  int? _officialMemberCount(OfficialFleetSummary fleet) {
+    final overview = widget.module.overview.projection.value;
+    return overview.availability == OfficialFleetOverviewAvailability.available
+        ? overview.metrics?.officialMemberCount ?? fleet.profile?.memberCount
+        : fleet.profile?.memberCount;
+  }
+
+  void _toMembers() =>
+      widget.onSectionChanged(OfficialFleetWorkspaceSection.members);
+
+  Widget _navigation() {
+    final communication = widget.module.communication;
+    return OfficialFleetWorkspaceNavigation(
+      selected: widget.section,
+      chatUnreadCount: communication.chatUnreadCount,
+      availableSections: {
+        OfficialFleetWorkspaceSection.members,
+        OfficialFleetWorkspaceSection.ships,
+        OfficialFleetWorkspaceSection.manage,
+        if (communication.chatAvailable) OfficialFleetWorkspaceSection.channel,
+        if (officialFleetActivityAvailable(communication, widget.module.rally))
+          OfficialFleetWorkspaceSection.broadcasts,
+      },
+      onSelected: widget.onSectionChanged,
     );
   }
-}
 
-class _FreshnessLabel extends StatelessWidget {
-  const _FreshnessLabel({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: tokens.icons.statusDot,
-          height: tokens.icons.statusDot,
-          decoration: BoxDecoration(
-            color: tokens.colors.success,
-            shape: BoxShape.circle,
+  Widget _frame(
+    OfficialFleetSummary fleet,
+    Widget Function(Widget child, {EdgeInsetsGeometry? padding}) viewport, {
+    required Widget? actions,
+    required bool navigation,
+  }) {
+    final communication = widget.module.communication;
+    return OrganizationWorkspaceFrame(
+      key: const Key('official-fleet-workspace'),
+      header: const SizedBox.shrink(),
+      actions: actions,
+      feedback: [
+        officialFleetAnnouncementOutcomesFor(communication, widget.section),
+        ValueListenableBuilder<OfficialFleetOverviewProjection>(
+          valueListenable: widget.module.overview.projection,
+          builder: (context, overview, _) => OfficialFleetWorkspaceSyncNotice(
+            projection: widget.projection,
+            overview: overview,
+            communication: communication,
+            key: const Key('official-fleet-refreshing'),
           ),
-        ),
-        SizedBox(width: tokens.space.xs),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelMedium
-              ?.copyWith(color: tokens.colors.textSecondary),
         ),
       ],
-    );
-  }
-}
-
-class _WorkspaceNavigation extends StatelessWidget {
-  const _WorkspaceNavigation({
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final OfficialFleetWorkspaceSection selected;
-  final ValueChanged<OfficialFleetWorkspaceSection> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: tokens.surfaces.panel.border,
-            width: tokens.stroke.regular,
-          ),
-        ),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final section in OfficialFleetWorkspaceSection.values)
-              _WorkspaceTab(
-                section: section,
-                selected: section == selected,
-                onPressed: () => onSelected(section),
+      navigation: navigation ? _navigation() : null,
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _onBodyScroll,
+        child: OrganizationSectionStack(
+          key: ValueKey((
+            widget.module,
+            widget.module.contextRevision,
+            fleet.sourceRef,
+          )),
+          selected: widget.section.name,
+          sections: {
+            'manage': (_) => OfficialFleetManageWorkspace(
+              fleet: fleet,
+              projection: widget.projection,
+              communication: communication,
+              rally: widget.module.rally,
+              hangarSharingPort: widget.hangarSharingPort,
+              onBack: () async => widget.onSectionChanged(
+                OfficialFleetWorkspaceSection.members,
               ),
-          ],
+            ),
+            if (communication.chatAvailable)
+              'channel': (_) => OfficialFleetChatWorkspace(
+                pinned: communication.announcementsAvailable
+                    ? communication.announcement()
+                    : null,
+                resetKey: fleet.sourceRef,
+                online: OfficialFleetOnlinePane.dock(
+                  widget.module.members.projection,
+                  _toMembers,
+                ),
+                chat: communication.chat(onBack: _toMembers),
+              ),
+            if (officialFleetActivityAvailable(
+              communication,
+              widget.module.rally,
+            ))
+              'broadcasts': (_) => viewport(
+                OfficialFleetActivitySection(
+                  rally: widget.module.rally,
+                  communication: communication,
+                ),
+                padding: const EdgeInsetsDirectional.only(end: 16),
+              ),
+            'members': (_) => viewport(
+              OfficialFleetMembersSection(
+                sourceRef: fleet.sourceRef,
+                module: widget.module.members,
+                retained: widget.projection.refreshFailed,
+                officialMemberCount: _officialMemberCount(fleet),
+              ),
+              padding: const EdgeInsetsDirectional.only(end: 16),
+            ),
+            // Panel owns its bounded scroll viewport, as it does in community.
+            'ships': (_) => CommunityShipsPanel(
+              port: communication.verifiedWorkspaceTargetRef == null
+                  ? const UnavailableOfficialFleetSharedShips()
+                  : widget.sharedShipsPort ??
+                        const UnavailableOfficialFleetSharedShips(),
+              // Missing context is an unavailable display; no fabricated target
+              // is ever sent to a real public ships adapter.
+              targetRef: communication.verifiedWorkspaceTargetRef ?? '',
+              name: fleet.name,
+              onBack: _toMembers,
+              onRefreshMembership: widget.module.refresh,
+              retryInvalidatedScope: true,
+              ownerTargetFactory:
+                  widget.sharedShipsPort is OfficialFleetShipOwnerAccess
+                  ? (widget.sharedShipsPort as OfficialFleetShipOwnerAccess)
+                        .ownerTarget
+                  : null,
+              avatarAccess:
+                  widget.sharedShipsPort is OfficialFleetShipOwnerAccess
+                  ? (widget.sharedShipsPort as OfficialFleetShipOwnerAccess)
+                        .avatarAccess
+                  : const CommunityShipAvatarAccess(),
+              includeSocialActions: false,
+              hangarSharingPort: widget.hangarSharingPort,
+              hangarSharingSourceRef: fleet.sourceRef,
+            ),
+          },
         ),
       ),
     );
   }
 }
-
-class _WorkspaceTab extends StatelessWidget {
-  const _WorkspaceTab({
-    required this.section,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final OfficialFleetWorkspaceSection section;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    final label = AppStrings.of(context).text(_sectionLabel(section));
-    return TextButton(
-      key: Key('official-fleet-tab-${section.name}'),
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: selected
-            ? tokens.colors.textPrimary
-            : tokens.colors.textSecondary,
-        backgroundColor: selected
-            ? tokens.surfaces.selected.fill
-            : Colors.transparent,
-        padding: EdgeInsets.symmetric(
-          horizontal: tokens.space.md,
-          vertical: tokens.space.sm,
-        ),
-        shape: const RoundedRectangleBorder(),
-        side: BorderSide.none,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label),
-          SizedBox(height: tokens.space.xs),
-          AnimatedContainer(
-            duration: tokens.motion.pointerMicro,
-            width: selected ? 24 : 0,
-            height: 2,
-            color: tokens.colors.accent,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DeferredSection extends StatelessWidget {
-  const _DeferredSection({required this.section});
-
-  final OfficialFleetWorkspaceSection section;
-
-  @override
-  Widget build(BuildContext context) {
-    final (titleKey, bodyKey, icon, color) = switch (section) {
-      OfficialFleetWorkspaceSection.operations => (
-        'officialFleet.section.operations.title',
-        'officialFleet.section.operations.body',
-        StarBridgeIconSemantic.operation,
-        context.tokens.domainColors.command.foreground,
-      ),
-      OfficialFleetWorkspaceSection.channel => (
-        'officialFleet.section.channel.title',
-        'officialFleet.section.channel.body',
-        StarBridgeIconSemantic.room,
-        context.tokens.domainColors.logistics.foreground,
-      ),
-      OfficialFleetWorkspaceSection.broadcasts => (
-        'officialFleet.section.broadcasts.title',
-        'officialFleet.section.broadcasts.body',
-        StarBridgeIconSemantic.notifications,
-        context.tokens.colors.warning,
-      ),
-      _ => throw StateError('Unsupported deferred fleet section.'),
-    };
-    return OfficialFleetStatePanel(
-      key: Key('official-fleet-section-${section.name}'),
-      icon: icon,
-      color: color,
-      titleKey: titleKey,
-      bodyKey: bodyKey,
-    );
-  }
-}
-
-String _sectionLabel(
-  OfficialFleetWorkspaceSection section,
-) => switch (section) {
-  OfficialFleetWorkspaceSection.overview => 'officialFleet.tab.overview',
-  OfficialFleetWorkspaceSection.operations => 'officialFleet.tab.operations',
-  OfficialFleetWorkspaceSection.members => 'officialFleet.tab.members',
-  OfficialFleetWorkspaceSection.channel => 'officialFleet.tab.channel',
-  OfficialFleetWorkspaceSection.ships => 'officialFleet.tab.ships',
-  OfficialFleetWorkspaceSection.broadcasts => 'officialFleet.tab.broadcasts',
-  OfficialFleetWorkspaceSection.profile => 'officialFleet.tab.profile',
-};

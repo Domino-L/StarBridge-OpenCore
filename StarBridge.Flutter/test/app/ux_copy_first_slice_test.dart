@@ -22,7 +22,6 @@ void main() {
       'officialFleet.members.error.contractUnavailable',
       'officialFleet.section.channel.title',
       'officialFleet.section.ships.title',
-      'officialFleet.section.broadcasts.title',
       'officialFleet.profile.body',
       'officialFleet.profile.unavailable.title',
       'officialFleet.profile.unavailable.body',

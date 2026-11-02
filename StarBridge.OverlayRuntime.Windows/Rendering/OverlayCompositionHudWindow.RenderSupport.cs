@@ -43,7 +43,7 @@ internal sealed partial class OverlayCompositionHudWindow
     private bool IsChatBarrageActive()
     {
         return _state is { ShowChat: true, ChatDisplayMode: OverlayChatDisplayMode.FullScreenBarrage } state &&
-               state.AnimationFrameRate != OverlayAnimationFrameRate.Off &&
+               state.ChatBarrageMotionEnabled &&
                state.ChatRows.Any(row => row.IsBarrageActive);
     }
 
@@ -58,6 +58,10 @@ internal sealed partial class OverlayCompositionHudWindow
         return fps > 0 ? Math.Clamp(fps, 1, 120) : 30;
     }
 
+    private int ResolveMotionFramesPerSecond(OverlayAnimationFrameRate frameRate) =>
+        ResolveAnimationFramesPerSecond(IsChatBarrageActive() && _state is { } state
+            ? state.BarrageFrameRate : frameRate);
+
     private static int ResolveStartupTransitionFramesPerSecond(OverlayStartupTransitionFrameRate frameRate)
     {
         return Math.Clamp((int)frameRate, 30, 120);
@@ -66,11 +70,72 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void ResolveDeviceBounds()
     {
-        _left = (int)Math.Floor(_surfaceBounds.Left * _dpiScaleX);
-        _top = (int)Math.Floor(_surfaceBounds.Top * _dpiScaleY);
-        _pixelWidth = (int)Math.Ceiling(Math.Max(1, _surfaceBounds.Width) * _dpiScaleX);
-        _pixelHeight = (int)Math.Ceiling(Math.Max(1, _surfaceBounds.Height) * _dpiScaleY);
+        SetCompositionViewportFields(CaptureCompositionViewport());
     }
+
+    private OverlayCompositionViewport CaptureCompositionViewport() => OverlayCompositionViewport.ShortOfFullScreen(
+        _surfaceBounds.Left, _surfaceBounds.Top, _surfaceBounds.Width, _surfaceBounds.Height, _dpiScaleX, _dpiScaleY);
+
+    private void SetCompositionViewportFields(OverlayCompositionViewport viewport)
+    {
+        _left = viewport.Left;
+        _top = viewport.Top;
+        _pixelWidth = viewport.Width;
+        _pixelHeight = viewport.Height;
+        _renderDpiScaleX = viewport.DpiScaleX;
+        _renderDpiScaleY = viewport.DpiScaleY;
+    }
+
+    // Runs only on the rendering dispatcher, between complete frames. Keep the
+    // HWND/device/appearance episode alive; a fixed-size DComp surface alone is
+    // replaced when its pixel capacity changes.
+    private void ApplyCompositionViewport(OverlayCompositionViewport viewport)
+    {
+        if (_source is null || _compositionDevice is null || _rootVisual is null)
+        {
+            return;
+        }
+
+        var moved = _left != viewport.Left || _top != viewport.Top;
+        var resized = _pixelWidth != viewport.Width || _pixelHeight != viewport.Height;
+        Vortice.DirectComposition.IDCompositionSurface? replacement = null;
+        try
+        {
+            if (resized)
+            {
+                _compositionDevice.CreateSurface((uint)viewport.Width, (uint)viewport.Height,
+                    Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DXGI.AlphaMode.Premultiplied, out replacement).CheckError();
+            }
+
+            // Preserve focus, visibility and menu-constrained Z order.
+            if ((moved || resized) && !SetCompositionWindowBounds(_source.Handle, IntPtr.Zero,
+                viewport.Left, viewport.Top, viewport.Width, viewport.Height, 0x0014u))
+            {
+                throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+            }
+
+            if (replacement is not null)
+            {
+                _rootVisual.SetContent(replacement).CheckError();
+                _compositionDevice.Commit().CheckError();
+                var previous = _surface;
+                _surface = replacement;
+                replacement = null;
+                previous?.Dispose();
+            }
+
+            SetCompositionViewportFields(viewport);
+        }
+        finally
+        {
+            replacement?.Dispose();
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetCompositionWindowBounds(IntPtr hwnd, IntPtr insertAfter,
+        int x, int y, int width, int height, uint flags);
 
     private void ResolveDpiScale()
     {
@@ -102,22 +167,6 @@ internal sealed partial class OverlayCompositionHudWindow
     private OverlayHudPalette BuildPalette()
     {
 
-        if (_settings.Skin == OverlaySkin.LagrangeWeave)
-        {
-            return new OverlayHudPalette(
-                HudColor.FromRgb(8, 11, 19, 218),
-                HudColor.FromRgb(86, 101, 121),
-                HudColor.FromRgb(174, 186, 201),
-                HudColor.FromRgb(229, 235, 241),
-                HudColor.FromRgb(135, 147, 163),
-                HudColor.FromRgb(240, 167, 107),
-                HudColor.FromRgb(130, 197, 162),
-                HudColor.FromRgb(135, 147, 163),
-                FromBrush(_viewModel.CrosshairBrush, HudColor.FromRgb(240, 167, 107, 215)),
-                FromBrush(_viewModel.CrosshairAlertBrush, HudColor.FromRgb(255, 240, 207, 225)),
-                HudColor.FromRgb(3, 5, 10));
-        }
-
         return new OverlayHudPalette(
             FromBrush(_viewModel.PanelBackgroundBrush, HudColor.FromRgb(5, 10, 17, 176)),
             FromBrush(_viewModel.PanelBorderBrush, HudColor.FromRgb(69, 174, 255)),
@@ -140,7 +189,11 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.Status,
                 row.Ship,
                 row.Location,
-                FromBrush(row.StatusBrush, HudColor.FromRgb(142, 187, 220))))
+                FromBrush(row.StatusBrush, HudColor.FromRgb(142, 187, 220)),
+                row.Key,
+                row.Group,
+                row.CueStartedAtUtc,
+                row.Presence))
             .ToArray();
     }
 
@@ -161,7 +214,8 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.BarrageDurationSeconds,
                 row.BarrageLane,
                 row.IsBarrageActive,
-                FromBrush(row.AccentBrush, HudColor.FromRgb(83, 190, 255))))
+                FromBrush(row.AccentBrush, HudColor.FromRgb(83, 190, 255)))
+            { AppearanceActivity = row.AppearanceActivity })
             .ToArray();
     }
 
@@ -170,6 +224,20 @@ internal sealed partial class OverlayCompositionHudWindow
         return brush is SolidColorBrush solid
             ? HudColor.FromRgb(solid.Color.R, solid.Color.G, solid.Color.B, solid.Color.A)
             : fallback;
+    }
+
+    // A one-pixel dark halo under every glyph keeps text readable on bright scenes
+    // without changing the panel look; four offset passes, no blur.
+    private static readonly HudColor TextHaloColor = HudColor.FromRgb(0, 0, 0);
+    private const double TextHaloAlpha = 0.6;
+    private static readonly (float Dx, float Dy)[] TextHaloOffsets = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+    private void DrawTextHalo(ID2D1RenderTarget target, string text, IDWriteTextFormat format,
+        float x, float y, float width, float height, double alpha, DrawTextOptions options)
+    {
+        var halo = GetBrush(target, TextHaloColor, alpha * TextHaloAlpha);
+        foreach (var (dx, dy) in TextHaloOffsets)
+            target.DrawText(text, format, RectF(x + dx, y + dy, width, height), halo, options);
     }
 
     private void DrawText(
@@ -184,10 +252,6 @@ internal sealed partial class OverlayCompositionHudWindow
         double alpha,
         DrawTextOptions options = DrawTextOptions.Clip)
     {
-        if (_lagrangeGlowMaskOnly)
-        {
-            return;
-        }
 
         if (format is null || string.IsNullOrWhiteSpace(text) || width <= 0 || height <= 0 || alpha <= 0)
         {
@@ -195,6 +259,7 @@ internal sealed partial class OverlayCompositionHudWindow
         }
 
         var brush = GetBrush(target, color, alpha);
+        DrawTextHalo(target, text, format, x, y, width, height, alpha, options);
         target.DrawText(text, format, RectF(x, y, width, height), brush, options);
     }
 
@@ -267,6 +332,12 @@ internal sealed partial class OverlayCompositionHudWindow
         }
 
         using var layout = _writeFactory.CreateTextLayout(text, format, width, maxHeight);
+        if (alpha > 0)
+        {
+            var halo = GetBrush(target, TextHaloColor, alpha * TextHaloAlpha);
+            foreach (var (dx, dy) in TextHaloOffsets)
+                target.DrawTextLayout(new Vector2(x + dx, y + dy), layout, halo, DrawTextOptions.Clip);
+        }
         target.DrawTextLayout(new Vector2(x, y), layout, GetBrush(target, color, alpha), DrawTextOptions.Clip);
     }
 

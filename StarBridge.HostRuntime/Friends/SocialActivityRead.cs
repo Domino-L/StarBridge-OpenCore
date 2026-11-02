@@ -27,34 +27,51 @@ internal sealed partial class FriendsReader
         bool community = false)
     {
         var (instance, version) = ParseActivity(payload);
+        // Realtime v1: answer from the pushed stream when connected. The community
+        // projection also needs the relay's presence capability, learned once from
+        // an HTTP response, so the stream takes over only after that is known.
+        if (RealtimeClient is { } realtime && (!community || _communityPresenceEvents is not null))
+        {
+            Dictionary<string, string[]> targets;
+            var credentialOwner = Owner(bearer, "");
+            lock (_targetGate) targets = _conversations.Where(p =>
+                    p.Value.CredentialOwner == credentialOwner && p.Value.Expires >= DateTimeOffset.UtcNow)
+                .GroupBy(p => p.Value.Id, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Select(p => p.Key).ToArray(), StringComparer.Ordinal);
+            realtime.SetDirectMessageTargets(bearer, targets, token);
+            var served = await realtime.TryWaitAsync(bearer, community, instance, version, TimeSpan.FromSeconds(8), token);
+            token.ThrowIfCancellationRequested();
+            if (served is { } cursor)
+            {
+                var hints = realtime.DirectMessageChanges(bearer, instance, version);
+                return community
+                    ? (object)new { schemaVersion = 1, instance = cursor.Instance, version = cursor.Version,
+                        presenceEvents = _communityPresenceEvents == true }
+                    : new { schemaVersion = 1, instance = cursor.Instance, version = cursor.Version,
+                        directMessagesPushHealthy = realtime.DirectMessagesPushHealthy,
+                        directMessagesOnly = hints.Only,
+                        directMessageTargets = hints.Targets };
+            }
+        }
         // Eight-second heartbeat fits the existing 12s HTTP / 15s bridge limits.
         // The server returns immediately on change, not at the heartbeat deadline.
         var resource = community ? "fleets" : "social";
         var path = $"/api/{resource}/activity?instance={Uri.EscapeDataString(instance)}&after={version}&waitSeconds=8";
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(12));
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-        if (response.StatusCode == HttpStatusCode.Unauthorized) throw new AccountBridgeHostException("friends.identity_unavailable");
-        if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("friends.read_unavailable", true);
-        if (response.Content.Headers.ContentLength > 4096) throw Invalid();
-        using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
-        using var buffer = new MemoryStream();
-        var bytes = new byte[1024];
-        int count;
-        while ((count = await stream.ReadAsync(bytes, deadline.Token)) > 0) {
-            if (buffer.Length + count > 4096) throw Invalid();
-            buffer.Write(bytes, 0, count);
-        }
-        using var json = JsonDocument.Parse(buffer.ToArray());
-        RejectDuplicates(json.RootElement);
-        var nextInstance = json.RootElement.GetProperty("instanceId").GetString();
-        var nextVersion = json.RootElement.GetProperty("version").GetInt64();
+        var json = await Realtime.ActivityWaitRead.JsonAsync(_http, _origin, bearer, path,
+            status => status == HttpStatusCode.Unauthorized
+                ? new("friends.identity_unavailable") : new("friends.read_unavailable", true), Invalid, token);
+        RejectDuplicates(json);
+        var nextInstance = json.GetProperty("instanceId").GetString();
+        var nextVersion = json.GetProperty("version").GetInt64();
         if (!Guid.TryParseExact(nextInstance, "N", out _) || nextVersion < 0) throw Invalid();
+        var presence = json.TryGetProperty("presenceEvents", out var supports) && supports.ValueKind == JsonValueKind.True;
+        if (community) _communityPresenceEvents = presence;
         return community
             ? (object)new { schemaVersion = 1, instance = nextInstance, version = nextVersion,
-                presenceEvents = json.RootElement.TryGetProperty("presenceEvents", out var supports) && supports.ValueKind == JsonValueKind.True }
-            : new { schemaVersion = 1, instance = nextInstance, version = nextVersion };
+                presenceEvents = presence }
+            : new { schemaVersion = 1, instance = nextInstance, version = nextVersion,
+                directMessagesPushHealthy = false };
     }
+
+    private bool? _communityPresenceEvents;
 }

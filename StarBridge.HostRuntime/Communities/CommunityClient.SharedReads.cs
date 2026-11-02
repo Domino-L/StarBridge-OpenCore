@@ -33,7 +33,13 @@ internal sealed partial class CommunityClient
             read.Consumers++;
         }
         if (start) _ = CompleteMembershipRead(key, read, bearer);
-        try { return await read.Result.Task.WaitAsync(token); }
+        try {
+            var rows = await read.Result.Task.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
+            return rows;
+        }
+        catch (Exception) when (token.IsCancellationRequested)
+        { throw new OperationCanceledException(token); }
         finally
         {
             var cancel = false;
@@ -55,7 +61,7 @@ internal sealed partial class CommunityClient
         Exception? failure = null;
         try
         {
-            rows = await WpfS2Membership(bearer, read.Cancellation.Token);
+            rows = await WpfS2Membership(bearer, read.Cancellation.Token, classifyReadFailure: true);
             read.Cancellation.Token.ThrowIfCancellationRequested();
         }
         catch (Exception error) { failure = error; }

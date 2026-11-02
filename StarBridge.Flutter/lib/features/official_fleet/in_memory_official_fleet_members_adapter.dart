@@ -3,12 +3,20 @@ import 'official_fleet_members_port.dart';
 
 final class InMemoryOfficialFleetMembersAdapter
     implements OfficialFleetMembersPort {
-  const InMemoryOfficialFleetMembersAdapter(this._members);
+  const InMemoryOfficialFleetMembersAdapter(
+    this._members, {
+    this.runtimeCapabilities =
+        const OfficialFleetMemberRuntimeCapabilities.none(),
+  });
 
   factory InMemoryOfficialFleetMembersAdapter.forReview() =>
-      const InMemoryOfficialFleetMembersAdapter(_reviewMembers);
+      const InMemoryOfficialFleetMembersAdapter(
+        _reviewMembers,
+        runtimeCapabilities: OfficialFleetMemberRuntimeCapabilities.all(),
+      );
 
   final List<OfficialFleetMember> _members;
+  final OfficialFleetMemberRuntimeCapabilities runtimeCapabilities;
 
   @override
   Stream<void> get invalidations => const Stream.empty();
@@ -17,6 +25,13 @@ final class InMemoryOfficialFleetMembersAdapter
   Future<OfficialFleetMemberDirectorySnapshot> read(
     OfficialFleetMemberDirectoryQuery query,
   ) async {
+    if (query.filter != OfficialFleetMemberFilter.all &&
+        !runtimeCapabilities.presence) {
+      return OfficialFleetMemberDirectorySnapshot.unavailable(
+        query: query,
+        failureKey: 'officialFleet.members.error.unavailable',
+      );
+    }
     final normalizedSearch = query.search.toLowerCase();
     final filtered =
         _members.where((member) {
@@ -30,10 +45,11 @@ final class InMemoryOfficialFleetMembersAdapter
           final matchesFilter = switch (query.filter) {
             OfficialFleetMemberFilter.all => true,
             OfficialFleetMemberFilter.online =>
-              member.presence == OfficialFleetMemberPresence.online ||
-                  member.presence == OfficialFleetMemberPresence.inGame,
+              member.publicPresence == OfficialFleetMemberPresence.online ||
+                  member.publicPresence == OfficialFleetMemberPresence.away ||
+                  member.publicPresence == OfficialFleetMemberPresence.inGame,
             OfficialFleetMemberFilter.inGame =>
-              member.presence == OfficialFleetMemberPresence.inGame,
+              member.publicPresence == OfficialFleetMemberPresence.inGame,
           };
           return matchesSearch && matchesFilter;
         }).toList()..sort((left, right) {
@@ -56,21 +72,35 @@ final class InMemoryOfficialFleetMembersAdapter
       query: query,
       members: pageMembers,
       totalCount: filtered.length,
-      onlineCount: _members
-          .where(
-            (member) =>
-                member.presence == OfficialFleetMemberPresence.online ||
-                member.presence == OfficialFleetMemberPresence.inGame,
-          )
-          .length,
-      inGameCount: _members
-          .where(
-            (member) => member.presence == OfficialFleetMemberPresence.inGame,
-          )
-          .length,
+      onlineCount: runtimeCapabilities.onlineCount
+          ? _members
+                .where(
+                  (member) =>
+                      member.publicPresence ==
+                          OfficialFleetMemberPresence.online ||
+                      member.publicPresence ==
+                          OfficialFleetMemberPresence.away ||
+                      member.publicPresence ==
+                          OfficialFleetMemberPresence.inGame,
+                )
+                .length
+          : null,
+      inGameCount: runtimeCapabilities.inGameCount
+          ? _members
+                .where(
+                  (member) =>
+                      member.publicPresence ==
+                      OfficialFleetMemberPresence.inGame,
+                )
+                .length
+          : null,
       totalPages: totalPages,
-      coverage: OfficialFleetRosterCoverage.completeOfficialRoster,
-      supportedFilters: OfficialFleetMemberFilter.values.toSet(),
+      // Production lists SCM-registered members only (PR #13 closed).
+      coverage: OfficialFleetRosterCoverage.scmRegisteredMembers,
+      runtimeCapabilities: runtimeCapabilities,
+      supportedFilters: runtimeCapabilities.presence
+          ? OfficialFleetMemberFilter.values.toSet()
+          : const {OfficialFleetMemberFilter.all},
     );
   }
 
@@ -90,6 +120,7 @@ const _reviewMembers = <OfficialFleetMember>[
     ship: OfficialFleetMemberField.value('克拉克'),
     location: OfficialFleetMemberField.value('新巴贝奇'),
     starBridgeConnected: true,
+    identityState: OfficialFleetMemberIdentityState.starBridge,
   ),
   OfficialFleetMember(
     memberRef: 'rsi:aurora-2800',
@@ -102,6 +133,7 @@ const _reviewMembers = <OfficialFleetMember>[
     ship: OfficialFleetMemberField(OfficialFleetMemberFieldState.notInGame),
     location: OfficialFleetMemberField(OfficialFleetMemberFieldState.notInGame),
     starBridgeConnected: true,
+    identityState: OfficialFleetMemberIdentityState.starBridge,
   ),
   OfficialFleetMember(
     memberRef: 'rsi:polaris-2801',
@@ -114,6 +146,7 @@ const _reviewMembers = <OfficialFleetMember>[
     ship: OfficialFleetMemberField(OfficialFleetMemberFieldState.notShared),
     location: OfficialFleetMemberField(OfficialFleetMemberFieldState.notShared),
     starBridgeConnected: true,
+    identityState: OfficialFleetMemberIdentityState.starBridge,
   ),
   OfficialFleetMember(
     memberRef: 'rsi:voyager-2802',
@@ -126,6 +159,7 @@ const _reviewMembers = <OfficialFleetMember>[
     ship: OfficialFleetMemberField.value('秃鹫'),
     location: OfficialFleetMemberField.value('赫斯顿近地轨道'),
     starBridgeConnected: true,
+    identityState: OfficialFleetMemberIdentityState.starBridge,
     arrivalPending: true,
   ),
   OfficialFleetMember(
@@ -143,5 +177,6 @@ const _reviewMembers = <OfficialFleetMember>[
       OfficialFleetMemberFieldState.notConnected,
     ),
     starBridgeConnected: false,
+    identityState: OfficialFleetMemberIdentityState.scm,
   ),
 ];

@@ -78,7 +78,8 @@ void main() {
               builder: (context) => RoomMembersPanel(
                 room: module.selectedRoom!,
                 serverTime: module.directory!.serverTime,
-                onRemove: (member) => removeRoomMember(context, module, member),
+                onRemove: (member, source) =>
+                    removeRoomMember(context, module, member, source: source),
               ),
             ),
           ),

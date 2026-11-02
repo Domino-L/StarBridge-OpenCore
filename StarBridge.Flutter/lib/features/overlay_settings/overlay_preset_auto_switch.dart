@@ -94,6 +94,7 @@ final class OverlayPresetAutoSwitch {
       final binding = policy.binding;
       return source.startsWith('room:') &&
               binding.mode == OverlaySourceMode.room ||
+          source == 'fleet' && binding.mode == OverlaySourceMode.fleet ||
           source.startsWith('org:') &&
               binding.mode == OverlaySourceMode.community &&
               binding.ownerKey == owner &&

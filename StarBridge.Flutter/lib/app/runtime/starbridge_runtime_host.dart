@@ -9,13 +9,9 @@ import '../routing/exit_application_intent.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../features/account/in_memory_account_adapter.dart';
 import '../../features/account/account_module.dart';
 import '../../features/communities/community_hangar_sharing_port.dart';
 import '../../features/overlay_settings/overlay_settings_feature.dart';
-import '../../features/personal_profile/in_memory_personal_profile_adapter.dart';
-import '../../features/official_fleet/in_memory_official_fleet_adapter.dart';
-import '../../features/official_fleet/in_memory_official_fleet_members_adapter.dart';
 import '../../platform/host/native_host_connector.dart';
 import '../../platform/host/native_host_session_connector.dart';
 import '../../platform/host/windows_native_host_platform.dart';
@@ -23,28 +19,32 @@ import '../../platform/lifecycle/application_lifecycle_port.dart';
 import '../../platform/lifecycle/method_channel_application_lifecycle.dart';
 import '../../platform/window/method_channel_window_chrome.dart';
 import '../../platform/window/window_chrome_port.dart';
-import '../bootstrap/shell_review_configuration.dart';
 import '../bootstrap/starbridge_app.dart';
 import '../composition/app_composition.dart';
 import '../localization/app_strings.dart';
+import '../preferences/app_preferences.dart';
 import '../preferences/app_preferences_module.dart';
 import '../preferences/app_preferences_projection.dart';
 import '../preferences/bridge_app_preferences.dart';
-import '../preferences/in_memory_app_preferences.dart';
-import '../shell/chrome/in_memory_shell_chrome.dart';
 import '../startup/startup_session.dart';
+import '../startup/startup_first_content.dart';
+import '../startup/startup_readiness_binding.dart';
+import 'application_behavior_prompt.dart';
 import 'application_lifecycle_prompts.dart';
 import 'example_scene_control.dart';
+import 'runtime_example_composition.dart';
 import 'startup_prompt_queue.dart';
 import 'first_use_privacy_flow.dart';
 import 'test_build_notice_flow.dart';
 import 'update_startup_receipt.dart';
 import 'application_update_flow.dart';
+import 'menu_tool_page_navigation.dart';
 import '../routing/open_destination_intent.dart';
 import '../../features/settings/local_privacy_page.dart';
-import '../../features/settings/bridge_data_location_result.dart';
-import '../../features/settings/data_location_copy.dart';
+import 'storage_result_flow.dart';
+import 'storage_result_retry.dart';
 import '../../platform/bridge/bridge_client_session.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class StarBridgeRuntimeHost extends StatefulWidget {
   const StarBridgeRuntimeHost({
@@ -77,22 +77,34 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   StreamSubscription<void>? _closeRequestSubscription;
   late final AppPreferencesModule _preferences;
   late AppComposition _composition;
-  AccountModule? _startupAccount;
+  StartupReadinessBinding? _startupReads;
   bool _exampleScene = false;
   bool _disposed = false;
   bool _hasConnectedHost = false;
   int _hostRevision = 0;
   Future<void>? _connectionAttempt;
   Timer? _reconnectTimer;
-  Timer? _storageResultRetry;
+  late final _storageResultRetry = StorageResultRetry(
+    current: (revision) => !_disposed && revision == _hostRevision,
+  );
+  late final _storageResult = StorageMigrationResultFlow(
+    retry: _storageResultRetry,
+    prompts: _prompts,
+    isCurrent: (revision) => !_disposed && revision == _hostRevision,
+    ready: () => _promptReady,
+    context: () => _navigatorKey.currentContext,
+  );
   bool _handlingCloseRequest = false;
   bool _startupChoiceVisible = false;
+  // "稍后再说": ask again on the next launch, not again in this session.
+  bool _behaviorPromptDeferred = false;
   late final StartupPromptQueue _prompts;
   FirstUsePrivacyFlow? _privacyFlow;
   TestBuildNoticeFlow? _noticeFlow;
   ApplicationUpdateFlow? _updateFlow;
   final _shownUpdateVersions = <String>{};
   final _navigationRequests = ValueNotifier<OpenDestinationIntent?>(null);
+  late final VoidCallback _unbindToolPages;
 
   bool get _promptReady =>
       !_disposed &&
@@ -141,12 +153,22 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       systemLocales: WidgetsBinding.instance.platformDispatcher.locales,
     );
     _composition = _createProductComposition();
+    _menuLifetime.execHangarRequests.addListener(_openMenuExecHangar);
+    _unbindToolPages = bindMenuToolPages(_menuLifetime, _navigationRequests);
     _preferences.projection.addListener(_handlePreferencesChanged);
     _startup.addListener(_handleStartupChanged);
     _closeRequestSubscription = _applicationLifecycle.closeRequests.listen(
       (_) => unawaited(_handleCloseRequest()),
     );
     _requestHostConnection();
+  }
+
+  void _openMenuExecHangar() {
+    if (!_disposed && mounted) {
+      _navigationRequests.value = const OpenDestinationIntent(
+        '/tools/exec-hangar',
+      );
+    }
   }
 
   void _handlePreferencesChanged() {
@@ -160,20 +182,21 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   }
 
   void _observeStartupAccount(AccountModule? account) {
-    _startupAccount?.projection.removeListener(_handleStartupAccountChanged);
-    _startupAccount = account;
-    account?.projection.addListener(_handleStartupAccountChanged);
-  }
-
-  void _handleStartupAccountChanged() {
-    if (_disposed ||
-        _exampleScene ||
-        !_hasConnectedHost ||
-        _startup.complete ||
-        !identical(_startupAccount, _composition.account)) {
-      return;
-    }
-    _finishStartupPreparation();
+    _startupReads?.dispose();
+    _startupReads = account == null
+        ? null
+        : StartupReadinessBinding(
+            account: account,
+            mode: _composition.manualPresence?.connectionMode,
+            firstContent: startupFirstContent(_composition),
+            current: () =>
+                !_disposed &&
+                !_exampleScene &&
+                _hasConnectedHost &&
+                !_startup.complete &&
+                identical(account, _composition.account),
+            onChanged: _finishStartupPreparation,
+          );
   }
 
   void _syncApplicationLifecycle() {
@@ -192,6 +215,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     );
   }
 
+  late final _firstUseHold = FirstUseChoiceHold(_scheduleStartupChoice);
   void _scheduleStartupChoice() {
     _noticeFlow?.wake();
     _privacyFlow?.wake();
@@ -205,7 +229,9 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       return;
     }
     final confirmed = _preferences.projection.value.confirmed;
-    if (confirmed == null || confirmed.applicationBehavior.startupChoiceMade) {
+    if (confirmed == null ||
+        _behaviorPromptDeferred ||
+        _behaviorChosen(confirmed.applicationBehavior)) {
       return;
     }
     _prompts.enqueue(
@@ -214,17 +240,21 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       eligible: () =>
           _promptReady &&
           !(_noticeFlow?.blocksPrompts ?? false) &&
+          !_firstUseHold.active &&
           !_startupChoiceVisible &&
           !(_privacyFlow?.blocksOptionalPrompt ?? false) &&
-          _preferences
-                  .projection
-                  .value
-                  .confirmed
-                  ?.applicationBehavior
-                  .startupChoiceMade ==
-              false,
+          !_behaviorPromptDeferred &&
+          _behaviorPending(),
       show: _showStartupChoice,
     );
+  }
+
+  static bool _behaviorChosen(ApplicationBehaviorPreferences behavior) =>
+      behavior.startupChoiceMade && behavior.closeBehaviorChoiceMade;
+  bool _behaviorPending() {
+    final behavior =
+        _preferences.projection.value.confirmed?.applicationBehavior;
+    return behavior != null && !_behaviorChosen(behavior);
   }
 
   Future<void> _showStartupChoice() async {
@@ -240,7 +270,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     final confirmed = _preferences.projection.value.confirmed;
     if (navigatorContext == null ||
         confirmed == null ||
-        confirmed.applicationBehavior.startupChoiceMade) {
+        _behaviorPromptDeferred ||
+        _behaviorChosen(confirmed.applicationBehavior)) {
       if (navigatorContext == null && confirmed != null) {
         _scheduleStartupChoice();
       }
@@ -249,22 +280,12 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
 
     _startupChoiceVisible = true;
     try {
-      await showFirstStartupChoicePrompt(
+      // Existing users: one prompt for whichever of the two was never chosen.
+      final saved = await showApplicationBehaviorPrompt(
         navigatorContext,
-        onSave: (selected) async {
-          final latest = _preferences.projection.value.confirmed;
-          return latest != null &&
-              await _preferences.setApplicationBehavior(
-                latest.applicationBehavior
-                    .copyWith(
-                      launchAtStartup: selected,
-                      startMinimized: selected,
-                      startupChoiceMade: true,
-                    )
-                    .normalize(),
-              );
-        },
+        _preferences,
       );
+      if (!saved) _behaviorPromptDeferred = true;
     } finally {
       _startupChoiceVisible = false;
     }
@@ -272,6 +293,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
 
   Future<void> _handleCloseRequest({
     bool completelyExit = false,
+    bool decliningTerms = false,
     Future<bool> Function()? beforeExit,
   }) async {
     if (_handlingCloseRequest || !mounted) {
@@ -279,7 +301,10 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     }
     _handlingCloseRequest = true;
     try {
-      if (_prompts.hasBlockingRoute) {
+      if (_prompts.hasBlockingRoute &&
+          !(decliningTerms &&
+              completelyExit &&
+              _noticeFlow?.ownsCurrentRoute == true)) {
         await _applicationLifecycle.cancelCloseRequest();
         return;
       }
@@ -354,7 +379,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
           await _applicationLifecycle.cancelCloseRequest();
           if (mounted && navigatorContext.mounted) {
             ScaffoldMessenger.of(navigatorContext).showSnackBar(
-              SnackBar(
+              starBridgeTimedSnackBar(
                 content: Text(
                   AppStrings.of(navigatorContext)
                       .text('settings.lifecycle.close.saveFailed'),
@@ -391,9 +416,11 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         ExitApplicationIntent: CallbackAction<ExitApplicationIntent>(
           onInvoke: (intent) {
             unawaited(
-              _handleCloseRequest(
-                completelyExit: true,
-                beforeExit: intent.beforeExit,
+              intent.runWithSource(
+                () => _handleCloseRequest(
+                  completelyExit: true,
+                  beforeExit: intent.beforeExit,
+                ),
               ),
             );
             return null;
@@ -401,14 +428,19 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         ),
       },
       child: StarBridgeApp(
+        taskbarAttentionScope: _menuLifetime.taskbarAttentionScope,
         key: ObjectKey(_composition),
         navigatorKey: _navigatorKey,
         navigatorObservers: [_prompts],
         promptQueue: _prompts,
         canPresentIdentityPrompt: () =>
             _promptReady && !(_noticeFlow?.blocksPrompts ?? false),
+        usageTermsPending: _noticeFlow?.blocksPrompts ?? false,
+        onFirstUseOwnsDeviceChoices: _firstUseHold.set,
         navigationRequests: _navigationRequests,
         composition: _composition,
+        // 调试用：STARBRIDGE_HOLIDAY_PREVIEW=xmas 启动即预览圣诞外观，不用改系统日期。
+        initialHolidayPreview: widget.environment['STARBRIDGE_HOLIDAY_PREVIEW'],
         onRetryConnection: _retryHostConnection,
         startupSession: _startup,
         onRetryStartup: _retryStartup,
@@ -492,13 +524,12 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       return;
     }
     final revision = _hostRevision;
-    final account = _composition.account;
     if (_preferences.projection.value.phase != AppPreferencesPhase.ready) {
       _startup.readingPreferences();
       await _preferences.retry();
     } else {
       _startup.readingAccount();
-      await account.refresh();
+      await _startupReads?.retry();
     }
     if (!_disposed &&
         !_exampleScene &&
@@ -508,103 +539,13 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     }
   }
 
-  void _finishStartupPreparation() {
-    if (_preferences.projection.value.phase == AppPreferencesPhase.ready) {
-      _startup.resolveAccount(_composition.account.projection.value);
-    } else {
-      _startup.preferencesUnavailable();
-    }
-  }
-
-  void _readStorageMigrationResult(BridgeClientSession session, int revision) {
-    if (_disposed || revision != _hostRevision) return;
-    if (!session.hostCapabilities.contains('dataLocation.getMigrationResult') ||
-        !session.hostCapabilities.contains(
-          'dataLocation.acknowledgeMigrationResult',
-        )) {
-      return;
-    }
-    unawaited(() async {
-      DataLocationMigrationResult? result;
-      try {
-        result = await BridgeDataLocationResult(session).read();
-      } on Object {
-        _retryStorageResult(
-          revision,
-          () => _readStorageMigrationResult(session, revision),
-        );
-        return;
-      }
-      if (result == null || _disposed || revision != _hostRevision) return;
-      final migrationResult = result;
-      final key = 'storage-migration-result-${migrationResult.nonce}';
-      _prompts.enqueue(
-        key,
-        priority: 20,
-        eligible: () => _promptReady && revision == _hostRevision && !_disposed,
-        show: () async {
-          final context = _navigatorKey.currentContext;
-          if (context == null || !context.mounted) {
-            _retryStorageResult(
-              revision,
-              () => _readStorageMigrationResult(session, revision),
-            );
-            return;
-          }
-          final controller = ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            SnackBar(
-              content: Text(
-                dataLocationCopy(
-                  context,
-                  migrationResult.state == 'migrated'
-                      ? 'migrationCompleted'
-                      : 'migrationFailed',
-                ),
-              ),
-            ),
-          );
-          if (controller == null) {
-            _retryStorageResult(
-              revision,
-              () => _readStorageMigrationResult(session, revision),
-            );
-            return;
-          }
-          await _acknowledgeStorageResult(
-            session,
-            revision,
-            migrationResult.nonce,
-          );
-          await controller.closed;
-        },
-      );
-    }());
-  }
-
-  void _retryStorageResult(int revision, void Function() retry) {
-    if (_disposed || revision != _hostRevision) return;
-    _storageResultRetry?.cancel();
-    _storageResultRetry = Timer(const Duration(seconds: 5), () {
-      if (!_disposed && revision == _hostRevision) retry();
-    });
-  }
-
-  Future<void> _acknowledgeStorageResult(
-    BridgeClientSession session,
-    int revision,
-    String nonce,
-  ) async {
-    if (_disposed || revision != _hostRevision) return;
-    try {
-      await BridgeDataLocationResult(session).acknowledge(nonce);
-    } on Object {
-      // Retry only the receipt: the user has already seen the result.
-      _retryStorageResult(
-        revision,
-        () => unawaited(_acknowledgeStorageResult(session, revision, nonce)),
-      );
-    }
-  }
+  void _finishStartupPreparation() => _startup.resolvePreparation(
+    preferencesConfirmed:
+        _preferences.projection.value.phase == AppPreferencesPhase.ready,
+    account: _composition.account.projection.value,
+    connectionMode: _composition.manualPresence?.connectionMode,
+    firstContentSettled: _startupReads?.firstContentSettled ?? true,
+  );
 
   Future<void> _connectHost(int revision) async {
     try {
@@ -644,8 +585,14 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
               session: lease.session,
               queue: _prompts,
               ready: () => _promptReady,
-              onExit: () => _handleCloseRequest(completelyExit: true),
-              onChanged: _scheduleStartupChoice,
+              onExit: () => _handleCloseRequest(
+                completelyExit: true,
+                decliningTerms: true,
+              ),
+              onChanged: () {
+                if (mounted && !_disposed) setState(() {});
+                _scheduleStartupChoice();
+              },
             )
           : null;
       _noticeFlow?.wake();
@@ -660,7 +607,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         shownVersions: _shownUpdateVersions,
       );
       _updateFlow?.wake();
-      _readStorageMigrationResult(lease.session, revision);
+      _storageResult.read(lease.session, revision);
       if (lease.session.hostCapabilities.contains(
         'applicationUpdates.firstFrameReady',
       )) {
@@ -757,33 +704,24 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     );
   }
 
-  AppComposition _createExampleComposition() {
-    final review = ShellReviewConfiguration.forExampleScene(widget.environment);
-    return AppComposition.forShellReview(
-      menuLifetime: _menuLifetime,
-      windowChrome: _windowChrome,
-      preferences: InMemoryAppPreferences(initial: review.preferences),
-      shellChrome: InMemoryShellChrome(initial: review.projection),
-      accountPort: InMemoryAccountAdapter.forReview(review.accountState),
-      personalProfilePort: InMemoryPersonalProfileAdapter.forReview(
-        signedIn: review.accountState != AccountReviewState.signedOut,
-      ),
-      officialFleetPort: InMemoryOfficialFleetAdapter.forReview(
-        signedIn: review.accountState != AccountReviewState.signedOut,
-      ),
-      officialFleetMembersPort: InMemoryOfficialFleetMembersAdapter.forReview(),
-    );
-  }
+  AppComposition _createExampleComposition() => createRuntimeExampleComposition(
+    environment: widget.environment,
+    menuLifetime: _menuLifetime,
+    windowChrome: _windowChrome,
+  );
 
   @override
   void dispose() {
     _disposed = true;
     _updateFlow?.dispose();
     _noticeFlow?.dispose();
+    _unbindToolPages();
     _navigationRequests.dispose();
+    _menuLifetime.execHangarRequests.removeListener(_openMenuExecHangar);
+    _menuLifetime.execHangarRequests.dispose();
     _privacyFlow?.dispose();
     _prompts.dispose();
-    _storageResultRetry?.cancel();
+    _storageResultRetry.dispose();
     _hostRevision++;
     _reconnectTimer?.cancel();
     _preferences.projection.removeListener(_handlePreferencesChanged);

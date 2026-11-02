@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "kind": "portable-actual-bridge-author-fixture",
+  "syntheticOnly": true,
+  "containsPersonalData": false,
+  "containsCredentials": false,
+  "containsThirdPartyMedia": false,
+  "producer": "Actual embedded Java P1 fixtures -> actual Relay POST/content auth -> actual CommunityClient/Account -> actual BridgeEnvelope.Response and BridgeWireCodec",
+  "actualRelayContextVersion": 0,
+  "capableContext1": "Explicit future-Relay protocol fixture only; no complete capability advertised",
+  "hintVariants": "Only bool true/missing/string hint field synthetically altered after real HTTP/P1; actual a page emits false",
+  "avatar": "Actual P1 synthetic BufferedImage-derived PNG thumbnail; no real person media",
+  "p1Producer": {
+    "path": "src/test/java/cn/iocoder/yudao/starbridge/personalprofile/AuthorProjectionWireProducerTest.java",
+    "sha256": "346EAFD605B6318E8B530B9BC65CEE35ECB80C93DFA518C22E01EFEEF170FC57",
+    "method": "exportActualPersonalProfileVisitorControllerResponses",
+    "pipeline": [
+      "MockMvc",
+      "UserTokenAuthenticationFilter",
+      "RelayBusinessProfileController",
+      "OfficialFleetAuthorIdentityService",
+      "PersonalProfileVisitorService"
+    ],
+    "productInputsSha256": "AD1050A353529E36E4F07CF93128319056CB9687DF8447E9A10B44DBDA8C887A",
+    "p1FrozenReceiptSha256": "4887729BE1B428C99468079BDE71B2E604874678B2F0CF1C180602EDF058509B",
+    "products": [
+      {
+        "path": "src/main/java/cn/iocoder/yudao/starbridge/personalprofile/OfficialFleetAuthorIdentityService.java",
+        "sha256": "1C8046426953F3C6501D130F7A9A7834633284DE4FB58F3123B7DE2C4F7AE44C"
+      },
+      {
+        "path": "src/main/java/cn/iocoder/yudao/starbridge/security/UserTokenAuthenticationFilter.java",
+        "sha256": "B0691ED468B6F55C6EEF3BD75AD1927FAB420DEBA9717DCB578E939FC9006210"
+      },
+      {
+        "path": "src/main/java/cn/iocoder/yudao/starbridge/web/RelayBusinessProfileController.java",
+        "sha256": "F2AA369C07906A0165C8C17AA96CAD2163E9B28A5811F0EB7D11B939864E0669"
+      }
+    ]
+  },
+  "p1SourceRepository": "SCMStarbridge-official-fleet-integration",
+  "fixtureLicense": "StarBridge-authored synthetic regression data; no game-derived data or external media",
+  "originalP1ProvenanceSha256": "28182304E4681C3F64EA79FF2BC71680E0ECFD8601077EC1FCF13EDDB4FD0AE1",
+  "originalBridgeProvenanceSha256": "C01C1F6EAB64F6F7221539956BD1673727C55DB77D8EC1050250B720BF97E57E",
+  "fixtureClock": "2026-10-17T12:00:00Z",
+  "staggeredObservation": "Second row observed at +3s and valid until +8s; each original deadline is <=5s from its own observation.",
+  "controlledHarnessVariants": "Worker tests explicitly align opaque addresses across independently minted current/empty samples; original raw bytes remain unchanged. Future-context1 and hint variants are not claimed as current production capability.",
+  "fixtures": [
+    {
+      "file": "ann-detail-hint-missing.frame",
+      "sha256": "6AE2BF27BC057ACDADFA13A81DBB38A23D8C6FAF9EFD94C803878068BD8F9762",
+      "bytes": 1187
+    },
+    {
+      "file": "ann-detail-hint-missing.payload.json",
+      "sha256": "4AF54DBB040D0F6D5CE146CB9CFD743492D8C46F99B452C1CBD0BBB5F790B048",
+      "bytes": 914
+    },
+    {
+      "file": "ann-detail-hint-string.frame",
+      "sha256": "F08B3AF86F06B7AB093C67BFA258BD4C3E40AB0131C59A6E5ECC522D1CDDB992",
+      "bytes": 1186
+    },
+    {
+      "file": "ann-detail-hint-string.payload.json",
+      "sha256": "4AF54DBB040D0F6D5CE146CB9CFD743492D8C46F99B452C1CBD0BBB5F790B048",
+      "bytes": 914
+    },
+    {
+      "file": "ann-detail-hint-true.frame",
+      "sha256": "CA80B6966D1BABD3D378C4C077EDBD3ED89D84A6CF19874FBA2875555C5DC886",
+      "bytes": 11314
+    },
+    {
+      "file": "ann-detail-hint-true.payload.json",
+      "sha256": "D44CEB7BE5A4549DDE3E1D5C6A51D874D9E1B28F23A27FB0F23F6BBA3227A62D",
+      "bytes": 11024
+    },
+    {
+      "file": "ann-detail-late-per-row-expiry.frame",
+      "sha256": "759CB2F72D037ED0BE4DFAF765DCD9CC8D04FD48EA224119189E5AC8417DE3A9",
+      "bytes": 6262
+    },
+    {
+      "file": "ann-detail-late-per-row-expiry.payload.json",
+      "sha256": "92A2F53336D82164E57635A890DD4172466D331C03FBF97DA755185AAD1205F2",
+      "bytes": 5972
+    },
+    {
+      "file": "ann-mixed-current.frame",
+      "sha256": "E6F4490D93BC3401B7937586C0F072C115FD25573A810CD088D0B7154BDDC70C",
+      "bytes": 2440
+    },
+    {
+      "file": "ann-mixed-current.payload.json",
+      "sha256": "617D444A96C81E78F90827114D1DD83978C5BCA22016EB3E67CE02DE2E961094",
+      "bytes": 2163
+    },
+    {
+      "file": "attachment-first.frame",
+      "sha256": "E4AE97B4785831828871356722A865178922015F1A820A9AA99ECA4B165EDF84",
+      "bytes": 263151
+    },
+    {
+      "file": "attachment-first.payload.json",
+      "sha256": "0BB9B162CCDC63B4416AAAAF236559188A0F45892A07B168E100B7B17AA3A284",
+      "bytes": 262875
+    },
+    {
+      "file": "attachment-neutral-1.frame",
+      "sha256": "592F24FD21048C0F6A9817502DB54BE20147BA8FD9016F9E057ACAE849730C8A",
+      "bytes": 262960
+    },
+    {
+      "file": "attachment-neutral-1.payload.json",
+      "sha256": "0579F35BD173F66298E40CCDA9730504474CB7153EBEE56535313AFE315DA127",
+      "bytes": 262690
+    },
+    {
+      "file": "attachment-neutral-2.frame",
+      "sha256": "8DE00C981F9D61BA19CC59501335E1A48F0A01437DDD91EC643E57741F16D549",
+      "bytes": 262965
+    },
+    {
+      "file": "attachment-neutral-2.payload.json",
+      "sha256": "3D87C3A52AA0980F586C1EC71904A277B53ABA8F25627D427EA335C9D32FF54A",
+      "bytes": 262695
+    },
+    {
+      "file": "attachment-neutral-3.frame",
+      "sha256": "82006351BE6706D0EE44681F9B8DD6C85322FCEA2A439FC3B58E5DCB6F56CD81",
+      "bytes": 262965
+    },
+    {
+      "file": "attachment-neutral-3.payload.json",
+      "sha256": "C2566FFE5D2931BDB19EE4FFD696C8C4485CE40EFB9886D16A75A6A337D93383",
+      "bytes": 262695
+    },
+    {
+      "file": "attachment-neutral-4.frame",
+      "sha256": "DFB4CC393CAFAAA4CC2497EE1A740FC1E138D11E72F292F193872ADEAEE54E5C",
+      "bytes": 1035
+    },
+    {
+      "file": "attachment-neutral-4.payload.json",
+      "sha256": "E2D686402DC0B74A440A6D7305F73EBAA19750F7BEF47576976E0A64153046BB",
+      "bytes": 765
+    },
+    {
+      "file": "chat-current-visible.frame",
+      "sha256": "15473ACE6771BBD7F421230758BE201E6CF89BC7E894600A0F89B1FF83C55F11",
+      "bytes": 1281
+    },
+    {
+      "file": "chat-current-visible.payload.json",
+      "sha256": "C0AB042958D93066B49F55EF6F895A8B59B6524B1EE20ACBAD411C892C9A81C8",
+      "bytes": 1001
+    },
+    {
+      "file": "chat-empty-page-observed-update.frame",
+      "sha256": "566C55C8E00FFCA12DFB0299EDE5E4E6EE29411B5FF5158D6FC12284D1B84264",
+      "bytes": 1113
+    },
+    {
+      "file": "chat-empty-page-observed-update.payload.json",
+      "sha256": "8919FB1F2D95186B4858C3592E2B696CFCFB9817C33C661264C669B376967C39",
+      "bytes": 822
+    },
+    {
+      "file": "chat-hint-missing.frame",
+      "sha256": "DDE793362195AEAE2DD75D73158424FF1C0DF0CFF50AD0BEC918A3A5111D583C",
+      "bytes": 1085
+    },
+    {
+      "file": "chat-hint-missing.payload.json",
+      "sha256": "37056CDA677526DC8FCF5EFB5EF74A48217E42B32A281BC8CCDF72EE86FF03D7",
+      "bytes": 818
+    },
+    {
+      "file": "chat-hint-string.frame",
+      "sha256": "B57F70140605DBA470FB01D61B8D3EA867EF98E1A8B99DF4E4B874DAC9F0277C",
+      "bytes": 1084
+    },
+    {
+      "file": "chat-hint-string.payload.json",
+      "sha256": "37056CDA677526DC8FCF5EFB5EF74A48217E42B32A281BC8CCDF72EE86FF03D7",
+      "bytes": 818
+    },
+    {
+      "file": "chat-hint-true.frame",
+      "sha256": "EB01F9DDB2DEB611E7022C2F48AEBF30A32B6977CF97BDC86628307DB285E628",
+      "bytes": 1276
+    },
+    {
+      "file": "chat-hint-true.payload.json",
+      "sha256": "B16794D2442605F81BAE6878C220377A3215964EDAB894BB9A51713C805CBFD5",
+      "bytes": 1002
+    },
+    {
+      "file": "host-max-ann.frame",
+      "sha256": "0F02B2C697417D4C38B30F1435FD9769968D94A6B15481A5471956A5F766EC55",
+      "bytes": 253650
+    },
+    {
+      "file": "host-max-ann.payload.json",
+      "sha256": "E641124B118021AEDAD207B63862596B41BA0EB6191BA39F5C823C52F6613229",
+      "bytes": 252548
+    },
+    {
+      "file": "host-max-chat.frame",
+      "sha256": "7909DDC651534C949E6A6F5E209D2C9A03482F158B4F60A989BC1EC6E717906A",
+      "bytes": 417930
+    },
+    {
+      "file": "host-max-chat.payload.json",
+      "sha256": "886931BB1EE3E292872ACD5AD358C8E1B3A514E84BA05515859AC490BC7908BA",
+      "bytes": 416667
+    },
+    {
+      "file": "open-capable-context-fixture.frame",
+      "sha256": "E604AD1432EF8E54FD119DE048E2CF4DE9CDD91AC4AEC8EEEDC9C2AA7D211AD3",
+      "bytes": 562
+    },
+    {
+      "file": "open-capable-context-fixture.payload.json",
+      "sha256": "971D95A8FC3AE2A2BAC735E443D368CC0F7801B1BA10234718131530F73369DF",
+      "bytes": 284
+    }
+  ]
+}

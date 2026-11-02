@@ -16,6 +16,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             Interlocked.Increment(ref _policyEpoch);
             Interlocked.Increment(ref _directEpoch);
             InvalidateReminder();
+            PublishDirectUnread(null, reset: true);
             return result;
         }
     }
@@ -27,6 +28,9 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             try {
                 var source = incoming.Source;
                 if (string.IsNullOrWhiteSpace(source.PolicyKey)) return;
+                var official = source.SourceKind == OrganizationNotificationSourceKind.OfficialFleet;
+                if (!Enum.IsDefined(source.SourceKind) || official != NotificationPolicyStore.IsOfficialFleetKey(source.PolicyKey) ||
+                    official && (source.ManagementAvailable || source.Tasks.Length != 0 || source.JoinedAt != null)) return;
                 var policies = _policies.Read(incoming.Owner);
                 if (!NotificationSourcePolicy.Allows(policies.For(source.PolicyKey), incoming.Kind)) return;
                 var settings = Read();
@@ -41,10 +45,10 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                 notice = CreateDesktop(id, false, 0, 0, settings, Current) with {
                     Community = new(settings.Preview == "hiddenDetails" ? "" : source.Name,
                         settings.Preview == "fullContent" && !management ? source.Chat?.Callsign ?? "" : "",
-                        settings.Preview == "fullContent" && !management ? source.Chat?.Text ?? "" : "", management),
+                        settings.Preview == "fullContent" && !management ? source.Chat?.Text ?? "" : "", management, source.SourceKind),
                     // Opens the authorized organization directory, never an old
                     // raw target, chat receipt or management command.
-                    Activated = activationEvent == null ? null : () => Activate(id, Current, "communities")
+                    Activated = activationEvent == null ? null : () => Activate(id, Current, official ? "officialFleet" : "communities")
                 };
             } catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or
                 Settings.ApplicationPreferencesException) { return; }

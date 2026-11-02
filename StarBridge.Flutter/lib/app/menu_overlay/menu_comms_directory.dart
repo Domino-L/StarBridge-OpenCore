@@ -1,8 +1,13 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../shell/widgets/attention_badge.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
 import '../../features/direct_messages/communication_time_formatter.dart';
 import 'menu_comms_view.dart';
 import 'menu_inline_avatar.dart';
@@ -19,6 +24,7 @@ class MenuCommsDirectory extends StatelessWidget {
     required this.onQuery,
     required this.onGroup,
     required this.onAction,
+    this.searchRevision = 0,
     this.onProfile,
     this.organization,
     this.organizationSelected = false,
@@ -26,6 +32,9 @@ class MenuCommsDirectory extends StatelessWidget {
   });
   final MenuCommsView view;
   final String query, group;
+
+  /// Retirement token from the existing panel reset, never a text-value key.
+  final int searchRevision;
   final ValueChanged<String> onQuery, onGroup;
   final void Function(String, String) onAction;
   final ValueChanged<String>? onProfile;
@@ -56,28 +65,40 @@ class MenuCommsDirectory extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Expanded(
-              child: Text('会话', style: TextStyle(fontWeight: FontWeight.w600)),
+            Expanded(
+              child: Text(
+                menuText(context, 'menu.overlay.comms.conversations'),
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
             if (view.name == null)
-              TextButton(
-                onPressed: view.busy ? null : () => onAction('retry', ''),
-                child: const Text('刷新'),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                semanticLabel: menuText(context, 'friends.refresh'),
+                onActivate: view.busy ? null : (_) => onAction('retry', ''),
+                child: Text(menuText(context, 'friends.refresh')),
               ),
           ],
         ),
         const SizedBox(height: 8),
-        if (view.name == null && view.refreshing) const MenuLoading(),
+        if (view.name == null && view.refreshing)
+          MenuLoading(feedback: view.readFeedback),
         KeyedSubtree(
-          key: ValueKey('menu-comms-search-${view.profileKey ?? ''}'),
-          child: TextFormField(
-            key: const ValueKey('menu-comms-search'),
-            initialValue: query,
-            decoration: const InputDecoration(
-              hintText: '搜索会话或消息摘要',
-              isDense: true,
+          key: ValueKey((
+            'menu-comms-search-${view.profileKey ?? ''}',
+            searchRevision,
+          )),
+          child: StarBridgeFieldFrame(
+            builder: (context, focus) => TextFormField(
+              key: const ValueKey('menu-comms-search'),
+              focusNode: focus,
+              initialValue: query,
+              decoration: InputDecoration(
+                hintText: menuText(context, 'menu.overlay.comms.filter'),
+                isDense: true,
+              ),
+              onChanged: onQuery,
             ),
-            onChanged: onQuery,
           ),
         ),
         const SizedBox(height: 8),
@@ -85,29 +106,36 @@ class MenuCommsDirectory extends StatelessWidget {
           spacing: 6,
           runSpacing: 6,
           children: [
-            for (final entry in const {
-              'all': '全部',
-              'unread': '未读',
-              'requests': '消息请求',
+            for (final entry in {
+              'all': menuText(context, 'menu.overlay.comms.all'),
+              'unread': menuText(context, 'menu.overlay.comms.unread'),
+              'requests': menuText(context, 'menu.overlay.comms.request'),
             }.entries)
-              OutlinedButton(
-                key: ValueKey('menu-comms-group-${entry.key}'),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: group == entry.key
-                      ? context.tokens.colors.info.withValues(alpha: .16)
-                      : null,
+              MergeSemantics(
+                child: Semantics(
+                  selected: group == entry.key,
+                  inMutuallyExclusiveGroup: true,
+                  child: StarBridgeActionButton(
+                    controlKey: ValueKey('menu-comms-group-${entry.key}'),
+                    semanticLabel: entry.value,
+                    nativeStyle: OutlinedButton.styleFrom(
+                      backgroundColor: group == entry.key
+                          ? context.tokens.colors.info.withValues(alpha: .16)
+                          : null,
+                    ),
+                    onActivate: (_) => onGroup(entry.key),
+                    child: Text(entry.value),
+                  ),
                 ),
-                onPressed: () => onGroup(entry.key),
-                child: Text(entry.value),
               ),
           ],
         ),
         const SizedBox(height: 8),
         Expanded(
           child: rows.isEmpty && channels.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
-                    '暂无匹配会话\n可从好友面板发起聊天。',
+                    menuText(context, 'menu.overlay.comms.noMatch'),
                     textAlign: TextAlign.center,
                   ),
                 )
@@ -117,31 +145,45 @@ class MenuCommsDirectory extends StatelessWidget {
                   itemBuilder: (context, index) {
                     if (index < channels.length) {
                       final row = channels[index];
-                      return ListTile(
-                        key: ValueKey(
-                          'menu-organization-conversation-${row.title}',
+                      return StarBridgeActionRow(
+                        semanticLabel: menuText(
+                          context,
+                          'menu.overlay.comms.openOrganization',
+                          {'name': row.title},
                         ),
-                        selected:
-                            organizationSelected && row.detail == '当前组织频道',
-                        selectedTileColor: context.tokens.surfaces.raised.fill,
-                        leading: MenuInlineAvatar(
-                          name: row.title,
-                          source: row.avatar,
-                        ),
-                        title: Text(
-                          row.title,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: const Text('组织频道'),
-                        onTap: organization?.busy == true || row.buttons.isEmpty
+                        semanticSelected: organizationSelected && row.selected,
+                        onActivate:
+                            organization?.busy == true || row.buttons.isEmpty
                             ? null
-                            : () => onOrganizationAction?.call(
+                            : (_, _) => onOrganizationAction?.call(
                                 row.buttons.first.key,
                                 '',
                               ),
+                        child: ListTile(
+                          key: ValueKey(
+                            'menu-organization-conversation-${row.title}',
+                          ),
+                          selected: organizationSelected && row.selected,
+                          selectedTileColor:
+                              context.tokens.surfaces.raised.fill,
+                          leading: MenuInlineAvatar(
+                            name: row.title,
+                            source: row.avatar,
+                          ),
+                          title: Text(
+                            row.title,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            menuText(
+                              context,
+                              'menu.overlay.comms.organizationChannel',
+                            ),
+                          ),
+                        ),
                       );
                     }
                     final row = rows[index - channels.length];
@@ -149,9 +191,17 @@ class MenuCommsDirectory extends StatelessWidget {
                       color: !organizationSelected && row.key == view.profileKey
                           ? context.tokens.surfaces.raised.fill
                           : Colors.transparent,
-                      child: InkWell(
-                        key: ValueKey('menu-conversation-${row.key}'),
-                        onTap: () => onAction('select', row.key),
+                      child: StarBridgeActionRow(
+                        controlKey: ValueKey('menu-conversation-${row.key}'),
+                        semanticLabel: menuText(
+                          context,
+                          'menu.overlay.comms.open',
+                          {'name': row.name},
+                        ),
+                        semanticSelected:
+                            !organizationSelected && row.key == view.profileKey,
+                        baseRadius: 0,
+                        onActivate: (_, _) => onAction('select', row.key),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             vertical: 12,
@@ -161,6 +211,7 @@ class MenuCommsDirectory extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               MenuAvatarActions(
+                                identity: row.key,
                                 name: row.name,
                                 onProfile: onProfile == null
                                     ? null
@@ -199,7 +250,7 @@ class MenuCommsDirectory extends StatelessWidget {
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     Text(
-                                      '${row.request ? '消息请求 · ' : ''}${communicationTime(row.time, Localizations.localeOf(context))}',
+                                      '${row.request ? menuText(context, 'menu.overlay.comms.requestPrefix') : ''}${communicationTime(row.time, Localizations.localeOf(context))}',
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
@@ -222,17 +273,31 @@ class MenuCommsDirectory extends StatelessWidget {
                 ),
         ),
         if (organization?.state == 'unavailable')
-          TextButton(
-            onPressed: () => onOrganizationAction?.call('refresh', ''),
-            child: const Text('组织会话加载失败 · 重试'),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            semanticLabel: menuText(
+              context,
+              'menu.overlay.comms.organizationRetry',
+            ),
+            onActivate: (_) => onOrganizationAction?.call('refresh', ''),
+            child: Text(
+              menuText(context, 'menu.overlay.comms.organizationRetry'),
+            ),
           ),
         for (final action
             in organization?.buttons ?? const <MenuFeatureButton>[])
-          if (const {'下一页', '首页', '更多组织会话', '组织会话首页'}.contains(action.label))
-            TextButton(
-              onPressed: organization?.busy == true
+          if (const {
+            'nextPage',
+            'firstPage',
+            'moreOrganizationChats',
+            'organizationChatsHome',
+          }.contains(action.role))
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              semanticLabel: action.label,
+              onActivate: organization?.busy == true
                   ? null
-                  : () => onOrganizationAction?.call(action.key, ''),
+                  : (_) => onOrganizationAction?.call(action.key, ''),
               child: Text(action.label),
             ),
       ],

@@ -3,28 +3,100 @@
   "description": "Exact reviewed runtime assets and synthetic UI test baselines. No personal captures, game media, caches or commercial artwork.",
   "files": [
     {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_xmas_dark_surface.ico",
+      "sha256": "9e1e8daa141f4c25356bbc0361836d97da1258176f7348152922d84b314819a8",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_xmas_light_surface.ico",
+      "sha256": "caa4b5ef21fb81bc7242643529a5808fe586ced9f05f594890fe4639030d2dbc",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_halloween_dark_surface.ico",
+      "sha256": "deb7c6a0516e5e8c3cf93f6e4836b5def0047cb030deb06883ccd515fbfe0337",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/windows/runner/resources/app_icon_halloween_light_surface.ico",
+      "sha256": "f44c12d311be1b5656a2aa069ffff42d7d7c911092f2f748363e0aa950670a45",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/default_banner_dark.png",
+      "sha256": "262a70e583c60dab39d80a50d2f6ddee26f045ef2917c26de8f1113ba6f07d4f",
+      "license": "StarBridge-authored render of its own code; no game or third-party media",
+      "licenseFile": "docs/brand-assets/default-banner/README.md"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/default_banner_light.png",
+      "sha256": "9499395b897ee4b340b639618eea34126cace7f2d27d29a0324623951c6bd916",
+      "license": "StarBridge-authored render of its own code; no game or third-party media",
+      "licenseFile": "docs/brand-assets/default-banner/README.md"
+    },
+    {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-color-picker-dark.png",
-      "sha256": "12cffcda9070c6a9420e12676bf64444913f0896c61387b726f762315fd1365e",
+      "sha256": "64c1a887a33404973c2a19f944bbcd8e5155d81c6f8a865958bcc31d7ee82797",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
     },
     {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-color-picker-light.png",
-      "sha256": "9b4a6ed559a563f67413761cd78a402d8abbdb3dbc649e6a2eb9f1775d53feed",
+      "sha256": "fc2cc001375ebaa759d558417134051618cc49425b57448ece9c3137d8da7602",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
     },
     {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1280.png",
-      "sha256": "97e0fe60906cb84558500fe064bca3274ce7c676a75b19921d8a277202b8cea1",
+      "sha256": "98d8197680f45d21f580e125ab3f62902a8a7a148a9cac0a4091a67960b5b64b",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
     },
     {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1440.png",
-      "sha256": "f56a0e146662fcc980efe5a93c002277a2d688add311d15e3b75a82e125a7bfe",
+      "sha256": "f5ee5f5067f10cc8a5619dd2704e04a91b25f7f4362bb2bcd43d8038bd1c2daf",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/halloween_mark_dark_surface.png",
+      "sha256": "f371cb3f5feb55cd16b774f94ca0a5a2201d60312e15d6d88dc8a69ece56dbb1",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/halloween_mark_light_surface.png",
+      "sha256": "d8150fa7a991bbce4b27a25b273cde86debfc7997dbc9d970749deb9c1acdc4a",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/halloween_mark_small_dark_surface.png",
+      "sha256": "aae47c20d93c1bf6cc03b6e7c2bce49a31d695093ff410dceca30e3cea411279",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/halloween_mark_small_light_surface.png",
+      "sha256": "5337d66dd50dc2937b80d510e1ced6f3d6998a8d9a5095a9108114985b6d6412",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/xmas_mark_dark_surface.png",
+      "sha256": "6ba475f0b8460705ba9200f0a477ea4da87bc3db535df3b40bda92d37fc113fe",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/brand/holiday/xmas_mark_light_surface.png",
+      "sha256": "3dfa3c557dfaa894b71e54d6cf92494059d82ec0f43073728eaaa127945e5f31",
+      "license": "StarBridge limited unmodified-build permission",
+      "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
     },
     {
       "path": "StarBridge.Flutter/assets/brand/scm_mark.png",
@@ -259,6 +331,30 @@
       "sha256": "6baa39ffa49e4f53b457a7aed6004e79084d6b9c2fb68f759791e4413331b302",
       "license": "StarBridge limited unmodified-build permission",
       "licenseFile": "StarBridge.Flutter/assets/brand/LICENSE.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/Rajdhani-Bold.ttf",
+      "sha256": "691470dd3286a14e9677940d0bf75796179841ba5215cbda1a2c8910a3226afd",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Rajdhani.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/Rajdhani-Medium.ttf",
+      "sha256": "12ff7dcfe4c206e3875ac53b1762eab57de6a2fa7f5a86c26b97b88d6591eac2",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Rajdhani.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/Rajdhani-SemiBold.ttf",
+      "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Rajdhani.txt"
+    },
+    {
+      "path": "StarBridge.Flutter/assets/fonts/Saira-VF.ttf",
+      "sha256": "98f97d8a1f2cdb4a652b802504a795dc7a8153c45368e985512037cde5d59b4b",
+      "license": "OFL-1.1",
+      "licenseFile": "StarBridge.Flutter/assets/font-licenses/LICENSE-Saira.txt"
     },
     {
       "path": "StarBridge.Flutter/assets/fonts/SourceCodeVF-Upright.ttf",

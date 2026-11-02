@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -18,6 +20,7 @@ import 'settings_models.dart';
 import 'notification_editor_frame.dart';
 import 'notification_connected_panels.dart';
 import 'notification_settings_comparison.dart';
+import 'help_support_waiting.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/host/desktop_notification_port.dart';
 
@@ -48,7 +51,7 @@ class NotificationSettingsPage extends StatelessWidget {
   );
 }
 
-class _NotificationSettingsBody extends StatelessWidget {
+class _NotificationSettingsBody extends StatefulWidget {
   const _NotificationSettingsBody({
     required this.module,
     this.audio,
@@ -61,13 +64,75 @@ class _NotificationSettingsBody extends StatelessWidget {
   final BridgeClientSession? session;
 
   @override
+  State<_NotificationSettingsBody> createState() =>
+      _NotificationSettingsBodyState();
+}
+
+class _NotificationSettingsBodyState extends State<_NotificationSettingsBody> {
+  // This slot belongs to the current Frame binding, never to the application.
+  // Projection-only reads may move it, but must not retire an audio commit.
+  final _audioPanelKey = GlobalKey(debugLabel: 'notification-audio-slot');
+  bool _wasPending = false, _wasReading = false;
+  int _phase = 0;
+  InteractionSource _source = InteractionSource.programmatic;
+
+  NotificationSettingsModule get module => widget.module;
+  NotificationAudioController? get audio => widget.audio;
+  DesktopNotificationPort? get desktop => widget.desktop;
+  BridgeClientSession? get session => widget.session;
+
+  // Observe the original owner's synchronous edge. This is provenance for
+  // decoration only: no request, admission or result is owned here.
+  void _observe() {
+    final value = module.projection.value;
+    final reading =
+        value.availability == NotificationSettingsAvailability.loading;
+    final pending =
+        reading || value.operation == NotificationSettingsOperation.saving;
+    if (pending && (!_wasPending || reading != _wasReading)) {
+      _phase++;
+      _source = captureStarBridgeActivationSource()();
+    }
+    _wasPending = pending;
+    _wasReading = reading;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    module.projection.addListener(_observe);
+    _observe();
+  }
+
+  @override
+  void didUpdateWidget(_NotificationSettingsBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.module, module)) {
+      oldWidget.module.projection.removeListener(_observe);
+      module.projection.addListener(_observe);
+      _wasPending = false;
+      _source = InteractionSource.programmatic;
+      _phase++;
+      _observe();
+    }
+  }
+
+  @override
+  void dispose() {
+    module.projection.removeListener(_observe);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<NotificationSettingsProjection>(
       valueListenable: module.projection,
       builder: (context, projection, _) {
         final content = switch (projection.availability) {
-          NotificationSettingsAvailability.loading =>
-            const NotificationLoadingView(),
+          NotificationSettingsAvailability.loading => NotificationLoadingView(
+            key: ValueKey((module, _phase)),
+            source: _source,
+          ),
           NotificationSettingsAvailability.signedOut =>
             const NotificationStateView(
               key: Key('notification-settings-signed-out'),
@@ -88,6 +153,9 @@ class _NotificationSettingsBody extends StatelessWidget {
             _NotificationSettingsContent(
               module: module,
               projection: projection,
+              waitSource: _source,
+              waitPhase: _phase,
+              audioPanelKey: _audioPanelKey,
               audio: audio,
               desktop: desktop,
               session: session,
@@ -103,7 +171,10 @@ class _NotificationSettingsBody extends StatelessWidget {
             if (audio != null)
               Padding(
                 padding: EdgeInsets.all(context.tokens.space.lg),
-                child: NotificationAudioPanel(controller: audio!),
+                child: NotificationAudioPanel(
+                  key: _audioPanelKey,
+                  controller: audio!,
+                ),
               ),
             content,
             if (session != null)
@@ -135,10 +206,34 @@ String _failureKey(NotificationSettingsFailure? failure) => switch (failure) {
   null => 'settings.notification.error.unavailable',
 };
 
+/// A sample rally alert: the Host draws the banner and plays the sound; the
+/// Windows notification carries the same sample, never a real rally.
+Future<void> _previewRally(
+  BridgeClientSession session,
+  DesktopNotificationPort? desktop,
+  AppStrings strings,
+) async {
+  try {
+    await session.request(
+      'notificationSettings.previewRally',
+      payload: const {'schemaVersion': 1},
+    );
+  } on Object {
+    // The banner and sound are best effort; the Windows sample still shows.
+  }
+  await desktop?.show(
+    strings.text('settings.notification.channels.rally.sampleTitle'),
+    strings.text('settings.notification.channels.rally.sampleBody'),
+  );
+}
+
 class _NotificationSettingsContent extends StatelessWidget {
   const _NotificationSettingsContent({
     required this.module,
     required this.projection,
+    required this.waitSource,
+    required this.waitPhase,
+    required this.audioPanelKey,
     this.audio,
     this.desktop,
     this.session,
@@ -146,6 +241,9 @@ class _NotificationSettingsContent extends StatelessWidget {
 
   final NotificationSettingsModule module;
   final NotificationSettingsProjection projection;
+  final InteractionSource waitSource;
+  final int waitPhase;
+  final Key audioPanelKey;
   final NotificationAudioController? audio;
   final DesktopNotificationPort? desktop;
   final BridgeClientSession? session;
@@ -173,7 +271,7 @@ class _NotificationSettingsContent extends StatelessWidget {
       return true;
     }
 
-    return SingleChildScrollView(
+    final content = SingleChildScrollView(
       key: const Key('notification-settings-content'),
       padding: EdgeInsetsDirectional.fromSTEB(
         tokens.space.xl,
@@ -196,23 +294,9 @@ class _NotificationSettingsContent extends StatelessWidget {
                 Text(strings.text('settings.notification.local.description')),
               ] else
                 _PageHeader(strings: strings),
-              if (projection.operation ==
-                  NotificationSettingsOperation.saving) ...[
-                SizedBox(height: tokens.space.md),
-                const LinearProgressIndicator(
-                  key: Key('notification-settings-saving'),
-                ),
-              ],
-              if (projection.failure case final failure?) ...[
-                SizedBox(height: tokens.space.md),
-                NotificationFailureBanner(
-                  messageKey: _failureKey(failure),
-                  onRetry: module.refresh,
-                ),
-              ],
               SizedBox(height: tokens.space.lg),
               if (audio != null) ...[
-                NotificationAudioPanel(controller: audio!),
+                NotificationAudioPanel(key: audioPanelKey, controller: audio!),
                 SizedBox(height: tokens.space.md),
               ],
               _ResponsivePair(
@@ -221,6 +305,13 @@ class _NotificationSettingsContent extends StatelessWidget {
                 primary: NotificationChannelPanel(
                   key: ValueKey(('notification-channels', drafts?.epoch)),
                   desktop: desktop,
+                  onPreviewRally:
+                      session?.hostCapabilities.contains(
+                            'notificationSettings.previewRally',
+                          ) ==
+                          true
+                      ? () => _previewRally(session!, desktop, strings)
+                      : null,
                   showSound: audio == null,
                   settings: settings,
                   enabled: enabled,
@@ -268,6 +359,51 @@ class _NotificationSettingsContent extends StatelessWidget {
           ),
         ),
       ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: content),
+        if (projection.operation == NotificationSettingsOperation.saving ||
+            projection.failure != null)
+          Padding(
+            key: const Key('notification-settings-feedback'),
+            padding: EdgeInsets.symmetric(
+              horizontal: tokens.space.xl,
+              vertical: tokens.space.sm,
+            ),
+            child: Align(
+              alignment: AlignmentDirectional.center,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: tokens.density.contentMaxWidth,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (projection.operation ==
+                        NotificationSettingsOperation.saving)
+                      KeyedSubtree(
+                        key: const Key('notification-settings-saving'),
+                        child: HelpSupportWaiting(
+                          key: ValueKey((module, waitPhase)),
+                          source: waitSource,
+                          label:
+                              '${strings.text('settings.notification.title')} · ${strings.text('privacy.local.saving')}',
+                        ),
+                      ),
+                    if (projection.failure case final failure?)
+                      NotificationFailureBanner(
+                        messageKey: _failureKey(failure),
+                        onRetry: module.refresh,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

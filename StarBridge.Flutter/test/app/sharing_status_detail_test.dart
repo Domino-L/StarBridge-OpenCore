@@ -1,17 +1,294 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/runtime/sharing_status_monitor.dart';
 import 'package:starbridge_flutter/app/shell/widgets/sharing_status_notice.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
 import 'package:starbridge_flutter/features/settings/privacy_publication_port.dart';
+import 'package:starbridge_flutter/features/settings/privacy_live_sharing_panel.dart';
 import 'package:starbridge_flutter/features/settings/sharing_status_presentation.dart';
 import 'package:starbridge_flutter/app/localization/privacy_scope_settings_strings.dart';
 
 import '../features/settings/local_privacy_page_test.dart' show app, viewport;
 import 'sharing_status_notice_test.dart' show NoticePrivacy;
-import '../features/friends/social_layout_test.dart' show capture, loadFonts;
+import '../features/friends/social_layout_test.dart' show loadFonts;
+
+Future<void> captureSharing(
+  WidgetTester tester,
+  GlobalKey key,
+  String name,
+) async {
+  final directory = Platform.environment['STARBRIDGE_TEST_VISUAL_DIR'];
+  if (directory == null || directory.isEmpty) return;
+  await tester.runAsync(() async {
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage();
+    try {
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      await Directory(directory).create(recursive: true);
+      await File('$directory/$name.png')
+          .writeAsBytes(data!.buffer.asUint8List());
+    } finally {
+      image.dispose();
+    }
+  });
+}
 
 void main() {
+  for (final code in ['privacy_local.owner_unavailable', 'privacy_local.read_unavailable']) {
+    testWidgets('temporary local policy recovers without save $code', (tester) async {
+      final port = NoticePrivacy()..state = 'failed'..errorCode = code;
+      final controller = LocalPrivacyController(port);
+      final monitor = SharingStatusMonitor(controller: controller);
+      await tester.pumpWidget(app(SharingStatusNotice(status: monitor, onOpenSettings: () {})));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 31)); await tester.pumpAndSettle();
+      expect(monitor.value, 'localRecovering');
+      expect(find.text('正在重新读取共享设置'), findsOneWidget);
+      port.state = 'applied'; port.errorCode = null;
+      await tester.pump(const Duration(seconds: 61)); await tester.pumpAndSettle();
+      expect(monitor.value, isNull);
+      expect(find.text('正在重新读取共享设置'), findsNothing);
+      expect(port.writes, 0); expect(port.actions.where((a) => a == 'apply'), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink()); monitor.dispose(); controller.dispose();
+    });
+  }
+  for (final observation in ['null', '0']) {
+    testWidgets(
+      'app-only empty Handle disconnect $observation shows network issue',
+      (tester) async {
+        // Matches the Host projection after app-only positive input disappears.
+        final port = NoticePrivacy()
+          ..state = 'reconnecting'
+          ..errorCode = 'privacy_publication.network_unavailable';
+        final controller = LocalPrivacyController(port);
+        final monitor = SharingStatusMonitor(controller: controller);
+        await tester.pumpWidget(
+          app(SharingStatusNotice(status: monitor, onOpenSettings: () {})),
+        );
+        await tester.pumpAndSettle();
+        // Shell retains its existing 30-second recovery grace period.
+        await tester.pump(const Duration(seconds: 31));
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            simplifiedPrivacyScopeSettingsStrings['privacy.notice.network.title']!,
+          ),
+          findsOneWidget,
+        );
+        expect(sharingStatusIssue(controller.publicationView, 1), 'network');
+        expect(find.textContaining('等待身份'), findsNothing);
+        await tester.pumpWidget(
+          app(
+            SingleChildScrollView(
+              child: PrivacyLiveSharingPanel(controller: controller),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.textContaining('网络'), findsWidgets);
+        expect(find.textContaining('等待身份'), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+        monitor.dispose();
+        controller.dispose();
+      },
+    );
+  }
+  testWidgets('identity notice stays through the Host publish attempts', (
+    tester,
+  ) async {
+    final port = NoticePrivacy()..state = 'identityRequired';
+    final controller = LocalPrivacyController(port);
+    final monitor = SharingStatusMonitor(controller: controller);
+    var changes = 0;
+    monitor.addListener(() => changes++);
+    await tester.pumpWidget(
+      app(SharingStatusNotice(status: monitor, onOpenSettings: () {})),
+    );
+    await tester.pumpAndSettle();
+    expect(monitor.value, 'identity');
+    changes = 0;
+    Future<void> read(String state) async {
+      port.state = state;
+      // Inside the fake clock, so the monitor's grace timer follows pump.
+      final done = controller.refreshPublication();
+      await tester.pump();
+      await done;
+    }
+
+    for (var round = 0; round < 4; round++) {
+      await read('publishing');
+      expect(monitor.value, 'identity');
+      await tester.pump(const Duration(seconds: 3));
+      await read('identityRequired');
+      expect(monitor.value, 'identity');
+      await tester.pump(const Duration(seconds: 3));
+    }
+    expect(changes, 0);
+    expect(find.byKey(const Key('sharing-status-notice')), findsOneWidget);
+
+    // A publish that never ends is still reported after the usual grace.
+    await read('publishing');
+    await tester.pump(const Duration(seconds: 16));
+    expect(monitor.value, 'waiting');
+
+    // Confirmed sharing ends the notice.
+    port.errorCode = null;
+    await read('applied');
+    expect(monitor.value, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    monitor.dispose();
+    controller.dispose();
+  });
+  testWidgets('a first publish still waits out its grace without a notice', (
+    tester,
+  ) async {
+    final port = NoticePrivacy()..state = 'publishing';
+    final controller = LocalPrivacyController(port);
+    final monitor = SharingStatusMonitor(controller: controller);
+    await tester.pumpWidget(
+      app(SharingStatusNotice(status: monitor, onOpenSettings: () {})),
+    );
+    await tester.pumpAndSettle();
+    expect(monitor.value, isNull);
+    await tester.pump(const Duration(seconds: 16));
+    expect(monitor.value, 'waiting');
+    await tester.pumpWidget(const SizedBox.shrink());
+    monitor.dispose();
+    controller.dispose();
+  });
+  test(
+    'exhausted authentication recovery requires sign-in, not network retry',
+    () {
+      for (final code in [
+        'privacy_publication.identity_unavailable',
+        'account.reauthorization_required',
+      ]) {
+        expect(
+          sharingStatusIssue(
+            PrivacyPublicationView('identityRequired', errorCode: code),
+            1,
+          ),
+          'signIn',
+        );
+      }
+    },
+  );
+  for (final (locale, strings) in [
+    (const Locale('zh', 'CN'), simplifiedPrivacyScopeSettingsStrings),
+    (const Locale('zh', 'TW'), traditionalPrivacyScopeSettingsStrings),
+    (const Locale('en'), englishPrivacyScopeSettingsStrings),
+  ]) {
+    testWidgets('non-auth retry keeps its specific cause in $locale', (
+      tester,
+    ) async {
+      for (final (code, issue) in [
+        ('forbidden', 'permission'),
+        ('response_invalid', 'contract'),
+        ('unavailable', 'service'),
+        ('route_retired', 'retired'),
+      ]) {
+        final port = NoticePrivacy()
+          ..state = code == 'route_retired' ? 'failed' : 'reconnecting'
+          ..errorCode = 'privacy_publication.$code';
+        final controller = LocalPrivacyController(port);
+        final monitor = SharingStatusMonitor(controller: controller);
+        await tester.pumpWidget(
+          app(
+            SharingStatusNotice(status: monitor, onOpenSettings: () {}),
+            locale: locale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(strings['privacy.notice.$issue.title']!),
+          findsOneWidget,
+        );
+        expect(
+          find.text(strings['privacy.notice.$issue.body']!),
+          findsOneWidget,
+        );
+        expect(
+          find.text(strings['privacy.notice.network.title']!),
+          findsNothing,
+        );
+        expect(
+          find.text(strings['privacy.notice.signIn.title']!),
+          findsNothing,
+        );
+        await tester.pumpWidget(
+          app(
+            SingleChildScrollView(
+              child: PrivacyLiveSharingPanel(controller: controller),
+            ),
+            locale: locale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(strings['privacy.notice.$issue.title']!),
+          findsOneWidget,
+        );
+        expect(
+          find.text(strings['privacy.notice.$issue.body']!),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        monitor.dispose();
+        controller.dispose();
+      }
+    });
+    testWidgets('identityRequired shows automatic resume copy in $locale', (
+      tester,
+    ) async {
+      final port = NoticePrivacy()
+        ..state = 'identityRequired'
+        ..errorCode = 'privacy_publication.identity_unavailable';
+      final controller = LocalPrivacyController(port);
+      final monitor = SharingStatusMonitor(controller: controller);
+      await tester.pumpWidget(
+        app(
+          SharingStatusNotice(status: monitor, onOpenSettings: () {}),
+          locale: locale,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text(strings['privacy.notice.signIn.title']!),
+        findsOneWidget,
+      );
+      expect(find.text(strings['privacy.notice.signIn.body']!), findsOneWidget);
+      expect(find.text(strings['privacy.notice.network.title']!), findsNothing);
+      expect(port.actions.where((action) => action == 'apply'), isEmpty);
+      await tester.pumpWidget(
+        app(
+          SingleChildScrollView(
+            child: PrivacyLiveSharingPanel(controller: controller),
+          ),
+          locale: locale,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text(strings['privacy.notice.signIn.title']!),
+        findsOneWidget,
+      );
+      expect(find.text(strings['privacy.notice.signIn.body']!), findsOneWidget);
+      expect(
+        find.text(strings['privacy.scope.live.identityRequired']!),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      monitor.dispose();
+      controller.dispose();
+    });
+  }
   testWidgets('isolated notice visual review at both acceptance widths', (
     tester,
   ) async {
@@ -53,7 +330,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await capture(tester, key, 'sharing-status-${width.toInt()}');
+      await captureSharing(tester, key, 'sharing-status-${width.toInt()}');
       await tester.pumpWidget(const SizedBox.shrink());
       for (final status in statuses) {
         status.dispose();
@@ -62,17 +339,34 @@ void main() {
   });
   const cases = {
     'network_unavailable': 'network',
-    'timeout': 'timeout',
-    'server_error': 'server',
-    'rate_limited': 'rateLimited',
+    'timeout': 'network',
+    'server_error': 'network',
+    'rate_limited': 'network',
     'consent_required': 'consent',
     'identity_pending': 'identityPending',
-    'identity_unavailable': 'signIn',
+    'identity_unavailable': 'reconnecting',
     'forbidden': 'permission',
     'response_invalid': 'contract',
+    'rejected': 'rejected',
+    'unavailable': 'service',
+    'route_retired': 'retired',
     'identity_required': 'identity',
   };
   test('evidence distinguishes causes and all three locales cover them', () {
+    expect(
+      sharingStatusIssue(const PrivacyPublicationView('withdrawn'), 4),
+      'paused',
+    );
+    expect(
+      sharingStatusIssue(
+        const PrivacyPublicationView(
+          'reconnecting',
+          errorCode: 'account.reauthorization_required',
+        ),
+        4,
+      ),
+      'reconnecting',
+    );
     for (final entry in cases.entries) {
       expect(
         sharingStatusIssue(
@@ -90,7 +384,7 @@ void main() {
         const PrivacyPublicationView('reconnecting', errorCode: 'unknown'),
         4,
       ),
-      'reconnecting',
+      'service',
     );
     expect(
       sharingStatusIssue(
@@ -144,7 +438,7 @@ void main() {
       await c.refreshPublication();
       await tester.pump(const Duration(seconds: 31));
       await tester.pumpAndSettle();
-      expect(find.text('实时共享服务暂时异常'), findsOneWidget);
+      expect(find.text('网络问题'), findsOneWidget);
       expect(tester.takeException(), isNull);
       expect(port.actions.every((a) => a == 'status'), isTrue);
       port.state = 'applied';
@@ -214,3 +508,4 @@ void main() {
     },
   );
 }
+

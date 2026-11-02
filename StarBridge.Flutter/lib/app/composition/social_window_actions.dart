@@ -25,6 +25,7 @@ SocialWindowBinding composeSocialWindow({
   preferences: composition.preferences,
   messages: composition.createWindowMessagesPort(),
   inbox: composition.notificationInbox,
+  tradeChat: kind == 'messages' ? composition.tradeChat : null,
   navigate: (route) async {
     if (!context.mounted) return;
     if (route == '/account-safety') {

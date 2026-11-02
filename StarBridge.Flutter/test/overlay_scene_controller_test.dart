@@ -15,66 +15,84 @@ const initial = OverlaySceneState(
   targets: [OverlaySceneTarget('A', '组织'), OverlaySceneTarget('B', '组织')],
 );
 void main() {
-  test('bound picker uses session choice, restore and shared result label, never an account write', () async {
+  test('a plan-fixed source offers follow first and never writes a session or account choice', () async {
     final port = _Port();
-    OverlaySceneState state(String? temporary) => OverlaySceneState(
+    OverlaySceneState state({required bool bound}) => OverlaySceneState(
       available: true, status: 'ready', sourceOwnerKey: 'A' * 64,
-      presetBindingId: 'room', temporarySourceId: temporary,
-      actualId: temporary == 'auto' ? 'org:A' : 'room', targets: initial.targets,
+      presetBindingId: bound ? 'room' : null,
+      actualId: bound ? 'room' : 'org:A', targets: initial.targets,
     );
-    port.state = state(null);
+    port.state = state(bound: true);
     final controller = OverlaySceneController(port, autoStart: false);
     addTearDown(controller.dispose);
-    final temporaryWrites = <String>[];
-    controller.selectTemporary = (id) async {
-      temporaryWrites.add(id);
-      port.state = state(id == 'resumeBinding' ? null : id);
+    var released = 0;
+    controller.followShared = () async {
+      released++;
+      port.state = state(bound: false);
       return true;
     };
     await controller.refresh();
     final strings = AppStrings.resolve(const Locale('zh', 'CN'));
-    expect(overlaySourceLabel(projectOverlayScene(controller.projection.value), strings), '由预设绑定：当前房间');
-    expect(await controller.select('auto'), isTrue);
+    final bound = projectOverlayScene(controller.projection.value);
+    expect(overlaySourceLabel(bound, strings), '方案固定：当前房间');
+    expect(overlaySourceHint(bound), 'overlay.source.planFixedHint');
+    expect(bound.options.first.id, 'followShared');
+    expect(bound.options.where((o) => o.enabled).map((o) => o.id), ['followShared']);
+    expect(await controller.select('auto'), isFalse);
     expect(port.writes, 0);
-    expect(overlaySourceLabel(projectOverlayScene(controller.projection.value), strings), '临时：自动 · 组织');
-    expect(await controller.select('resumeBinding'), isTrue);
+    expect(await controller.select('followShared'), isTrue);
+    expect(released, 1);
     expect(port.writes, 0);
-    expect(temporaryWrites, ['auto', 'resumeBinding']);
-    expect(controller.projection.value.temporarySourceId, isNull);
-    expect(controller.projection.value.accountPreferredId, 'auto');
+    final free = projectOverlayScene(controller.projection.value);
+    expect(free.options.any((o) => o.id == 'followShared'), isFalse);
+    expect(overlaySourceLabel(free, strings), '自动 · 组织');
+    expect(overlaySourceHint(free), 'overlay.source.hint');
   });
 
-  test('late temporary selection cannot publish after account invalidation', () async {
+  test('a leftover session source without a fixed plan source still reads and never blocks a choice', () async {
+    // Field report 2026-10-21: after "follow" on the same plan, a leftover
+    // session source made every read invalid, so the card showed "unavailable".
+    final state = BridgeOverlayScenes.parse({
+      'schemaVersion': 1, 'revision': 3, 'mode': 'community', 'code': 'A',
+      'actualId': 'org:A', 'status': 'ready', 'sourceOwnerKey': 'a' * 64,
+      'presetBindingId': null, 'temporarySourceId': 'room',
+      'resolvedSourceIds': {'auto': 'org:A', 'room': null, 'org:A': 'org:A'},
+      'organizations': [{'code': 'A', 'name': '组织'}],
+    });
+    expect(state.status, 'ready');
+    expect(state.actualId, 'org:A');
+    expect(state.resolvedSourceIds!['org:A'], 'org:A');
+    final port = _Port()..state = const OverlaySceneState(
+      available: true, status: 'ready', temporarySourceId: 'room', targets: [OverlaySceneTarget('A', '组织')],
+    );
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    expect(await controller.select('org:A'), isTrue);
+    expect(port.writes, 1);
+    expect(() => BridgeOverlayScenes.parse({
+      'schemaVersion': 1, 'revision': 3, 'mode': 'auto', 'actualId': null, 'status': 'ready',
+      'temporarySourceId': 'room', 'organizations': [],
+    }), throwsFormatException, reason: 'a session source still needs an owner scope');
+  });
+
+  test('a late follow cannot publish after account invalidation', () async {
     final port = _Port()..state = const OverlaySceneState(available: true, presetBindingId: 'room');
     final controller = OverlaySceneController(port, autoStart: false);
     addTearDown(controller.dispose);
     await controller.refresh();
     final pending = Completer<bool>();
-    controller.selectTemporary = (_) => pending.future;
-    final selecting = controller.select('auto');
+    controller.followShared = () => pending.future;
+    final selecting = controller.select('followShared');
     port.state = const OverlaySceneState(status: 'signedOut');
     port.events.add(null);
     await Future<void>.delayed(Duration.zero);
     pending.complete(true);
     expect(await selecting, isFalse);
     expect(controller.projection.value.status, 'signedOut');
-    expect(controller.projection.value.presetBindingId, isNull);
     expect(port.writes, 0);
   });
 
-  test('temporary failure reads back once without replay or account fallback', () async {
-    final port = _Port()..state = const OverlaySceneState(available: true, presetBindingId: 'room');
-    final controller = OverlaySceneController(port, autoStart: false);
-    addTearDown(controller.dispose);
-    await controller.refresh();
-    var attempts = 0;
-    controller.selectTemporary = (_) async { attempts++; return false; };
-    expect(await controller.select('auto'), isFalse);
-    await Future<void>.delayed(Duration.zero);
-    expect(attempts, 1);
-    expect(port.writes, 0);
-    expect(controller.projection.value.preferredId, 'room');
-  });
   test('manual selection supersedes a pending background read', () async {
     final port = _Port();
     final controller = OverlaySceneController(port, autoStart: false);
@@ -180,7 +198,7 @@ void main() {
     },
   );
   test(
-    'same-name organizations use identity; fleet and unknown targets disabled',
+    'same-name organizations use identity; unsupported fleet and unknown targets unavailable',
     () async {
       final port = _Port();
       final controller = OverlaySceneController(port, autoStart: false);
@@ -192,7 +210,7 @@ void main() {
       expect(await controller.select('org:B'), true);
       expect(controller.projection.value.code, 'B');
       final view = projectOverlayScene(controller.projection.value);
-      expect(view.optionById('fleet')!.enabled, false);
+      expect(view.optionById('fleet'), isNull, reason: 'Host without main fleet');
       expect(view.optionById('org:B')!.label, '组织');
     },
   );
@@ -277,6 +295,113 @@ void main() {
       );
     },
   );
+  test(
+    'a missed background read keeps the last answer until misses repeat',
+    () async {
+      final port = _Port();
+      final controller = OverlaySceneController(port, autoStart: false);
+      addTearDown(controller.dispose);
+      await controller.refresh();
+      port.readResult = () => Future.error(StateError('timeout'));
+      await controller.refresh();
+      await controller.refresh();
+      expect(controller.projection.value.status, 'standby');
+      expect(controller.projection.value.failure, false);
+      await controller.refresh();
+      expect(controller.projection.value.failure, true);
+      expect(controller.projection.value.status, 'unavailable');
+      port.readResult = null;
+      await controller.refresh();
+      expect(controller.projection.value.failure, false);
+      port.readResult = () => Future.error(StateError('timeout'));
+      await controller.refresh();
+      expect(
+        controller.projection.value.failure,
+        false,
+        reason: 'a good read restarts the count',
+      );
+    },
+  );
+  test('the main fleet is offered only by a Host that can show it', () async {
+    final port = _Port();
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    expect(
+      projectOverlayScene(controller.projection.value).options.map((o) => o.id),
+      isNot(contains('fleet')),
+    );
+    expect(await controller.select('fleet'), isFalse);
+    expect(port.writes, 0);
+
+    port.state = const OverlaySceneState(
+      available: true,
+      status: 'standby',
+      fleetStatus: 'ready',
+      fleetName: 'Domino Pizza',
+      targets: [OverlaySceneTarget('A', '组织')],
+    );
+    await controller.refresh();
+    final view = projectOverlayScene(controller.projection.value);
+    final fleet = view.options.singleWhere((o) => o.id == 'fleet');
+    expect(fleet.enabled, isTrue);
+    expect(fleet.label, 'Domino Pizza', reason: 'listed by its own name');
+    expect(
+      view.options.map((o) => o.id).toList(),
+      ['auto', 'room', 'fleet', 'org:A'],
+      reason: 'the main fleet sits with the organizations',
+    );
+    expect(await controller.select('fleet'), isTrue);
+    expect(controller.projection.value.mode, 'fleet');
+    expect(controller.projection.value.code, isNull);
+    expect(controller.projection.value.preferredId, 'fleet');
+  });
+  test('a main fleet the viewer is not in is simply not listed', () {
+    final left = projectOverlayScene(
+      const OverlaySceneState(
+        available: true,
+        status: 'ready',
+        mode: 'fleet',
+        fleetStatus: 'notMember',
+      ),
+    );
+    expect(
+      const OverlaySceneState(fleetStatus: 'unavailable').offersFleet,
+      isFalse,
+      reason: 'a failed read without a confirmed name offers nothing',
+    );
+    final entry = left.options.singleWhere((o) => o.id == 'fleet');
+    expect(entry.enabled, isFalse);
+    expect(
+      entry.labelKey,
+      'overlay.source.missing',
+      reason: 'a fixed choice reads like an unavailable organization',
+    );
+    final never = projectOverlayScene(
+      const OverlaySceneState(
+        available: true,
+        status: 'ready',
+        fleetStatus: 'notMember',
+      ),
+    );
+    expect(never.options.map((o) => o.id), isNot(contains('fleet')));
+  });
+  test('the main fleet page and organization pages take turns as the page', () async {
+    final port = _Port();
+    final controller = OverlaySceneController(port, autoStart: false);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    controller.focusFleet();
+    await Future<void>.delayed(Duration.zero);
+    controller.focusFleet();
+    await Future<void>.delayed(Duration.zero);
+    controller.focusCommunity('A');
+    await Future<void>.delayed(Duration.zero);
+    controller.focusFleet();
+    await Future<void>.delayed(Duration.zero);
+    expect(port.focused, ['fleet', 'A', 'fleet']);
+    expect(port.writes, 0, reason: 'page focus is never a saved choice');
+  });
 }
 
 class _Port implements OverlayScenePort {
@@ -284,6 +409,12 @@ class _Port implements OverlayScenePort {
   @override
   Future<OverlaySceneState> focusCommunity(String code) async {
     focused.add(code);
+    return state;
+  }
+
+  @override
+  Future<OverlaySceneState> focusFleet() async {
+    focused.add('fleet');
     return state;
   }
 
@@ -310,6 +441,7 @@ class _Port implements OverlayScenePort {
       targets: initial.targets,
       available: true,
       status: 'standby',
+      fleetStatus: state.fleetStatus,
     );
     if (failWrite) throw StateError('Uncertain response');
     return state;

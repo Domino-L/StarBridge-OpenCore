@@ -117,16 +117,23 @@ void main() {
       await tester.pumpAndSettle();
       final selector = find.descendant(
         of: find.byKey(const Key('notification-play-first')),
-        matching: find.byType(DropdownButtonFormField<int>),
+        matching: find.byWidgetPredicate(
+          (w) => w is DropdownButtonFormField<int>,
+        ),
       );
       await tester.ensureVisible(selector);
       await tester.tap(selector);
       await tester.pumpAndSettle();
-      final choice = find
-          .byWidgetPredicate((w) => w is DropdownMenuItem<int> && w.value == 90)
-          .last;
       await tester.tap(
-        find.descendant(of: choice, matching: find.byType(Text)).last,
+        find.byKey(
+          const ValueKey<Object>((
+            (
+              'notification-play-interval',
+              'settings.notification.play.first.title',
+            ),
+            90,
+          )),
+        ),
       );
       await tester.pump();
       expect(port.writes.single.firstMinutes, 90);
@@ -225,7 +232,9 @@ FormFieldState<int> _field(WidgetTester tester, String key) =>
     tester.state<FormFieldState<int>>(
       find.descendant(
         of: find.byKey(Key(key)),
-        matching: find.byType(DropdownButtonFormField<int>),
+        matching: find.byWidgetPredicate(
+          (w) => w is DropdownButtonFormField<int>,
+        ),
       ),
     );
 

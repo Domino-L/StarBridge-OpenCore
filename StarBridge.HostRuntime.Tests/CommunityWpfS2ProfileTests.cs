@@ -3,10 +3,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using StarBridge.HostRuntime.Communities;
 
-internal static class CommunityWpfS2ProfileTests
+internal static partial class CommunityWpfS2ProfileTests
 {
     internal static async Task Verify()
     {
+        await Background();
         using var handler = new Handler();
         using var client = new CommunityClient(new Uri("https://legacy.invalid"), handler);
         const string scope = "legacy-profile";
@@ -89,6 +90,10 @@ internal static class CommunityWpfS2ProfileTests
         internal long Revision = 4;
         internal long ExpectedRevision;
         internal bool Allowed = true;
+        internal bool Owner;
+        internal bool BannerOnly;
+        internal bool Denied;
+        internal JsonElement Outgoing;
         internal string Mode = "ok";
         internal bool OriginalRoute = true;
         internal bool PreservedUntouchedFields = true;
@@ -109,6 +114,7 @@ internal static class CommunityWpfS2ProfileTests
             Writes++;
             OriginalRoute &= request.RequestUri.Query.Length == 0;
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            Outgoing = body.RootElement.Clone();
             ExpectedRevision = body.RootElement.GetProperty("expectedProfileRevision").GetInt64();
             PreservedUntouchedFields &= body.RootElement.GetProperty("type").GetString() == "PVP" &&
                 body.RootElement.GetProperty("activeSystemIds").EnumerateArray().Single().GetString() == "stanton" &&
@@ -124,10 +130,13 @@ internal static class CommunityWpfS2ProfileTests
         private string Description = "Before";
         private object Fleet() => new
         {
-            name = "Organization", code = "A", commander = "Owner", ownerAccount = "other-owner",
+            mediaProjectionVersion = 1, hasLogo = false, hasBanner = false, hasBackground = false,
+            name = "Organization", code = "A", commander = "Owner", ownerAccount = Owner ? "self-user" : "other-owner",
             totalMembers = 2, members = new[] { new { accountId = "self" }, new { accountId = "member" } },
             memberPermissions = new[] { new { accountId = "self", permissionEnabled = Allowed,
-                canManageFleetInfo = Allowed, canRemoveMembers = false, canPublishTasks = false, canPublishPlans = false } },
+                canManageFleetInfo = Allowed && !BannerOnly, canRemoveMembers = false, canPublishTasks = false, canPublishPlans = false,
+                extraAllowedPermissions = BannerOnly ? new[] { "fleet.banner.edit" } : Array.Empty<string>(),
+                extraDeniedPermissions = Denied ? new[] { "fleet.banner.edit" } : Array.Empty<string>() } },
             profileRevision = Revision, description = Description, type = "PVP", activeTime = "19:00 - 22:00",
             joinPolicy = "Open", logoText = "A", logoImageData = (string?)null, bannerImageData = (string?)null,
             emailNotificationsEnabled = true, activityWindows = Array.Empty<object>(), activeDaysDescription = "",

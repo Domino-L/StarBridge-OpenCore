@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_compact_select.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -28,20 +32,24 @@ class OfficialFleetShipsToolbar extends StatelessWidget {
     final tokens = context.tokens;
     final search = SizedBox(
       width: 340,
-      child: TextField(
-        key: const Key('official-fleet-ships-search'),
-        controller: searchController,
-        onSubmitted: module.search,
-        decoration: InputDecoration(
-          hintText: strings.text('officialFleet.ships.search'),
-          prefixIcon: const Padding(
-            padding: EdgeInsets.all(10),
-            child: StarBridgeIcon(StarBridgeIconSemantic.hangar),
-          ),
-          suffixIcon: IconButton(
-            tooltip: strings.text('officialFleet.ships.search.submit'),
-            onPressed: () => module.search(searchController.text),
-            icon: const StarBridgeIcon(StarBridgeIconSemantic.forward),
+      child: StarBridgeFieldFrame(
+        enabled: true,
+        builder: (_, focus) => TextField(
+          focusNode: focus,
+          key: const Key('official-fleet-ships-search'),
+          controller: searchController,
+          onSubmitted: module.search,
+          decoration: InputDecoration(
+            hintText: strings.text('officialFleet.ships.search'),
+            prefixIcon: const Padding(
+              padding: EdgeInsets.all(10),
+              child: StarBridgeIcon(StarBridgeIconSemantic.hangar),
+            ),
+            suffixIcon: IconButton(
+              tooltip: strings.text('officialFleet.ships.search.submit'),
+              onPressed: () => module.search(searchController.text),
+              icon: const StarBridgeIcon(StarBridgeIconSemantic.forward),
+            ),
           ),
         ),
       ),
@@ -51,9 +59,9 @@ class OfficialFleetShipsToolbar extends StatelessWidget {
       runSpacing: tokens.space.xs,
       children: [
         for (final filter in OfficialFleetShipFilter.values)
-          ChoiceChip(
-            key: Key('official-fleet-ships-filter-${filter.name}'),
-            label: Text(strings.text(_filterLabelKey(filter))),
+          StarBridgeChoiceChip(
+            controlKey: Key('official-fleet-ships-filter-${filter.name}'),
+            label: strings.text(_filterLabelKey(filter)),
             selected: query.filter == filter,
             onSelected: (_) => module.setFilter(filter),
           ),
@@ -68,19 +76,17 @@ class OfficialFleetShipsToolbar extends StatelessWidget {
               ?.copyWith(color: tokens.colors.textSecondary),
         ),
         SizedBox(width: tokens.space.sm),
-        DropdownButton<int>(
-          key: const Key('official-fleet-ships-page-size'),
+        StarBridgeCompactSelect<int>(
+          identity: 'official-fleet-ships-page-size',
+          controlKey: const Key('official-fleet-ships-page-size'),
+          semanticLabel: strings.text('officialFleet.ships.pageSize'),
           value: query.pageSize,
-          items: const [
-            DropdownMenuItem(value: 25, child: Text('25')),
-            DropdownMenuItem(value: 50, child: Text('50')),
-            DropdownMenuItem(value: 100, child: Text('100')),
+          options: const [
+            StarBridgeSelectOption(value: 25, label: '25'),
+            StarBridgeSelectOption(value: 50, label: '50'),
+            StarBridgeSelectOption(value: 100, label: '100'),
           ],
-          onChanged: (value) {
-            if (value != null) {
-              module.setPageSize(value);
-            }
-          },
+          onSelected: (value, _) => module.setPageSize(value),
         ),
       ],
     );

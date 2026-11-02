@@ -22,7 +22,8 @@ public sealed record LocalPrivacySettings(
     [property: JsonRequired] RoomPrivacySettings Room,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CommunityRealtimeScope[]? Communities = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SharedEventPreferences? Events = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HideLowConfidenceLocation = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HideLowConfidenceLocation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OfficialFleetRealtimeChoice? OfficialFleet = null)
 {
     // Suggestions are not consent. An absent saved record remains null.
     public static LocalPrivacySettings EditorDefaults => new(true,
@@ -31,6 +32,7 @@ public sealed record LocalPrivacySettings(
 
     internal LocalPrivacySettings ValidatedCopy()
     {
+        if (OfficialFleet is not null && !OfficialFleet.IsValid) throw new LocalPrivacyException("privacy_local.invalid_request");
         if (Fleet is null || Room is null || Fleet.VisibilityGroupIds is null ||
             !ValidFields(Fleet.Fields) || !ValidFields(Room.Fields) || Fleet.VisibilityGroupIds.Count > 12 ||
             Fleet.VisibilityGroupIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 128 ||
@@ -55,7 +57,14 @@ public sealed record LocalPrivacySettings(
 public sealed record LocalPrivacySnapshot(long Revision, DateTimeOffset? SavedAt, string? OperationId,
     LocalPrivacySettings? Settings);
 
-public sealed class LocalPrivacyException(string code) : Exception(code)
+public class LocalPrivacyException(string code) : Exception(code)
 {
     public string Code { get; } = code;
 }
+
+// The serialized policy has not failed validation: its verified business owner
+// is temporarily unavailable. Keep the stable bridge error while allowing only
+// a later authoritative owner check to retry the existing consent read.
+internal class LocalPrivacyReadUnavailableException() : LocalPrivacyException("privacy_local.read_failed");
+internal sealed class LocalPrivacyOwnerUnavailableException() : LocalPrivacyReadUnavailableException;
+

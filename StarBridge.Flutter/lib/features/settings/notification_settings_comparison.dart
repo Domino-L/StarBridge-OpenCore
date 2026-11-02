@@ -23,6 +23,7 @@ bool sameNotificationSettings(
     v.channels.inAppEnabled,
     v.channels.windowsDesktopEnabled,
     v.channels.directMessageWindowsEnabled,
+    v.channels.tradeWindowsEnabled,
     v.channels.overlayEnabled,
     v.channels.desktopPosition,
     v.channels.sound.enabled,

@@ -42,7 +42,9 @@ void main() {
       final metadata = Completer<CommunityWorkspace>();
       port.reader = (_, _, _) => metadata.future;
       try {
-        await tester.tap(find.text('搜索'));
+        await tester.tap(
+          find.byKey(const Key('community-member-search-submit')),
+        );
         await tester.pump();
         expect(
           find.byKey(const ValueKey('community-refresh-progress')),

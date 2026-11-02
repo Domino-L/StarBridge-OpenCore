@@ -11,14 +11,14 @@ public enum GameplayRecordingConsent { Unknown, Allowed, Declined }
 /// </summary>
 public sealed class GameplayTimeAccumulator
 {
-    public static readonly TimeSpan MaximumSampleGap = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan MaximumSampleGap = GameplayTimeSampleCounter.MaximumSampleGap;
     private BridgeAccountContext? _owner;
     private long _generation;
-    private DateTimeOffset? _lastSample;
+    private readonly GameplayTimeSampleCounter _counter = new();
 
     public GameplayRecordingConsent Consent { get; private set; }
-    public long PlayTimeSeconds { get; private set; }
-    public bool IsRecording => _lastSample is not null;
+    public long PlayTimeSeconds => _counter.Seconds;
+    public bool IsRecording => _counter.IsRecording;
 
     /// <summary>Replaces the active owner only; no old files or totals are promoted.</summary>
     public void Restore(BridgeAccountContext? owner, long generation,
@@ -28,7 +28,7 @@ public sealed class GameplayTimeAccumulator
         Suspend();
         _owner = null;
         Consent = GameplayRecordingConsent.Unknown;
-        PlayTimeSeconds = 0;
+        _counter.Restore(0);
         if (generation < 0 || recordedSeconds < 0 || !Enum.IsDefined(consent) ||
             owner is not null && !owner.IsComplete)
             throw new ArgumentException("Invalid gameplay statistics snapshot.");
@@ -36,7 +36,7 @@ public sealed class GameplayTimeAccumulator
         if (owner is null) return;
         _owner = owner;
         Consent = consent;
-        PlayTimeSeconds = recordedSeconds;
+        _counter.Restore(recordedSeconds);
     }
 
     public void ApplyConsent(GameplayRecordingConsent consent)
@@ -62,21 +62,9 @@ public sealed class GameplayTimeAccumulator
             return;
         }
 
-        var previous = _lastSample;
-        Suspend();
-        if (previous is not null)
-        {
-            var elapsed = now - previous.Value;
-            if (elapsed > TimeSpan.Zero && elapsed <= MaximumSampleGap)
-            {
-                // Preserve WPF rounding, including the final confirmed-exit sample.
-                var seconds = (long)Math.Round(elapsed.TotalSeconds, MidpointRounding.AwayFromZero);
-                PlayTimeSeconds = checked(PlayTimeSeconds + seconds);
-            }
-        }
-        if (presence.State == "running") _lastSample = now;
+        _counter.Observe(presence.State == "running", now);
     }
 
     /// <summary>Stops immediately, retaining totals but no interval to resume later.</summary>
-    public void Suspend() => _lastSample = null;
+    public void Suspend() => _counter.Suspend();
 }

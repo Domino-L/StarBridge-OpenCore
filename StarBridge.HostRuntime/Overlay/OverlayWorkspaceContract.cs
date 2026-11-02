@@ -19,7 +19,8 @@ internal sealed record OverlayWorkspacePresetSnapshot(
 internal sealed record OverlayWorkspaceHotkeySnapshot(
     string Binding,
     bool Enabled,
-    string RuntimeState);
+    string RuntimeState,
+    bool? UseRegisteredHotkey = null);
 
 internal sealed record OverlayWorkspaceReadResult(
     int SchemaVersion,
@@ -57,11 +58,18 @@ internal sealed record OverlayWorkspaceMutation(
     string? RenderMode = null,
     OverlayWorkspaceHotkeySnapshot? Hotkey = null,
     OverlayPresetSources? Sources = null,
-    string? ReplaceAutoSwitchPresetId = null);
+    string? ReplaceAutoSwitchPresetId = null,
+    OverlayAppearanceOptions? AppearanceOptions = null);
 
 internal interface IOverlayWorkspaceStore
 {
     OverlayWorkspaceReadResult Load();
 
     OverlayWorkspaceReadResult Apply(OverlayWorkspaceMutation mutation, Func<bool>? isCurrent = null);
+}
+
+// Optional inspection seam. Never fall back to Load(), which may migrate files.
+internal interface IOverlayWorkspaceInspector
+{
+    OverlayWorkspaceReadResult Inspect();
 }

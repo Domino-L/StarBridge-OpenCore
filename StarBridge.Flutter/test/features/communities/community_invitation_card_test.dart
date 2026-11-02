@@ -187,7 +187,7 @@ void main() {
         )).alreadyMember,
         isFalse,
       );
-      await tester.tap(find.byTooltip('关闭'));
+      await tester.tap(find.byKey(const Key('community-admission-close-icon')));
       await tester.pumpAndSettle();
       expect(find.byType(CommunityInviteDialog), findsNothing);
       expect(find.text('未发送草稿'), findsOneWidget);

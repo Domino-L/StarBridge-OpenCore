@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using StarBridge.Core.Identity;
+using StarBridge.Core.Parsing;
 
 namespace StarBridge.HostRuntime.Presence;
 
@@ -18,6 +19,9 @@ public sealed class GameLogIdentityReader
     private const int WindowBytes = 16 * 1024 * 1024;
     private string? _source;
     private long _position;
+    private long? _liveFrom;
+    private bool _following;
+    private long _lineStart;
     private readonly Dictionary<(string Handle, string Id), string> _identities = [];
     private bool _quit;
     private bool _invalidIdentityEvidence;
@@ -28,67 +32,46 @@ public sealed class GameLogIdentityReader
     private long? _recentWriteStamp;
     private readonly GameLogSessionTracker? _session;
     private readonly Support.GameLogJournalBatch? _journal;
+    private readonly bool _strictLocalEvidence;
 
     public GameLogIdentityReader()
     {
     }
 
-    internal GameLogIdentityReader(GameLogSessionTracker session, Support.GameLogJournalBatch? journal = null)
+    internal GameLogIdentityReader(GameLogSessionTracker session, Support.GameLogJournalBatch? journal = null,
+        bool strictLocalEvidence = false)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _journal = journal;
+        _strictLocalEvidence = strictLocalEvidence;
     }
 
     internal GameLogSessionSnapshot SessionSnapshot(DateTimeOffset now) =>
         _session?.Snapshot(now) ?? GameLogSessionSnapshot.Empty;
 
+    // Runtime candidates belong to this reader source and must not survive its reset.
+    internal event Action? SourceReset;
+    internal bool IdentityInvalidated => _quit || _invalidIdentityEvidence || _identities.Count > 1;
+
     public void Reset()
     {
         _source = null; _position = 0; _identities.Clear(); _quit = false;
+        _liveFrom = null; _lineStart = 0; _following = false;
         _invalidIdentityEvidence = false;
         _anchor = []; _line.Clear(); _longLine = false;
         _recentIdentityAt = null;
         _recentWriteStamp = null;
         _session?.Reset();
         _journal?.Reset();
+        SourceReset?.Invoke();
     }
     private static readonly Regex Identity = new(
         "nickname=\"(?<handle>[^\"]{2,64})\"\\s+playerGEID\\s*=?\\s*\"?(?<id>[0-9]{1,24})(?:\"|\\s|,|$)",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
-    public static GameProcessSession Probe()
-    {
-        var sessions = new List<GameProcessSession>();
-        var uncertain = false;
-        foreach (var name in new[] { "StarCitizen", "StarCitizen_LIVE", "StarCitizen_PTUR", "StarCitizen_EPTU",
-                     "StarCitizen_HOTFIX", "StarCitizen_TECH-PREVIEW" })
-        {
-            Process[] processes;
-            try { processes = Process.GetProcessesByName(name); }
-            catch { uncertain = true; continue; }
-            foreach (var process in processes)
-                using (process)
-                    try
-                    {
-                        if (process.HasExited) continue;
-                        using var processHandle = OpenProcess(0x1000, false, process.Id);
-                        var executableBuffer = new StringBuilder(2048);
-                        var executableLength = (uint)executableBuffer.Capacity;
-                        if (processHandle.IsInvalid || !QueryFullProcessImageName(processHandle, 0, executableBuffer, ref executableLength))
-                        { uncertain = true; continue; }
-                        var executable = executableBuffer.ToString();
-                        var bin = Path.GetDirectoryName(executable);
-                        if (bin is null || !Path.GetFileName(bin).Equals("Bin64", StringComparison.OrdinalIgnoreCase))
-                        { uncertain = true; continue; }
-                        var started = new DateTimeOffset(process.StartTime.ToUniversalTime());
-                        sessions.Add(new("running", Path.Combine(Path.GetDirectoryName(bin)!, "Game.log"),
-                            started, process.Id + ":" + started.UtcTicks));
-                    }
-                    catch { uncertain = true; }
-        }
-        return uncertain || sessions.Count > 1 ? new("unknown") :
-            sessions.Count == 0 ? new("notRunning") : sessions[0];
-    }
+    private static readonly GameProcessSnapshotCache Processes = new(new WindowsGameProcessSource());
+
+    public static GameProcessSession Probe() => GameProcessSnapshotCache.Resolve(Processes.Observe());
 
     public static string ValidatePath(string path)
     {
@@ -115,6 +98,10 @@ public sealed class GameLogIdentityReader
         if (process.State != "running") { Reset(); return new(process.State == "notRunning" ? "notRunning" : "unknown"); }
         if (process.StartedAt is null || process.LogPath is null || process.SessionId is null)
         { Reset(); return new("unknown"); }
+        if (_strictLocalEvidence && (process.StartedAt.Value.Offset != TimeSpan.Zero ||
+            process.StartedAt < DateTimeOffset.UnixEpoch || process.StartedAt > now ||
+            process.SessionId.Length is 0 or > 256 || process.SessionId.Any(char.IsControl)))
+        { Reset(); return new("unknown"); }
         return ReadFile(path, process, now);
     }
 
@@ -132,6 +119,10 @@ public sealed class GameLogIdentityReader
         try
         {
             path = ValidatePath(path);
+            // The independent local profile opts into the strict source contract.
+            // Existing account readers retain their accepted compatibility policy.
+            using var pinned = _strictLocalEvidence
+                ? CheckedGameLogAccess.PinnedDirectories.Open(Path.GetDirectoryName(path)!, () => { }) : null;
             if (!recent && !path.Equals(Path.GetFullPath(process!.LogPath!), StringComparison.OrdinalIgnoreCase))
             {
                 Reset();
@@ -146,12 +137,18 @@ public sealed class GameLogIdentityReader
                 !GetFileInformationByHandle(stream.SafeFileHandle, out var fileInfo) ||
                 (fileInfo.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
                 throw new IOException();
+            if (_strictLocalEvidence && fileInfo.Links != 1) throw new IOException();
             var length = stream.Length;
+            if (_strictLocalEvidence && length > 64L * 1024 * 1024) { Reset(); return new("limit"); }
             var writeStamp = ((long)fileInfo.Write.dwHighDateTime << 32) | (uint)fileInfo.Write.dwLowDateTime;
-            var source = path + "|" + (process?.SessionId ?? "recent-identity-only") + "|" + fileInfo.Volume + ":" + fileInfo.IndexHigh + ":" + fileInfo.IndexLow;
+            var fileIdentity = _strictLocalEvidence ? CheckedGameLogAccess.PersistentIdentity(stream.SafeFileHandle) :
+                fileInfo.Volume + ":" + fileInfo.IndexHigh + ":" + fileInfo.IndexLow;
+            var source = path + "|" + (process?.SessionId ?? "recent-identity-only") + "|" + fileIdentity;
             if (_source != source || length < _position || !AnchorMatches() ||
-                (recent && length == _position && _recentWriteStamp is { } lastWrite && lastWrite != writeStamp))
+                ((recent || _strictLocalEvidence) && length == _position && _recentWriteStamp is { } lastWrite && lastWrite != writeStamp))
             { Reset(); _source = source; }
+            // Stay historical until catch-up reaches EOF; an old partial line remains historical.
+            if (!_following) _liveFrom = length;
             stream.Position = _position;
             var remaining = (int)Math.Min(length - _position, WindowBytes);
             var buffer = new byte[65536];
@@ -179,15 +176,17 @@ public sealed class GameLogIdentityReader
                                 if (lineBytes.AsSpan().IndexOf("nickname="u8) >= 0 ||
                                     lineBytes.AsSpan().IndexOf("SystemQuit"u8) >= 0)
                                     _invalidIdentityEvidence = true;
+                                if (_strictLocalEvidence) _invalidIdentityEvidence = true;
                             }
                         }
                         _line.Clear(); _longLine = false;
+                        _lineStart = _position + i + 1;
                     }
                     else if (!_longLine)
                     {
                         if (_line.Count >= 65536) {
                             _longLine = true; _line.Clear();
-                            if (recent) _invalidIdentityEvidence = true;
+                            if (recent || _strictLocalEvidence) _invalidIdentityEvidence = true;
                         }
                         else _line.Add(buffer[i]);
                     }
@@ -198,19 +197,22 @@ public sealed class GameLogIdentityReader
             stream.Position = _position - _anchor.Length;
             stream.ReadExactly(_anchor);
             if (stream.Length < length) { Reset(); return new("waiting"); }
-            if (recent) {
+            if (recent || _strictLocalEvidence) {
                 if (!GetFileInformationByHandle(stream.SafeFileHandle, out var after) ||
                     after.Write.dwHighDateTime != fileInfo.Write.dwHighDateTime ||
-                    after.Write.dwLowDateTime != fileInfo.Write.dwLowDateTime) {
+                    after.Write.dwLowDateTime != fileInfo.Write.dwLowDateTime ||
+                    _strictLocalEvidence && (after.Links != 1 ||
+                        (after.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)) {
                     Reset(); return new("reading");
                 }
                 _recentWriteStamp = writeStamp;
             }
             // Do not skip the middle of a large file: it may contain a conflicting identity or quit.
             if (_position < stream.Length) return new("reading");
+            _following = true;
             if ((!recent && _quit) || _invalidIdentityEvidence) return new("waiting");
             // An incomplete possible identity must not let a previous value authorize a rename.
-            if (recent && (_longLine || _line.Count != 0)) return new("reading");
+            if ((recent || _strictLocalEvidence) && (_longLine || _line.Count != 0)) return new("reading");
             return _identities.Count switch
             {
                 0 => new("waiting"), 1 => new("identified", _identities.Single().Value), _ => new("ambiguous")
@@ -225,6 +227,7 @@ public sealed class GameLogIdentityReader
             }
             void Observe(string line)
             {
+                if (_strictLocalEvidence) { ObserveStrict(line); return; }
                 var containsIdentity = line.Contains("nickname=", StringComparison.Ordinal);
                 var containsQuit = line.Contains("SystemQuit", StringComparison.Ordinal);
                 if (_journal is null && !containsIdentity && !containsQuit &&
@@ -241,7 +244,7 @@ public sealed class GameLogIdentityReader
                     if (recent && containsIdentity) _invalidIdentityEvidence = true;
                     return;
                 }
-                _session?.Observe(line);
+                _session?.Observe(line, live: !recent && _following && _lineStart >= _liveFrom);
                 if (line.Contains("SystemQuit", StringComparison.Ordinal) && line.Contains("CSystem::Quit", StringComparison.Ordinal))
                 {
                     _quit = true;
@@ -266,18 +269,32 @@ public sealed class GameLogIdentityReader
                     _identities.TryAdd((match.Groups["handle"].Value.ToLowerInvariant(), match.Groups["id"].Value),
                         match.Groups["handle"].Value);
             }
+            void ObserveStrict(string line)
+            {
+                var state = LocalGameIdentityLine.Parse(line, now, out var identity);
+                var quit = line.Contains("<SystemQuit>", StringComparison.OrdinalIgnoreCase) &&
+                    line.Contains("CSystem::Quit", StringComparison.OrdinalIgnoreCase);
+                if (!LocalGameIdentityLine.TryTimestamp(line, now, out var at, out var resolution))
+                { if (state == LocalGameIdentityLineState.Invalid || quit) _invalidIdentityEvidence = true; return; }
+                if (!LocalGameIdentityLine.MeetsSessionTime(new("", "", at) { ResolutionTicks = resolution },
+                    process!.StartedAt!.Value, process.StartedAt.Value, now)) return;
+                if (state == LocalGameIdentityLineState.Invalid) { _invalidIdentityEvidence = true; return; }
+                if (quit) { _quit = true; _session?.Reset(); return; }
+                // A remote/unrelated nickname must not change the session tracker's
+                // local identity while the strict identity observer ignores it.
+                if (state == LocalGameIdentityLineState.Unrelated &&
+                    line.Contains("nickname", StringComparison.OrdinalIgnoreCase)) return;
+                _session?.Observe(line, live: !recent && _following && _lineStart >= _liveFrom);
+                if (identity is not null && _identities.Count < 2)
+                    _identities.TryAdd((identity.Handle.ToLowerInvariant(), identity.PlayerId), identity.Handle);
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or
-            NotSupportedException or DecoderFallbackException or RegexMatchTimeoutException)
+            NotSupportedException or DecoderFallbackException or RegexMatchTimeoutException or GameplayTimeException)
         { Reset(); return new("unreadable"); }
     }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint size, uint flags);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern SafeProcessHandle OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int processId);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, StringBuilder path, ref uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);

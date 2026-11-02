@@ -5,6 +5,7 @@ internal static class CommunityLogoBridgeTests
 {
     internal static async Task Verify()
     {
+        await CommunityWideImageBridgeTests.Verify();
         var owner = new BridgeAccountContext("test", "test", "owner");
         var generation = 2L;
         using var picker = new Picker();

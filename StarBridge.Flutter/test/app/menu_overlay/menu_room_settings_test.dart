@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -43,7 +45,7 @@ class SettingsPort extends RoomPort {
     nextDelay = Duration.zero;
     if (delay != Duration.zero) await Future<void>.delayed(delay);
     if (readUnavailable) return const RoomReadResult(RoomReadState.unavailable);
-    final base = (await super.read()).directory!;
+    final base = (resolvedMenuCopy(await super.read())).directory!;
     final room = base.rooms.single;
     const tag = RoomTag(id: 'combat', text: '战斗', isGameplay: true);
     return RoomReadResult(
@@ -131,10 +133,10 @@ void main() {
           port.roomId = 'other-private-room';
           await session.refresh();
         }
-        final before = jsonEncode(session.currentView);
+        final before = jsonEncode(resolvedMenuCopy(session.currentView));
         port.pendingResult!.complete(const RoomCommandResult('updated'));
         await tester.pump();
-        expect(jsonEncode(session.currentView), before);
+        expect(jsonEncode(resolvedMenuCopy(session.currentView)), before);
         expect(port.calls.length, 1);
         session.dispose();
       },

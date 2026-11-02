@@ -5,6 +5,7 @@ public sealed record InformationOverlayRoomMember(string Callsign, string GameId
     bool IsHost, string Presence, string Location, string Ship, string ServerRegion)
 {
     public string? PreferenceKey { get; init; }
+    public string? ServerShard { get; init; }
     public bool? IsSelf { get; init; }
     public string? LocationHiddenReason { get; init; }
     public bool ArrivalPendingConfirmation { get; init; }
@@ -17,6 +18,9 @@ public sealed record InformationOverlayRoomMessage(long Sequence, string SenderC
     public bool? IsSelf { get; init; }
     // Only the kind crosses into the HUD; never attachment packages or invite tokens.
     public string? AttachmentKind { get; init; }
+    // Host-only lifetime of a fleet author projection; never part of the HUD wire.
+    // Null is reserved for room/community messages with their existing semantics.
+    internal DateTimeOffset? AuthorValidUntil { get; init; }
 }
 
 public sealed record InformationOverlayRoomContent(string RoomId, string Title, string Goal,

@@ -6,7 +6,7 @@ using StarBridge.NativeBridge;
 
 namespace StarBridge.HostRuntime.Privacy;
 
-internal sealed class FriendSharingRuntime : IDisposable
+internal sealed partial class FriendSharingRuntime : IDisposable
 {
     private readonly IFriendSharingRemote _remote;
     private readonly Func<PrivacyPublicationInput?> _current;
@@ -15,14 +15,15 @@ internal sealed class FriendSharingRuntime : IDisposable
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly ITimer? _timer;
+    private readonly Lifecycle.DeferredWorkTimer _timer;
     private FriendSharingPublication _publisher;
     private FriendSharingRemoteSnapshot? _saved;
     private PrivacyPublicationInput? _owner;
     private DateTimeOffset _lastRead;
     private int _paused;
     private int _tickPending;
-    private bool _shutdown, _disposed;
+    private bool _shutdown;
+    private volatile bool _disposed;
     internal string State { get; private set; } = "inactive";
     internal Action<string, string>? Diagnostic { get; set; }
 
@@ -33,9 +34,11 @@ internal sealed class FriendSharingRuntime : IDisposable
         _remote = remote; _current = current; _allowed = allowed; _visibility = visibility;
         _time = timeProvider ?? TimeProvider.System;
         _publisher = CreatePublisher();
-        if (startTimer) _timer = _time.CreateTimer(_ => _ = TickAsync(), null,
+        _timer = new(_time, TickAsync,
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        if (startTimer) _timer.Start();
     }
+    internal bool StartDeferredWork() => !_disposed && !_shutdown && _timer.Start();
     private FriendSharingPublication CreatePublisher() => new(Snapshot,
         (value, ct) => Observe("start", () => _remote.WriteFriendLiveAsync(value.Input, "start", value.Revision, null, 0, null, ct)),
         async (value, session, sequence, source, ct) => { await Observe("publish", () => _remote.WriteFriendLiveAsync(value.Input, "publish", value.Revision, session, sequence, source, ct)); },
@@ -71,6 +74,9 @@ internal sealed class FriendSharingRuntime : IDisposable
     internal void Resume() => Interlocked.Decrement(ref _paused);
     internal async Task<bool> StopAsync(CancellationToken token, bool shutdown = false)
     {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) return false;
+        token = work.Token;
         if (shutdown) _shutdown = true;
         await _gate.WaitAsync(token);
         try { await _publisher.StopAsync(token); State = "inactive"; return true; }
@@ -79,10 +85,12 @@ internal sealed class FriendSharingRuntime : IDisposable
     }
     internal async Task TickAsync()
     {
-        if (_disposed) return;
+        using var work = _work.Enter(default);
+        if (work is null || _disposed) return;
         Interlocked.Exchange(ref _tickPending, 1);
         if (!await _gate.WaitAsync(0)) return;
         try {
+            if (_disposed) return;
             var passes = 0;
             do {
                 Interlocked.Exchange(ref _tickPending, 0);
@@ -98,6 +106,7 @@ internal sealed class FriendSharingRuntime : IDisposable
     }
     private async Task TickCoreAsync()
     {
+        if (_disposed) return;
         try
         {
             var input = _current();
@@ -116,7 +125,7 @@ internal sealed class FriendSharingRuntime : IDisposable
             {
                 try {
                     var value = await Observe("read", () => _remote.ReadFriendSharingAsync(input.Owner, input.Generation, _lifetime.Token));
-                    if (_current() is not { } current || current.Owner != input.Owner || current.Generation != input.Generation) return;
+                    if (_disposed || _current() is not { } current || current.Owner != input.Owner || current.Generation != input.Generation) return;
                     _saved = value; _lastRead = _time.GetUtcNow();
                 }
                 catch (Exception error) when (_saved is not null && FriendSharingPublication.IsTransient(error, _lifetime.Token)) {
@@ -125,11 +134,13 @@ internal sealed class FriendSharingRuntime : IDisposable
                     // live session; remote revocation still rejects the write.
                 }
             }
+            if (_disposed) return;
             await _publisher.TickAsync(_lifetime.Token);
             State = Snapshot()?.Enabled == true ? "active" : "inactive";
         }
         catch (Exception error)
         {
+            if (_disposed) return;
             State = "unconfirmed";
             // Transport uncertainty is not an intentional Offline event. Keep
             // the bounded session and last verified revision; a later tick can
@@ -140,21 +151,35 @@ internal sealed class FriendSharingRuntime : IDisposable
             }
         }
     }
-    internal async Task<FriendSharingRemoteSnapshot> ReadAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
-        await Observe("read", () => _remote.ReadFriendSharingAsync(owner, generation, token));
+    internal async Task<FriendSharingRemoteSnapshot> ReadAsync(BridgeAccountContext owner, long generation, CancellationToken token)
+    {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
+        var result = await Observe("read", () => _remote.ReadFriendSharingAsync(owner, generation, work.Token));
+        if (!work.IsCurrent || _disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
+        return result;
+    }
     internal async Task<FriendSharingRemoteSnapshot> SaveAsync(BridgeAccountContext owner, long generation,
         long revision, string operation, FriendSharedFields fields, CancellationToken token)
     {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
+        token = work.Token;
         Pause();
         try
         {
             await _gate.WaitAsync(token);
             try
             {
+            token.ThrowIfCancellationRequested();
+            if (_disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
             _saved = null; _lastRead = default;
             // Remote narrowing must remain possible even when withdrawal failed.
             try { await _publisher.StopAsync(token); } catch (Exception e) when (e is not OperationCanceledException) { }
+            token.ThrowIfCancellationRequested();
+            if (_disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
             var result = await Observe("save", () => _remote.SaveFriendSharingAsync(owner, generation, revision, operation, fields, token));
+            if (!work.IsCurrent || _disposed) throw new AccountBridgeHostException("friendsSharing.account_changed");
             State = "inactive";
             return result;
             }
@@ -162,7 +187,6 @@ internal sealed class FriendSharingRuntime : IDisposable
         }
         finally { Resume(); }
     }
-    public void Dispose() { _disposed = true; _timer?.Dispose(); _lifetime.Cancel(); }
 }
 
 internal sealed class FriendSharingDispatcher(FriendSharingRuntime runtime, Func<(BridgeAccountContext? Context, long Generation)> current)

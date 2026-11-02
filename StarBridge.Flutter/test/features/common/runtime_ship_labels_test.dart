@@ -5,7 +5,7 @@ import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_row.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_port.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_view.dart';
 import 'package:starbridge_flutter/features/party_rooms/party_rooms_module.dart';
@@ -133,7 +133,8 @@ void main() {
       await settleCommunityImages(tester);
       expect(
         tester
-            .widget<CommunityMemberBanner>(find.byType(CommunityMemberBanner))
+            .widget<OrganizationMemberRow>(find.byType(OrganizationMemberRow))
+            .entry
             .ship,
         entry.$2,
       );
@@ -147,7 +148,8 @@ void main() {
       await settleCommunityImages(tester);
       expect(
         tester
-            .widget<CommunityMemberBanner>(find.byType(CommunityMemberBanner))
+            .widget<OrganizationMemberRow>(find.byType(OrganizationMemberRow))
+            .entry
             .ship,
         isNot(entry.$2),
         reason: 'A revoked field cannot reuse old labels',
@@ -155,7 +157,7 @@ void main() {
       port.changes.add(null);
       await tester.pump();
       expect(
-        find.byType(CommunityMemberBanner),
+        find.byType(OrganizationMemberRow),
         findsNothing,
         reason: 'Account invalidation must clear the old member and its labels',
       );

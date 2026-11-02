@@ -549,7 +549,13 @@ final class OverlayWorkspaceLayoutGeometry {
     final wide = surfaceSize.aspectRatio >= 2.1;
     final raw = switch (key) {
       'Notice' => _ModuleConstraints(420, wide ? 1040 : 1120, 52, 118),
-      'Squads' => _ModuleConstraints(240, wide ? 460 : 540, 150, 620),
+      // Never below the 5% a saved layout item keeps.
+      'Squads' => _ModuleConstraints(
+        240,
+        wide ? 460 : 540,
+        math.max(72, surfaceSize.height * 0.05),
+        620,
+      ),
       'Members' => _ModuleConstraints(240, wide ? 480 : 520, 140, 440),
       'Chat' => _ModuleConstraints(240, wide ? 760 : 680, 104, 440),
       _ => _ModuleConstraints(80, surfaceSize.width, 50, surfaceSize.height),

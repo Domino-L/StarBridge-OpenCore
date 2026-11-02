@@ -45,6 +45,8 @@ void main() {
     'users.targetChanged': 'profile.visitor.refreshSource',
     'communities.refreshRequired': 'profile.visitor.refreshSource',
     'profile.visitor_not_visible': 'profile.visitor.notVisible',
+    'profile.visitor_identity_unavailable': 'profile.visitor.identityUnavailable',
+    'profile.visitor_unavailable': 'profile.visitor.identityUnavailable',
     'account.reauthorization_required': 'profile.visitor.accountRequired',
     'bridge.timeout': 'profile.visitor.readTimeout',
   }.entries) {

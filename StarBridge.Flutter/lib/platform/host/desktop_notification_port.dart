@@ -49,6 +49,16 @@ abstract interface class DesktopNotificationDestinationPort {
   Future<String?> consumeDestination(DesktopReminderActivation activation);
 }
 
+/// A destination with its opaque Host reference: `trade` (a transaction ref)
+/// and `tradeChat` (a trade conversation ref); other destinations have none.
+typedef DesktopNotificationTarget = ({String destination, String? ref});
+
+abstract interface class DesktopNotificationTargetPort {
+  Future<DesktopNotificationTarget?> consumeTarget(
+    DesktopReminderActivation activation,
+  );
+}
+
 abstract interface class DesktopNotificationActivationPort {
   Stream<DesktopReminderActivation> get activations;
   bool isCurrent(DesktopReminderActivation activation);
@@ -98,7 +108,8 @@ final class BridgeDesktopNotificationPort
         DesktopNotificationPort,
         DesktopNotificationDiagnostics,
         DesktopNotificationActivationPort,
-        DesktopNotificationDestinationPort {
+        DesktopNotificationDestinationPort,
+        DesktopNotificationTargetPort {
   const BridgeDesktopNotificationPort(this.session);
   final BridgeClientSession session;
   @override
@@ -127,6 +138,13 @@ final class BridgeDesktopNotificationPort
   @override
   Future<String?> consumeDestination(
     DesktopReminderActivation activation,
+  ) async => (await consumeTarget(activation))?.destination;
+
+  static final _ref = RegExp(r'^[a-f0-9]{32}$');
+
+  @override
+  Future<DesktopNotificationTarget?> consumeTarget(
+    DesktopReminderActivation activation,
   ) async {
     const name = 'notificationSettings.consumeActivation';
     if (!isCurrent(activation) || !session.hostCapabilities.contains(name)) {
@@ -138,14 +156,25 @@ final class BridgeDesktopNotificationPort
         payload: {'schemaVersion': 1, 'activationId': activation.id},
       );
       final destination = response.payload['destination'];
-      return isCurrent(activation) &&
-              response.payload['schemaVersion'] == 1 &&
-              (destination == 'roomReminders' ||
-                  destination == 'notificationInbox' ||
-                  destination == 'directMessages' ||
-                  destination == 'communities' ||
-                  destination == 'gameIdentity')
-          ? destination as String
+      final ref = response.payload['ref'];
+      if (!isCurrent(activation) || response.payload['schemaVersion'] != 1) {
+        return null;
+      }
+      if (destination == 'trade' || destination == 'tradeChat') {
+        // A trade or chat card without a usable ref still opens 我的交易.
+        return ref is String && _ref.hasMatch(ref)
+            ? (destination: destination as String, ref: ref)
+            : (destination: 'myTrades', ref: null);
+      }
+      return destination == 'roomReminders' ||
+              destination == 'notificationInbox' ||
+              destination == 'directMessages' ||
+              destination == 'communities' ||
+              destination == 'officialFleet' ||
+              destination == 'gameIdentity' ||
+              destination == 'execHangar' ||
+              destination == 'myTrades'
+          ? (destination: destination as String, ref: null)
           : null;
     } catch (_) {
       return null;

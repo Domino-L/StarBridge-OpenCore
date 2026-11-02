@@ -1,10 +1,16 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../design_system/icons/standard_icon.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 
 import '../../features/communities/community_catalog_ship_image.dart';
-import '../../features/communities/community_member_banner.dart';
 import '../../features/communities/community_ship_banner.dart';
 import '../../features/communities/community_fleet_statistics_dialog.dart';
 import '../../features/communities/community_ship_row_surface.dart';
@@ -22,12 +28,13 @@ import 'menu_friends_view.dart' show menuPresenceColor;
 import 'menu_organization_view.dart';
 import 'menu_announcement_details_control.dart';
 import 'menu_comms_panel.dart' show MenuInlineAvatar;
-import 'menu_avatar_actions.dart';
 import 'menu_organization_directory.dart';
 import 'menu_organization_header.dart';
 import 'menu_organization_sidebar.dart';
 import 'menu_organization_navigation.dart';
 import 'menu_channel_panel.dart';
+import 'menu_organization_members_board.dart';
+import 'menu_loading.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 /// WPF-style collaboration hierarchy, with stacked fields at narrow widths.
@@ -50,7 +57,6 @@ class MenuOrganizationsPanel extends StatefulWidget {
 
 class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
   final _query = TextEditingController();
-  String _filter = '';
   bool _showOrganizations = false;
   bool _statisticsDismissed = false;
   @override
@@ -67,7 +73,6 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
             widget.view.organization != null &&
             oldWidget.view.organization?.tab !=
                 widget.view.organization?.tab)) {
-      _filter = '';
       _statisticsDismissed = false;
       _query.text = widget.view.organization?.query ?? '';
     }
@@ -79,29 +84,68 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
     super.dispose();
   }
 
-  Widget _action(MenuFeatureButton action, {bool selected = false}) => selected
-      ? FilledButton.tonal(
-          onPressed: widget.view.busy
-              ? null
-              : () {
-                  if (action.label == '舰队统计') {
-                    setState(() => _statisticsDismissed = false);
-                  }
-                  widget.onAction(action.key, '');
-                },
-          child: Text(action.label),
-        )
-      : OutlinedButton(
-          onPressed: widget.view.busy
-              ? null
-              : () {
-                  if (action.label == '舰队统计') {
-                    setState(() => _statisticsDismissed = false);
-                  }
-                  widget.onAction(action.key, '');
-                },
-          child: Text(action.label),
-        );
+  Widget _action(MenuFeatureButton action, {bool selected = false}) =>
+      StarBridgeActionButton(
+        kind: selected
+            ? StarBridgeActionKind.primary
+            : StarBridgeActionKind.secondary,
+        nativeStyle: selected
+            ? const FilledButton.tonal(
+                    onPressed: null,
+                    child: SizedBox.shrink(),
+                  )
+                  .defaultStyleOf(context)
+                  .merge(FilledButtonTheme.of(context).style)
+            : null,
+        onActivate: widget.view.busy
+            ? null
+            : (_) {
+                if (action.role == 'fleetStatistics') {
+                  setState(() => _statisticsDismissed = false);
+                }
+                widget.onAction(action.key, '');
+              },
+        child: Text(action.label),
+      );
+
+  Widget _organizationToggle() {
+    final style = TextButton.icon(
+      onPressed: null,
+      icon: const SizedBox.shrink(),
+      label: const SizedBox.shrink(),
+    ).defaultStyleOf(context).merge(TextButtonTheme.of(context).style);
+    final fontSize = style.textStyle?.resolve({})?.fontSize ?? 14;
+    final scale =
+        (MediaQuery.textScalerOf(context).scale(fontSize) / 14)
+            .clamp(1.0, 2.0)
+            .toDouble() -
+        1;
+    final icon = StandardIcon(
+      _showOrganizations
+          ? StandardIconSemantic.arrowForward
+          : StandardIconSemantic.arrowBack,
+    );
+    final label = Flexible(
+      child: Text(
+        _showOrganizations
+            ? menuText(context, 'menu.overlay.organizations.backCurrent')
+            : menuText(context, 'menu.overlay.organizations.list'),
+      ),
+    );
+    return StarBridgeActionButton(
+      kind: StarBridgeActionKind.quiet,
+      nativeStyle: style,
+      onActivate: (_) =>
+          setState(() => _showOrganizations = !_showOrganizations),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 8 - 4 * scale,
+        children: style.iconAlignment == IconAlignment.end
+            ? [label, icon]
+            : [icon, label],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,17 +157,16 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
       return MenuOrganizationDirectory(view: view, onAction: widget.onAction);
     }
     final search = view.buttons
-        .where((a) => a.label == '搜索成员' || a.label == '搜索舰船')
+        .where((a) => a.role == 'searchMembers' || a.role == 'searchShips')
         .firstOrNull;
     final footer = view.buttons.where(
-      (a) => const {'首页', '下一页', '较早消息'}.contains(a.label),
+      (a) => const {'firstPage', 'nextPage', 'olderMessages'}.contains(a.role),
     );
     final form = view.buttons.where((a) => a.input != null && a != search);
-    final statistics = view.buttons.where((a) => a.label == '舰队统计').firstOrNull;
-    final indices = [
-      for (var i = 0; i < view.rows.length; i++)
-        if (_filter.isEmpty || org.rows[i].presence == _filter) i,
-    ];
+    final statistics = view.buttons
+        .where((a) => a.role == 'fleetStatistics')
+        .firstOrNull;
+    final indices = List<int>.generate(view.rows.length, (i) => i);
     final layout = LayoutBuilder(
       builder: (context, constraints) {
         final normalText = MediaQuery.textScalerOf(context).scale(1) <= 1.3;
@@ -143,32 +186,47 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
                   style: const TextStyle(color: BridgeInk.amber),
                 ),
               ),
-            if (view.busy) const BridgeCaption('正在处理…'),
+            if (view.busy) ...[
+              if (!view.refreshing && !org.bodyLoading)
+                MenuLoading(
+                  label: menuText(context, 'menu.overlay.window.working'),
+                ),
+              BridgeCaption(menuText(context, 'menu.display.busy')),
+            ],
             if (search != null) ...[
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _query,
+                    child: StarBridgeFieldFrame(
                       enabled: !view.busy,
-                      inputFormatters: [
-                        LengthLimitingTextInputFormatter(search.limit),
-                      ],
-                      decoration: InputDecoration(
-                        hintText: search.input,
-                        isDense: true,
+                      builder: (context, focus) => TextField(
+                        controller: _query,
+                        focusNode: focus,
+                        enabled: !view.busy,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(search.limit),
+                        ],
+                        decoration: InputDecoration(
+                          hintText: search.input,
+                          isDense: true,
+                        ),
+                        onSubmitted: view.busy
+                            ? null
+                            : (value) => runStarBridgeSynchronousActivation(
+                                InteractionSource.keyboard,
+                                () => widget.onAction(search.key, value),
+                              ),
                       ),
-                      onSubmitted: view.busy
-                          ? null
-                          : (value) => widget.onAction(search.key, value),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: view.busy
+                  StarBridgeActionButton(
+                    onActivate: view.busy
                         ? null
-                        : () => widget.onAction(search.key, _query.text),
-                    child: const Text('搜索'),
+                        : (_) => widget.onAction(search.key, _query.text),
+                    child: Text(
+                      menuText(context, 'menu.overlay.organizations.search'),
+                    ),
                   ),
                   if (org.tab == 'ships' && statistics != null) ...[
                     const SizedBox(width: 8),
@@ -177,61 +235,40 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
                 ],
               ),
               const SizedBox(height: 8),
-              if (org.tab == 'members')
-                Wrap(
-                  spacing: 4,
-                  children: [
-                    for (final status in const [
-                      '',
-                      'inGame',
-                      'online',
-                      'away',
-                      'offline',
-                      'unknown',
-                    ])
-                      OutlinedButton(
-                        key: ValueKey('menu-org-filter-$status'),
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: _filter == status
-                              ? context.tokens.colors.info.withValues(
-                                  alpha: .16,
-                                )
-                              : null,
-                        ),
-                        onPressed: () => setState(() => _filter = status),
-                        child: Text(
-                          status.isEmpty
-                              ? '本页全部'
-                              : organizationPresenceText(status),
-                          style: TextStyle(
-                            color: status.isEmpty
-                                ? BridgeInk.text
-                                : menuPresenceColor(status),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
               const SizedBox(height: 10),
             ],
-            if (org.tab == 'members')
-              const CommunityMemberHeader(showActions: false),
             if (org.tab == 'ships')
               const CommunityShipColumnHeader(showImportedAt: false),
             if (indices.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  _filter.isNotEmpty
-                      ? '当前页没有符合条件的成员或舰船。'
-                      : org.query.isNotEmpty
-                      ? '没有匹配结果，请调整搜索条件。'
+                  org.query.isNotEmpty
+                      ? menuText(
+                          context,
+                          'menu.overlay.organizations.noSearchResults',
+                        )
                       : switch (org.tab) {
-                          'directory' => '尚未加入组织，可在客户端的社区组织页面查找。',
-                          'ships' => '暂无向组织共享的舰船。',
-                          'announcements' => '暂无组织公告。',
-                          'chat' => '暂无消息。',
-                          _ => '暂无可查看的成员。',
+                          'directory' => menuText(
+                            context,
+                            'menu.overlay.organizations.empty',
+                          ),
+                          'ships' => menuText(
+                            context,
+                            'menu.overlay.organizations.noShips',
+                          ),
+                          'announcements' => menuText(
+                            context,
+                            'menu.overlay.organizations.noAnnouncements',
+                          ),
+                          'chat' => menuText(
+                            context,
+                            'menu.overlay.organizations.noMessages',
+                          ),
+                          _ => menuText(
+                            context,
+                            'menu.overlay.organizations.noMembers',
+                          ),
                         },
                 ),
               ),
@@ -239,13 +276,17 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
             if (org.tab == 'members' || org.tab == 'ships')
               BridgeCaption(
                 org.matched == 0
-                    ? '0 条结果'
+                    ? menuText(
+                        context,
+                        'menu.overlay.organizations.zeroResults',
+                      )
                     : '${org.offset + 1}–${org.offset + view.rows.length} / ${org.matched}',
               ),
             Wrap(children: [for (final action in footer) _action(action)]),
             for (final action in form)
               MenuFeatureAction(
-                key: ValueKey('${view.scope}/${action.label}'),
+                key: ValueKey('${view.scope}/${action.role ?? action.label}'),
+                identity: view.scope,
                 action: action,
                 enabled: !view.busy,
                 onAction: widget.onAction,
@@ -272,14 +313,57 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Divider(color: BridgeInk.divider),
             ),
+            if (org.tab != 'members' && view.refreshing && !org.bodyLoading)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: MenuLoading(feedback: view.readFeedback),
+              ),
             Expanded(
-              child: org.bodyLoading
-                  ? const Center(child: BridgeCaption('正在读取…'))
+              child: org.tab == 'members'
+                  ? SingleChildScrollView(
+                      key: const ValueKey('menu-org-body-members'),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: MenuOrganizationMembersBoard(
+                          key: ValueKey('${view.scope}/${org.identity}'),
+                          view: view,
+                          searchController: _query,
+                          onAction: widget.onAction,
+                          onProfile: widget.onProfile,
+                        ),
+                      ),
+                    )
+                  : org.bodyLoading
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ExcludeSemantics(
+                              child: MenuLoading(feedback: view.readFeedback),
+                            ),
+                            BridgeCaption(
+                              menuText(
+                                context,
+                                'menu.overlay.window.readingEllipsis',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
                   : org.bodyError
                   ? Center(
-                      child: TextButton(
-                        onPressed: () => widget.onAction('refresh', ''),
-                        child: const Text('暂时无法读取，点击重试'),
+                      child: StarBridgeActionButton(
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: (_) => widget.onAction('refresh', ''),
+                        child: Text(
+                          menuText(
+                            context,
+                            'menu.overlay.organizations.retryRead',
+                          ),
+                        ),
                       ),
                     )
                   : org.tab == 'chat' && view.chat != null
@@ -326,16 +410,7 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () =>
-                    setState(() => _showOrganizations = !_showOrganizations),
-                icon: StandardIcon(
-                  _showOrganizations
-                      ? StandardIconSemantic.arrowForward
-                      : StandardIconSemantic.arrowBack,
-                ),
-                label: Text(_showOrganizations ? '返回当前组织' : '组织列表'),
-              ),
+              child: _organizationToggle(),
             ),
             Expanded(child: _showOrganizations ? sidebar : content),
           ],
@@ -350,7 +425,9 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
     }
     void closeStatistics() {
       setState(() => _statisticsDismissed = true);
-      final close = view.buttons.where((b) => b.label == '关闭统计').firstOrNull;
+      final close = view.buttons
+          .where((b) => b.role == 'closeStatistics')
+          .firstOrNull;
       if (close != null) widget.onAction(close.key, '');
     }
 
@@ -383,7 +460,7 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${row.title}${data.isSelf ? ' · 你' : ''}',
+          '${row.title}${data.isSelf ? menuText(context, 'menu.overlay.organizations.youSuffix') : ''}',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         if (data.handle.isNotEmpty && data.handle != row.title)
@@ -393,32 +470,11 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
           ),
       ],
     );
-    Widget identity() => tab != 'members'
-        ? name()
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              MenuAvatarActions(
-                name: row.title,
-                onProfile:
-                    data.profileKey == null ||
-                        widget.onProfile == null ||
-                        widget.view.busy
-                    ? null
-                    : () => widget.onProfile!(data.profileKey!),
-                child: MenuInlineAvatar(name: row.title, source: data.avatar),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: name()),
-            ],
-          );
+    Widget identity() => name();
     Widget status() => Text(
-      organizationPresenceText(data.presence),
+      organizationPresenceText(data.presence, context),
       style: TextStyle(color: menuPresenceColor(data.presence)),
     );
-    final roleColor = data.roleColor.isEmpty
-        ? BridgeInk.muted
-        : Color(int.parse('ff${data.roleColor.substring(1)}', radix: 16));
     if (tab == 'announcements') {
       final date = DateTime.tryParse(data.announcementTime);
       final colors = context.tokens.colors;
@@ -519,7 +575,7 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Tooltip(
+                      StarBridgeTooltip(
                         message: data.owner,
                         child: Text(
                           data.owner,
@@ -535,26 +591,6 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
             ),
             importedAt: const SizedBox.shrink(),
             action: const SizedBox.shrink(),
-          ),
-        ),
-      );
-    }
-    if (tab == 'members') {
-      return Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: CommunityMemberCard(
-          status: menuPresenceColor(data.presence),
-          child: CommunityMemberBanner(
-            identity: identity(),
-            role: CommunityRoleBadge(
-              label: data.role.isEmpty ? '组织成员' : data.role,
-              color: roleColor,
-            ),
-            server: data.server,
-            ship: data.ship,
-            location: data.location,
-            status: status(),
-            actions: null,
           ),
         ),
       );
@@ -583,8 +619,9 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
           for (final action in row.buttons)
             MenuFeatureAction(
               key: ValueKey(
-                '${widget.view.scope}/${row.title}/${action.label}',
+                '${widget.view.scope}/${row.title}/${action.role ?? action.label}',
               ),
+              identity: (widget.view.scope, data.profileKey),
               action: action,
               enabled: !widget.view.busy,
               onAction: widget.onAction,

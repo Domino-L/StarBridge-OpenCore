@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using StarBridge.Core.Overlay;
 
-internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
+internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore, IOverlayWorkspaceInspector
 {
     private const string SettingsFile = "overlay.settings";
     private const string LayoutFile = "overlay.layout";
@@ -15,6 +15,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
     private const string RenderModeFile = "overlay.render-mode";
     private const string DesktopConfigFile = "desktop.config";
     private const string BackupDirectory = "overlay.workspace-backup-v1";
+    private const string RegisteredHotkeyFile = "desktop.registered-hotkey.json";
     private const string DefaultHotkey = "Alt+O";
     private static readonly IReadOnlySet<string> LayoutKeys = new HashSet<string>(
         ["Notice", "Squads", "Members", "Chat"],
@@ -22,7 +23,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
 
     private readonly string _dataRoot;
     private readonly string? _fallbackRoot;
-    // Explicit build opt-in; ordinary builds keep the legacy workspace contract.
+    // Per-store compatibility selection; product composition supplies the build capability.
     private readonly bool _enableSourcePresets;
     private static readonly object StorageGate = new();
 
@@ -43,6 +44,11 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
     public OverlayWorkspaceReadResult Load()
     {
         lock (StorageGate) return LoadCore();
+    }
+
+    public OverlayWorkspaceReadResult Inspect()
+    {
+        lock (StorageGate) return LoadCore(allowMigration: false);
     }
 
     private OverlayWorkspaceReadResult LoadCore(bool allowMigration = true)
@@ -82,7 +88,12 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
                     _fallbackRoot is not null && File.Exists(Path.Combine(_fallbackRoot, PresetFile(entry.Id, "workspace.json")))))
                     throw new OverlaySettingsException("overlay.workspace_version_unsupported");
                 OverlayPresetDocument? document = null;
-                try { if (_enableSourcePresets) document = ReadPresetDocument(entry.Id, isActive, observed); }
+                OverlayAppearanceOptions appearanceOptions;
+                try
+                {
+                    appearanceOptions = ReadAppearanceOptions(entry.Id, observed);
+                    if (_enableSourcePresets) document = ReadPresetDocument(entry.Id, isActive, observed);
+                }
                 catch (OverlaySettingsException error) when (error.Code == "overlay.workspace_invalid_preset")
                 {
                     // Quarantine this preset only. These placeholders must never be activated or projected.
@@ -93,7 +104,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
                 if (document is not null)
                 {
                     recovered |= document.RecoveredDefaults;
-                    presets.Add(new(entry.Id, entry.Name, isActive, document.Settings, document.Layout,
+                    presets.Add(new(entry.Id, entry.Name, isActive, document.Settings with { AppearanceOptions = appearanceOptions }, document.Layout,
                         document.RecoveredDefaults ? "recoveredDefaults" : "ready", document.Sources));
                     continue;
                 }
@@ -108,6 +119,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
                 var settings = settingsPayload is null
                     ? InformationOverlayDefaults.CreateSettings(entry.Id)
                     : OverlayDisplaySettings.Parse(settingsPayload);
+                settings = settings with { AppearanceOptions = appearanceOptions };
                 var parsedLayout = layoutPayload is null
                     ? InformationOverlayDefaults.CreateLayout(entry.Id)
                     : InformationOverlayLayoutItem.ParseMany(layoutPayload).ToArray();
@@ -199,6 +211,9 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
                 throw new OverlaySettingsException("overlay.workspace_invalid_value");
             if (mutation.ReplaceAutoSwitchPresetId is not null && mutation.Kind != OverlayWorkspaceMutationKind.ConfigurePresetSources)
                 throw new OverlaySettingsException("overlay.workspace_invalid_value");
+            if (mutation.AppearanceOptions is not null && mutation.Kind is not
+                (OverlayWorkspaceMutationKind.SaveActive or OverlayWorkspaceMutationKind.ImportPreset))
+                throw new OverlaySettingsException("overlay.workspace_invalid_value");
             if (current.Revision != mutation.ExpectedRevision)
             {
                 throw new OverlaySettingsException("overlay.workspace_revision_conflict", true);
@@ -217,15 +232,20 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
             var writes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var deletes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var recoveryCopies = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-            if (_enableSourcePresets && mutation.Kind is OverlayWorkspaceMutationKind.DeletePreset or OverlayWorkspaceMutationKind.ResetPreset)
+            if (mutation.Kind is OverlayWorkspaceMutationKind.DeletePreset or OverlayWorkspaceMutationKind.ResetPreset)
             {
                 var damaged = current.Presets.FirstOrDefault(p => p.Id.Equals(targetId, StringComparison.OrdinalIgnoreCase) && p.StorageState == "corrupt");
                 if (damaged is not null)
                 {
-                    var name = PresetFile(damaged.Id, "workspace.json");
-                    var original = Path.Combine(_dataRoot, name);
-                    if (!File.Exists(original) && _fallbackRoot is not null) original = Path.Combine(_fallbackRoot, name);
-                    recoveryCopies[$"overlay.recovered-{damaged.Id}-{Guid.NewGuid():N}.json"] = File.ReadAllBytes(original);
+                    foreach (var kind in new[] { "workspace.json", "appearance.json" })
+                    {
+                        var name = PresetFile(damaged.Id, kind);
+                        var original = Path.Combine(_dataRoot, name);
+                        if (kind == "workspace.json" && !File.Exists(original) && _fallbackRoot is not null)
+                            original = Path.Combine(_fallbackRoot, name);
+                        if (File.Exists(original))
+                            recoveryCopies[$"overlay.recovered-{damaged.Id}-{kind}-{Guid.NewGuid():N}.json"] = File.ReadAllBytes(original);
+                    }
                 }
             }
 
@@ -265,6 +285,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
             }
 
             if (_enableSourcePresets) PrepareVersionedWrites(current, mutation, entries, writes, deletes);
+            PrepareAppearanceWrites(current, mutation, entries, writes, deletes);
             EnsureFirstWriteBackup();
             ApplyFileTransaction(writes, deletes, recoveryCopies, isCurrent);
             return Load() with
@@ -280,6 +301,42 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new OverlaySettingsException("overlay.workspace_write_failed", true, exception);
+        }
+    }
+
+    private OverlayAppearanceOptions ReadAppearanceOptions(string id, IDictionary<string, string> observed)
+    {
+        // User choices are local to this workspace owner. Bundled defaults never inject decorations.
+        var name = PresetFile(id, "appearance.json");
+        var path = Path.Combine(_dataRoot, name);
+        if (!File.Exists(path)) return OverlayAppearanceOptions.Empty;
+        if (new FileInfo(path).Length > OverlayAppearanceOptions.MaximumBytes)
+            throw new OverlaySettingsException("overlay.workspace_invalid_preset");
+        var payload = File.ReadAllText(path, Encoding.UTF8);
+        observed[$"primary/{name}"] = payload;
+        try { return OverlayAppearanceOptions.Parse(payload); }
+        catch (FormatException error) { throw new OverlaySettingsException("overlay.workspace_invalid_preset", false, error); }
+    }
+
+    private static void PrepareAppearanceWrites(OverlayWorkspaceReadResult current, OverlayWorkspaceMutation mutation,
+        IReadOnlyList<InformationOverlayPresetEntry> entries, IDictionary<string, string> writes, ISet<string> deletes)
+    {
+        foreach (var removed in current.Presets.Where(preset => !entries.Any(entry => entry.Id == preset.Id)))
+            deletes.Add(PresetFile(removed.Id, "appearance.json"));
+        foreach (var entry in entries)
+        {
+            var previous = current.Presets.FirstOrDefault(preset => preset.Id == entry.Id);
+            OverlayAppearanceOptions? options = mutation.Kind switch
+            {
+                OverlayWorkspaceMutationKind.SaveActive when entry.Id == current.ActivePresetId => mutation.AppearanceOptions,
+                OverlayWorkspaceMutationKind.DuplicatePreset when previous is null =>
+                    RequiredPreset(current, mutation.PresetId ?? current.ActivePresetId).Settings.AppearanceOptions,
+                OverlayWorkspaceMutationKind.ImportPreset when previous is null => mutation.AppearanceOptions ?? OverlayAppearanceOptions.Empty,
+                OverlayWorkspaceMutationKind.ResetPreset when entry.Id == (mutation.PresetId ?? current.ActivePresetId) => OverlayAppearanceOptions.Empty,
+                _ => null
+            };
+            // Omission means preserve, explicit Empty means clear. Same atomic transaction and revision as layout/settings.
+            if (options is not null) writes[PresetFile(entry.Id, "appearance.json")] = options.Json;
         }
     }
 
@@ -408,6 +465,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
         writes[ActivePresetFile] = current.ActivePresetId;
         writes[PresetManifestFile] = InformationOverlayPresetCodec.SerializeManifest(entries);
         writes[DesktopConfigFile] = BuildDesktopConfig(hotkey);
+        writes[RegisteredHotkeyFile] = JsonSerializer.Serialize(new { registerHotKey = hotkey.UseRegisteredHotkey ?? current.Hotkey.UseRegisteredHotkey ?? false });
     }
 
     private static void Activate(
@@ -598,7 +656,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
     }
 
     internal static OverlayDisplaySettings NormalizeSettings(OverlayDisplaySettings settings) =>
-        OverlayDisplaySettings.Parse(settings.Serialize());
+        OverlayDisplaySettings.Parse(settings.Serialize()) with { AppearanceOptions = settings.AppearanceOptions };
 
     internal static IReadOnlyList<InformationOverlayLayoutItem> ValidateLayout(
         IReadOnlyList<InformationOverlayLayoutItem> layout)
@@ -681,6 +739,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
                 .Concat(File.Exists(Path.Combine(_dataRoot, DesktopConfigFile))
                     ? [Path.Combine(_dataRoot, DesktopConfigFile)]
                     : [])
+                .Concat(File.Exists(Path.Combine(_dataRoot, RegisteredHotkeyFile)) ? [Path.Combine(_dataRoot, RegisteredHotkeyFile)] : [])
                 .Where(path => !Path.GetFileName(path).Contains(".tmp", StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -822,15 +881,32 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
         return EmptyToNull(fallbackValue);
     }
 
+    // Anything but an explicit true means off: a damaged file must not block the
+    // workspace or turn a registration on.
+    private bool ReadRegisterHotKey(IDictionary<string, string> observed)
+    {
+        var payload = ReadOptional(RegisteredHotkeyFile, observed);
+        if (payload is null) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("registerHotKey", out var value) &&
+                value.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException) { return false; }
+    }
+
     private OverlayWorkspaceHotkeySnapshot ReadHotkey(IDictionary<string, string> observed)
     {
+        var registered = ReadRegisterHotKey(observed);
         var primary = Path.Combine(_dataRoot, DesktopConfigFile);
         var source = File.Exists(primary)
             ? primary
             : _fallbackRoot is null ? null : Path.Combine(_fallbackRoot, DesktopConfigFile);
         if (source is null || !File.Exists(source))
         {
-            return new OverlayWorkspaceHotkeySnapshot(DefaultHotkey, true, "unavailable");
+            return new OverlayWorkspaceHotkeySnapshot(DefaultHotkey, true, "unavailable", registered);
         }
 
         var lines = File.ReadAllLines(source);
@@ -842,7 +918,7 @@ internal sealed class OverlayWorkspaceStore : IOverlayWorkspaceStore
         var prefix = source.Equals(primary, StringComparison.OrdinalIgnoreCase) ? "primary" : "fallback";
         observed[$"{prefix}/{DesktopConfigFile}#overlayHotkey"] = binding;
         observed[$"{prefix}/{DesktopConfigFile}#enableOverlayGlobalHotkey"] = enabled.ToString();
-        return new OverlayWorkspaceHotkeySnapshot(binding, enabled, "unavailable");
+        return new OverlayWorkspaceHotkeySnapshot(binding, enabled, "unavailable", registered);
     }
 
     private static string PresetFile(string presetId, string kind) =>

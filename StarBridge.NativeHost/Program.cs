@@ -5,6 +5,7 @@ using StarBridge.HostRuntime.Updates;
 using StarBridge.HostRuntime.Overlay;
 using StarBridge.HostRuntime.Notifications;
 using StarBridge.HostRuntime.Reminders;
+using StarBridge.HostRuntime.Tools;
 using StarBridge.NativeHost;
 using StarBridge.OverlayRuntime.Windows;
 using System.Diagnostics;
@@ -60,6 +61,8 @@ using (var lifetime = new CancellationTokenSource())
     using var storageActivity = isolatedHangar ? null :
         StarBridge.HostRuntime.Storage.StorageActivityLease.AcquireWriter(HostDataRoot.BootstrapDirectory);
     var releaseAssembly = System.Reflection.Assembly.GetExecutingAssembly();
+    var firstUseEnabled = bool.TryParse(System.Reflection.CustomAttributeExtensions.GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>(releaseAssembly)
+        .SingleOrDefault(attribute => attribute.Key == "StarBridgeEnableFirstUse")?.Value, out var enableFirstUse) && enableFirstUse;
     var updateSource = FlutterReleaseUpdateSource.FromRelease(releaseAssembly,
         new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath).Read().ApplicationVersion,
         System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64
@@ -68,6 +71,9 @@ using (var lifetime = new CancellationTokenSource())
         ? FlutterInstalledUpdateInstallation.TryCreate(updateSource, parent, HostDataRoot.CurrentRoot) : null;
     using var legacyCleanup = isolatedHangar ? null :
         LegacyCleanupLauncher.TryCreate(releaseAssembly, parent, HostDataRoot.CurrentRoot);
+    var firstUseStartupReader = isolatedHangar || !firstUseEnabled ? null : new StarBridge.HostRuntime.Onboarding.FirstUseStartupReader(
+        HostDataRoot.CurrentRoot, () => StarBridge.HostRuntime.Onboarding.FirstUseStartupReader.ReadInstalledSource(
+            flutterExecutablePath, Environment.ProcessPath!, HostDataRoot.CurrentRoot));
     // Shared non-UI WPF journal; no new Game.log watcher. Dispose after the pipe stops.
     using var eventJournal = isolatedHangar ? null : new LocalGameEventJournal(
         Path.Combine(HostDataRoot.CurrentRoot, "local-event-log.json"));
@@ -75,8 +81,9 @@ using (var lifetime = new CancellationTokenSource())
     var account = isolatedHangar
         ? AccountBridgeRuntime.CreateIsolatedSandboxShell()
         : await AccountBridgeRuntime.CreateDefaultAsync(cancellationToken: lifetime.Token,
-            eventJournal: eventJournal?.IsWritable == true ? eventJournal : null);
-    account.ConfigureCommunityLogoPicker(new WindowsCommunityLogoPicker(parent.Id));
+            eventJournal: eventJournal?.IsWritable == true ? eventJournal : null, enableFirstUseModes: firstUseEnabled);
+    await using var accountBinding = new NativeAccountRuntimeBinding(account);
+    using var firstUseModeDispatcher = isolatedHangar || !firstUseEnabled ? null : accountBinding.CreateModeDispatcher();
     var exportPicker = new WindowsGameplayExportPicker(() =>
     {
         parent.Refresh();
@@ -95,70 +102,76 @@ using (var lifetime = new CancellationTokenSource())
                 storagePicker.ChooseAsync,
                 new StarBridge.HostRuntime.Storage.StorageMigrationInstallation(
                     HostDataRoot.BootstrapDirectory, storageHelperPath, parent).HandoffAsync),
-            () => account.Generation,
+            () => accountBinding.Generation,
             new StarBridge.HostRuntime.Storage.StorageMigrationResultStore(HostDataRoot.BootstrapDirectory));
-    if (!isolatedHangar)
-        account.ConfigureGameplayExportPicker(exportPicker, HostDataRoot.CurrentRoot);
-    account.ConfigureOverlayCommunitySource(HostDataRoot.CurrentRoot);
     var applicationPreferences = new ApplicationPreferencesBridgeDispatcher(
         HostDataRoot.CurrentRoot,
-        () => account.Generation,
+        () => accountBinding.Generation,
         flutterExecutablePath);
     var menuBrowserResume = new MenuBrowserResumeBridgeDispatcher(
-        HostDataRoot.CurrentRoot, () => account.CurrentOverlaySourceScope);
+        HostDataRoot.CurrentRoot, () => accountBinding.Read(owner => owner.CurrentOverlaySourceScope, (OwnerKey: (string?)null, Generation: -1L)));
     var screenshotPicker = new WindowsStorageFolderPicker(() =>
     {
         parent.Refresh();
         return parent.HasExited ? 0 : WindowsStorageFolderPicker.ClientOwner(parent.Id, parent.MainWindowHandle);
     });
     var menuScreenshotDirectory = isolatedHangar ? null : new MenuScreenshotDirectoryBridgeDispatcher(
-        HostDataRoot.CurrentRoot, () => account.Generation, screenshotPicker.ChooseAsync);
+        HostDataRoot.CurrentRoot, () => accountBinding.Generation, screenshotPicker.ChooseAsync);
     var localGamePresence = new StarBridge.HostRuntime.Presence.LocalGamePresenceReader(
-        trustedVersion: () => account.ConfirmedGameVersion,
+        trustedVersion: () => accountBinding.Read(owner => owner.ConfirmedGameVersion, (string?)null),
         journal: eventJournal?.IsWritable == true ? eventJournal : null);
     var overlayRuntime = WindowsInformationOverlayRuntimeFactory.Create(
-        () => account.CurrentGameSession,
-        () => account.CurrentOverlayEntitlements,
-        () => account.CurrentRoomOverlay,
-        () => account.CurrentCommunityOverlay,
-        () => account.CurrentOverlaySceneMode,
+        () => accountBinding.Read(owner => owner.CurrentGameSession, StarBridge.HostRuntime.Presence.GameLogSessionSnapshot.Empty),
+        () => accountBinding.Read(owner => owner.CurrentOverlayEntitlements, Array.Empty<string>()),
+        () => accountBinding.Read(owner => owner.CurrentRoomOverlay, (InformationOverlayRoomContent?)null),
+        () => accountBinding.Read(owner => owner.CurrentCommunityOverlay, (InformationOverlayCommunityContent?)null),
+        () => accountBinding.Read(owner => owner.CurrentOverlaySceneMode, (string?)null),
         () => applicationPreferences.CurrentLocaleOverride,
-        () => account.CurrentOverlayRosterPreferences,
+        () => accountBinding.Read(owner => owner.CurrentOverlayRosterPreferences, InformationOverlayRosterPreferences.Empty),
         localGamePresence.Read,
-        account.PrepareCommunityOverlayAsync,
-        account.ReadOverlayModules);
+        token => accountBinding.RunAsync((owner, cancellation) => owner.PrepareCommunityOverlayAsync(cancellation), token),
+        workspace => accountBinding.Read(owner => owner.ReadOverlayModules(workspace), new InformationOverlayModuleReadResult(null, "overlay.identity_unavailable")),
+        installedAppearanceDataRoot: HostDataRoot.CurrentRoot,
+        installedAppearanceProgress: isolatedHangar ? null : account.CreateInstalledAppearanceProgress(),
+        localSource: account.FirstUseOverlaySource);
     var reminderSink = overlayRuntime as IContinuousPlayReminderSink;
     var menuHotkeys = !isolatedHangar && overlayRuntime is IMenuHotkeyRuntime menuRuntime
-        ? new MenuHotkeyBridgeDispatcher(menuRuntime, () => account.CurrentOverlaySourceScope,
-            account.MenuHotkeyIntent, parent.Id, applicationPreferences.MenuHotkeyPreferences) : null;
+        ? new MenuHotkeyBridgeDispatcher(menuRuntime, () => accountBinding.Read(owner => owner.CurrentOverlaySourceScope, (OwnerKey: (string?)null, Generation: -1L)),
+            accountBinding.DeviceMenuHotkeyIntent, parent.Id, applicationPreferences.MenuHotkeyPreferences) : null;
     if (menuHotkeys is not null) account.ConfigureMenuHotkeys(menuHotkeys);
-    if (!isolatedHangar && overlayRuntime is IInformationOverlayLiveUpdateSink liveOverlay)
-        account.ConfigureLiveOverlayUpdates(liveOverlay);
-    if (!isolatedHangar && overlayRuntime is StarBridge.HostRuntime.Privacy.ISharedActivitySink sharedActivities)
-        account.ConfigureSharedActivity(sharedActivities);
     var desktopNotifications = WindowsInformationOverlayRuntimeFactory.CreateDesktopNotifications(parent.Id);
     var activityEnvironment = new WindowsNotificationActivity(parent.Id);
+    // One device-only preferences/test entry also exists on a local cold start.
+    // It never receives social observations; those belong to each account graph.
     var playerActivity = isolatedHangar ? null : new PlayerActivityRuntime(
-        HostDataRoot.CurrentRoot, () => account.Generation, desktopNotifications,
+        HostDataRoot.CurrentRoot, () => accountBinding.Generation, desktopNotifications,
         () => activityEnvironment.ReadPlayerActivity(overlayRuntime as IRuntimeOverlayStatusReader));
-    if (playerActivity is not null && !account.ConfigurePlayerActivity(playerActivity)) {
-        playerActivity.Dispose(); playerActivity = null;
-    }
+    var previewClient = new WindowsOverlayPreviewRegisteredClient(parent.Id, Environment.ProcessId, () => !parent.HasExited);
+    var appearanceLivePreview = !isolatedHangar && overlayRuntime is IInformationOverlayLivePreviewRuntime previewRuntime &&
+        overlayRuntime is IInformationOverlayLivePreviewControls && overlayRuntime is IInformationOverlayLivePreviewPlayback
+        ? new OverlayAppearanceLivePreviewDispatcher(previewRuntime, () => accountBinding.Generation,
+            () => accountBinding.Read(owner => owner.CurrentOverlaySourceScope, (OwnerKey: (string?)null, Generation: -1L)), previewClient.Resolve, previewClient.Capture) : null;
     var lifecycle = new HostBridgeDispatcher(
         Guid.NewGuid().ToString("N"),
-        () => account.Generation,
+        () => accountBinding.Generation,
         [
             "host.lifecycle",
+            .. firstUseEnabled && firstUseModeDispatcher is not null && reminderSink is not null
+                ? new[] { StarBridge.HostRuntime.Onboarding.FirstUseBridgeDispatcher.Capability } : Array.Empty<string>(),
+            .. firstUseStartupReader is null ? Array.Empty<string>() : new[] { StarBridge.HostRuntime.Onboarding.FirstUseStartupBridgeDispatcher.Capability },
             .. menuHotkeys is null ? Array.Empty<string>() : new[] { MenuHotkeyBridgeDispatcher.Capability },
             .. playerActivity is null ? Array.Empty<string>() : PlayerActivityRuntime.Capabilities,
             "host.gamePresence",
             "communities.logo",
+            "communities.wideImage",
             "account.avatarImages",
+            "achievementIdeas.images",
             .. AccountBridgeRuntime.AdvertisedCapabilities,
             .. ApplicationPreferencesBridgeDispatcher.AdvertisedCapabilities,
             .. MenuBrowserResumeBridgeDispatcher.Capabilities,
             .. menuScreenshotDirectory is null ? Array.Empty<string>() : MenuScreenshotDirectoryBridgeDispatcher.Capabilities,
             .. OverlayBridgeDispatcher.AdvertisedCapabilities,
+            .. appearanceLivePreview is null ? Array.Empty<string>() : new[] { OverlayAppearanceLivePreviewDispatcher.Capability },
             .. NotificationAudioBridgeDispatcher.AdvertisedCapabilities,
             .. NotificationSettingsBridgeDispatcher.AdvertisedCapabilities,
             .. NotificationPolicyBridgeDispatcher.Capabilities,
@@ -182,38 +195,86 @@ using (var lifetime = new CancellationTokenSource())
             .. eventJournal?.IsWritable == true ? LocalEventClearDispatcher.AdvertisedCapabilities : Array.Empty<string>(),
             .. isolatedHangar ? Array.Empty<string>() : LocalEventExportDispatcher.AdvertisedCapabilities,
             .. reminderSink is null ? Array.Empty<string>() : ContinuousPlayBridgeDispatcher.AdvertisedCapabilities,
+            .. firstUseEnabled && !isolatedHangar && reminderSink is not null ? new[] { StarBridge.HostRuntime.Onboarding.LocalDeviceReviewBridgeDispatcher.Capability } : Array.Empty<string>(),
+            .. account.GuideStateDispatcher is not null ? new[] { StarBridge.HostRuntime.Onboarding.GuideStateBridgeDispatcher.Capability } : Array.Empty<string>(),
+            .. account.FirstUseStatisticsDispatcher is not null ? new[] { StarBridge.HostRuntime.Onboarding.LocalStatisticsChoiceBridgeDispatcher.Capability,
+                StarBridge.HostRuntime.Onboarding.LocalStatisticsChoiceBridgeDispatcher.HistoryCapability,
+                StarBridge.HostRuntime.Onboarding.LocalStatisticsChoiceBridgeDispatcher.ResetCapability,
+                StarBridge.HostRuntime.Onboarding.LocalStatisticsChoiceBridgeDispatcher.RecognitionCapability } : Array.Empty<string>(),
+            .. !isolatedHangar && account.FirstUseOnlineReviewDispatcher is not null ? StarBridge.HostRuntime.Onboarding.FirstUseOnlineReviewBridgeDispatcher.AdvertisedCapabilities : Array.Empty<string>(),
+            .. firstUseModeDispatcher is not null ? new[] { StarBridge.HostRuntime.Onboarding.FirstUseModeBridgeDispatcher.Capability,
+                StarBridge.HostRuntime.Onboarding.FirstUseModeBridgeDispatcher.OrganizationsCapability } : Array.Empty<string>(),
+            .. firstUseModeDispatcher is not null ? new[] { StarBridge.HostRuntime.Onboarding.FirstUseOnlineInstallationBridgeDispatcher.Capability } : Array.Empty<string>(),
+            .. firstUseEnabled && !isolatedHangar && overlayRuntime is StarBridge.HostRuntime.Onboarding.INativeOverlayObservationReader
+                ? new[] { StarBridge.HostRuntime.Onboarding.NativeOverlayObservationBridgeDispatcher.Capability } : Array.Empty<string>(),
+            .. ExecHangarBridgeDispatcher.Capabilities,
             .. isolatedHangar ? Array.Empty<string>() : GameplayDataExportDispatcher.AdvertisedCapabilities
-        ], gamePresence: localGamePresence);
-    var hangarSandbox = StarBridge.HostRuntime.Hangar.HangarSandboxDispatcher.FromEnvironment(() => account.Generation);
+        ], gamePresence: localGamePresence, additionalCapabilities: () =>
+            accountBinding.Read(owner => owner.AdditionalHostCapabilities, (IReadOnlyList<string>)Array.Empty<string>()));
+    var hangarSandbox = StarBridge.HostRuntime.Hangar.HangarSandboxDispatcher.FromEnvironment(() => accountBinding.Generation);
     var overlay = new OverlayBridgeDispatcher(
         HostDataRoot.CurrentRoot,
-        () => account.Generation,
-        () => account.CurrentGameSession,
+        () => accountBinding.Generation,
+        () => accountBinding.Read(owner => owner.CurrentGameSession, StarBridge.HostRuntime.Presence.GameLogSessionSnapshot.Empty),
         overlayRuntime,
-        () => account.CurrentOverlayPresetTrigger,
-        () => account.CurrentOverlaySourceScope);
+        () => accountBinding.Read(owner => owner.CurrentOverlayPresetTrigger, (OverlayPresetTrigger?)null),
+        () => accountBinding.Read(owner => owner.CurrentOverlaySourceScope, (OwnerKey: (string?)null, Generation: -1L)));
     await overlay.InitializeRuntimeAsync(lifetime.Token);
     var audio = NotificationAudioBridgeDispatcher.CreateDefault(HostDataRoot.CurrentRoot,
-        Path.Combine(AppContext.BaseDirectory, "Assets", "Audio"), () => account.Generation,
+        Path.Combine(AppContext.BaseDirectory, "Assets", "Audio"), () => accountBinding.Generation,
         activityEnvironment.CanNotify,
         activityEnvironment.CanPlaySocialSound, () => menuHotkeys?.IsMenuVisible == true);
+    using var achievementCelebration = new NativeAchievementCelebrationRuntime(
+        () => applicationPreferences.CurrentLocaleOverride,
+        () => applicationPreferences.CurrentAppearanceMode == "light",
+        () => applicationPreferences.CurrentReduceMotion,
+        audio.TryPlayAchievement, audio.StopAchievement);
     var playReminder = reminderSink is null ? null : new ContinuousPlayReminderRuntime(
         HostDataRoot.CurrentRoot, () =>
         {
             var process = StarBridge.HostRuntime.Presence.GameLogIdentityReader.Probe();
             return new PlayProcessObservation(process.State, process.StartedAt);
         }, reminderSink);
-    var notifications = new NotificationSettingsBridgeDispatcher(HostDataRoot.CurrentRoot, () => account.Generation,
+    var notifications = new NotificationSettingsBridgeDispatcher(HostDataRoot.CurrentRoot, () => accountBinding.Generation,
         activityEnvironment.CanNotify, overlayRuntime as IInformationOverlayReminderSink,
-        desktopNotifications, account.NotificationActivation, account.SocialNotification,
-        gameIdentityPolicy: account.ReadGameIdentityNotificationPolicyAsync,
+        desktopNotifications, accountBinding.DeviceNotificationActivation, accountBinding.SocialNotification,
+        gameIdentityPolicy: (context, token) => accountBinding.ReadAsync((owner, cancellation) => owner.ReadGameIdentityNotificationPolicyAsync(context, cancellation), token),
         canNotifyGameIdentity: activityEnvironment.CanNotifyGameIdentity,
-        isGameIdentityCurrent: account.IsGameIdentityNotificationCurrent,
-        desktopSuppressionReason: activityEnvironment.DesktopSuppressionReason);
-    if (!isolatedHangar) account.ConfigureCommunityNotifications(notifications);
+        isGameIdentityCurrent: (context, expected) => accountBinding.Read(owner => owner.IsGameIdentityNotificationCurrent(context, expected), false),
+        desktopSuppressionReason: activityEnvironment.DesktopSuppressionReason,
+        rallyBanner: overlayRuntime as IRallyBannerSink, playRally: audio.TryPlayRally,
+        hotkeys: overlayRuntime as ISafeHotkeyRuntime, hostEvent: accountBinding.HostEvent,
+        directUnread: overlayRuntime as IInformationOverlayDirectUnreadSink,
+        tradeSuppressionReason: activityEnvironment.TradeSuppressionReason, playTrade: audio.TryPlayTrade);
+    if (firstUseEnabled && !isolatedHangar && playReminder is not null)
+        account.ConfigureFirstUseDeviceSetup(applicationPreferences, overlay, notifications, playReminder);
+    var accountComposition = isolatedHangar ? null : new AccountBridgeRuntime.NativeBusinessComposition(
+        HostDataRoot.CurrentRoot, () => new WindowsCommunityLogoPicker(parent.Id), exportPicker,
+        owner => new PlayerActivityRuntime(HostDataRoot.CurrentRoot, () => owner.Generation, desktopNotifications,
+            () => activityEnvironment.ReadPlayerActivity(overlayRuntime as IRuntimeOverlayStatusReader)),
+        overlayRuntime as IInformationOverlayLiveUpdateSink,
+        overlayRuntime as StarBridge.HostRuntime.Privacy.ISharedActivitySink,
+        achievementCelebration, notifications, audio);
+    if (accountComposition is not null) account.TryConfigureAccountBusiness(accountComposition.Configure);
+    var firstUse = firstUseEnabled && firstUseModeDispatcher is not null && firstUseStartupReader is not null &&
+        accountComposition is not null && account.FirstUseCompletion is not null
+        ? account.CreateFirstUseDispatcher(accountBinding, firstUseStartupReader, new WindowsFirstUseLogPicker(parent.Id),
+            accountComposition, () => applicationPreferences.CurrentLocaleOverride ?? "zh-CN") : null;
+    using var execConfigClient = new ExecHangarConfigClient(
+        StarBridge.HostRuntime.Auth.ScmOAuthOptions.CreateDefault().AuthorizationServerBaseUri);
+    var execHangar = new ExecHangarRuntime(HostDataRoot.CurrentRoot, execConfigClient, async (delivery, token) => {
+        var state = await notifications.PresentExecHangarAsync(delivery, activityEnvironment.CanNotifyExecHangar, token);
+        var played = audio.TryPlayExecHangar(delivery.IsCurrent, activityEnvironment.CanNotifyExecHangar);
+        return state == "submitted" ? state : played ? "soundOnly" : state;
+    }, game: StarBridge.HostRuntime.Presence.GameLogIdentityReader.Probe, network: account.DeviceNetwork);
+    using var execHangarGameOverlay = new ExecHangarGameOverlay(
+        token => execHangar.ReadAsync(false, token),
+        new NativeExecHangarGameOverlay(() => menuHotkeys?.IsMenuVisible == true, () => applicationPreferences.CurrentLocaleOverride),
+        () => accountBinding.Generation);
+    var appStatsCapability = new AppStatsHeartbeatRuntime.RelayCapability();
     using var dispatcher = new CompositeBridgeDispatcher(
         lifecycle,
-        account,
+        accountBinding,
         applicationPreferences,
         hangarSandbox,
         overlay,
@@ -222,39 +283,66 @@ using (var lifetime = new CancellationTokenSource())
         menuHotkeys: menuHotkeys,
         menuBrowserResume: menuBrowserResume,
         menuScreenshotDirectory: menuScreenshotDirectory,
-        notificationPolicies: account.CreateNotificationPolicyDispatcher(notifications),
+        notificationPolicies: accountBinding.CreateNotificationPolicyDispatcher(notifications),
         playerActivity: playerActivity,
-        localEventClear: eventJournal?.IsWritable == true ? new LocalEventClearDispatcher(eventJournal, () => account.Generation) : null,
+        localEventClear: eventJournal?.IsWritable == true ? new LocalEventClearDispatcher(eventJournal, () => accountBinding.Generation) : null,
         localEventExport: isolatedHangar ? null : new LocalEventExportDispatcher(
-            new LocalEventJournalReader(HostDataRoot.CurrentRoot), () => account.Generation,
+            new LocalEventJournalReader(HostDataRoot.CurrentRoot), () => accountBinding.Generation,
             exportPicker, HostDataRoot.CurrentRoot),
         localHistory: new LocalEventHistoryBridgeDispatcher(
-            new LocalEventJournalReader(HostDataRoot.CurrentRoot), () => account.Generation),
+            new LocalEventJournalReader(HostDataRoot.CurrentRoot), () => accountBinding.Generation),
         overlayRuntimeStatus: overlayRuntime is IRuntimeOverlayStatusReader statusReader
-            ? new OverlayRuntimeStatusBridgeDispatcher(statusReader, () => account.Generation)
+            ? new OverlayRuntimeStatusBridgeDispatcher(statusReader, () => accountBinding.Generation)
             : null,
         clientLicense: new ClientLicenseBridgeDispatcher(
-            new ClientLicenseReader(AppContext.BaseDirectory), () => account.Generation,
+            new ClientLicenseReader(AppContext.BaseDirectory), () => accountBinding.Generation,
             new TestBuildNoticeStore(HostDataRoot.CurrentRoot)),
-        helpSupport: new HelpSupportBridgeDispatcher(account.DiagnosticsRelayUri, () => account.Generation),
+        helpSupport: new HelpSupportBridgeDispatcher(account.DiagnosticsRelayUri, () => accountBinding.Generation,
+            network: account.DeviceNetwork, appStatsCapability: appStatsCapability),
         // Installed updates require explicit compiled release opt-in AND exact
         // per-user installer ownership; development/portable previews remain read-only.
         updates: new FlutterUpdateBridgeDispatcher(updateSource,
             () => new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath).Read().ApplicationVersion,
-            () => account.Generation, updateReporter, installedUpdates?.Installation, progressEvent: account.UpdateProgress,
-            firstFrameReady: legacyCleanup is null ? null : legacyCleanup.FirstFrameReady),
+            () => accountBinding.Generation, updateReporter, installedUpdates?.Installation, progressEvent: accountBinding.DeviceUpdateProgress,
+            firstFrameReady: legacyCleanup is null ? null : legacyCleanup.FirstFrameReady, network: account.DeviceNetwork),
         runtimeFacts: new RuntimeFactsBridgeDispatcher(
-            new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath, () => account.DiagnosticsRelayUri?.AbsoluteUri),
-            () => account.Generation),
+            new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath, () => accountBinding.Read(owner => owner.DiagnosticsRelayUri?.AbsoluteUri, (string?)null)),
+            () => accountBinding.Generation),
         support: new ApplicationSupportBridgeDispatcher(HostDataRoot.CurrentRoot, flutterExecutablePath,
-            () => account.SelectedGameLogPathForDiagnostics, () => account.Generation, account.DiagnosticsRelayUri),
-        playReminder: playReminder is null ? null : new ContinuousPlayBridgeDispatcher(playReminder, () => account.Generation),
-        storageMigration: storageMigration);
+            () => accountBinding.Read(owner => owner.SelectedGameLogPathForDiagnostics, (string?)null), () => accountBinding.Generation, account.DiagnosticsRelayUri, network: account.DeviceNetwork,
+            clearImageReadCaches: () => { accountBinding.Read(owner => { owner.ClearDownloadableImageReadCaches(); return true; }, false); }),
+        playReminder: playReminder is null ? null : new ContinuousPlayBridgeDispatcher(playReminder, () => accountBinding.Generation),
+        storageMigration: storageMigration,
+        appearanceLivePreview: appearanceLivePreview,
+        execHangar: new ExecHangarBridgeDispatcher(execHangar, () => accountBinding.Generation, execHangarGameOverlay),
+        firstUseDeviceReview: account.FirstUseDeviceReviewDispatcher,
+        firstUseStatistics: account.FirstUseStatisticsDispatcher,
+        guideState: account.GuideStateDispatcher,
+        firstUseOnlineReview: isolatedHangar ? null : account.FirstUseOnlineReviewDispatcher,
+        firstUseMode: firstUseModeDispatcher,
+        firstUse: firstUse,
+        firstUseStartup: firstUseStartupReader is null ? null : new StarBridge.HostRuntime.Onboarding.FirstUseStartupBridgeDispatcher(firstUseStartupReader, () => accountBinding.Generation),
+        firstUseOnlineInstallation: !firstUseEnabled || accountComposition is null ? null : accountBinding.CreateOnlineInstallationDispatcher(accountComposition),
+        firstUseOverlayObservation: firstUseEnabled && !isolatedHangar && overlayRuntime is StarBridge.HostRuntime.Onboarding.INativeOverlayObservationReader overlayObservation
+            ? new StarBridge.HostRuntime.Onboarding.NativeOverlayObservationBridgeDispatcher(overlayObservation, () => accountBinding.Generation) : null);
     // Reverse using order stops ticks and invalidates callbacks before overlay disposal.
+    using var appStatsHeartbeat = isolatedHangar ? null : new AppStatsHeartbeatRuntime(
+        account.DiagnosticsRelayUri, overlayRuntime as IInformationOverlayUsageMeter, account.DeviceNetwork,
+        new ApplicationRuntimeFactsReader(HostDataRoot.CurrentRoot, flutterExecutablePath).Read().ApplicationVersion,
+        TimeProvider.System, HostDataRoot.CurrentRoot,
+        visibility: () => accountBinding.Read(owner => owner.AppStatsPresenceVisibilityMode,
+            StarBridge.Core.Presence.PlayerPresenceVisibilityMode.Offline), capability: appStatsCapability);
     using var localOverlayEvents = eventJournal?.IsWritable == true && overlayRuntime is ILocalGameOverlayEventSink localEventSink
-        ? new LocalGameOverlayEventSource(eventJournal, localEventSink, () => account.Generation) : null;
+        ? new LocalGameOverlayEventSource(eventJournal, localEventSink, () => accountBinding.Generation) : null;
     using var ownedPlayReminder = playReminder;
     using var playReminderDriver = playReminder is null ? null : new ContinuousPlayReminderDriver(playReminder);
+    using var ownedExecHangar = execHangar;
+    using var execHangarDriver = new ExecHangarDriver(execHangar);
+    using var execHangarGameOverlayDriver = new ExecHangarGameOverlayDriver(execHangarGameOverlay);
+    using var gameStartupHint = new GameStartupHintRuntime(WindowsInformationOverlayRuntimeFactory.ReadGameStartupSession,
+        () => menuHotkeys?.ReadGameStartupHint(), desktopNotifications,
+        () => (applicationPreferences.CurrentLocaleOverride ?? "zh-CN", applicationPreferences.CurrentAppearanceMode, applicationPreferences.CurrentReduceMotion));
+    using var gameStartupHintDriver = new GameStartupHintDriver(gameStartupHint);
     await using var server = new NativeHostPipeServer(options.PipeName, dispatcher);
     var parentExit = parent.WaitForExitAsync();
     var hostRun = server.RunAsync(lifetime.Token);
@@ -268,6 +356,14 @@ using (var lifetime = new CancellationTokenSource())
     finally
     {
         // Parent cancellation/pipe errors must still attempt the bounded clear.
-        await account.StopPrivacyPublicationAsync();
+        Exception? shutdownFailure = null;
+        try { await accountBinding.StopPrivacyPublicationAsync(); }
+        catch (Exception error) { shutdownFailure = error; }
+        // Composite owns borrowed device resources. Await the actual account
+        // consumers/configuration here, before Composite's synchronous Dispose.
+        try { await accountBinding.DisposeAsync(); }
+        catch (Exception error)
+        { shutdownFailure = shutdownFailure is null ? error : new AggregateException(shutdownFailure, error); }
+        if (shutdownFailure is not null) throw shutdownFailure;
     }
 }

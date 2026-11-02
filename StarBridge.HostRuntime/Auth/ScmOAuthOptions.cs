@@ -8,7 +8,8 @@ public sealed record ScmOAuthOptions(
     string ClientId,
     string Resource,
     string Scope,
-    string CallbackPath)
+    string CallbackPath,
+    Uri? WebSocketServerBaseUri = null)
 {
     public static ScmOAuthOptions CreateDefault() => Create(ScmEnvironmentSettings.Load());
 
@@ -21,8 +22,9 @@ public sealed record ScmOAuthOptions(
         route?.ResourceBaseUri ?? settings.ResourceBaseUri,
         "starbridge-desktop",
         "starbridge-api",
-        "openid profile.read game_identity.read game_identity.verify organizations.read presence.write fleet_broadcast.read fleet_broadcast.write offline_access",
-        "/oauth/callback");
+        "openid profile.read profile.write game_identity.read game_identity.verify organizations.read presence.write fleet_broadcast.read fleet_broadcast.write trade.read trade.write checklist.read checklist.write blocklist.read blocklist.write offline_access",
+        "/oauth/callback",
+        route?.EffectiveWebSocketBaseUri ?? settings.EffectiveWebSocketBaseUri);
 
     public Uri AuthorizeEndpoint => new(WebBaseUri, "oauth/authorize");
     public Uri TokenEndpoint => new(AuthorizationServerBaseUri, "open-api/oauth2/token");
@@ -31,6 +33,9 @@ public sealed record ScmOAuthOptions(
     public Uri BootstrapEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/bootstrap");
     public Uri ProfileEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/profile");
     public Uri PersonalProfileEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/personal-profile");
+    public Uri HandlePrivacyEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/handle-privacy");
+    public Uri AchievementsEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/achievements");
+    public Uri ScmAchievementsEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/achievements/scm");
     public Uri TimeZoneDirectoryEndpoint => new(AuthorizationServerBaseUri, "app-api/member/timezone/list");
     public Uri WebSocketTicketEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/ws-ticket");
     public Uri PresenceStatusEndpoint => new(ResourceServerBaseUri, "app-api/starbridge/v1/presence/status");
@@ -41,9 +46,10 @@ public sealed record ScmOAuthOptions(
     {
         get
         {
-            var builder = new UriBuilder(ResourceServerBaseUri)
+            var baseUri = WebSocketServerBaseUri ?? ResourceServerBaseUri;
+            var builder = new UriBuilder(baseUri)
             {
-                Scheme = ResourceServerBaseUri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
+                Scheme = baseUri.Scheme is "https" or "wss" ? "wss" : "ws",
                 Path = "/infra/ws/starbridge",
                 Query = string.Empty
             };

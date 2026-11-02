@@ -4,6 +4,13 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/tokens/color_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_passive_count.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import 'help_support_action.dart';
+import 'help_support_waiting.dart';
+import 'help_support_expansion_tile.dart';
 import 'help_support_port.dart';
 
 String helpLiveText(BuildContext context, String key) {
@@ -78,14 +85,20 @@ class HelpSupportReadCard extends StatefulWidget {
 class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
   Map<String, dynamic>? _value;
   bool _busy = true, _failed = false;
+  int _waitRevision = 0;
+  InteractionSource _readSource = InteractionSource.programmatic;
   @override
   void initState() {
     super.initState();
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({
+    InteractionSource source = InteractionSource.programmatic,
+  }) async {
     setState(() {
+      _readSource = source;
+      _waitRevision++;
       _busy = true;
       _failed = false;
     });
@@ -168,19 +181,24 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
           ),
           SizedBox(height: tokens.space.sm),
           if (history || stats) Text(t(history ? 'historyInfo' : 'statsInfo')),
-          if (_busy) Text(t('loading')),
+          if (_busy)
+            HelpSupportWaiting(
+              key: ValueKey(_waitRevision),
+              label: t('loading'),
+              source: _readSource,
+            ),
           if (_failed)
             Text(t('failed'), style: TextStyle(color: tokens.colors.warning)),
           if (data != null && history) ...[
             for (final entry in data['entries'] as List)
               Material(
                 color: Colors.transparent,
-                child: ExpansionTile(
+                child: HelpSupportExpansionTile(
                   key: PageStorageKey('release-${entry['version']}'),
                   title: Text('v${entry['version']} · ${entry['title']}'),
                   subtitle: Text(entry['publishedOn'] as String),
                   childrenPadding: EdgeInsets.all(tokens.space.md),
-                  expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                  childrenCrossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(entry['summary'] as String),
                     for (final line in entry['highlights'] as List)
@@ -210,16 +228,21 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(t(key)),
-                        Text(
-                          key == 'registeredAccountCount' &&
-                                  (data[key] is! int || (data[key] as int) < 0)
-                              ? t('unavailable')
-                              : key == 'overlayUsageSeconds'
-                              ? (data[key] / 3600).toStringAsFixed(1)
-                              : '${data[key]}',
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(color: tokens.colors.accent),
-                        ),
+                        if (key == 'overlayUsageSeconds')
+                          Text(
+                            (data[key] / 3600).toStringAsFixed(1),
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(color: tokens.colors.accent),
+                          )
+                        else
+                          StarBridgePassiveCount(
+                            value: data[key] is int && (data[key] as int) >= 0
+                                ? data[key] as int
+                                : null,
+                            unknown: t('unavailable'),
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(color: tokens.colors.accent),
+                          ),
                       ],
                     ),
                   ),
@@ -238,8 +261,9 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
           ],
           Align(
             alignment: AlignmentDirectional.centerEnd,
-            child: TextButton(
-              onPressed: _busy ? null : _load,
+            child: HelpSupportAction(
+              controlKey: Key('help-read-reload-${widget.name}'),
+              onActivate: _busy ? null : (source) => _load(source: source),
               child: Text(t('retry')),
             ),
           ),
@@ -266,9 +290,11 @@ class HelpSupportFeedbackForm extends StatefulWidget {
 class _HelpSupportFeedbackFormState extends State<HelpSupportFeedbackForm> {
   bool _busy = false;
   String? _status;
-  Future<void> _send() async {
+  InteractionSource _sendSource = InteractionSource.programmatic;
+  Future<void> _send(InteractionSource source) async {
     if (_busy || widget.message.text.trim().isEmpty) return;
     setState(() {
+      _sendSource = source;
       _busy = true;
       _status = null;
     });
@@ -297,23 +323,33 @@ class _HelpSupportFeedbackFormState extends State<HelpSupportFeedbackForm> {
         children: [
           Text(t('feedbackInfo')),
           const SizedBox(height: 12),
-          TextField(
-            key: const Key('help-feedback-contact'),
-            controller: widget.contact,
+          StarBridgeFieldFrame(
             enabled: !_busy,
-            maxLength: 120,
-            decoration: InputDecoration(labelText: t('contact')),
+            builder: (context, focus) => TextField(
+              key: const Key('help-feedback-contact'),
+              controller: widget.contact,
+              focusNode: focus,
+              enabled: !_busy,
+              maxLength: 120,
+              decoration: InputDecoration(labelText: t('contact')),
+            ),
           ),
-          TextField(
-            key: const Key('help-feedback-message'),
-            controller: widget.message,
+          StarBridgeFieldFrame(
             enabled: !_busy,
-            minLines: 4,
-            maxLines: 8,
-            maxLength: 2000,
-            decoration: InputDecoration(labelText: t('message')),
-            onChanged: (_) => setState(() {}),
+            builder: (context, focus) => TextField(
+              key: const Key('help-feedback-message'),
+              controller: widget.message,
+              focusNode: focus,
+              enabled: !_busy,
+              minLines: 4,
+              maxLines: 8,
+              maxLength: 2000,
+              decoration: InputDecoration(labelText: t('message')),
+              onChanged: (_) => setState(() {}),
+            ),
           ),
+          if (_busy)
+            HelpSupportWaiting(label: t('sending'), source: _sendSource),
           if (_status != null)
             Text(
               t(_status!),
@@ -325,9 +361,10 @@ class _HelpSupportFeedbackFormState extends State<HelpSupportFeedbackForm> {
             ),
           Align(
             alignment: AlignmentDirectional.centerEnd,
-            child: FilledButton(
-              key: const Key('help-feedback-send'),
-              onPressed:
+            child: HelpSupportAction(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('help-feedback-send'),
+              onActivate:
                   _busy ||
                       widget.port == null ||
                       widget.message.text.trim().isEmpty

@@ -53,11 +53,9 @@ contain an explicit redistribution license when reviewed on 2026-07-25
 repository's GPL-3.0 license is therefore not treated as permission to
 redistribute or relicense the separate translation data.
 
-Official binary distributions are a separate distribution. Data excluded from
-the public source package still requires its own redistribution review before
-it is placed in an official binary. Exclusion from the public repository does
-not by itself make binary redistribution lawful, and presence in an official
-binary does not place that data under Apache-2.0.
+Official binary distributions are a separate distribution. Exclusion from the
+public repository does not by itself make binary redistribution lawful, and
+presence in an official binary does not place that data under Apache-2.0.
 
 ## Official binary media evidence
 
@@ -69,9 +67,27 @@ The public registry uses a controlled `rightsBasisType` vocabulary:
 - `written-permission`
 - `official-policy`
 - `public-domain`
+- `maintainer-recording-no-written-license`
 
-`unverified` is never sufficient for an official binary. Every approved media
-group must register a repository-relative `evidencePath` below
+`maintainer-recording-no-written-license` states exactly what it says: the
+maintainer recorded the media in the game, holds no written license from the
+rights holder, and personally decided to ship it in the official binary. It is
+a recorded decision, not a grant of rights, and it never covers public source.
+
+`unverified` means the source and redistribution permission are not verified.
+It is not a claim of permission. The repository media audit
+(`scripts/Test StarBridge Third Party Media.ps1`) refuses an `unverified` group
+in the packaging paths that run it, which are the WPF-era installer and update
+scripts. **The Flutter official binary does not run this audit.**
+
+The 0.7.2 Flutter official binary ships the ship images and system maps in this
+registry, still `unverified`, by the maintainer's own decision for a
+non-commercial test release. Verifying their sources is planned for 0.7.3. The
+home scene videos ship in that binary only, under
+`maintainer-recording-no-written-license`. Neither is authorized by the rights
+holder, and neither is in the public source package.
+
+A group approved for the audited paths must register a repository-relative `evidencePath` below
 `.private-ops/third-party-media-rights/`, the evidence file's SHA-256 in
 `evidenceSha256`, and an optional `permissionExpiresAt`. A null expiry means
 that the recorded grant does not state an expiry; it is not a substitute for

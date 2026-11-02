@@ -6,7 +6,8 @@ using StarBridge.HostRuntime.Overlay;
 
 internal sealed record LocalNotificationSettings(int SchemaVersion = 1, int Revision = 0,
     bool InAppEnabled = true, string Position = "bottomRight", string Preview = "sourceOnly", bool WindowsEnabled = false,
-    bool OverlayEnabled = true, bool DirectMessageWindowsEnabled = false);
+    bool OverlayEnabled = true, bool DirectMessageWindowsEnabled = false, bool TradeWindowsEnabled = true,
+    [property: System.Text.Json.Serialization.JsonPropertyName("rallyAlerts")] bool RallyAlertsEnabled = true);
 internal sealed class NotificationSettingsConflictException : Exception;
 
 // Device-local visual channels. No account/source policy or sound duplication.
@@ -17,11 +18,16 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
     Func<BridgeAccountContext, CancellationToken, Task<GameIdentityNotificationPolicy>>? gameIdentityPolicy = null,
     Func<bool>? canNotifyGameIdentity = null,
     Func<BridgeAccountContext, GameIdentityNotificationPolicy, bool>? isGameIdentityCurrent = null,
-    Func<string>? desktopSuppressionReason = null) : IBridgeRequestDispatcher
+    Func<string>? desktopSuppressionReason = null, IRallyBannerSink? rallyBanner = null,
+    Func<Func<bool>, bool>? playRally = null, TimeProvider? time = null,
+    ISafeHotkeyRuntime? hotkeys = null, Func<long, string, object, BridgeEnvelope>? hostEvent = null,
+    IInformationOverlayDirectUnreadSink? directUnread = null,
+    Func<string>? tradeSuppressionReason = null, Func<bool, Func<bool>, bool>? playTrade = null) : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } = ["notificationSettings.read", "notificationSettings.save",
         "notificationSettings.presentDesktop", "notificationSettings.testDesktop", "notificationSettings.clearDesktop", "notificationSettings.consumeActivation",
-        "gameIdentity.notifyMismatch"];
+        "gameIdentity.notifyMismatch", "notificationSettings.rallyAlerts", "notificationSettings.previewRally"];
+    private readonly TimeProvider _rallyTime = time ?? TimeProvider.System;
     private readonly string _path = Path.Combine(Path.GetFullPath(dataRoot), "notification-settings.v1.json");
     private readonly object _gate = new();
     private readonly NotificationDeliveryJournal _delivery = new(dataRoot);
@@ -39,7 +45,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
     private long _reminderEpoch;
     private string[] _activeIds = [];
     public event Action<BridgeEnvelope>? EventReady;
-    internal void Reset() { lock (_gate) { Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetIdentityNotifications(); InvalidateReminder(); } }
+    internal void Reset() { lock (_gate) { ResetRallies(); Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); ResetIdentityNotifications(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } }
     private void InvalidateReminder() {
         Interlocked.Increment(ref _reminderEpoch);
         _activeIds = [];
@@ -52,7 +58,9 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
         ["schemaVersion", revision, "inAppEnabled", "position", "preview",
          .. root.TryGetProperty("windowsEnabled", out _) ? new[] { "windowsEnabled" } : [],
          .. root.TryGetProperty("overlayEnabled", out _) ? new[] { "overlayEnabled" } : [],
-         .. root.TryGetProperty("directMessageWindowsEnabled", out _) ? new[] { "directMessageWindowsEnabled" } : []];
+         .. root.TryGetProperty("rallyAlerts", out _) ? new[] { "rallyAlerts" } : [],
+         .. root.TryGetProperty("directMessageWindowsEnabled", out _) ? new[] { "directMessageWindowsEnabled" } : [],
+         .. root.TryGetProperty("tradeWindowsEnabled", out _) ? new[] { "tradeWindowsEnabled" } : []];
     private static bool Valid(LocalNotificationSettings value) => value.SchemaVersion == 1 && value.Revision >= 0 &&
         value.Position is "topLeft" or "topRight" or "bottomLeft" or "bottomRight" &&
         value.Preview is "fullContent" or "sourceOnly" or "hiddenDetails";
@@ -71,6 +79,15 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
         if (value == null || !Valid(value)) throw new InvalidDataException();
         return value;
     }
+    // Borrow the original device store and lock. Reading must not clear queued
+    // notifications, inspect account policy, emit a test, or create a delivery log.
+    internal LocalNotificationSettings InspectLocalSetup(CancellationToken cancellationToken = default) {
+        lock (_gate) {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Read();
+        }
+    }
     private void Write(LocalNotificationSettings value) {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -82,6 +99,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
         } finally { if (File.Exists(temp)) File.Delete(temp); }
     }
     public ValueTask<BridgeDispatchBatch> DispatchAsync(BridgeEnvelope request, CancellationToken cancellationToken = default) {
+        if (request.Name == "notificationSettings.previewRally") return PreviewRallyAsync(request, cancellationToken);
         if (request.Name == "notificationSettings.consumeActivation") return ConsumeActivationAsync(request, cancellationToken);
         if (request.Name == "gameIdentity.notifyMismatch") return DispatchIdentityMismatchAsync(request, cancellationToken);
         if (request.Name is "notificationSettings.presentDesktop" or "notificationSettings.testDesktop" or "notificationSettings.clearDesktop")
@@ -94,25 +112,32 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
                 cancellationToken.ThrowIfCancellationRequested();
                 BridgeEnvelopeValidator.ValidateWireShape(request); BridgeEnvelopeValidator.RequireCurrentVersion(request);
                 if (request.SessionGeneration != generation()) throw new BridgeStaleGenerationException(request.SessionGeneration, generation());
-                if (request.AccountContext != null || request.MessageType != BridgeMessageTypes.Request || !AdvertisedCapabilities.Contains(request.Name))
+                if (request.AccountContext != null || request.MessageType != BridgeMessageTypes.Request ||
+                    request.Name is not ("notificationSettings.read" or "notificationSettings.save"))
                     throw new ArgumentException();
                 var save = request.Name == "notificationSettings.save";
                 Fields(request.Payload, !save ? ["schemaVersion"] : SettingFields(request.Payload, "expectedRevision"));
                 if (request.Payload.GetProperty("schemaVersion").GetInt32() != 1) throw new ArgumentException();
                 var value = Read();
+                if (!value.RallyAlertsEnabled) InvalidateRally();
                 if (save) {
                     if (request.Payload.GetProperty("expectedRevision").GetInt32() != value.Revision) throw new NotificationSettingsConflictException();
                     value = new(Revision: checked(value.Revision + 1), InAppEnabled: request.Payload.GetProperty("inAppEnabled").GetBoolean(),
                         Position: request.Payload.GetProperty("position").GetString()!, Preview: request.Payload.GetProperty("preview").GetString()!,
                         WindowsEnabled: request.Payload.TryGetProperty("windowsEnabled", out var windows) ? windows.GetBoolean() : value.WindowsEnabled,
                         OverlayEnabled: request.Payload.TryGetProperty("overlayEnabled", out var inGame) ? inGame.GetBoolean() : value.OverlayEnabled,
-                        DirectMessageWindowsEnabled: request.Payload.TryGetProperty("directMessageWindowsEnabled", out var direct) ? direct.GetBoolean() : value.DirectMessageWindowsEnabled);
+                        RallyAlertsEnabled: request.Payload.TryGetProperty("rallyAlerts", out var rallyAlerts) ? rallyAlerts.GetBoolean() : value.RallyAlertsEnabled,
+                        DirectMessageWindowsEnabled: request.Payload.TryGetProperty("directMessageWindowsEnabled", out var direct) ? direct.GetBoolean() : value.DirectMessageWindowsEnabled,
+                        TradeWindowsEnabled: request.Payload.TryGetProperty("tradeWindowsEnabled", out var trade) ? trade.GetBoolean() : value.TradeWindowsEnabled);
                     if (!Valid(value)) throw new ArgumentException();
                     cancellationToken.ThrowIfCancellationRequested();
                     if (request.SessionGeneration != generation()) throw new BridgeStaleGenerationException(request.SessionGeneration, generation());
                     Write(value);
+                    if (!value.RallyAlertsEnabled) InvalidateRally();
                     Interlocked.Increment(ref _directEpoch);
+                    Interlocked.Increment(ref _tradeEpoch);
                     InvalidateReminder();
+                    PublishDirectUnread(null, reset: true);
                 }
                 var projection = JsonSerializer.SerializeToElement(value, BridgeProtocol.JsonOptions)
                     .Deserialize<Dictionary<string, JsonElement>>()!;
@@ -127,6 +152,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
         }
     }
     internal async ValueTask<BridgeEnvelope> ObserveAsync(BridgeEnvelope request, BridgeEnvelope response, CancellationToken token) {
+        if (request.Name == "officialFleet.rally") return await ObserveRallyAsync(request, response, token).ConfigureAwait(false);
         if (request.Name == "directMessages.read") return await ObserveDirectAsync(request, response, token).ConfigureAwait(false);
         if (request.Name == "notificationInbox.read") return await ObserveFriendsAsync(request, response, token).ConfigureAwait(false);
         LocalNotificationSettings settings;
@@ -187,5 +213,5 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
             return response with { Payload = BridgePayload.From(payload) };
         }
     }
-    public void Dispose() { lock (_gate) { _disposed = true; _rooms.Reset(); _direct.Reset(); _friends.Reset(); InvalidateReminder(); } desktop?.Dispose(); }
+    public void Dispose() { lock (_gate) { _disposed = true; ResetRallies(); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } UnsubscribeRallyHotkeys(); desktop?.Dispose(); }
 }

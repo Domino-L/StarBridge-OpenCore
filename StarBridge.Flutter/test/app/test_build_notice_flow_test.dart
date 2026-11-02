@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/runtime/startup_prompt_queue.dart';
 import 'package:starbridge_flutter/app/runtime/test_build_notice_flow.dart';
 import 'package:starbridge_flutter/app/runtime/test_build_notice_copy.dart';
@@ -31,7 +33,10 @@ void main() {
       );
       await tester.drag(scroll, const Offset(0, -1600));
       await tester.pumpAndSettle();
-      expect(find.text('查看完整客户端许可').hitTestable(), findsOneWidget);
+      expect(
+        find.byKey(const Key('usage-terms-license')).hitTestable(),
+        findsOneWidget,
+      );
       expect(h.accepts, 0);
       expect(tester.takeException(), isNull);
       await h.close(tester);
@@ -79,12 +84,13 @@ void main() {
       final h = Harness();
       await h.mount(tester);
       expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
-      expect(find.text('测试版使用须知'), findsOneWidget);
-      expect(find.text('我已阅读并理解，继续'), findsOneWidget);
+      expect(find.text('使用条款与声明'), findsOneWidget);
+      expect(find.text('同意并继续'), findsOneWidget);
       expect(find.textContaining('确认记录保存在本机'), findsNothing);
       expect(find.textContaining('核对 Windows 数字签名'), findsOneWidget);
       expect(h.accepts, 0);
       expect(h.flow.blocksPrompts, isTrue);
+      await readTermsAndCheck(tester);
       await tester.tap(find.byKey(const Key('test-build-accept')));
       await tester.pumpAndSettle();
       expect(h.accepts, 1);
@@ -147,19 +153,97 @@ void main() {
     (tester) async {
       final h = Harness()..fail = true;
       await h.mount(tester);
+      await readTermsAndCheck(tester);
       await tester.tap(find.byKey(const Key('test-build-accept')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
       expect(h.acknowledged, isFalse);
       expect(find.textContaining('请重试'), findsOneWidget);
       expect(find.textContaining('数据目录'), findsNothing);
-      await tester.tap(find.text('退出应用'));
+      await tester.tap(find.text('不同意并退出'));
       await tester.pumpAndSettle();
       expect(h.exits, 1);
       expect(h.acknowledged, isFalse);
+      expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
       await h.close(tester);
     },
   );
+
+  testWidgets('reading to the end still requires explicit consent', (
+    tester,
+  ) async {
+    final h = Harness();
+    await h.mount(tester);
+    final checkbox = find.byKey(const Key('usage-terms-consent'));
+    expect(tester.widget<StarBridgeCheckboxTile>(checkbox).onChanged, isNull);
+    await tester.tap(find.byKey(const Key('test-build-accept')));
+    expect(h.accepts, 0);
+    final scroll = tester.widget<SingleChildScrollView>(
+      find.byKey(const Key('usage-terms-scroll')),
+    );
+    Focus.of(tester.element(find.byKey(const Key('usage-terms-scroll'))))
+        .requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.end);
+    await tester.pumpAndSettle();
+    expect(scroll.controller!.position.extentAfter, lessThanOrEqualTo(1));
+    expect(
+      tester.widget<StarBridgeCheckboxTile>(checkbox).onChanged,
+      isNotNull,
+    );
+    expect(tester.widget<StarBridgeCheckboxTile>(checkbox).value, false);
+    await tester.tap(find.byKey(const Key('test-build-accept')));
+    expect(h.accepts, 0);
+    await tester.tap(checkbox);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('test-build-accept')));
+    await tester.pumpAndSettle();
+    expect(h.accepts, 1);
+    await h.close(tester);
+  });
+
+  testWidgets('missing full license cannot be accepted and decline exits', (
+    tester,
+  ) async {
+    final h = Harness()..licenseAvailable = false;
+    await h.mount(tester);
+    final scroll = tester.widget<SingleChildScrollView>(
+      find.byKey(const Key('usage-terms-scroll')),
+    );
+    scroll.controller!.jumpTo(scroll.controller!.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<StarBridgeCheckboxTile>(
+            find.byKey(const Key('usage-terms-consent')),
+          )
+          .onChanged,
+      isNull,
+    );
+    await tester.tap(find.byKey(const Key('test-build-accept')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(h.accepts, 0);
+    expect(h.flow.blocksPrompts, isTrue);
+    await tester.tap(find.byKey(const Key('test-build-exit')));
+    await tester.pumpAndSettle();
+    expect(h.exits, 1);
+    expect(h.acknowledged, isFalse);
+    await h.close(tester);
+  });
+}
+
+Future<void> readTermsAndCheck(WidgetTester tester) async {
+  final scroll = tester.widget<SingleChildScrollView>(
+    find.byKey(const Key('usage-terms-scroll')),
+  );
+  scroll.controller!.jumpTo(scroll.controller!.position.maxScrollExtent);
+  await tester.pumpAndSettle();
+  final checkbox = find.byKey(const Key('usage-terms-consent'));
+  if (!tester.widget<StarBridgeCheckboxTile>(checkbox).value) {
+    await tester.tap(checkbox);
+    await tester.pump();
+  }
 }
 
 class Harness {
@@ -174,6 +258,7 @@ class Harness {
   );
   late TestBuildNoticeFlow flow;
   bool acknowledged = false, fail = false;
+  bool licenseAvailable = true;
   bool advanceDuringFirstRead = false;
   int accepts = 0, exits = 0, reads = 0, unknownReads = 0;
   void createFlow() => flow = TestBuildNoticeFlow(
@@ -212,13 +297,20 @@ class Harness {
             correlationId: request.correlationId,
             sessionGeneration: request.sessionGeneration,
             status: 'ok',
-            payload:
-                request.name == 'legal.readTestBuildNotice' &&
-                    reads <= unknownReads
+            payload: request.name == 'legal.getClientLicense'
+                ? {
+                    'schemaVersion': 1,
+                    'state': licenseAvailable ? 'ready' : 'missing',
+                    'text': licenseAvailable
+                        ? 'Synthetic full license. No real account data.'
+                        : null,
+                  }
+                : request.name == 'legal.readTestBuildNotice' &&
+                      reads <= unknownReads
                 ? const {'schemaVersion': 1}
                 : {
                     'schemaVersion': 1,
-                    'termsVersion': '2026-08-01-v3',
+                    'termsVersion': '2026-10-31-v4',
                     'acknowledged': acknowledged,
                   },
           ),

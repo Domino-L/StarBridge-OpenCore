@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -101,11 +103,17 @@ void main() {
     await tester.pump();
     var view = MenuFeatureView.parse(views.last);
     expect(view.state, 'ready');
-    expect((await port.read()).directory!.currentRoomId, isNull);
+    expect(
+      (resolvedMenuCopy(await port.read())).directory!.currentRoomId,
+      isNull,
+    );
     expect(jsonEncode(views.last), isNot(contains('example-cargo')));
     final lobby = view.lobby!;
     session.act('example-cargo', '');
-    expect((await port.read()).directory!.currentRoomId, isNull);
+    expect(
+      (resolvedMenuCopy(await port.read())).directory!.currentRoomId,
+      isNull,
+    );
     session.act(
       lobby.actions[RoomOperation.join]!,
       jsonEncode({
@@ -114,7 +122,10 @@ void main() {
       }),
     );
     await tester.pump();
-    expect((await port.read()).directory!.currentRoomId, isNull);
+    expect(
+      (resolvedMenuCopy(await port.read())).directory!.currentRoomId,
+      isNull,
+    );
     expect(
       MenuFeatureView.parse(views.last).lobby!.reply!['status'],
       'pending',
@@ -261,14 +272,8 @@ void main() {
             await tester.tap(find.byKey(ValueKey('menu-tool-$tool')));
             await tester.pumpAndSettle();
             expect(tester.takeException(), isNull, reason: tool);
-            if (tool == 'overlay') {
-              expect(hudActions, ['hud:toggle:']);
-              expect(
-                find.byKey(const ValueKey('menu-panel-hud')),
-                findsNothing,
-              );
-              continue;
-            }
+            // The overlay dock entry opens the quick panel; nothing is sent.
+            expect(hudActions, isEmpty, reason: tool);
             // Windows now occlude the desktop dock. Move each newly opened
             // window clear before using another desktop shortcut.
             final id =
@@ -276,6 +281,7 @@ void main() {
                   'group': 'organizations',
                   'room': 'rooms',
                   'camera': 'screenshot',
+                  'overlay': 'hud',
                 }[tool] ??
                 tool;
             final panelRect = tester.getRect(
@@ -292,6 +298,7 @@ void main() {
           for (final tool in [
             'organizations',
             'rooms',
+            'hud',
             'image',
             'browser',
             'screenshot',

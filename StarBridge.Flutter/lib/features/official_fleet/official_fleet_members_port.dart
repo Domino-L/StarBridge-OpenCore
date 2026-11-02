@@ -9,3 +9,10 @@ abstract interface class OfficialFleetMembersPort {
 
   Future<void> close();
 }
+
+/// Optional reads owned by the existing activity scheduler, never a page timer.
+abstract interface class OfficialFleetMembersActivityPort {
+  Stream<void> get runtimeChanges;
+  Stream<void> get runtimeScopeInvalidations;
+  void retireRuntimeActivity();
+}

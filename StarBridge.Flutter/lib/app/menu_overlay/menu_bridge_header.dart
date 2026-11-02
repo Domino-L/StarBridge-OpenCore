@@ -1,8 +1,11 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../platform/window/menu_display_preferences.dart';
 import 'menu_bridge_style.dart';
 import 'menu_clock.dart';
+import '../localization/app_strings.dart';
 
 class MenuBridgeHeader extends StatelessWidget {
   const MenuBridgeHeader({
@@ -17,6 +20,10 @@ class MenuBridgeHeader extends StatelessWidget {
     this.display = const MenuDisplayPreferences(),
     this.presenceKey = 'presence.unknown',
     this.system24Hour,
+    this.onEditWidgets,
+    this.editingWidgets = false,
+    this.onAddHangar,
+    this.desktopWidget,
   });
   final VoidCallback onDismiss;
   final VoidCallback? onSettings, onHud, onToggleWindows;
@@ -26,6 +33,10 @@ class MenuBridgeHeader extends StatelessWidget {
   final MenuDisplayPreferences display;
   final String presenceKey;
   final bool? system24Hour;
+  final VoidCallback? onEditWidgets;
+  final bool editingWidgets;
+  final VoidCallback? onAddHangar;
+  final Widget? desktopWidget;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
@@ -61,6 +72,28 @@ class MenuBridgeHeader extends StatelessWidget {
         runSpacing: 12,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          if (editingWidgets && onAddHangar != null)
+            BridgeMenuAction(
+              key: const Key('menu-add-hangar-widget'),
+              label: AppStrings.of(context).text('execHangar.widgetAdd'),
+              onPressed: onAddHangar,
+              child: Text(
+                AppStrings.of(context).text('execHangar.widgetAddNamed'),
+              ),
+            ),
+          if (onEditWidgets != null)
+            BridgeMenuAction(
+              key: const Key('menu-edit-widgets'),
+              label: AppStrings.of(context).text(
+                'execHangar.${editingWidgets ? 'widgetDone' : 'widgetEdit'}',
+              ),
+              onPressed: onEditWidgets,
+              child: Text(
+                AppStrings.of(context).text(
+                  'execHangar.${editingWidgets ? 'widgetDone' : 'widgetEdit'}',
+                ),
+              ),
+            ),
           BridgeMenuAction(
             key: const ValueKey('menu-toggle-all-windows'),
             label: windowsLabel,
@@ -68,9 +101,12 @@ class MenuBridgeHeader extends StatelessWidget {
             child: Text(windowsLabel),
           ),
           BridgeMenuAction(
-            label: '设置',
+            label: menuText(context, 'navigation.settings'),
             onPressed: onSettings,
-            child: const BridgeLabel(MenuGlyph.settings, '设置'),
+            child: BridgeLabel(
+              MenuGlyph.settings,
+              menuText(context, 'navigation.settings'),
+            ),
           ),
           BridgeMenuAction(
             label: hudLabel,
@@ -80,12 +116,12 @@ class MenuBridgeHeader extends StatelessWidget {
           ),
           BridgeMenuAction(
             key: const ValueKey('menu-return'),
-            label: '返回游戏',
+            label: menuText(context, 'overlay.menu.return'),
             onPressed: onDismiss,
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('返回游戏'),
+                Text(menuText(context, 'overlay.menu.return')),
                 SizedBox(width: 16),
                 BridgeCaption('ESC'),
               ],
@@ -100,7 +136,10 @@ class MenuBridgeHeader extends StatelessWidget {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (display.showClock || display.showDate || display.showPresence)
+            if (display.showClock ||
+                display.showDate ||
+                display.showPresence ||
+                desktopWidget != null)
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -108,6 +147,7 @@ class MenuBridgeHeader extends StatelessWidget {
                     preferences: display,
                     presenceKey: presenceKey,
                     system24Hour: system24Hour,
+                    desktopWidget: desktopWidget,
                   ),
                 ),
               ),
@@ -120,11 +160,15 @@ class MenuBridgeHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          if (display.showClock || display.showDate || display.showPresence)
+          if (display.showClock ||
+              display.showDate ||
+              display.showPresence ||
+              desktopWidget != null)
             MenuClock(
               preferences: display,
               presenceKey: presenceKey,
               system24Hour: system24Hour,
+              desktopWidget: desktopWidget,
             )
           else
             const SizedBox.shrink(),

@@ -1,28 +1,43 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-import '../../design_system/tokens/starbridge_tokens.dart';
-import 'community_ship_statistics_view.dart';
-import 'community_ships_port.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import 'community_fleet_statistics_dialog.dart';
+import 'community_image_decoder.dart';
 import 'community_ship_statistics.dart';
-import 'community_ships_copy.dart';
+import 'community_ships_port.dart';
+import 'community_ships_summary_strip.dart';
 
+/// Reads the whole shared inventory once, again only when it changed, and shows
+/// it as the one-line summary strip. A later read replaces what is shown when it
+/// ends, or says it could not; the full statistics open in a dialog (user
+/// decision 2026-10-29, option D). The loaded statistics are also reported
+/// upward: the ships page draws its filter counts and owner view from them.
 class CommunityShipStatisticsPanel extends StatefulWidget {
   const CommunityShipStatisticsPanel({
     required this.port,
     required this.targetRef,
     required this.culture,
     required this.firstPage,
-    this.loadingHeight,
-    this.onHeightChanged,
+    this.initial,
+    this.onStatistics,
+    this.avatarOf,
+    this.decoder,
     super.key,
   });
   final CommunityShipsPort port;
   final String targetRef, culture;
   final CommunityShipsPage? firstPage;
-  final double? loadingHeight;
-  final ValueChanged<double>? onHeightChanged;
+
+  /// The inventory held from an earlier visit, shown without a read.
+  final CommunityShipStatistics? initial;
+
+  /// Null again whenever the inventory is invalidated or read from nothing.
+  final ValueChanged<CommunityShipStatistics?>? onStatistics;
+  final Uint8List? Function(String memberRef)? avatarOf;
+  final CommunityImageDecoder? decoder;
   @override
   State<CommunityShipStatisticsPanel> createState() =>
       _CommunityShipStatisticsPanelState();
@@ -33,16 +48,18 @@ class _CommunityShipStatisticsPanelState
   CommunityShipStatistics? statistics;
   bool failed = false, loading = false;
   int epoch = 0;
-  final statisticsLayoutKey = GlobalKey();
-  double? lastStatisticsHeight;
-  DialogRoute<void>? detailsRoute;
+  StarBridgeDialogRoute<void>? detailsRoute;
   void dismissDetails() {
     final route = detailsRoute;
     detailsRoute = null;
-    scheduleMicrotask(() {
-      if (route?.isActive == true) route!.navigator?.removeRoute(route);
-    });
+    retireStarBridgeDialog(route);
   }
+
+  // Never during a build: the parent sets state on this.
+  void _publish(CommunityShipStatistics? value) =>
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onStatistics?.call(value);
+      });
 
   late StreamSubscription<void> subscription;
   void subscribe() => subscription = widget.port.invalidations.listen((_) {
@@ -54,14 +71,20 @@ class _CommunityShipStatisticsPanelState
         failed = true;
         loading = false;
       });
+      _publish(null);
     }
   });
-  String t(String key) => communityShipsText(context, key);
   @override
   void initState() {
     super.initState();
     subscribe();
-    _load();
+    statistics = widget.initial;
+    if (statistics == null) {
+      _load();
+    } else {
+      _publish(statistics);
+      if (_inventoryChanged(widget.firstPage)) _load();
+    }
   }
 
   @override
@@ -77,24 +100,40 @@ class _CommunityShipStatisticsPanelState
       epoch++;
       statistics = null;
       dismissDetails();
+      _publish(null);
       _load();
     } else if (!loading &&
         statistics == null &&
         !failed &&
         widget.firstPage != null) {
       _load();
+    } else if (!loading &&
+        !identical(oldWidget.firstPage, widget.firstPage) &&
+        _inventoryChanged(widget.firstPage)) {
+      _load();
     }
   }
 
+  /// Any page tells whether the count moved, whatever its filter. Only the
+  /// unfiltered first page can compare revisions, which hash the query.
+  bool _inventoryChanged(CommunityShipsPage? page) {
+    final held = statistics;
+    if (page == null || held == null) return false;
+    if (page.totalCount != held.ships.length) return true;
+    return page.offset == 0 &&
+        page.query == CommunityShipQuery(culture: widget.culture) &&
+        page.revision != held.revision;
+  }
+
   Future<void> _load() async {
-    if (widget.firstPage == null) return;
+    final started = widget.firstPage;
+    if (started == null) return;
     final request = ++epoch;
-    dismissDetails();
     setState(() {
       loading = true;
       failed = false;
-      statistics = null;
     });
+    if (statistics == null) _publish(null);
     void current() {
       if (!mounted || epoch != request) throw StateError('Stale statistics');
     }
@@ -108,16 +147,29 @@ class _CommunityShipStatisticsPanelState
         checkCurrent: current,
       );
       current();
+      dismissDetails();
       setState(() {
         statistics = result;
         loading = false;
       });
+      // The list moved on while this was being read: its answer is older than
+      // what is on screen, so it is not published. One new page, one reread.
+      if (!identical(widget.firstPage, started) &&
+          _inventoryChanged(widget.firstPage)) {
+        unawaited(_load());
+        return;
+      }
+      _publish(result);
     } catch (_) {
       if (mounted && epoch == request) {
+        // The held answer is known to be old by now: say so, with the retry.
+        dismissDetails();
         setState(() {
+          statistics = null;
           failed = true;
           loading = false;
         });
+        _publish(null);
       }
     }
   }
@@ -130,59 +182,29 @@ class _CommunityShipStatisticsPanelState
     super.dispose();
   }
 
+  Future<void> _openDetails(CommunityShipStatistics stats) async {
+    if (detailsRoute != null) return;
+    StarBridgeDialogRoute<void>? opened;
+    await showStarBridgeDialog<void>(
+      context,
+      useRootNavigator: false,
+      builder: (_) => CommunityFleetStatisticsDialog(statistics: stats),
+      onRouteCreated: (route) => detailsRoute = opened = route,
+    );
+    if (detailsRoute == opened) detailsRoute = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final stats = statistics;
-    final colors = context.tokens.colors;
-    if (stats == null) {
-      return LayoutBuilder(
-        builder: (context, constraints) => SizedBox(
-          // Preserve the measured layout while a filter invalidates/reloads
-          // the same full inventory. High-frequency controls below must not jump.
-          height:
-              lastStatisticsHeight ??
-              widget.loadingHeight ??
-              (constraints.maxWidth >= 760 ? 232 : 474),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  t(failed ? 'statisticsUnavailable' : 'statisticsLoading'),
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: colors.textSecondary),
-                ),
-              ),
-              if (failed)
-                TextButton(onPressed: _load, child: Text(t('imageRetry'))),
-            ],
-          ),
-        ),
-      );
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final size = statisticsLayoutKey.currentContext?.size;
-      if (size != null) {
-        lastStatisticsHeight = size.height;
-        widget.onHeightChanged?.call(size.height);
-      }
-    });
-    return CommunityShipStatisticsView(
-      key: statisticsLayoutKey,
+    return CommunityShipsSummaryStrip(
       statistics: stats,
-      onDetails: (dispatch) async {
-        if (detailsRoute != null) return;
-        final route = DialogRoute<void>(
-          context: context,
-          builder: (_) => CommunityShipStatisticsDetails(
-            statistics: stats,
-            dispatch: dispatch,
-          ),
-        );
-        detailsRoute = route;
-        await Navigator.of(context).push(route);
-        if (detailsRoute == route) detailsRoute = null;
-      },
+      loading: loading,
+      failed: failed,
+      onRetry: _load,
+      onDetails: stats == null ? null : () => _openDetails(stats),
+      avatarOf: widget.avatarOf,
+      decoder: widget.decoder,
     );
   }
 }

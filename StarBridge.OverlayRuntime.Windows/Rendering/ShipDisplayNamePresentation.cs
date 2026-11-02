@@ -27,8 +27,16 @@ internal static class ShipDisplayNamePresentation
         if (StarBridge.HostRuntime.Presence.GameShipNames.Find(text) is { } name)
             return string.IsNullOrWhiteSpace(name.ChineseName) ? name.EnglishName : name.ChineseName;
 
-        // Detection and translation are separate. Keep a bounded detected name
-        // even when an optional/new catalog entry has no Chinese translation.
+        // Match the catalog's runtime-ID syntax only after exact name lookup.
+        // This display guard never establishes or changes a runtime identity.
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+                text,
+                "^[A-Za-z0-9]+_[A-Za-z0-9_-]+$",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            return UnknownShip;
+
+        // Detection and translation are separate. Preserve readable names that
+        // have no translation; do not replace them merely because lookup failed.
         return text;
     }
 }

@@ -1,5 +1,6 @@
 import '../../shared/ships/ship_catalog_display.dart';
 import '../../shared/ships/ship_reviewed_display.dart';
+import '../common/organization_ship_image_features.dart';
 
 /// Data changed without invalidating the authenticated organization context.
 abstract interface class CommunityShipsRefreshPort {
@@ -110,10 +111,15 @@ final class CommunitySharedShip {
       ),
       loaners = _loaners(row),
       hasCustomImage = _flag(row, 'hasCustomImage'),
+      imageVersion = _optional(row, 'imageVersion', 64),
       customImageCropFocusX = _crop(row, 'customImageCropFocusX', 0, 1),
       customImageCropFocusY = _crop(row, 'customImageCropFocusY', 0, 1),
       customImageCropZoom = _crop(row, 'customImageCropZoom', .1, 20) {
     if (code.isEmpty) throw const FormatException();
+    if (imageVersion != null &&
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(imageVersion!)) {
+      throw const FormatException();
+    }
     if (ownerAvatarVersion != null &&
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(ownerAvatarVersion!)) {
       throw const FormatException();
@@ -127,6 +133,7 @@ final class CommunitySharedShip {
       ownerCallsign,
       ownerLiveStatus;
   final bool ownerOnline, ownerIsSelf, ownerHasAvatar, hasCustomImage;
+  final String? imageVersion;
   final String? englishName, manufacturer;
   String? subtitleFor(String languageCode) {
     final value = languageCode == 'en' ? manufacturer : englishName;
@@ -238,21 +245,26 @@ List<CommunityShipLoaner>? _loaners(Map<String, Object?> row) {
 }
 
 final class CommunityShipsPage {
-  CommunityShipsPage.parse(Map<String, Object?> root)
-    : targetRef = _reference(root, 'targetRef'),
-      revision = _text(root, 'revision', 64),
-      offset = _number(root, 'offset'),
-      next = root['next'] == null ? null : _number(root, 'next'),
-      totalCount = _number(root, 'totalCount'),
-      matchedCount = root['matchedCount'] == null
-          ? _number(root, 'totalCount')
-          : _number(root, 'matchedCount'),
-      query = root['query'] == null
-          ? null
-          : CommunityShipQuery.parse(
-              Map<String, Object?>.from(root['query'] as Map),
-            ),
-      ships = List.unmodifiable(_rows(root).map(CommunitySharedShip.parse)) {
+  CommunityShipsPage.parse(
+    Map<String, Object?> root, {
+    bool officialImages = false,
+  }) : targetRef = _reference(root, 'targetRef'),
+       imageFeatures = officialImages && root.containsKey('imageFeatures')
+           ? OrganizationShipImageFeatures.parse(root['imageFeatures'])
+           : null,
+       revision = _text(root, 'revision', 64),
+       offset = _number(root, 'offset'),
+       next = root['next'] == null ? null : _number(root, 'next'),
+       totalCount = _number(root, 'totalCount'),
+       matchedCount = root['matchedCount'] == null
+           ? _number(root, 'totalCount')
+           : _number(root, 'matchedCount'),
+       query = root['query'] == null
+           ? null
+           : CommunityShipQuery.parse(
+               Map<String, Object?>.from(root['query'] as Map),
+             ),
+       ships = List.unmodifiable(_rows(root).map(CommunitySharedShip.parse)) {
     if (root['schemaVersion'] != 1 ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(revision) ||
         offset % 20 != 0 ||
@@ -269,7 +281,21 @@ final class CommunityShipsPage {
         ships.map((s) => s.shipRef).toSet().length != ships.length) {
       throw const FormatException();
     }
+    if (officialImages &&
+        ships.any(
+          (ship) =>
+              imageFeatures == null &&
+                  (ship.hasCustomImage || ship.imageVersion != null) ||
+              imageFeatures != null &&
+                  (ship.hasCustomImage != (ship.imageVersion != null) ||
+                      ship.hasCustomImage &&
+                          (ship.customImageCropZoom < 1 ||
+                              ship.customImageCropZoom > 3)),
+        )) {
+      throw const FormatException('Invalid official image projection.');
+    }
   }
+  final OrganizationShipImageFeatures? imageFeatures;
   final String targetRef, revision;
   final int offset, totalCount, matchedCount;
   final CommunityShipQuery? query;

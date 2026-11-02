@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/icons/standard_icon.dart';
 import '../../app/localization/app_strings.dart';
@@ -17,6 +21,7 @@ class CommunityLocalMessageTile extends StatelessWidget {
     this.onCheck,
     this.onRestore,
     this.composerOccupied = false,
+    this.source = InteractionSource.programmatic,
     super.key,
     // Preserve the non-null domain constructor alongside the display-only one.
     // ignore: prefer_initializing_formals
@@ -37,6 +42,7 @@ class CommunityLocalMessageTile extends StatelessWidget {
     this.onCheck,
     this.onRestore,
     this.composerOccupied = false,
+    this.source = InteractionSource.programmatic,
     super.key,
   }) : _message = null;
   final CommunityLocalMessage? _message;
@@ -46,6 +52,10 @@ class CommunityLocalMessageTile extends StatelessWidget {
   final String? avatar;
   final VoidCallback? onRetry, onCheck, onRestore;
   final bool composerOccupied;
+
+  /// Presentation provenance only. Unreported/menu work stays static rather
+  /// than being labelled as a pointer command.
+  final InteractionSource source;
 
   @override
   Widget build(BuildContext context) {
@@ -87,10 +97,30 @@ class CommunityLocalMessageTile extends StatelessWidget {
               children: [
                 ExcludeSemantics(
                   child: state == 'sending'
-                      ? const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                      ? StarBridgeInteractionRegion(
+                          child: Builder(
+                            builder: (context) {
+                              final data = InteractionScope.of(context);
+                              final animate =
+                                  data.animates &&
+                                  source == InteractionSource.pointer;
+                              return InteractionScope(
+                                data: data.copyWith(reduceMotion: !animate),
+                                child: SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: SuiteBusyFrame(
+                                    busy: true,
+                                    radius: 0,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      value: animate ? null : .5,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         )
                       : StandardIcon(
                           warning
@@ -117,9 +147,13 @@ class CommunityLocalMessageTile extends StatelessWidget {
               spacing: 8,
               runSpacing: 4,
               children: [
-                OutlinedButton(
-                  onPressed: state == 'failed' ? onRetry : onCheck,
-                  style: OutlinedButton.styleFrom(
+                StarBridgeActionButton(
+                  onActivate: (state == 'failed' ? onRetry : onCheck) == null
+                      ? null
+                      : (_) => (state == 'failed' ? onRetry : onCheck)!(),
+                  tone: ActionTone.warning,
+                  minHeight: 44,
+                  nativeStyle: OutlinedButton.styleFrom(
                     foregroundColor: context.tokens.colors.warning,
                     side: BorderSide(color: context.tokens.colors.warning),
                     minimumSize: const Size(64, 44),
@@ -127,9 +161,11 @@ class CommunityLocalMessageTile extends StatelessWidget {
                   child: Text(t(state == 'failed' ? 'retry' : 'checkSend')),
                 ),
                 if (state == 'failed')
-                  TextButton(
-                    onPressed: onRestore,
-                    style: TextButton.styleFrom(
+                  StarBridgeActionButton(
+                    onActivate: onRestore == null ? null : (_) => onRestore!(),
+                    kind: StarBridgeActionKind.quiet,
+                    minHeight: 44,
+                    nativeStyle: TextButton.styleFrom(
                       minimumSize: const Size(64, 44),
                     ),
                     child: Text(t('restoreLocalDraft')),

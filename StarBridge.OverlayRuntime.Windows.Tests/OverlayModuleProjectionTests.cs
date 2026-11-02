@@ -44,8 +44,9 @@ internal static class OverlayModuleProjectionTests
         Check(projection.Chat.Chat.Single().Text == "Organization message" && projection.Notice.Command.NoticeText == "Approved notice" &&
             projection.Events.Scene.Context.Kind == OverlaySceneKind.PartyRoom,
             "Communication and event inputs carry their own source.");
-        Check(projection.Members.SourceLabel == "Current room" && projection.Overview.SourceLabel is null,
-            "Only overridden modules expose a source label.");
+        Check(projection.Members.SourceLabel == "Room fixture" && projection.Members.OwnSource &&
+            projection.Overview.SourceLabel == "Organization fixture" && !projection.Overview.OwnSource,
+            "Every module names its source; only modules with their own binding are marked own.");
         Check(!NativeInformationOverlayRuntime.IsModuleSelfPublisher("fixture-peer", projection.Events.Scene.Players),
             "A matching local handle without explicit self proof cannot suppress a mixed-source peer event.");
         var activity = new StarBridge.HostRuntime.Privacy.SharedActivityNotice("Fixture",
@@ -62,12 +63,16 @@ internal static class OverlayModuleProjectionTests
         try
         {
             model.RefreshModules(projection, settings, OverlayRosterSelectionSettings.Default, "en", PlayerPresenceKind.AppOnline, "");
-            Check(model.ModuleSourceLabels.Members == "Current room" && model.ModuleSourceLabels.Events == "Current room" &&
-                model.ModuleSourceLabels.Overview is null && model.ModuleSourceLabels.Chat is null,
-                "Native render headers carry only the independently overridden module labels.");
-            Check(OverlayModuleSourceLabels.Prefix("Fixture event", model.ModuleSourceLabels.Events, false) == "[Current room] Fixture event" &&
-                OverlayModuleSourceLabels.Prefix("Device event", model.ModuleSourceLabels.Events, true) == "Device event",
-                "Barrage/toast source labels do not misattribute device-local events to a remote source.");
+            var labels = model.ModuleSourceLabels;
+            Check(labels.Members == "Room fixture" && labels.Events == "Room fixture" &&
+                labels.Overview == "Organization fixture" && labels.Chat == "Organization fixture" &&
+                labels.Own == (OverlayModuleFlags.Members | OverlayModuleFlags.Events),
+                "Native render headers carry every module's source and mark only the overridden ones.");
+            var eventPrefix = labels.RowPrefix(OverlayModuleFlags.Events, labels.Events);
+            Check(OverlayModuleSourceLabels.Prefix("Fixture event", eventPrefix, false) == "[Room fixture] Fixture event" &&
+                OverlayModuleSourceLabels.Prefix("Device event", eventPrefix, true) == "Device event" &&
+                labels.RowPrefix(OverlayModuleFlags.Chat, labels.Chat) is null,
+                "Rows repeat only an own source and never misattribute device-local events to a remote source.");
             Check(model.SquadsTitle == "ORGANIZATION OVERVIEW" && model.MembersTitle == "PARTY MEMBERS" && model.Members.Any(m => m.DisplayName.Contains("Room")) &&
                 !model.Members.Any(m => m.DisplayName.Contains("Organization")), "Real native ViewModel no longer shares a single roster across modules.");
             Check(model.ChatMessages.Any(m => m.Detail.Contains("Organization message")) && model.FleetNotice == "Approved notice",
@@ -85,14 +90,17 @@ internal static class OverlayModuleProjectionTests
                 "Organization withdrawal clears its visible communication immediately.");
             Check(model.NotificationVisibility == System.Windows.Visibility.Visible && model.ChatVisibility == System.Windows.Visibility.Visible,
                 "Unavailable enabled modules keep their fixed empty-state panels visible, without queued content.");
-            Check(model.ModuleEmptyStates.Notice == "Organization unavailable" && model.ModuleEmptyStates.Chat == "Organization unavailable" &&
-                model.ModuleEmptyStates.Members == "Room information unavailable",
+            Check(model.ModuleEmptyStates.Notice?.Headline == "This organization can't be reached right now" &&
+                model.ModuleEmptyStates.Chat?.Headline == "This organization can't be reached right now" &&
+                model.ModuleEmptyStates.Members?.Headline == "The current room can't be reached right now" &&
+                model.ModuleSourceLabels.Overview == "Organization" && model.ModuleSourceLabels.Members == "Current room",
                 "Empty states are specific to each source without exposing revoked names or old messages.");
             var hidden = InformationOverlayRuntimeProjection.ResolveVisibility(settings with { ShowNotice = false, ShowChat = false },
                 new(true, true, true));
             Check(!hidden.ShowNotice && !hidden.ShowChat && !hidden.ShowEventNotifications,
                 "An unavailable source never forces a user-disabled module on.");
-            Check(OverlayModuleEmptyStates.Message(new(OverlaySourceMode.Room, null, false, "module_hidden"), "en") is null,
+            Check(OverlayModuleSourceCopy.Unavailable(OverlaySourceModule.Members,
+                new(OverlaySourceMode.Room, null, false, "module_hidden"), InformationOverlayModuleSourceDisplay.None, "en") is null,
                 "Inactive modules do not acquire unavailable-source messages.");
             current = false;
             projection = NativeInformationOverlayRuntime.ProjectModules(frame, "en", now);
@@ -207,9 +215,14 @@ internal static class OverlayModuleProjectionTests
             var projection = NativeInformationOverlayRuntime.ProjectModules(frame, "en", now);
             Check(projection.Chat.Chat.All(m => m.SourceLabel?.Contains("fixture") == true) &&
                 model.ChatMessages.All(m => m.Title.Contains("fixture")), "Source labels remain visible even when senders are hidden.");
+            Check(model.CommunicationAppearanceActivities.Count == 0, "Mode switching establishes a silent companion baseline.");
+            roomSequence = orgSequence = 4;
+            Refresh();
+            Check(model.CommunicationAppearanceActivities.Count == 2, "Independent live sources each publish one content-free appearance activity.");
             orgAllowed = false;
             Refresh();
-            Check(model.ChatMessages.Count == 1 && model.ChatMessages[0].Detail.Contains("room-3"), "Partial revocation preserves only the still-authorized room.");
+            Check(model.ChatMessages.Count == 1 && model.ChatMessages[0].Detail.Contains("room-4"), "Partial revocation preserves only the still-authorized room.");
+            Check(model.CommunicationAppearanceActivities.Count == 1, "Partial revocation removes withdrawn optional appearance activity before rendering.");
             settings = settings with { ChatDisplayMode = OverlayChatDisplayMode.FullScreenBarrage };
             Refresh();
             orgAllowed = true;

@@ -11,6 +11,7 @@ import 'package:starbridge_flutter/features/personal_profile/personal_profile_ed
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_schedule_editor.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_collaboration.dart';
 
+import '../../shared/clock_field_test.dart' show clockShown, pickClock;
 import 'local_personal_profile_test.dart' show Harness, edit, shipA;
 
 const schedule = PersonalProfileSchedule(
@@ -30,10 +31,49 @@ const schedule = PersonalProfileSchedule(
   ],
 );
 void main() {
+  test('imported labels remain literal and removable without allowing new unknown values', () {
+    final tags = ProfileCollaboration.tags(['旧版岗位', 'pilot'], 'roles')!;
+    expect(tags.first.displayLabel, '旧版岗位');
+    expect(ProfileCollaboration.ids(tags, 'roles'), ['旧版岗位', 'pilot']);
+    expect(
+      ProfileCollaboration.validGroup(['旧版岗位'], 'roles', retained: ['旧版岗位']),
+      isTrue,
+    );
+    expect(
+      ProfileCollaboration.validGroup(
+        ['new-unknown'],
+        'roles',
+        retained: ['旧版岗位'],
+      ),
+      isFalse,
+    );
+    expect(
+      ProfileCollaboration.validGroup(
+        ['a', 'b', 'c', 'd'],
+        'interests',
+        retained: ['a', 'b', 'c', 'd'],
+      ),
+      isTrue,
+    );
+    expect(
+      ProfileCollaboration.validGroup(
+        ['a', 'b', 'c', 'pve'],
+        'interests',
+        retained: ['a', 'b', 'c', 'd'],
+      ),
+      isFalse,
+    );
+    expect(
+      () => ProfileCollaboration.tags(['bad\nlabel'], 'roles'),
+      throwsFormatException,
+    );
+  });
   setUpAll(() async {
     if (const bool.fromEnvironment('PROFILE_COLLAB_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       }.entries) {
         await (FontLoader(
@@ -86,14 +126,8 @@ void main() {
       );
       await tapKey('profile-remove-window-0');
       expect(changed!.windows.first.days, [0]);
-      expect(
-        tester
-            .widget<TextFormField>(
-              find.byKey(const Key('profile-window-0-start')),
-            )
-            .initialValue,
-        '08:07',
-      );
+      // 08:07 is off the quarter-hour lists and stays as the current value.
+      expect(clockShown(tester, 'profile-window-0-start'), '08:07');
       await tapKey('profile-window-0-day-0');
       expect(form.currentState!.validate(), isFalse);
       await tester.pump();
@@ -249,28 +283,37 @@ void main() {
         isNull,
       );
       await tapKey('profile-schedule-editor');
-      final start = find.byKey(const Key('profile-window-0-start'));
-      await tester.ensureVisible(start);
-      await tester.enterText(start, '24:00');
-      await tester.pump();
+      // Times are picked, so an invalid window now comes from its days.
+      final days = [
+        for (final day in [1, 2, 3, 4, 5, 6, 0])
+          if (tester
+              .widget<FilterChip>(find.byKey(Key('profile-window-0-day-$day')))
+              .selected)
+            day,
+      ];
+      for (final day in days) {
+        await tapKey('profile-window-0-day-$day');
+      }
       // Collapsed invalid fields must still block saving and show a visible explanation.
       await tapKey('profile-schedule-editor');
       await tapKey('profile-save');
       expect(attempts, 0);
       expect(find.byKey(const Key('profile-validation-error')), findsOneWidget);
       await tapKey('profile-schedule-editor');
-      await tester.ensureVisible(start);
-      await tester.enterText(start, '21:07');
-      await tester.pump();
+      for (final day in days) {
+        await tapKey('profile-window-0-day-$day');
+      }
+      await pickClock(tester, 'profile-window-0-start', 'hour', 21);
+      await pickClock(tester, 'profile-window-0-start', 'minute', 15);
       await tapKey('profile-save');
       expect(attempts, 1);
-      expect(submitted!.schedule!.windows.first.startTime, '21:07');
+      expect(submitted!.schedule!.windows.first.startTime, '21:15');
       expect(submitted!.schedule!.windows.first.days, [1, 3]);
       expect(submitted!.playStyle!.roles, contains('medic'));
       expect(submitted!.schedule!.timeZoneId, 'America/Regina');
       await tapKey('profile-save');
       expect(attempts, 2);
-      expect(submitted!.schedule!.windows.first.startTime, '21:07');
+      expect(submitted!.schedule!.windows.first.startTime, '21:15');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

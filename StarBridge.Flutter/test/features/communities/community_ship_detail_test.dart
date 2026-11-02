@@ -125,6 +125,11 @@ Future<void> _open(WidgetTester tester, _Port port, Locale locale) async {
   await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pumpAndSettle();
+  // These checks cover the list view; cards have their own tests.
+  final list = find.byKey(const ValueKey('community-ships-view-list'));
+  await tester.ensureVisible(list);
+  await tester.tap(list);
+  await tester.pumpAndSettle();
   final thumbnail = tester
       .widgetList<CommunityCatalogShipImage>(
         find.byType(CommunityCatalogShipImage),

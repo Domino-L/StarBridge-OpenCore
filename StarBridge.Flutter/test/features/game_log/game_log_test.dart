@@ -192,6 +192,68 @@ class Harness {
 }
 
 void main() {
+  testWidgets('successful identity reread clears transient account change', (
+    tester,
+  ) async {
+    final h = Harness()..error = 'gameLog.accountChanged';
+    await tester.pump();
+    expect(h.controller.value.error, 'accountChanged');
+    h.error = null;
+    h.enabled = true;
+    h.state = 'notRunning';
+    h.recentHandle = 'Pilot_A';
+    h.match = 'match';
+    final retry = h.controller.run();
+    await tester.pump();
+    await retry;
+    expect(h.controller.value.expectedHandle, 'Pilot_A');
+    expect(h.controller.value.recentHandle, 'Pilot_A');
+    expect(h.controller.value.error, isNull);
+    expect(
+      h.requests.where((r) => r.name == 'account.getCurrent'),
+      hasLength(2),
+    );
+    await h.close(tester);
+  });
+
+  testWidgets(
+    'offline recent identity refreshes policy without live presence',
+    (tester) async {
+      final h = Harness()
+        ..enabled = true
+        ..state = 'notRunning'
+        ..recentHandle = 'Pilot-B';
+      await tester.pump();
+      await tester.pumpWidget(
+        support.app(GameLogPanel(controller: h.controller)),
+      );
+      await tester.pumpAndSettle();
+      expect(h.controller.value.recentHandle, 'Pilot-B');
+      expect(h.controller.value.handle, isNull);
+      expect(h.controller.value.sessionState, 'unavailable');
+      expect(h.controller.value.serverState, 'unknown');
+      expect(h.changes, 1);
+      expect(find.textContaining('非在线状态'), findsOneWidget);
+      expect(find.textContaining('Pilot-B'), findsOneWidget);
+      final unchanged = h.controller.run();
+      await tester.pump();
+      await unchanged;
+      expect(h.changes, 1);
+      h.recentHandle = 'Pilot-C';
+      final changed = h.controller.run();
+      await tester.pump();
+      await changed;
+      expect(h.changes, 2);
+      final stop = h.controller.run(command: 'stop');
+      await tester.pump();
+      await stop;
+      expect(h.controller.value.recentHandle, isNull);
+      expect(h.changes, 3);
+      await tester.pumpWidget(const SizedBox());
+      await h.close(tester);
+    },
+  );
+
   testWidgets(
     'offline recent identity refreshes policy without live presence',
     (tester) async {
@@ -280,6 +342,8 @@ void main() {
     if (!render) return;
     for (final font in {
       'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+      'Saira': 'assets/fonts/Saira-VF.ttf',
+      'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();

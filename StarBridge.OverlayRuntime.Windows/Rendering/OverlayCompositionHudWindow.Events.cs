@@ -15,18 +15,13 @@ internal sealed partial class OverlayCompositionHudWindow
             var opacity = state.Opacity * state.EventStyle.TextOpacity;
             DrawPanelFrame(target, emptyRect, state, 24, 100, 20, 48,
                 state.EventStyle.BackgroundOpacity, state.EventStyle.DecorationOpacity, moduleKey: "Events");
-            DrawSourceHeader(target, state.EmptyEventsTitle, state.SourceLabels.Events, _eventTitleFormat,
+            DrawSourceHeader(target, state.EmptyEventsTitle, state.SourceLabels.Events,
+                state.SourceLabels.IsOwn(OverlayModuleFlags.Events), _eventTitleFormat,
                 (float)emptyRect.X + 20, (float)emptyRect.Y + 12, Math.Max(1, (float)emptyRect.Width - 40), state, opacity);
             DrawModuleEmptyMessage(target, state.EmptyStates.Events, (float)emptyRect.X + 20, (float)emptyRect.Y + 38,
                 Math.Max(1, (float)emptyRect.Width - 40), (float)emptyRect.Height - 46, state, opacity);
             return;
         }
-        if (state.LagrangeWeaveStyle)
-        {
-            DrawLagrangeEventNotifications(target, state);
-            return;
-        }
-
         var rect = state.EventRect;
         var contentWidth = Math.Max(1, (float)rect.Width - 86);
         var layouts = state.EventRows.Select(row =>

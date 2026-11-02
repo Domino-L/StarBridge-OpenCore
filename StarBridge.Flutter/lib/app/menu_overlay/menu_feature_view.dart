@@ -1,7 +1,15 @@
+import 'menu_overlay_locale.dart';
+import '../localization/app_strings.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../platform/window/menu_read_feedback.dart';
 
 import 'menu_bridge_style.dart';
 import 'menu_organization_view.dart';
@@ -10,10 +18,13 @@ import 'menu_room_lobby_view.dart';
 import 'menu_loading.dart';
 import 'menu_channel_outbox.dart';
 import 'menu_room_preset_view.dart';
+import 'menu_hud_quick_view.dart';
 
 typedef MenuFeatureButton = ({
   String key,
   String label,
+  String? role,
+  bool secret,
   String? confirm,
   String? input,
   int limit,
@@ -21,6 +32,7 @@ typedef MenuFeatureButton = ({
 typedef MenuFeatureRow = ({
   String title,
   String detail,
+  bool selected,
   String? avatar,
   List<MenuFeatureButton> buttons,
 });
@@ -32,6 +44,7 @@ final class MenuFeatureView {
     this.notice = '',
     this.busy = false,
     this.refreshing = false,
+    this.readFeedback,
     this.scope = '',
     this.rows = const [],
     this.buttons = const [],
@@ -42,12 +55,15 @@ final class MenuFeatureView {
     this.channels = const [],
     this.rejectedAction,
     this.hudEnabled,
+    this.hudQuick,
   });
   final String state, title, notice, scope;
   final bool busy;
   final bool refreshing;
+  final MenuReadFeedback? readFeedback;
   final String? rejectedAction;
   final bool? hudEnabled;
+  final MenuHudQuickView? hudQuick;
   final List<MenuFeatureRow> rows;
   final List<MenuFeatureButton> buttons;
   final MenuOrganizationView? organization;
@@ -55,7 +71,35 @@ final class MenuFeatureView {
   final MenuRoomLobbyView? lobby;
   final MenuChannelView? chat;
   final List<MenuFeatureRow> channels;
-  static MenuFeatureView parse(Object? value) {
+  MenuFeatureView withoutOrganizationImages() => MenuFeatureView(
+    state,
+    title: title,
+    notice: notice,
+    scope: scope,
+    busy: busy,
+    refreshing: refreshing,
+    readFeedback: readFeedback,
+    rows: rows,
+    buttons: buttons,
+    organization: organization?.withoutDownloadedImages(),
+    room: room,
+    lobby: lobby,
+    chat: chat,
+    channels: [
+      for (final row in channels)
+        (
+          title: row.title,
+          selected: row.selected,
+          detail: row.detail,
+          avatar: null,
+          buttons: row.buttons,
+        ),
+    ],
+    rejectedAction: rejectedAction,
+    hudEnabled: hudEnabled,
+    hudQuick: hudQuick,
+  );
+  static MenuFeatureView parse(Object? value, {Locale? locale}) {
     try {
       if (value is! Map ||
           !const {
@@ -88,6 +132,8 @@ final class MenuFeatureView {
           }
           return (
             key: key,
+            role: _role(entry),
+            secret: _boolean(entry, 'secret'),
             label: text(entry, 'label', 128),
             confirm: entry['confirm'] == null
                 ? null
@@ -118,6 +164,10 @@ final class MenuFeatureView {
         if (photoBytes > 400000) throw const FormatException();
         photos[entry.key as String] = photo;
       }
+      final channelView = value['channels'] == null
+          ? null
+          : parse({'state': 'ready', 'rows': value['channels']}, locale: locale);
+      if (channelView?.state == 'unavailable') throw const FormatException();
       return MenuFeatureView(
         value['state'] as String,
         title: text(value, 'title', 512),
@@ -126,7 +176,9 @@ final class MenuFeatureView {
         hudEnabled: value['hudEnabled'] is bool
             ? value['hudEnabled'] as bool
             : null,
+        hudQuick: MenuHudQuickView.parse(value['quick']),
         refreshing: value['refreshing'] == true,
+        readFeedback: MenuReadFeedback.parse(value['readFeedback']),
         scope: text(value, 'scope', 32),
         rejectedAction: MenuChannelOutbox.action(value['rejectedAction']),
         buttons: buttons(value['buttons']),
@@ -148,13 +200,12 @@ final class MenuFeatureView {
         chat: value['chat'] == null
             ? null
             : MenuChannelView.parse(value['chat'], rawRows.length),
-        channels: value['channels'] == null
-            ? const []
-            : parse({'state': 'ready', 'rows': value['channels']}).rows,
+        channels: channelView?.rows ?? const [],
         rows: rawRows.map((row) {
           if (row is! Map) throw const FormatException();
           return (
             title: text(row, 'title', 512),
+            selected: _boolean(row, 'selected'),
             detail: text(row, 'detail', 8192),
             avatar: row['avatar'] == null
                 ? photos[row['portrait']]
@@ -167,10 +218,26 @@ final class MenuFeatureView {
       return MenuFeatureView(
         'unavailable',
         notice: value is Map && value['organization'] != null
-            ? '组织显示数据校验失败，请刷新重试。'
+            ? AppStrings.resolve(locale ?? const Locale('zh', 'CN'))
+                  .text('menu.overlay.errors.organizationData')
             : '',
       );
     }
+  }
+
+  static bool _boolean(Map map, String key) {
+    if (!map.containsKey(key)) return false;
+    if (map[key] is! bool) throw const FormatException();
+    return map[key] as bool;
+  }
+
+  static String? _role(Map map) {
+    if (!map.containsKey('role')) return null;
+    final role = map['role'];
+    if (role is! String || !RegExp(r'^[a-z][A-Za-z]{0,31}$').hasMatch(role)) {
+      throw const FormatException();
+    }
+    return role;
   }
 
   static String _avatar(Object? value) {
@@ -182,7 +249,7 @@ final class MenuFeatureView {
     return value;
   }
 
-  static (String, MenuFeatureView)? envelope(Object? raw) {
+  static (String, MenuFeatureView)? envelope(Object? raw, {Locale? locale}) {
     try {
       if (raw is! String || raw.length > 1048576) return null;
       final map = jsonDecode(raw);
@@ -196,7 +263,7 @@ final class MenuFeatureView {
           }.contains(map['tool'])) {
         return null;
       }
-      return (map['tool'] as String, parse(map));
+      return (map['tool'] as String, parse(map, locale: locale));
     } on Object {
       return null;
     }
@@ -347,9 +414,9 @@ class MenuFeaturePanel extends StatelessWidget {
                 ),
               ),
               BridgeMenuAction(
-                label: '刷新',
+                label: menuText(context, 'friends.refresh'),
                 onPressed: view.busy ? null : () => onAction('refresh', ''),
-                child: const Text('刷新'),
+                child: Text(menuText(context, 'friends.refresh')),
               ),
             ],
           ),
@@ -357,22 +424,25 @@ class MenuFeaturePanel extends StatelessWidget {
           if (view.state == 'loading' ||
               view.state == 'idle' ||
               view.refreshing)
-            const MenuLoading(),
+            MenuLoading(feedback: view.readFeedback),
           if (view.state != 'ready')
             BridgeCaption(
-              view.state == 'unavailable' ? '暂时无法读取，请刷新重试。' : '正在读取…',
+              view.state == 'unavailable'
+                  ? menuText(context, 'menu.overlay.errors.readFailed')
+                  : menuText(context, 'menu.overlay.window.readingEllipsis'),
             ),
-          if (view.busy) const BridgeCaption('正在处理…'),
+          if (view.busy) BridgeCaption(menuText(context, 'menu.display.busy')),
           for (final action
               in actionsAfterRows ? <MenuFeatureButton>[] : view.buttons)
             MenuFeatureAction(
-              key: ValueKey('${view.scope}/${action.label}'),
+              key: ValueKey('${view.scope}/${action.role ?? action.label}'),
+              identity: view.scope,
               action: action,
               enabled: !view.busy,
               onAction: onAction,
             ),
           if (view.state == 'ready' && view.rows.isEmpty)
-            const BridgeCaption('暂无内容'),
+            BridgeCaption(menuText(context, 'menu.overlay.window.empty')),
           for (final row in view.rows)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
@@ -387,8 +457,9 @@ class MenuFeaturePanel extends StatelessWidget {
                   for (final action in row.buttons)
                     MenuFeatureAction(
                       key: ValueKey(
-                        '${view.scope}/${row.title}/${action.label}',
+                        '${view.scope}/${row.title}/${action.role ?? action.label}',
                       ),
+                      identity: view.scope,
                       action: action,
                       enabled: !view.busy,
                       onAction: onAction,
@@ -400,7 +471,8 @@ class MenuFeaturePanel extends StatelessWidget {
           if (actionsAfterRows)
             for (final action in view.buttons)
               MenuFeatureAction(
-                key: ValueKey('${view.scope}/${action.label}'),
+                key: ValueKey('${view.scope}/${action.role ?? action.label}'),
+                identity: view.scope,
                 action: action,
                 enabled: !view.busy,
                 onAction: onAction,
@@ -419,34 +491,86 @@ class MenuFeatureAction extends StatefulWidget {
     required this.onAction,
     this.outlined = false,
     this.buttonStyle,
+    this.identity,
+    this.tone,
   });
   final MenuFeatureButton action;
   final bool enabled;
   final void Function(String, String) onAction;
   final bool outlined;
   final ButtonStyle? buttonStyle;
+
+  /// Existing presentation context, separate from rotating command grants.
+  final Object? identity;
+  final ActionTone? tone;
   @override
   State<MenuFeatureAction> createState() => _FeatureActionState();
 }
 
+final class _FeatureDecision {
+  _FeatureDecision(this.action, this.identity, this.value);
+  final MenuFeatureButton action;
+  final Object? identity;
+  final String value;
+}
+
 class _FeatureActionState extends State<MenuFeatureAction> {
   final input = TextEditingController();
-  String? pending;
+  _FeatureDecision? pending;
   Widget _button({
     required String label,
     required VoidCallback? onPressed,
     required Widget child,
   }) => widget.outlined
-      ? OutlinedButton(
-          onPressed: onPressed,
-          style: widget.buttonStyle,
+      ? StarBridgeActionButton(
+          onActivate: onPressed == null ? null : (_) => onPressed(),
+          semanticLabel: label,
+          nativeStyle: widget.buttonStyle,
+          tone: widget.tone,
           child: child,
         )
       : BridgeMenuAction(label: label, onPressed: onPressed, child: child);
   @override
   void didUpdateWidget(MenuFeatureAction oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.action.key != widget.action.key) pending = null;
+    final contextChanged = oldWidget.identity != widget.identity;
+    if (contextChanged || oldWidget.action != widget.action) pending = null;
+    // A quiet grant renewal keeps the same-context input. Never carry an old
+    // context's password/draft into another target or another input purpose.
+    if (contextChanged || oldWidget.action.input != widget.action.input) {
+      input.clear();
+    }
+  }
+
+  void _begin() {
+    if (!mounted || !widget.enabled) return;
+    final action = widget.action;
+    if (action.confirm != null) {
+      setState(
+        () => pending = _FeatureDecision(action, widget.identity, input.text),
+      );
+    } else {
+      widget.onAction(action.key, input.text);
+    }
+  }
+
+  void _cancel(_FeatureDecision decision) {
+    if (!mounted || !identical(pending, decision)) return;
+    setState(() => pending = null);
+  }
+
+  void _confirm(_FeatureDecision decision) {
+    if (!mounted ||
+        !widget.enabled ||
+        !identical(pending, decision) ||
+        widget.identity != decision.identity ||
+        widget.action != decision.action) {
+      return;
+    }
+    // Consume only this decision before dispatch; stale/double callbacks cannot
+    // act on a later decision. This is not a business-success acknowledgement.
+    setState(() => pending = null);
+    widget.onAction(decision.action.key, decision.value);
   }
 
   @override
@@ -469,47 +593,48 @@ class _FeatureActionState extends State<MenuFeatureAction> {
             : CrossAxisAlignment.stretch,
         children: [
           if (action.input != null)
-            TextField(
-              controller: input,
+            StarBridgeFieldFrame(
               enabled: widget.enabled,
-              maxLines: action.limit > 128 ? 3 : 1,
-              obscureText: action.input == '房间密码',
-              inputFormatters: [LengthLimitingTextInputFormatter(action.limit)],
-              decoration: InputDecoration(hintText: action.input),
+              builder: (context, focus) => TextField(
+                focusNode: focus,
+                controller: input,
+                enabled: widget.enabled,
+                maxLines: action.limit > 128 ? 3 : 1,
+                obscureText: action.secret,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(action.limit),
+                ],
+                decoration: InputDecoration(hintText: action.input),
+              ),
             ),
-          if (pending != null) ...[
-            Text(action.confirm!),
+          if (pending case final decision?) ...[
+            Text(decision.action.confirm!),
             Wrap(
               children: [
                 BridgeMenuAction(
-                  label: '取消',
-                  onPressed: () => setState(() => pending = null),
-                  child: const Text('取消'),
+                  label: menuText(context, 'menu.overlay.window.cancel'),
+                  onPressed: () => _cancel(decision),
+                  child: Text(menuText(context, 'menu.overlay.window.cancel')),
                 ),
                 BridgeMenuAction(
-                  label: '确认${action.label}',
-                  onPressed: !widget.enabled
-                      ? null
-                      : () {
-                          widget.onAction(action.key, pending!);
-                          setState(() => pending = null);
-                        },
-                  child: Text('确认${action.label}'),
+                  label: menuText(
+                    context,
+                    'menu.overlay.window.confirmAction',
+                    {'action': action.label},
+                  ),
+                  onPressed: !widget.enabled ? null : () => _confirm(decision),
+                  child: Text(
+                    menuText(context, 'menu.overlay.window.confirmAction', {
+                      'action': action.label,
+                    }),
+                  ),
                 ),
               ],
             ),
           ] else
             _button(
               label: action.label,
-              onPressed: !widget.enabled
-                  ? null
-                  : () {
-                      if (action.confirm != null) {
-                        setState(() => pending = input.text);
-                      } else {
-                        widget.onAction(action.key, input.text);
-                      }
-                    },
+              onPressed: !widget.enabled ? null : _begin,
               child: Text(action.label),
             ),
         ],

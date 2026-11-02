@@ -160,7 +160,8 @@ internal sealed partial class ScmAccountBridgeHost : IOverlayCommunityReader, IO
             (!row.TryGetProperty("hasServerSession", out var session) || session.ValueKind != JsonValueKind.False);
         return new(Text("gameName"), Text("callsign"), Text("roleTitle"), Text("liveStatus"),
             Text("ship"), Text("location"), Text("serverRegion"), row.GetProperty("isSelf").GetBoolean())
-        { LocationHiddenReason = StarBridge.Core.Presence.SharedLocationVisibility.NormalizeReason(
+        { ServerShard = StarBridge.Core.Presence.PublicShardId.IsValid(Text("serverShard")) ? Text("serverShard").Trim() : null,
+            LocationHiddenReason = StarBridge.Core.Presence.SharedLocationVisibility.NormalizeReason(
             Text("locationHiddenReason"), Text("location"), Text("liveStatus") == "InGame", pending),
             ArrivalPendingConfirmation = pending,
             ArrivalTargetCode = pending ? Text("arrivalTargetCode") : null };

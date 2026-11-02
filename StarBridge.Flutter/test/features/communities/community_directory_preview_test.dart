@@ -364,7 +364,7 @@ void main() {
       expect(model.selected, isNull);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('关闭'));
+      await tester.tap(find.byKey(const Key('community-details-close-icon')));
       await tester.pumpAndSettle();
       expect(model.selected, isNull);
       final primary = find.byKey(

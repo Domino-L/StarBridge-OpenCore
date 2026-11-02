@@ -19,6 +19,7 @@ void main() {
         'notificationSettings.consumeActivation',
       ]);
       var reason = 'doNotDisturb';
+      var destination = 'roomReminders';
       final requests = <BridgeEnvelope>[];
       final sub = pair.host.incoming.listen((request) {
         requests.add(request);
@@ -34,7 +35,7 @@ void main() {
               'schemaVersion': 1,
               'submitted': false,
               'reason': reason,
-              'destination': 'roomReminders',
+              'destination': destination,
             },
           ),
         );
@@ -48,12 +49,29 @@ void main() {
         isTrue,
       );
       final count = requests.length;
+      destination = 'execHangar';
+      expect(
+        await port.consumeDestination(DesktopReminderActivation('a' * 32, 3)),
+        'execHangar',
+      );
+      destination = 'officialFleet';
+      expect(
+        await port.consumeDestination(DesktopReminderActivation('a' * 32, 3)),
+        'officialFleet',
+      );
+      destination = 'unknownDestination';
+      expect(
+        await port.consumeDestination(DesktopReminderActivation('a' * 32, 3)),
+        isNull,
+      );
+      final afterDestinations = requests.length;
       session.advanceGeneration(4);
       expect(
         await port.consume(DesktopReminderActivation('a' * 32, 3)),
         isFalse,
       );
-      expect(requests.length, count);
+      expect(afterDestinations, count + 3);
+      expect(requests.length, afterDestinations);
       await sub.cancel();
       await session.close();
       await pair.host.close();

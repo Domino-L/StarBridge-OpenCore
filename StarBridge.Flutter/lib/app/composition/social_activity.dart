@@ -2,10 +2,19 @@ import 'dart:async';
 
 import '../../platform/bridge/bridge_account_access.dart';
 import '../../platform/bridge/bridge_client_session.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 
 /// One account-bound wake-up stream per bridge. Contains no identity or content.
 final _signals = Expando<StreamController<void>>();
 final _lastReply = Expando<DateTime>();
+final _directPush = Expando<bool>();
+final _directSignals = Expando<StreamController<List<String>?>>();
+StreamController<List<String>?> _directSignal(BridgeClientSession session) =>
+    _directSignals[session] ??= StreamController<List<String>?>.broadcast(sync: true);
+Stream<List<String>?> directMessageActivityChanges(BridgeClientSession session) =>
+    _directSignal(session).stream;
+bool directMessagePushHealthy(BridgeClientSession session) =>
+    _directPush[session] == true && socialActivityHealthy(session);
 bool socialActivityHealthy(BridgeClientSession session) {
   final last = _lastReply[session];
   return last != null && DateTime.now().difference(last) < const Duration(seconds: 12);
@@ -15,11 +24,19 @@ StreamController<void> _signal(BridgeClientSession session) =>
 Stream<void> socialActivityChanges(BridgeClientSession session) => _signal(session).stream;
 // Successful idempotent receipt changes unread authority without waiting for a
 // remote activity heartbeat. Consumers re-read; no optimistic unread clearing.
-void notifySocialReadChanged(BridgeClientSession session) => _signal(session).add(null);
+void notifySocialReadChanged(BridgeClientSession session) {
+  _signal(session).add(null);
+  _directSignal(session).add(null);
+}
 
 class SocialActivity {
   SocialActivity(this.session) {
     _events = session.events.listen((event) {
+      if (!_closed && event.name == 'account.presentationChanged') {
+        // Display-only refresh: do not retire writes, drafts or the live wait.
+        _signal(session).add(null);
+        _directSignal(session).add(null);
+      }
       if (event.name == 'account.changed' || event.name == 'bootstrap.invalidated') {
         _epoch++;
         _instance = '';
@@ -42,7 +59,7 @@ class SocialActivity {
 
   void _schedule(Duration delay) {
     if (!_closed && session.hostCapabilities.contains('social.wait')) {
-      _timer = Timer(delay, _wait);
+      _timer = Timer(delay, () => backgroundLoadingRead(_wait));
     }
   }
   Future<void> _wait() async {
@@ -73,7 +90,17 @@ class SocialActivity {
       _version = version;
       _failures = 0;
       _lastReply[session] = DateTime.now();
-      if (changed) _signal(session).add(null);
+      // Missing on older Hosts, false on HTTP fallback. A successful wait alone
+      // is not evidence of a connected, DM-capable push transport.
+      _directPush[session] = reply.payload['directMessagesPushHealthy'] == true;
+      if (changed) {
+        _signal(session).add(null);
+        final targets = reply.payload['directMessageTargets'];
+        _directSignal(session).add(
+          reply.payload['directMessagesOnly'] == true && targets is List && targets.every((v) => v is String)
+              ? List<String>.from(targets) : null,
+        );
+      }
     } catch (_) {
       if (epoch == _epoch) {
         _lastReply[session] = null;

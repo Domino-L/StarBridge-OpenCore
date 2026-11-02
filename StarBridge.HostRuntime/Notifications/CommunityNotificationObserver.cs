@@ -20,8 +20,7 @@ internal sealed class CommunityNotificationObserver(TimeProvider? time = null)
     internal IReadOnlyList<CommunityNotificationCandidate> Observe(
         string owner, long generation, CommunityNotificationFeed feed)
     {
-        if (string.IsNullOrWhiteSpace(owner) || feed.Sources.Length > 64 ||
-            feed.Sources.Select(row => row.SourceKey).Distinct(StringComparer.Ordinal).Count() != feed.Sources.Length) {
+        if (string.IsNullOrWhiteSpace(owner) || !feed.IsBounded) {
             Reset(); return [];
         }
         var same = owner == _owner && generation == _generation;

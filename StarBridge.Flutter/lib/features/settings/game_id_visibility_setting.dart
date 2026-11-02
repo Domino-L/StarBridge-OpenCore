@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import 'game_id_visibility_controller.dart';
 import 'privacy_page_drafts.dart';
+import 'sharing_settings_waiting.dart';
 
 class GameIdVisibilitySetting extends StatefulWidget {
   const GameIdVisibilitySetting({required this.session, super.key});
@@ -50,11 +53,18 @@ class _GameIdVisibilitySettingState extends State<GameIdVisibilitySetting> {
                       : c.snapshot == null
                       ? 'settings.privacy.loading'
                       : c.snapshot!['canConfigure'] == false
-                      ? 'settings.privacy.gameId.required'
+                      ? c.locations == 0
+                            ? 'settings.privacy.gameId.unverified'
+                            : 'settings.privacy.gameId.required'
                       : 'settings.privacy.gameId.help',
                 ),
               ),
-              if (c.busy && c.snapshot == null) const LinearProgressIndicator(),
+              SharingSettingsWaiting(
+                owner: c,
+                pending: () => c.busy && c.snapshot == null,
+                titleKey: 'settings.privacy.gameId.title',
+                labelKey: 'settings.privacy.loading',
+              ),
               Wrap(
                 spacing: tokens.space.md,
                 children: [
@@ -66,12 +76,30 @@ class _GameIdVisibilitySettingState extends State<GameIdVisibilitySetting> {
                   }.entries)
                     SizedBox(
                       width: 160,
-                      child: SwitchListTile.adaptive(
-                        key: Key('game-id-${item.value}'),
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
+                      child: StarBridgeSwitch.tile(
+                        controlKey: Key('game-id-${item.value}'),
+                        preserveNativeTile: true,
+                        label: strings.text(
+                          'settings.privacy.gameId.${item.value}',
+                        ),
+                        titleWidget: Text(
                           strings.text('settings.privacy.gameId.${item.value}'),
                         ),
+                        rowBuilder: (control) =>
+                            resolveStarBridgeInteraction(context).suite ==
+                                InteractionSuite.standard
+                            ? control
+                            : ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  strings.text(
+                                    'settings.privacy.gameId.${item.value}',
+                                  ),
+                                ),
+                                enabled:
+                                    c.canEdit && !(drafts?.saving ?? false),
+                                trailing: control,
+                              ),
                         value: locations & item.key != 0,
                         onChanged: c.canEdit && !(drafts?.saving ?? false)
                             ? (value) {
@@ -86,7 +114,8 @@ class _GameIdVisibilitySettingState extends State<GameIdVisibilitySetting> {
                                       ? locations | item.key
                                       : locations & ~item.key,
                                   (next) async {
-                                    if (c.locations == next && c.error == null) {
+                                    if (c.locations == next &&
+                                        c.error == null) {
                                       return true;
                                     }
                                     if (c.snapshot?['revision'] != revision ||
@@ -105,6 +134,12 @@ class _GameIdVisibilitySettingState extends State<GameIdVisibilitySetting> {
                       ),
                     ),
                 ],
+              ),
+              SharingSettingsWaiting(
+                owner: c,
+                pending: () => c.busy && c.snapshot != null,
+                titleKey: 'settings.privacy.gameId.title',
+                labelKey: 'privacy.local.saving',
               ),
             ],
           ),

@@ -1,29 +1,44 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_field.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
 import '../../app/localization/app_strings.dart';
 import 'overlay_settings_help.dart';
 import '../../platform/window/menu_display_preferences.dart';
+import '../../platform/window/menu_desktop_widgets.dart';
+import 'menu_desktop_widgets_editor.dart';
 
 class MenuDisplayEditor extends StatelessWidget {
   const MenuDisplayEditor({
     super.key,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
     this.showTitle = true,
+    this.widgets = const MenuDesktopWidgets(),
+    this.onWidgetsChanged,
   });
   final MenuDisplayPreferences value;
   final bool showTitle;
+  final MenuDesktopWidgets widgets;
+  final bool enabled;
+  final ValueChanged<MenuDesktopWidgets>? onWidgetsChanged;
   final ValueChanged<MenuDisplayPreferences> onChanged;
   @override
   Widget build(BuildContext context) {
     String text(String key) => AppStrings.of(context).text('menu.display.$key');
-    Widget flag(String key, bool enabled, {bool active = true}) =>
-        SwitchListTile(
+    Widget flag(String key, bool selectedValue, {bool active = true}) =>
+        StarBridgeSwitch.tile(
           key: ValueKey('menu-display-$key'),
-          contentPadding: EdgeInsets.zero,
-          title: Text(text(key)),
-          value: enabled,
-          onChanged: active ? (v) => onChanged(value.change(key, v)) : null,
+          label: text(key),
+          value: selectedValue,
+          onChanged: !enabled
+              ? null
+              : enabled && active
+              ? (v) => onChanged(value.change(key, v))
+              : null,
         );
     return Material(
       type: MaterialType.transparency,
@@ -39,42 +54,40 @@ class MenuDisplayEditor extends StatelessWidget {
             style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
-            key: ValueKey(
-              'menu-display-interfaceScale-${value.interfaceScalePercent}',
-            ),
-            initialValue: value.interfaceScalePercent,
-            isExpanded: true,
+          StarBridgeSelectField<int>(
+            key: ValueKey('menu-display-interfaceScale'),
+            identity: 'menu-display-interfaceScale',
+            value: value.interfaceScalePercent,
             decoration: InputDecoration(labelText: text('interfaceScale')),
-            items: [
+            options: [
               for (final percent in MenuDisplayPreferences.interfaceScales)
-                DropdownMenuItem(
+                StarBridgeSelectOption(
                   value: percent,
-                  child: Text(percent == 0 ? text('system') : '$percent%'),
+                  label: percent == 0 ? text('system') : '$percent%',
                 ),
             ],
-            onChanged: (percent) {
-              if (percent != null) {
-                onChanged(value.change('interfaceScalePercent', percent));
-              }
-            },
+            onSelected: !enabled
+                ? null
+                : (percent, _) {
+                    onChanged(value.change('interfaceScalePercent', percent));
+                  },
           ),
           OverlaySettingsHelp(text('interfaceScaleHint')),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
-            key: ValueKey('menu-display-textScale-${value.textScalePercent}'),
-            initialValue: value.textScalePercent,
-            isExpanded: true,
+          StarBridgeSelectField<int>(
+            key: ValueKey('menu-display-textScale'),
+            identity: 'menu-display-textScale',
+            value: value.textScalePercent,
             decoration: InputDecoration(labelText: text('textScale')),
-            items: [
+            options: [
               for (final percent in MenuDisplayPreferences.textScales)
-                DropdownMenuItem(value: percent, child: Text('$percent%')),
+                StarBridgeSelectOption(value: percent, label: '$percent%'),
             ],
-            onChanged: (percent) {
-              if (percent != null) {
-                onChanged(value.change('textScalePercent', percent));
-              }
-            },
+            onSelected: !enabled
+                ? null
+                : (percent, _) {
+                    onChanged(value.change('textScalePercent', percent));
+                  },
           ),
           OverlaySettingsHelp(text('textScaleHint')),
           flag('reduceMotion', value.reduceMotion),
@@ -83,15 +96,27 @@ class MenuDisplayEditor extends StatelessWidget {
           OverlaySettingsHelp(text('highContrastHint')),
           const SizedBox(height: 12),
           Text('${text('tooltipDelay')} ${value.tooltipDelayMilliseconds} ms'),
-          Slider(
-            key: const ValueKey('menu-display-tooltipDelay'),
-            value: value.tooltipDelayMilliseconds.toDouble(),
-            min: 100,
-            max: 1500,
-            divisions: 14,
-            label: '${value.tooltipDelayMilliseconds} ms',
-            onChanged: (delay) => onChanged(
-              value.change('tooltipDelayMilliseconds', delay.round()),
+          StarBridgeFieldFrame(
+            enabled: enabled,
+            cursor: SystemMouseCursors.click,
+            builder: (_, focus) => KeyedSubtree(
+              // Preserve the existing client workaround: SDK Slider owns an
+              // OverlayPortal whose semantics cache must not cross enabled.
+              key: ValueKey(('menu-display-slider', enabled)),
+              child: Slider(
+                focusNode: focus,
+                key: const ValueKey('menu-display-tooltipDelay'),
+                value: value.tooltipDelayMilliseconds.toDouble(),
+                min: 100,
+                max: 1500,
+                divisions: 14,
+                label: '${value.tooltipDelayMilliseconds} ms',
+                onChanged: !enabled
+                    ? null
+                    : (delay) => onChanged(
+                        value.change('tooltipDelayMilliseconds', delay.round()),
+                      ),
+              ),
             ),
           ),
           OverlaySettingsHelp(text('tooltipDelayHint')),
@@ -99,22 +124,32 @@ class MenuDisplayEditor extends StatelessWidget {
           Text(text('time'), style: Theme.of(context).textTheme.titleSmall),
           flag('showClock', value.showClock),
           flag('showDate', value.showDate),
-          DropdownButtonFormField<String>(
-            key: ValueKey('menu-display-format-${value.clockFormat}'),
-            initialValue: value.clockFormat,
-            isExpanded: true,
+          StarBridgeSelectField<String>(
+            key: ValueKey('menu-display-format'),
+            identity: 'menu-display-format',
+            value: value.clockFormat,
             decoration: InputDecoration(labelText: text('clockFormat')),
-            items: [
+            options: [
               for (final id in const ['system', 'twentyFourHour', 'twelveHour'])
-                DropdownMenuItem(value: id, child: Text(text(id))),
+                StarBridgeSelectOption(value: id, label: text(id)),
             ],
-            onChanged: value.showClock
-                ? (v) {
-                    if (v != null) onChanged(value.change('clockFormat', v));
+            onSelected: !enabled
+                ? null
+                : value.showClock
+                ? (v, _) {
+                    onChanged(value.change('clockFormat', v));
                   }
                 : null,
           ),
           flag('showPresence', value.showPresence),
+          if (onWidgetsChanged case final change?) ...[
+            const SizedBox(height: 16),
+            MenuDesktopWidgetsEditor(
+              value: widgets,
+              onChanged: change,
+              enabled: enabled,
+            ),
+          ],
           const SizedBox(height: 16),
           Text(text('context'), style: Theme.of(context).textTheme.titleSmall),
           flag('showContext', value.showContext),

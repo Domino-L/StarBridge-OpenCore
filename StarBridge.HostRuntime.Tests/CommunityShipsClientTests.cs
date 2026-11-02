@@ -10,6 +10,7 @@ internal static class CommunityShipsClientTests
 {
     internal static async Task Verify()
     {
+        await CommunityShipMetadataRecoveryTests.Verify();
         StarBridge.HostRuntime.Tests.CommunityShipCatalogTests.Verify();
         await CommunityLoanerSearchTests.Verify();
         var mode = "ok";

@@ -32,7 +32,7 @@ internal sealed record DirectHistoryView(string TargetRef, DirectMessageView[] M
 internal sealed partial class FriendsReader
 {
     private sealed record ConversationTarget(string Owner, string Id, DateTimeOffset Expires,
-        long Oldest = 0, long Newest = 0, string? Viewer = null, string DisplayName = "");
+        long Oldest = 0, long Newest = 0, string? Viewer = null, string DisplayName = "", string CredentialOwner = "");
     private readonly Dictionary<string, ConversationTarget> _conversations = new(StringComparer.Ordinal);
     private static AccountBridgeHostException ChatError(string code) => new("directMessages." + code);
     private static string ChatState(JsonElement value) => Text(value, "conversationState", 64) is var state &&
@@ -60,7 +60,10 @@ internal sealed partial class FriendsReader
         ConversationTarget? target = null;
         if (reference is not null) lock (_targetGate) {
             if (!_conversations.TryGetValue(reference, out target) || target.Owner != Owner(bearer, scope) || target.Expires < DateTimeOffset.UtcNow ||
-                (before > 0 && before != target.Oldest) || (after > 0 && after != target.Newest)) throw ChatError("target_changed");
+                // The client may have trimmed either end of its bounded window.
+                // Cursors within the observed range remain reads of this same
+                // scoped capability; REST still checks authorization on each page.
+                before > target.Newest || after > target.Newest) throw ChatError("target_changed");
         }
         if (payload.TryGetProperty("localHistory", out var local))
         {
@@ -105,7 +108,7 @@ internal sealed partial class FriendsReader
             var user = entry.GetProperty("user"); var id = Text(user, "accountId", 256);
             if (string.IsNullOrWhiteSpace(id) || !seen.Add(id)) throw ChatError("data_invalid");
             var reference = Guid.NewGuid().ToString("N");
-            targets.Add(reference, new(Owner(bearer, scope), id, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: Text(user, "callsign", 512)));
+            targets.Add(reference, new(Owner(bearer, scope), id, DateTimeOffset.UtcNow.AddMinutes(30), DisplayName: Text(user, "callsign", 512), CredentialOwner: Owner(bearer, "")));
             var unread = entry.GetProperty("unreadCount").GetInt32();
             if (unread < 0) throw ChatError("data_invalid");
             long? sequence = entry.TryGetProperty("latestSequence", out var latest) ? latest.GetInt64() : null;
@@ -202,7 +205,7 @@ internal sealed partial class FriendsReader
             if (!_conversations.TryGetValue(reference, out var active) || active != target) throw ChatError("target_changed");
             _conversations[reference] = target with { Viewer = viewer, Expires = DateTimeOffset.UtcNow.AddMinutes(30),
                 Oldest = after > 0 ? target.Oldest : oldest,
-                Newest = before > 0 ? target.Newest : rows.LastOrDefault()?.Sequence ?? target.Newest };
+                Newest = Math.Max(target.Newest, rows.LastOrDefault()?.Sequence ?? 0) };
         }
         return result;
     }

@@ -36,6 +36,8 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     private long _epoch, _lastTest;
     private long? _unknownEnvironmentAt;
     private CancellationTokenSource? _unknownRetry;
+    private readonly Lifecycle.AsyncWorkRetirement _accountRetirement = new();
+    private volatile bool _accountRetired;
     private volatile bool _disposed;
     public static IReadOnlyList<string> Capabilities { get; } = ["playerActivity.read", "playerActivity.save", "playerActivity.test"];
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
@@ -49,19 +51,21 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     }
     public bool ShouldObserve()
     {
-        try { var saved = _store.Read(); return !_disposed && _sink is not null && saved.Value.Enabled && !saved.DoNotDisturb; }
+        try { var saved = _store.Read(); return !_disposed && !_accountRetired && _sink is not null && saved.Value.Enabled && !saved.DoNotDisturb; }
         catch { return false; }
     }
     public void Observe(PlayerActivityObservation observation) => _ = ObserveAsync(observation);
     internal async Task ObserveAsync(PlayerActivityObservation observation)
     {
+        using var work = _accountRetirement.Enter(default);
+        if (work is null) return;
         try
         {
             List<DesktopNotification> output = [];
             NotificationDeliveryStage? observationStage = null;
             lock (_gate)
             {
-                if (_disposed || observation.Generation != _generation() || !observation.IsCurrent()) return;
+                if (_disposed || _accountRetired || observation.Generation != _generation() || !observation.IsCurrent()) return;
                 if (observation.Source is not ("friends" or "organization" or "room") ||
                     observation.Members.Length > 10000 || !observation.IsComplete) return;
                 var saved = _store.Read();
@@ -88,7 +92,7 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
                     if (_unknownEnvironmentAt is not null) EnsureUnknownRetryLocked();
                 }
             }
-            await DeliverAsync(output, observationStage).ConfigureAwait(false);
+            await DeliverAsync(output, observationStage, work.Token).ConfigureAwait(false);
         }
         catch {
             // An unreadable policy cannot leave transition history that would
@@ -171,13 +175,17 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     }
     private void EnsureUnknownRetryLocked()
     {
-        if (_unknownRetry is not null || _disposed) return;
-        var retry = new CancellationTokenSource();
+        if (_unknownRetry is not null || _disposed || _accountRetired) return;
+        var work = _accountRetirement.Enter(default);
+        if (work is null) return;
+        var retry = CancellationTokenSource.CreateLinkedTokenSource(work.Token);
         _unknownRetry = retry;
-        _ = RetryUnknownEnvironmentAsync(retry, _epoch);
+        _ = RetryUnknownEnvironmentAsync(retry, _epoch, work);
     }
-    private async Task RetryUnknownEnvironmentAsync(CancellationTokenSource retry, long epoch)
+    private async Task RetryUnknownEnvironmentAsync(CancellationTokenSource retry, long epoch,
+        Lifecycle.AsyncWorkRetirement.Lease work)
     {
+        using var admission = work;
         try
         {
             while (true)
@@ -187,7 +195,7 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
                 NotificationDeliveryStage? stage;
                 lock (_gate)
                 {
-                    if (_disposed || _unknownRetry != retry || _epoch != epoch || _unknownEnvironmentAt is not { } started)
+                    if (_disposed || _accountRetired || _unknownRetry != retry || _epoch != epoch || _unknownEnvironmentAt is not { } started)
                         return;
                     PlayerActivityEnvironment env;
                     try { env = _environment(); }
@@ -205,7 +213,7 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
                     (output, stage) = EvaluateKnownLocked(observation, saved, env, false, false);
                     if (_unknownEnvironmentAt is null) _unknownRetry = null;
                 }
-                await DeliverAsync(output, stage).ConfigureAwait(false);
+                await DeliverAsync(output, stage, retry.Token).ConfigureAwait(false);
                 lock (_gate) { if (_unknownRetry != retry || _unknownEnvironmentAt is null) return; }
             }
         }
@@ -217,13 +225,15 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
             retry.Dispose();
         }
     }
-    private async Task DeliverAsync(List<DesktopNotification> output, NotificationDeliveryStage? observationStage)
+    private async Task DeliverAsync(List<DesktopNotification> output, NotificationDeliveryStage? observationStage, CancellationToken token)
     {
+        if (_accountRetired || token.IsCancellationRequested) return;
         if (observationStage is { } stage)
             _delivery.Record(NotificationDeliveryChannel.Activity, stage, Guid.NewGuid().ToString("N"),
                 result: stage == NotificationDeliveryStage.EnvironmentSuppressed ? "environmentUnknown" : "sourceChanged");
         foreach (var notice in output)
         {
+            if (_accountRetired || token.IsCancellationRequested) return;
             var trace = notice.Id.ToString("N");
             _delivery.Record(NotificationDeliveryChannel.Activity, NotificationDeliveryStage.FreshEvent, trace,
                 result: notice.Activity?.Kind);
@@ -247,7 +257,8 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
                     result: "expired");
             }
             if (!canSubmit) continue;
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(1));
             // Uncertain submission never retries or falls through to a second channel.
             try {
                 var result = await sink!.TryPresentDetailedAsync(notice, deadline.Token).ConfigureAwait(false);
@@ -375,5 +386,17 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     public void Reset() { lock (_gate) ResetLocked(); }
     private NotificationPolicySnapshot? Policies() => _policyOwner?.Invoke() is {} owner ? _policies.Read(owner) : null;
     private void ResetLocked() { _epoch++; _unknownRetry?.Cancel(); _unknownRetry = null; _sources.Clear(); _deferred.Clear(); _tracker = new(); _scope = null; _revision = null; _policyRevision = -1; _unknownEnvironmentAt = null; }
-    public void Dispose() { lock (_gate) { _disposed = true; ResetLocked(); } _preferences.Dispose(); }
+    // Retire account observations and their native submissions, not the device
+    // settings/test module: those local controls remain usable without a login.
+    internal Task RetireAccountActivityAsync()
+    {
+        lock (_gate) { _accountRetired = true; ResetLocked(); }
+        return _accountRetirement.Close();
+    }
+    public void Dispose()
+    {
+        lock (_gate) { _disposed = true; _accountRetired = true; ResetLocked(); }
+        _ = _accountRetirement.Close();
+        _preferences.Dispose();
+    }
 }

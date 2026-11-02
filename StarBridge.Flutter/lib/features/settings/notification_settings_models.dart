@@ -66,6 +66,8 @@ final class NotificationChannelSettings {
     required this.overlayEnabled,
     required this.desktopPosition,
     required this.sound,
+    this.rallyAlertsEnabled = true,
+    this.tradeWindowsEnabled = true,
   });
 
   factory NotificationChannelSettings.newDevice() =>
@@ -83,6 +85,11 @@ final class NotificationChannelSettings {
   final bool overlayEnabled;
   final DesktopNotificationPosition desktopPosition;
   final NotificationSoundSettings sound;
+  // Main-fleet rally alerts (banner, sound, Windows, taskbar) have their own
+  // switch, independent of the overlay channel and the notice module.
+  final bool rallyAlertsEnabled;
+  // 交易提醒 (user 10-28): under the Windows switch, on by default.
+  final bool tradeWindowsEnabled;
 
   NotificationChannelSettings copyWith({
     bool? inAppEnabled,
@@ -91,6 +98,8 @@ final class NotificationChannelSettings {
     bool? overlayEnabled,
     DesktopNotificationPosition? desktopPosition,
     NotificationSoundSettings? sound,
+    bool? rallyAlertsEnabled,
+    bool? tradeWindowsEnabled,
   }) => NotificationChannelSettings(
     inAppEnabled: inAppEnabled ?? this.inAppEnabled,
     windowsDesktopEnabled: windowsDesktopEnabled ?? this.windowsDesktopEnabled,
@@ -99,6 +108,8 @@ final class NotificationChannelSettings {
     overlayEnabled: overlayEnabled ?? this.overlayEnabled,
     desktopPosition: desktopPosition ?? this.desktopPosition,
     sound: sound ?? this.sound,
+    rallyAlertsEnabled: rallyAlertsEnabled ?? this.rallyAlertsEnabled,
+    tradeWindowsEnabled: tradeWindowsEnabled ?? this.tradeWindowsEnabled,
   );
 }
 
@@ -111,8 +122,11 @@ final class NotificationSourceRule {
     required this.contextLabel,
     required this.mode,
     this.logoImageData,
+    this.organizationCode,
   });
 
+  /// A community's code, for finding its rule from its own page.
+  final String? organizationCode;
   final String sourceRef;
   final NotificationSourceKind kind;
   final String displayName;
@@ -120,8 +134,11 @@ final class NotificationSourceRule {
   final NotificationSourceMode mode;
   final String? logoImageData;
 
-  NotificationSourceRule copyWith({NotificationSourceMode? mode}) =>
-      NotificationSourceRule(
+  NotificationSourceRule copyWith({
+    NotificationSourceMode? mode,
+    String? organizationCode,
+  }) => NotificationSourceRule(
+        organizationCode: organizationCode ?? this.organizationCode,
         sourceRef: sourceRef,
         kind: kind,
         displayName: displayName,
@@ -249,6 +266,8 @@ final class NotificationSettingsValue {
     this.desktopDeliveryAvailable = false,
     this.directMessageDeliveryAvailable = false,
     this.overlayDeliveryAvailable = false,
+    this.rallyAlertsAvailable = false,
+    this.tradeDeliveryAvailable = false,
     required this.channels,
     required List<NotificationSourceRule> sourceRules,
     required this.previewMode,
@@ -271,6 +290,8 @@ final class NotificationSettingsValue {
   final bool desktopDeliveryAvailable;
   final bool directMessageDeliveryAvailable;
   final bool overlayDeliveryAvailable;
+  final bool rallyAlertsAvailable;
+  final bool tradeDeliveryAvailable;
   final List<NotificationSourceRule> sourceRules;
   final NotificationPreviewMode previewMode;
   final PlayerActivityNotificationSettings playerActivity;
@@ -287,6 +308,8 @@ final class NotificationSettingsValue {
     desktopDeliveryAvailable: desktopDeliveryAvailable,
     directMessageDeliveryAvailable: directMessageDeliveryAvailable,
     overlayDeliveryAvailable: overlayDeliveryAvailable,
+    rallyAlertsAvailable: rallyAlertsAvailable,
+    tradeDeliveryAvailable: tradeDeliveryAvailable,
     channels: channels ?? this.channels,
     sourceRules: sourceRules ?? this.sourceRules,
     previewMode: previewMode ?? this.previewMode,

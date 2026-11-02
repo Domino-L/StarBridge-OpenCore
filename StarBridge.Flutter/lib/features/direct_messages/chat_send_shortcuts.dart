@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 /// Shared desktop chat behavior. IME confirmation must remain an input event.
 class ChatSendShortcuts extends StatelessWidget {
@@ -32,7 +37,11 @@ class ChatSendShortcuts extends StatelessWidget {
       }
       // Keep Ctrl+Enter compatible; neither a held key nor a blocked send
       // should insert newlines or submit the same message again.
-      if (event is KeyDownEvent) onSend?.call();
+      if (event is KeyDownEvent && onSend != null) {
+        unawaited(
+          runStarBridgeActivation<void>(InteractionSource.keyboard, onSend!),
+        );
+      }
       return KeyEventResult.handled;
     },
     child: child,

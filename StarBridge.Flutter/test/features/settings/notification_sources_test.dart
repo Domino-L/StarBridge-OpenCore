@@ -55,6 +55,169 @@ class Fake implements NotificationSourcesPort {
 }
 
 void main() {
+  for (final v2 in [true, false]) {
+    test(
+      'official notification source requires both V2 capabilities v2=$v2',
+      () async {
+        final pair = InMemoryBridgeConnection.createPair();
+        final session = BridgeClientSession(
+          connection: pair.client,
+          sessionGeneration: 1,
+        );
+        session.acceptHostCapabilities([
+          'notificationPolicies.read',
+          'notificationPolicies.save',
+          'notificationPolicies.readV2',
+          if (v2) 'notificationPolicies.saveV2',
+        ]);
+        const owner = BridgeAccountContext(
+          environment: 'fixture',
+          authority: 'fixture',
+          subject: 'owner',
+        );
+        final requests = <BridgeEnvelope>[];
+        final subscription = pair.host.incoming.listen((request) {
+          requests.add(request);
+          final version = request.name.endsWith('V2') ? 2 : 1;
+          final saving =
+              request.name == 'notificationPolicies.saveV2' ||
+              request.name == 'notificationPolicies.save';
+          unawaited(
+            pair.host.send(
+              BridgeEnvelope(
+                protocolVersion: 1,
+                messageType: 'response',
+                name: request.name,
+                correlationId: request.correlationId,
+                sessionGeneration: 1,
+                accountContext: owner,
+                status: 'ok',
+                payload: request.name == 'account.getCurrent'
+                    ? {'schemaVersion': 1, 'state': 'signedIn'}
+                    : {
+                        ...data(),
+                        'schemaVersion': version,
+                        if (saving) 'revision': 1,
+                        if (saving)
+                          'operationId': request.payload['operationId'],
+                        'sources': [
+                          if (version == 2)
+                            {
+                              'sourceRef': 'officialFleet:${'a' * 64}',
+                              'kind': 'officialFleet',
+                              'displayName': 'Fixture main fleet',
+                              'mode': saving ? 'doNotDisturb' : 'normal',
+                            },
+                        ],
+                      },
+              ),
+            ),
+          );
+        });
+        final port = BridgeNotificationSources(session);
+        addTearDown(() async {
+          port.dispose();
+          await subscription.cancel();
+          await session.close();
+          await pair.host.close();
+        });
+        final value = await port.read();
+        expect(
+          requests.last.name,
+          v2 ? 'notificationPolicies.readV2' : 'notificationPolicies.read',
+        );
+        expect(
+          value.sources.where(
+            (source) => source.kind == NotificationSourceKind.officialFleet,
+          ),
+          hasLength(v2 ? 1 : 0),
+        );
+        final modes = {...value.modes};
+        if (v2) {
+          modes['officialFleet:${'a' * 64}'] =
+              NotificationSourceMode.doNotDisturb;
+        }
+        final next = await port.save(value, modes);
+        expect(
+          requests.last.name,
+          v2 ? 'notificationPolicies.saveV2' : 'notificationPolicies.save',
+        );
+        expect(next.revision, 1);
+        expect(requests.last.payload['schemaVersion'], v2 ? 2 : 1);
+        if (v2) {
+          final before = requests.length;
+          session.acceptHostCapabilities([
+            'notificationPolicies.read',
+            'notificationPolicies.save',
+          ]);
+          await expectLater(
+            port.save(next, modes),
+            throwsA(isA<BridgeClientException>()),
+          );
+          expect(
+            requests.length,
+            before,
+            reason:
+                'An official editor never downgrades its save into a V1 lease',
+          );
+        }
+      },
+    );
+  }
+  test('V2 accepts sixty-four communities and only one official source', () {
+    Map<String, Object?> row(int id, {bool official = false}) => {
+      'sourceRef':
+          '${official ? 'officialFleet' : 'organization'}:${id.toRadixString(16).padLeft(64, '0')}',
+      'kind': official ? 'officialFleet' : 'community',
+      'displayName': 'Fixture $id',
+      'mode': 'normal',
+    };
+    final communities = [for (var i = 0; i < 64; i++) row(i)];
+    final valid = {
+      ...data(),
+      'schemaVersion': 2,
+      'sources': [...communities, row(90, official: true)],
+    };
+    expect(
+      BridgeNotificationSources.parse(valid, schemaVersion: 2).sources,
+      hasLength(68),
+    );
+    for (final invalid in [
+      {
+        ...valid,
+        'sources': [...communities, row(64)],
+      },
+      {
+        ...valid,
+        'sources': [
+          ...communities.take(63),
+          row(90, official: true),
+          row(91, official: true),
+        ],
+      },
+      {
+        ...valid,
+        'sources': [
+          {...row(1), 'kind': 'officialFleet'},
+        ],
+      },
+      {
+        ...valid,
+        'sources': [
+          {...row(1), 'kind': 'future'},
+        ],
+      },
+    ]) {
+      expect(
+        () => BridgeNotificationSources.parse(invalid, schemaVersion: 2),
+        throwsA(isA<BridgeFormatException>()),
+      );
+    }
+    expect(
+      () => BridgeNotificationSources.parse(valid),
+      throwsA(isA<BridgeFormatException>()),
+    );
+  });
   testWidgets(
     'narrow source dropdown discards without a write or stale visual value',
     (tester) async {
@@ -72,7 +235,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       final selector = find
-          .byType(DropdownButtonFormField<NotificationSourceMode>)
+          .byWidgetPredicate(
+            (w) => w is DropdownButtonFormField<NotificationSourceMode>,
+          )
           .first;
       tester
           .widget<DropdownButtonFormField<NotificationSourceMode>>(selector)

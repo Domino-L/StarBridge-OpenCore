@@ -5,12 +5,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
-import '../../app/shell/chrome/presence_color.dart';
+import '../common/organization_member_board.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_menu_anchor.dart';
+
 import '../common/user_avatar_menu.dart';
 import '../party_rooms/room_display.dart' show roomDate, roomServerRegion;
 import 'community_workspace_controller.dart';
-import 'community_member_banner.dart';
 import 'community_member_runtime.dart';
 import 'community_workspace_copy.dart';
 import 'community_workspace_port.dart';
@@ -24,7 +27,6 @@ import 'community_member_removal_copy.dart';
 import 'community_ownership_transfer_port.dart';
 import 'community_ownership_transfer_dialog.dart';
 import 'community_ownership_transfer_copy.dart';
-import '../../design_system/controls/semantic_action_style.dart';
 
 /// Member presentation and governance actions share the live workspace guard.
 final class CommunityWorkspaceMembers {
@@ -37,6 +39,8 @@ final class CommunityWorkspaceMembers {
     required this.search,
     required this.contextInvalidations,
     required this.onGovernanceChanged,
+    required this.openDialog,
+    this.refreshingIndicator,
   });
   final BuildContext context;
   final CommunityWorkspaceController Function() currentModel;
@@ -46,85 +50,13 @@ final class CommunityWorkspaceMembers {
   final TextEditingController search;
   final Stream<void> contextInvalidations;
   final Future<void> Function() onGovernanceChanged;
+  final Future<bool?> Function(WidgetBuilder builder) openDialog;
+  final Widget? refreshingIndicator;
   CommunityWorkspaceController get model => currentModel();
   String t(String key) => workspaceText(context, key);
   Widget build() {
     final workspace = model.workspace!;
-    final memberContent = <Widget>[
-      Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        spacing: 12,
-        runSpacing: 8,
-        children: [
-          Text(
-            '${t('members')} · ${workspace.matchedCount} / ${workspace.totalCount}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          Text(
-            '${t('updated')} · ${roomDate(context, workspace.fetchedAt)}',
-            style: TextStyle(color: context.tokens.colors.textSecondary),
-          ),
-        ],
-      ),
-      const SizedBox(height: 12),
-      Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: search,
-              maxLength: 128,
-              decoration: InputDecoration(
-                labelText: t('search'),
-                counterText: '',
-              ),
-              onSubmitted: (_) => model.load(search: search.text),
-            ),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: () => model.load(search: search.text),
-            child: Text(t('searchButton')),
-          ),
-        ],
-      ),
-      if (model.mediaFailed)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            t('mediaFailed'),
-            style: TextStyle(color: context.tokens.colors.warning),
-          ),
-        ),
-      if (workspace.members.isEmpty)
-        Padding(padding: const EdgeInsets.all(24), child: Text(t('empty'))),
-      CommunityMemberHeader(showActions: _showMemberActions),
-      for (final member in model.displayMembers)
-        Padding(
-          key: ValueKey('member-row-${member.memberRef}'),
-          padding: const EdgeInsets.only(top: 8),
-          child: _member(member),
-        ),
-      const SizedBox(height: 12),
-      Wrap(
-        spacing: 12,
-        children: [
-          OutlinedButton(
-            onPressed: workspace.offset == 0
-                ? null
-                : () => model.load(
-                    offset: (workspace.offset - 20).clamp(0, 1000000),
-                  ),
-            child: Text(t('previous')),
-          ),
-          OutlinedButton(
-            onPressed: workspace.next == null
-                ? null
-                : () => model.load(offset: workspace.next!),
-            child: Text(t('next')),
-          ),
-        ],
-      ),
-    ];
+    final members = model.displayMembers;
     return MouseRegion(
       onEnter: (_) => model.setMemberListHovered(true),
       onExit: (_) => model.setMemberListHovered(false),
@@ -135,35 +67,76 @@ final class CommunityWorkspaceMembers {
           'members',
         )),
         padding: const EdgeInsetsDirectional.only(end: 16),
-        children: memberContent,
+        children: [
+          OrganizationMemberBoard(
+            key: ValueKey((
+              port,
+              model.targetRef,
+              workspace.offset,
+              workspace.query,
+            )),
+            namespace: 'community-member',
+            roleLabel: memberBoardText(context, 'role'),
+            columns: const OrganizationMemberColumns.all(),
+            rows: members.map(_member).toList(),
+            searchController: search,
+            onSearch: (value) => unawaited(model.load(search: value)),
+            totalCount: workspace.matchedCount,
+            summaryText:
+                '${t('members')} · ${workspace.matchedCount} / ${workspace.totalCount}',
+            updatedText:
+                '${t('updated')} · ${roomDate(context, workspace.fetchedAt)}',
+            searchLabel: t('search'),
+            searchButtonLabel: t('searchButton'),
+            onlineCount: workspace.members
+                .where((member) => member.publicOnline)
+                .length,
+            inGameCount: workspace.members
+                .where((member) => member.publicInGame)
+                .length,
+            countsArePageScoped: true,
+            hasMultiplePages:
+                workspace.offset > 0 ||
+                workspace.next != null ||
+                workspace.matchedCount > workspace.members.length,
+            fetchedAt: workspace.fetchedAt,
+            refreshing: model.busy,
+            refreshingIndicator: refreshingIndicator == null
+                ? null
+                : Row(
+                    children: [
+                      Expanded(
+                        child: Text(memberBoardText(context, 'refreshing')),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(width: 80, child: refreshingIndicator),
+                    ],
+                  ),
+            error: model.error == null
+                ? null
+                : memberBoardText(context, 'refreshFailed'),
+            onRetry: () => unawaited(model.load()),
+            note: model.mediaFailed ? t('mediaFailed') : null,
+            pagination: OrganizationMemberPagination(
+              showNavigationWhenDisabled: true,
+              onPrevious: workspace.offset == 0
+                  ? null
+                  : () => unawaited(
+                      model.load(
+                        offset: (workspace.offset - 20).clamp(0, 1000000),
+                      ),
+                    ),
+              onNext: workspace.next == null
+                  ? null
+                  : () => unawaited(model.load(offset: workspace.next!)),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  bool get _showMemberActions {
-    final workspace = model.workspace;
-    if (workspace == null ||
-        !workspace.members.any((member) => !member.isSelf && !member.isOwner)) {
-      return false;
-    }
-
-    final owner = workspace.access['isOwner'] == true;
-    return (owner &&
-            port is CommunityOwnershipTransferPort &&
-            (port as CommunityOwnershipTransferPort)
-                .ownershipTransferAvailable) ||
-        (owner &&
-            port is CommunityMemberRolePort &&
-            (port as CommunityMemberRolePort).memberRoleAvailable) ||
-        ((owner || workspace.access['canRemoveMembers'] == true) &&
-            port is CommunityMemberRemovalPort &&
-            (port as CommunityMemberRemovalPort).memberRemovalAvailable);
-  }
-
-  Widget _box(Widget child, {Color? status}) =>
-      CommunityMemberCard(status: status, child: child);
-
-  Widget _member(CommunityWorkspaceMember member) {
+  OrganizationMemberEntry _member(CommunityWorkspaceMember member) {
     final transferPort = port is CommunityOwnershipTransferPort
         ? port as CommunityOwnershipTransferPort
         : null;
@@ -181,10 +154,8 @@ final class CommunityWorkspaceMembers {
           !workspace.members.contains(member)) {
         return;
       }
-      final changed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => CommunityOwnershipTransferDialog(
+      final changed = await openDialog(
+        (_) => CommunityOwnershipTransferDialog(
           port: transferPort,
           targetRef: model.targetRef,
           memberRef: member.memberRef,
@@ -203,16 +174,6 @@ final class CommunityWorkspaceMembers {
       }
     }
 
-    final transferButton = OutlinedButton(
-      key: ValueKey('transfer-owner-${member.memberRef}'),
-      onPressed: transfer,
-      style: semanticActionStyle(
-        context,
-        ActionTone.danger,
-        emphasis: ActionEmphasis.outlined,
-      ),
-      child: Text(ownershipTransferText(context, 'transfer')),
-    );
     final removalPort = port is CommunityMemberRemovalPort
         ? port as CommunityMemberRemovalPort
         : null;
@@ -231,10 +192,8 @@ final class CommunityWorkspaceMembers {
           !workspace.members.contains(member)) {
         return;
       }
-      final changed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => CommunityMemberRemovalDialog(
+      final changed = await openDialog(
+        (_) => CommunityMemberRemovalDialog(
           port: removalPort,
           targetRef: model.targetRef,
           memberRef: member.memberRef,
@@ -251,16 +210,6 @@ final class CommunityWorkspaceMembers {
       }
     }
 
-    final removalButton = OutlinedButton(
-      key: ValueKey('remove-member-${member.memberRef}'),
-      onPressed: remove,
-      style: semanticActionStyle(
-        context,
-        ActionTone.danger,
-        emphasis: ActionEmphasis.outlined,
-      ),
-      child: Text(memberRemovalText(context, 'remove')),
-    );
     final assignmentPort = port is CommunityMemberRolePort
         ? port as CommunityMemberRolePort
         : null;
@@ -278,10 +227,8 @@ final class CommunityWorkspaceMembers {
           !workspace.members.contains(member)) {
         return;
       }
-      final changed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => CommunityMemberRoleDialog(
+      final changed = await openDialog(
+        (_) => CommunityMemberRoleDialog(
           port: assignmentPort,
           targetRef: model.targetRef,
           memberRef: member.memberRef,
@@ -296,130 +243,115 @@ final class CommunityWorkspaceMembers {
       }
     }
 
-    final key = switch (member.liveStatus.toLowerCase()) {
-      'paused' => 'paused',
-      _ when !member.online => 'presence.offline',
-      'ingame' => 'presence.inGame',
-      'away' => 'presence.away',
-      _ => 'presence.online',
-    };
-    final runtime = communityMemberRuntime(
+    final runtime = communityMemberRuntimeCells(
       member,
-      text: t,
+      text: (key) => memberBoardText(context, key),
       regionText: (region) => roomServerRegion(context, region),
       locale: AppStrings.of(context).locale,
     );
-    final identity = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        UserAvatarMenu(
-          name: member.displayName,
-          avatarBytes: model.image(member.memberRef),
-          isSelf: member.isSelf,
-          target: UserTarget.community(
-            model.targetRef,
-            member.memberRef,
-            query: member.gameName,
-          ),
-          actions: [
-            if (canTransfer)
-              AvatarMenuAction(
-                ownershipTransferText(context, 'transfer'),
-                () => unawaited(transfer()),
-                color: context.tokens.colors.danger,
-              ),
-            if (canOpenRemoval)
-              AvatarMenuAction(
-                memberRemovalText(context, 'remove'),
-                () => unawaited(remove()),
-                color: context.tokens.colors.danger,
-              ),
-            if (canAssign)
-              AvatarMenuAction(
-                memberRoleText(context, 'assignRole'),
-                () => unawaited(assign()),
-              ),
-          ],
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: CommunityWorkspaceImage(
-              bytes: model.image(member.memberRef),
-              decoder: model.avatars.images.decode,
-              maxWidth: 96,
-              loading: model.imageLoading(member.memberRef),
-              loadFailed: model.imageFailed(member.memberRef),
-              icon: StandardIconSemantic.person,
+    final identity = OrganizationMemberIdentity(
+      name: member.displayName,
+      gameId: member.gameName,
+      isSelf: member.isSelf,
+      avatarBytes: model.image(member.memberRef),
+      target: model.error != null
+          ? null
+          : UserTarget.community(
+              model.targetRef,
+              member.memberRef,
+              query: member.gameName,
             ),
+      actions: [
+        if (canTransfer)
+          AvatarMenuAction(
+            ownershipTransferText(context, 'transfer'),
+            () => unawaited(transfer()),
+            color: context.tokens.colors.danger,
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${member.displayName}${member.isSelf ? ' · ${t('self')}' : ''}',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              if (member.gameName.isNotEmpty &&
-                  member.gameName != member.displayName)
-                Text(member.gameName),
-            ],
+        if (canOpenRemoval)
+          AvatarMenuAction(
+            memberRemovalText(context, 'remove'),
+            () => unawaited(remove()),
+            color: context.tokens.colors.danger,
           ),
-        ),
+        if (canAssign)
+          AvatarMenuAction(
+            memberRoleText(context, 'assignRole'),
+            () => unawaited(assign()),
+          ),
       ],
+      avatar: CommunityWorkspaceImage(
+        bytes: model.image(member.memberRef),
+        decoder: model.avatars.images.decode,
+        peek: model.avatars.images.peek,
+        maxWidth: 96,
+        loading: model.imageLoading(member.memberRef),
+        loadFailed: model.imageFailed(member.memberRef),
+        icon: StandardIconSemantic.person,
+      ),
     );
-    final roleColor = Color(
-      int.parse('ff${member.roleColor.substring(1)}', radix: 16),
-    );
-    final role = CommunityRoleBadge(
-      color: roleColor,
-      label: member.roleTitle.isNotEmpty
+    // This is the source's existing neutral default, not a custom role color.
+    final roleColor = member.roleColor.toUpperCase() == '#9DAAB3'
+        ? null
+        : Color(int.parse('ff${member.roleColor.substring(1)}', radix: 16));
+    final actions = canTransfer || canOpenRemoval || canAssign
+        ? StarBridgeMenuAnchor(
+            semanticLabel: t('actions'),
+            entries: [
+              if (canTransfer)
+                StarBridgeMenuEntry(
+                  id: 'transfer-owner-${member.memberRef}',
+                  label: ownershipTransferText(context, 'transfer'),
+                  child: Text(
+                    ownershipTransferText(context, 'transfer'),
+                    style: TextStyle(color: context.tokens.colors.danger),
+                  ),
+                  onActivate: (source) => unawaited(
+                    runStarBridgeActivation<void>(source, transfer),
+                  ),
+                ),
+              if (canOpenRemoval)
+                StarBridgeMenuEntry(
+                  id: 'remove-member-${member.memberRef}',
+                  label: memberRemovalText(context, 'remove'),
+                  child: Text(
+                    memberRemovalText(context, 'remove'),
+                    style: TextStyle(color: context.tokens.colors.danger),
+                  ),
+                  onActivate: (source) =>
+                      unawaited(runStarBridgeActivation<void>(source, remove)),
+                ),
+              if (canAssign)
+                StarBridgeMenuEntry(
+                  id: 'assign-member-${member.memberRef}',
+                  label: memberRoleText(context, 'assignRole'),
+                  onActivate: (source) =>
+                      unawaited(runStarBridgeActivation<void>(source, assign)),
+                  child: Text(memberRoleText(context, 'assignRole')),
+                ),
+            ],
+            builder: (context, controller, focus, toggle) =>
+                StarBridgeIconAction(
+                  controlKey: ValueKey('member-actions-${member.memberRef}'),
+                  focusNode: focus,
+                  label: t('actions'),
+                  icon: const StandardIcon(StandardIconSemantic.moreHoriz),
+                  onActivate: toggle,
+                ),
+          )
+        : null;
+    return OrganizationMemberEntry(
+      reference: member.memberRef,
+      identity: identity,
+      roleColor: roleColor,
+      role: member.roleTitle.isNotEmpty
           ? member.roleTitle
           : member.isOwner
           ? t('owner')
           : t('member'),
-    );
-    final status = Text(
-      key == 'paused' ? t('paused') : AppStrings.of(context).text(key),
-      style: TextStyle(color: presenceColor(context.tokens.colors, key)),
-    );
-    final actions = canTransfer || canOpenRemoval || canAssign
-        ? MenuAnchor(
-            menuChildren: [
-              if (canTransfer) transferButton,
-              if (canOpenRemoval) removalButton,
-              if (canAssign)
-                OutlinedButton(
-                  key: ValueKey('assign-member-${member.memberRef}'),
-                  onPressed: assign,
-                  child: Text(memberRoleText(context, 'assignRole')),
-                ),
-            ],
-            builder: (context, controller, _) => IconButton(
-              key: ValueKey('member-actions-${member.memberRef}'),
-              tooltip: t('actions'),
-              icon: const StandardIcon(StandardIconSemantic.moreHoriz),
-              onPressed: () =>
-                  controller.isOpen ? controller.close() : controller.open(),
-            ),
-          )
-        : _showMemberActions
-        ? const SizedBox(width: 40)
-        : null;
-    return _box(
-      CommunityMemberBanner(
-        key: ValueKey('member-banner-${member.memberRef}'),
-        identity: identity,
-        role: role,
-        server: runtime.server,
-        ship: runtime.ship,
-        location: runtime.location,
-        status: status,
-        actions: actions,
-      ),
-      status: presenceColor(context.tokens.colors, key),
+      presence: OrganizationMemberPresence.values.byName(member.publicPresence),
+      runtime: runtime,
+      actions: actions,
     );
   }
 }

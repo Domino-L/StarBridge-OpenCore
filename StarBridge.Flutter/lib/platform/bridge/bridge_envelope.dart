@@ -4,6 +4,8 @@ import 'dart:typed_data';
 abstract final class BridgeProtocol {
   static const currentVersion = 1;
   static const maximumFrameBytes = 1024 * 1024;
+  static const maximumCommunityProfileFrameBytes = 8 * 1024 * 1024;
+  static const maximumCommunityWideImageFrameBytes = 4 * 1024 * 1024;
 }
 
 final class BridgeAccountContext {
@@ -167,10 +169,19 @@ final class BridgeEnvelope {
 }
 
 abstract final class BridgeFrameCodec {
+  static int _limit(BridgeEnvelope envelope) =>
+      envelope.messageType == 'request' &&
+          envelope.name == 'communities.saveProfile'
+      ? BridgeProtocol.maximumCommunityProfileFrameBytes
+      : envelope.messageType == 'response' &&
+            envelope.name == 'communities.cropWideImage'
+      ? BridgeProtocol.maximumCommunityWideImageFrameBytes
+      : BridgeProtocol.maximumFrameBytes;
+
   static Uint8List encode(BridgeEnvelope envelope) {
     envelope.validateWireShape();
     final payload = utf8.encode(jsonEncode(envelope.toJson()));
-    if (payload.isEmpty || payload.length > BridgeProtocol.maximumFrameBytes) {
+    if (payload.isEmpty || payload.length > _limit(envelope)) {
       throw const BridgeFormatException(
         'Bridge frame is empty or exceeds the size limit.',
       );
@@ -191,7 +202,7 @@ abstract final class BridgeFrameCodec {
       4,
     ).getUint32(0, Endian.little);
     if (length <= 0 ||
-        length > BridgeProtocol.maximumFrameBytes ||
+        length > BridgeProtocol.maximumCommunityProfileFrameBytes ||
         length != frame.length - 4) {
       throw const BridgeFormatException('Bridge frame length is invalid.');
     }
@@ -201,7 +212,13 @@ abstract final class BridgeFrameCodec {
         'Bridge envelope must be a JSON object.',
       );
     }
-    return BridgeEnvelope.fromJson(decoded.cast<String, Object?>());
+    final envelope = BridgeEnvelope.fromJson(decoded.cast<String, Object?>());
+    if (length > _limit(envelope)) {
+      throw const BridgeFormatException(
+        'Bridge message exceeds its frame limit.',
+      );
+    }
+    return envelope;
   }
 }
 

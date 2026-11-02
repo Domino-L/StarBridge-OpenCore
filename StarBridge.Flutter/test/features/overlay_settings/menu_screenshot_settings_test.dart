@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_bridge_preview.dart';
@@ -190,7 +191,7 @@ void main() {
         );
         final hide = find.byKey(const Key('menu-screenshot-hide-menu'));
         await tester.ensureVisible(hide);
-        tester.widget<SwitchListTile>(hide).onChanged!(false);
+        tester.widget<StarBridgeSwitch>(hide).onChanged!(false);
         await tester.pumpAndSettle();
         await tester.ensureVisible(
           find.byKey(const Key('menu-screenshot-quality')),
@@ -210,7 +211,7 @@ void main() {
           find.byKey(const Key('menu-screenshot-copy')),
         );
         tester
-            .widget<SwitchListTile>(
+            .widget<StarBridgeSwitch>(
               find.byKey(const Key('menu-screenshot-copy')),
             )
             .onChanged!(true);

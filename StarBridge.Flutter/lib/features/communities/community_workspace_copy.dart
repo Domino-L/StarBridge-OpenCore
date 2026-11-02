@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityWorkspaceCopy = <String, (String, String, String)>{
+  'unknown': ('—', '—', '—'),
   'notInGame': ('未进入游戏', '未進入遊戲', 'Not in game'),
   'notInServer': ('未进入服务器', '未進入伺服器', 'Not in a server'),
   'waitingRecognition': ('等待识别', '等待識別', 'Waiting for recognition'),
@@ -24,16 +25,40 @@ const communityWorkspaceCopy = <String, (String, String, String)>{
   'section.chat': ('聊天', '聊天', 'Chat'),
   'section.announcements': ('公告', '公告', 'Announcements'),
   'section.ships': ('舰船', '艦船', 'Ships'),
-  'section.broadcast': ('广播', '廣播', 'Broadcast'),
+  'section.broadcast': ('活动', '活動', 'Activity'),
+  'activity.title': ('组织活动', '組織活動', 'Organization activity'),
   'section.manage': ('管理', '管理', 'Manage'),
+  // The holo shell's rail (2026-10-23).
+  'holo.chat': ('组织聊天', '組織聊天', 'Organization chat'),
+  'holo.owner': ('你是组织所有者', '你是組織擁有者', 'You own this organization'),
+  // Rail tile previews (user request 2026-10-29).
+  'holo.unread': ('{count} 条未读', '{count} 則未讀', '{count} unread'),
+  'holo.noMessages': ('还没有聊天消息', '還沒有聊天訊息', 'No messages yet'),
+  'holo.attachment': ('[图片]', '[圖片]', '[Image]'),
+  'holo.ships': ('共享 {count} 艘', '共享 {count} 艘', '{count} shared'),
+  'holo.shipsNone': ('还没有成员共享舰船', '還沒有成員共享艦船', 'No member shares a ship yet'),
+  'holo.shipsLoading': ('正在统计共享舰船', '正在統計共享艦船', 'Counting shared ships'),
+  'holo.shipsFailed': ('暂时无法统计舰船', '暫時無法統計艦船', 'Ship totals unavailable'),
+  'holo.shipsReady': (
+    '持有人在线 {count} 艘',
+    '持有人在線 {count} 艘',
+    '{count} with owner online',
+  ),
+  'holo.shipsInGame': (
+    '持有人游戏中 {count} 艘',
+    '持有人遊戲中 {count} 艘',
+    '{count} with owner in game',
+  ),
+  'holo.shipsOffline': (
+    '船主离线 {count} 艘',
+    '船主離線 {count} 艘',
+    '{count} with owner offline',
+  ),
   'details': ('组织资料与公告', '組織資料與公告', 'Details and announcements'),
+  'inviteMembers': ('邀请成员', '邀請成員', 'Invite members'),
   'viewDetails': ('详情', '詳情', 'Details'),
   'currentPage': ('当前页', '目前頁', 'This page'),
-  'sectionUnavailable': (
-    '此功能尚未接入当前客户端。',
-    '此功能尚未接入目前用戶端。',
-    'This feature is not connected in this client yet.',
-  ),
+  'sectionUnavailable': ('暂不可用', '暫不可用', 'Not available right now'),
   'paused': ('共享已暂停', '分享已暫停', 'Sharing paused'),
   'members': ('组织成员', '組織成員', 'Members'),
   'member': ('成员', '成員', 'Member'),
@@ -115,6 +140,7 @@ const communityWorkspaceCopy = <String, (String, String, String)>{
   ),
   'language': ('交流语言', '交流語言', 'Language'),
   'activity': ('活跃时间', '活躍時間', 'Active hours'),
+  'viewerTime': ('你的时间', '你的時間', 'Your time'),
   'systems': ('活动星系', '活動星系', 'Systems'),
   'server': ('服务器', '伺服器', 'Server'),
   'ship': ('飞船', '飛船', 'Ship'),

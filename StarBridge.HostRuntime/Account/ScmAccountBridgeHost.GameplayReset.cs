@@ -25,7 +25,7 @@ internal sealed partial class ScmAccountBridgeHost : IGameplayTimeResetRemote, I
         if (_legacyPasswordLogin is null || GameplayTimeContext != context)
             throw new GameplayTimeException("gameplay.reset_unsupported");
         var generation = Generation;
-        var session = RequireRelaySession(context);
+        var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         // Bypass the refresh/replay wrapper for destructive operations. Normal account lifecycle owns reauthorization.
         var result = await send(session.AccessToken, token).ConfigureAwait(false);

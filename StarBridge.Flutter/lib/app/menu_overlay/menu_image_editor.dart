@@ -1,3 +1,5 @@
+import 'menu_overlay_locale.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -16,8 +18,8 @@ import 'menu_screenshot_actions.dart';
 import 'menu_workspace_controller.dart';
 import 'menu_workspace_viewport.dart';
 import '../localization/app_strings.dart';
-
 import 'menu_image_pin.dart';
+import 'menu_image_controls.dart';
 
 /// Local image workspace. No file paths or account data enter the surface.
 class MenuImageTool extends StatefulWidget {
@@ -36,6 +38,8 @@ class MenuImageTool extends StatefulWidget {
 
 class _MenuImageToolState extends State<MenuImageTool>
     with MenuImagePinLifecycle<MenuImageTool> {
+  String _text(String key, [Map<String, Object?> args = const {}]) =>
+      menuText(context, key, args);
   @override
   bool get capturesScreenshot => widget.capture;
   @override
@@ -54,12 +58,10 @@ class _MenuImageToolState extends State<MenuImageTool>
   bool updatingScale = false;
   double actualScale = 1;
   bool hovered = false;
-
   @override
   MenuLocalToolsController get tools => widget.tools;
   TransformationController get transform =>
       widget.capture ? screenshotTransform : tools.referenceTransform;
-
   @override
   void initState() {
     super.initState();
@@ -67,12 +69,17 @@ class _MenuImageToolState extends State<MenuImageTool>
     widget.workspace?.addListener(queuePreparedReferencePin);
     tools.addListener(queuePreparedReferencePin);
     if (!widget.capture && widget.workspace != null) {
+      final owner = tools, epoch = pinOperationEpoch;
       unawaited(
-        tools
+        owner
             .call('imagePinState', const {})
             .then((value) {
-              if (mounted && !tools.closed && value is bool) {
-                setState(() => tools.pinned = value);
+              if (mounted &&
+                  identical(tools, owner) &&
+                  !owner.closed &&
+                  epoch == pinOperationEpoch &&
+                  value is bool) {
+                setState(() => owner.pinned = value);
               }
             })
             .catchError((_) {}),
@@ -88,6 +95,7 @@ class _MenuImageToolState extends State<MenuImageTool>
       widget.workspace?.addListener(queuePreparedReferencePin);
     }
     if (oldWidget.tools != tools) {
+      retirePinWork();
       oldWidget.tools.referenceTransform.removeListener(_transformed);
       oldWidget.tools.removeListener(queuePreparedReferencePin);
       tools.referenceTransform.addListener(_transformed);
@@ -175,6 +183,7 @@ class _MenuImageToolState extends State<MenuImageTool>
 
   @override
   void dispose() {
+    retirePinWork();
     widget.workspace?.removeListener(queuePreparedReferencePin);
     tools.removeListener(queuePreparedReferencePin);
     if (!widget.capture && !tools.closed) {
@@ -203,15 +212,12 @@ class _MenuImageToolState extends State<MenuImageTool>
     Widget icon,
     VoidCallback? action, {
     bool selected = false,
-  }) => OutlinedButton.icon(
-    onPressed: tools.busy || capturingFrame ? null : action,
+  }) => MenuImageAction(
+    action: tools.busy || capturingFrame ? null : action,
     icon: icon,
-    label: Text(title),
-    style: selected
-        ? OutlinedButton.styleFrom(foregroundColor: BridgeInk.blue)
-        : null,
+    title: title,
+    selected: selected,
   );
-
   void _zoom(double factor) {
     final box = viewport.currentContext?.findRenderObject();
     if (box is! RenderBox) return;
@@ -338,11 +344,11 @@ class _MenuImageToolState extends State<MenuImageTool>
           : null,
     ),
   ];
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: tools,
     builder: (context, _) {
+      final owner = tools;
       final bytes = widget.capture
           ? tools.screenshotPreview ?? tools.screenshot
           : tools.referencePreview ?? tools.reference;
@@ -387,7 +393,7 @@ class _MenuImageToolState extends State<MenuImageTool>
                                   ? shotText(
                                       available ? 'recapture' : 'capture',
                                     )
-                                  : '选择图片',
+                                  : _text('menu.overlay.image.select'),
                               widget.capture
                                   ? const MenuGlyphView(
                                       MenuGlyph.camera,
@@ -417,14 +423,16 @@ class _MenuImageToolState extends State<MenuImageTool>
                                     : null,
                               ),
                               _button(
-                                tools.pinned ? '更新固定画面' : '固定到游戏',
+                                tools.pinned
+                                    ? _text('menu.overlay.image.updatePin')
+                                    : _text('menu.overlay.image.pin'),
                                 const ImageToolIcon(ImageToolGlyph.pin),
                                 available && !cropping ? pinReference : null,
                                 selected: tools.pinned,
                               ),
                               if (tools.pinned)
                                 _button(
-                                  '取消固定',
+                                  _text('menu.overlay.image.unpin'),
                                   const MenuGlyphView(
                                     MenuGlyph.close,
                                     size: 16,
@@ -436,7 +444,7 @@ class _MenuImageToolState extends State<MenuImageTool>
                             _button(
                               widget.capture
                                   ? shotText('clearPreview')
-                                  : '清除预览',
+                                  : _text('menu.screenshot.clearPreview'),
                               const StandardIcon(
                                 StandardIconSemantic.delete,
                                 size: 16,
@@ -454,7 +462,9 @@ class _MenuImageToolState extends State<MenuImageTool>
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             _button(
-                              widget.capture ? shotText('fit') : '适合窗口',
+                              widget.capture
+                                  ? shotText('fit')
+                                  : _text('menu.screenshot.fit'),
                               const StarBridgeIcon(
                                 StarBridgeIconSemantic.windowMaximize,
                                 size: 16,
@@ -486,7 +496,9 @@ class _MenuImageToolState extends State<MenuImageTool>
                                     tools.referenceScaleMode == 'actualSize',
                               ),
                             _button(
-                              widget.capture ? shotText('zoomOut') : '缩小',
+                              widget.capture
+                                  ? shotText('zoomOut')
+                                  : _text('menu.screenshot.zoomOut'),
                               const StarBridgeIcon(
                                 StarBridgeIconSemantic.remove,
                                 size: 16,
@@ -494,7 +506,9 @@ class _MenuImageToolState extends State<MenuImageTool>
                               available && !cropping ? () => _zoom(.8) : null,
                             ),
                             _button(
-                              widget.capture ? shotText('zoomIn') : '放大',
+                              widget.capture
+                                  ? shotText('zoomIn')
+                                  : _text('menu.screenshot.zoomIn'),
                               const StarBridgeIcon(
                                 StarBridgeIconSemantic.add,
                                 size: 16,
@@ -502,7 +516,9 @@ class _MenuImageToolState extends State<MenuImageTool>
                               available && !cropping ? () => _zoom(1.25) : null,
                             ),
                             _button(
-                              widget.capture ? shotText('rotate') : '旋转',
+                              widget.capture
+                                  ? shotText('rotate')
+                                  : _text('menu.screenshot.rotate'),
                               const ImageToolIcon(ImageToolGlyph.rotate),
                               available && !cropping
                                   ? () {
@@ -529,23 +545,18 @@ class _MenuImageToolState extends State<MenuImageTool>
                           ],
                         ),
                         if (!widget.capture)
-                          Row(
-                            children: [
-                              Text(
-                                '${imageText('opacityValue')} ${(tools.referenceOpacity * 100).round()}%',
-                              ),
-                              Expanded(
-                                child: Slider(
-                                  value: tools.referenceOpacity,
-                                  min: .15,
-                                  onChanged:
-                                      !available || tools.busy || capturingFrame
-                                      ? null
-                                      : (v) =>
-                                            tools.referenceChanged(opacity: v),
-                                ),
-                              ),
-                            ],
+                          MenuImageOpacity(
+                            key: ObjectKey(owner),
+                            value: owner.referenceOpacity,
+                            label: imageText('opacityValue'),
+                            onChanged:
+                                !available || owner.busy || capturingFrame
+                                ? null
+                                : (v) {
+                                    if (mounted && identical(tools, owner)) {
+                                      owner.referenceChanged(opacity: v);
+                                    }
+                                  },
                           ),
                         if (!widget.capture && available && !cropping)
                           Text(
@@ -562,7 +573,11 @@ class _MenuImageToolState extends State<MenuImageTool>
             SizedBox(
               height: 2,
               child: tools.busy || capturingFrame
-                  ? const LinearProgressIndicator(minHeight: 2)
+                  ? MenuImageBusy(
+                      source: capturingFrame
+                          ? pinFeedbackSource
+                          : tools.imageFeedbackSource,
+                    )
                   : null,
             ),
             Visibility(
@@ -593,10 +608,10 @@ class _MenuImageToolState extends State<MenuImageTool>
                           : cropping
                           ? imageText(regionZoom ? 'regionHint' : 'cropHint')
                           : tools.pinDirty
-                          ? '调整尚未应用到游戏，请点击“更新固定画面”。'
+                          ? _text('menu.overlay.image.pinDirty')
                           : tools.pinned
-                          ? '仅在 Star Citizen 前台显示，鼠标可穿透。关闭此编辑窗口不会取消固定。'
-                          : '滚轮缩放、拖动查看；固定后可在游戏中对照。',
+                          ? _text('menu.overlay.image.pinnedHint')
+                          : _text('menu.overlay.image.referenceHint'),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -701,12 +716,13 @@ class _MenuImageToolState extends State<MenuImageTool>
                                                 }
                                                 return child;
                                               },
-                                              errorBuilder: (_, _, _) =>
-                                                  const Center(
-                                                    child: Text(
-                                                      '无法显示这张图片，请重新选择。',
-                                                    ),
+                                              errorBuilder: (_, _, _) => Center(
+                                                child: Text(
+                                                  _text(
+                                                    'menu.overlay.image.displayFailed',
                                                   ),
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -722,8 +738,8 @@ class _MenuImageToolState extends State<MenuImageTool>
                                 padding: const EdgeInsets.all(16),
                                 child: Text(
                                   widget.capture
-                                      ? '截取菜单所在屏幕，再预览、裁剪或保存。'
-                                      : '选择一张本机图片作为参考。\n图片不会上传，也不会随应用重启恢复。',
+                                      ? _text('menu.overlay.image.captureHint')
+                                      : _text('menu.overlay.image.chooseHint'),
                                   textAlign: TextAlign.center,
                                 ),
                               ),

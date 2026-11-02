@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_favorite_dialog.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_favorite_ships.dart';
@@ -44,7 +45,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
   testWidgets(
-    'former model is selectable once and keeps an earlier favorite ID',
+    'each former instance stays selectable without substituting another of the same model',
     (tester) async {
       viewport(tester, const Size(800, 900));
       await tester.pumpWidget(
@@ -52,7 +53,7 @@ void main() {
           Scaffold(
             body: ProfileFavoriteDialog(
               local: PersonalProfileLocalView(
-                choices: [b],
+                choices: [a, b],
                 retainedChoices: [a, b],
                 favoriteShipIds: ['a'],
                 hangarAvailable: true,
@@ -66,21 +67,40 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(CheckboxListTile), findsOneWidget);
+      expect(find.byType(StarBridgeCheckboxTile), findsNWidgets(2));
       expect(find.byKey(const Key('profile-favorite-a')), findsOneWidget);
-      expect(find.text('克拉克 · 曾拥有'), findsOneWidget);
+      expect(find.text('克拉克 · 曾拥有'), findsNWidgets(2));
+      await tester.ensureVisible(find.byKey(const Key('profile-favorite-a')));
       await tester.tap(find.byKey(const Key('profile-favorite-a')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('profile-favorite-b')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('profile-favorite-b')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('profile-favorite-b')));
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<CheckboxListTile>(
-              find.byKey(const Key('profile-favorite-b')),
+            .widget<StarBridgeCheckboxTile>(
+              find.byWidgetPredicate(
+                (w) =>
+                    w is StarBridgeCheckboxTile &&
+                    w.controlKey == const Key('profile-favorite-b'),
+              ),
             )
             .value,
         isTrue,
+      );
+      await tester.ensureVisible(find.byKey(const Key('profile-favorite-a')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('profile-favorite-a')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<StarBridgeCheckboxTile>(
+              find.byType(StarBridgeCheckboxTile),
+            )
+            .where((tile) => tile.value),
+        hasLength(2),
       );
       expect(tester.takeException(), isNull);
     },

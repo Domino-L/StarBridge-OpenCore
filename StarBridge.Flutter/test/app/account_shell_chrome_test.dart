@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/composition/account_shell_chrome.dart';
 import 'package:starbridge_flutter/app/shell/chrome/in_memory_shell_chrome.dart';
@@ -8,8 +9,109 @@ import 'package:starbridge_flutter/features/account/account_models.dart';
 import 'package:starbridge_flutter/features/account/account_module.dart';
 import 'package:starbridge_flutter/features/account/account_port.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
+import 'package:starbridge_flutter/features/game_log/game_log_controller.dart';
+
+AccountHostSnapshot _signedIn(String name) => AccountHostSnapshot(
+  generation: 1,
+  sessionState: AccountSessionState.legacySignedIn,
+  profileFreshness: AccountProfileFreshness.live,
+  profile: AccountProfile(displayName: name),
+  identity: const AccountIdentityProjection.unavailable(),
+  compatibility: const AccountCompatibilityProjection.unavailable(),
+  localeOptions: const [],
+  timeZoneOptions: const [],
+);
 
 void main() {
+  test('a poll that found nothing new notifies nobody', () async {
+    final module = createAccountModule(
+      InMemoryAccountAdapter(initial: _signedIn('Commander')),
+    );
+    final log = ValueNotifier(const GameLogView(state: 'watching'));
+    final chrome = AccountShellChrome(
+      base: InMemoryShellChrome(
+        initial: InMemoryShellChrome.connectedProjection,
+      ),
+      account: module,
+      gameLog: log,
+    );
+    addTearDown(() {
+      chrome.dispose();
+      module.dispose();
+      log.dispose();
+    });
+    await module.initialize();
+    var notified = 0;
+    chrome.projection.addListener(() => notified++);
+    final before = chrome.projection.value;
+    // GameLogView has no equality: every poll is a new value, and a notification.
+    for (var poll = 0; poll < 3; poll++) {
+      log.value = const GameLogView(state: 'watching', channel: 'LIVE');
+      log.value = const GameLogView(state: 'watching');
+    }
+    expect(notified, 0);
+    expect(identical(chrome.projection.value, before), isTrue);
+  });
+
+  test('a real change still reaches listeners, once', () async {
+    final presence = ValueNotifier(GamePresenceState.notRunning);
+    final module = createAccountModule(
+      InMemoryAccountAdapter(initial: _signedIn('Commander')),
+    );
+    final chrome = AccountShellChrome(
+      base: InMemoryShellChrome(
+        initial: InMemoryShellChrome.connectedProjection,
+      ),
+      account: module,
+      gamePresence: presence,
+    );
+    addTearDown(() {
+      chrome.dispose();
+      module.dispose();
+      presence.dispose();
+    });
+    await module.initialize();
+    var notified = 0;
+    chrome.projection.addListener(() => notified++);
+    presence.value = GamePresenceState.running;
+    expect(notified, 1);
+    expect(chrome.projection.value.gamePresence, GamePresenceState.running);
+  });
+
+  test('projections compare by content', () {
+    const base = InMemoryShellChrome.connectedProjection;
+    expect(base.copyWith(), base);
+    expect(base.copyWith().hashCode, base.hashCode);
+    expect(base.copyWith(accountLabel: 'other'), isNot(base));
+    expect(base.copyWith(notificationCount: 99), isNot(base));
+    const issue = ConnectionIssueProjection(
+      domain: ConnectionStatusDomain.network,
+      titleKey: 'a',
+      detailKey: 'b',
+      state: ConnectionVisualState.limited,
+    );
+    expect(base.copyWith(connectionIssue: issue), isNot(base));
+    expect(
+      base.copyWith(connectionIssue: issue),
+      base.copyWith(connectionIssue: issue),
+    );
+    const scene = OverlaySceneProjection(
+      options: [OverlaySceneOption(id: 'a', labelKey: 'k')],
+      preferredSceneId: 'a',
+      actualSceneId: 'a',
+      canChange: true,
+    );
+    expect(
+      scene,
+      const OverlaySceneProjection(
+        options: [OverlaySceneOption(id: 'a', labelKey: 'k')],
+        preferredSceneId: 'a',
+        actualSceneId: 'a',
+        canChange: true,
+      ),
+    );
+  });
+
   test(
     'legacy account photo reaches chrome and is cleared on logout',
     () async {
@@ -158,6 +260,7 @@ void main() {
 
       expect(chrome.projection.value.syncKey, 'sync.issue');
       expect(chrome.projection.value.accountSignedIn, isFalse);
+      expect(chrome.projection.value.accountIdentityUnconfirmed, isTrue);
       expect(
         chrome.projection.value.accountIssue?.domain,
         ConnectionStatusDomain.network,
@@ -175,6 +278,12 @@ void main() {
         'connection.account.unavailable.title',
       );
       expect(chrome.projection.value.connectionIssueUsesAccountAction, isTrue);
+      // Simulate the next authoritative Host result, not an unavailable UI action.
+      await adapter.execute(const LogoutAccount());
+      await module.refresh();
+      await Future<void>.delayed(Duration.zero);
+      expect(chrome.projection.value.accountIdentityUnconfirmed, isFalse);
+      expect(chrome.projection.value.accountSignedIn, isFalse);
       chrome.dispose();
       module.dispose();
     },

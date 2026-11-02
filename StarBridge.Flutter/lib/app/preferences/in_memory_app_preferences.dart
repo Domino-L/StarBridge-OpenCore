@@ -16,7 +16,9 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
             localeOverride: initial.locale,
             appearanceMode: initial.appearanceMode,
             motionPreference: initial.motionPreference,
+            interactionStyle: initial.interactionStyle,
             applicationBehavior: initial.applicationBehavior,
+            holidayAppearance: initial.holidayAppearance,
           ),
           revision: 0,
           phase: AppPreferencesPhase.ready,
@@ -50,6 +52,12 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
   }
 
   @override
+  Future<bool> setInteractionStyle(InteractionStyle style) async {
+    _set(_projection.value.effective.copyWith(interactionStyle: style));
+    return true;
+  }
+
+  @override
   Future<bool> setApplicationBehavior(
     ApplicationBehaviorPreferences behavior,
   ) async {
@@ -61,6 +69,12 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
     return true;
   }
 
+  @override
+  Future<bool> setHolidayAppearance(bool enabled) async {
+    _set(_projection.value.effective.copyWith(holidayAppearance: enabled));
+    return true;
+  }
+
   void _set(AppPreferences effective) {
     final current = _projection.value;
     _projection.value = AppPreferencesProjection(
@@ -69,7 +83,9 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
         localeOverride: effective.locale,
         appearanceMode: effective.appearanceMode,
         motionPreference: effective.motionPreference,
+        interactionStyle: effective.interactionStyle,
         applicationBehavior: effective.applicationBehavior,
+        holidayAppearance: effective.holidayAppearance,
       ),
       revision: (current.revision ?? 0) + 1,
       phase: AppPreferencesPhase.ready,

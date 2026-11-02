@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_menu_anchor.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
@@ -37,6 +38,8 @@ void main() {
     if (const bool.fromEnvironment('PROFILE_MODULE_GOLDENS')) {
       for (final font in {
         'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+        'Saira': 'assets/fonts/Saira-VF.ttf',
+        'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
         'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
       }.entries) {
         await (FontLoader(
@@ -92,16 +95,22 @@ void main() {
           await tester.tap(find.byType(PersonalProfileAddModuleButton));
           await tester.pumpAndSettle();
           final entries = tester
-              .widgetList<PopupMenuItem<String>>(
-                find.byType(PopupMenuItem<String>),
-              )
-              .toList();
+              .widget<StarBridgeMenuAnchor>(find.byType(StarBridgeMenuAnchor))
+              .entries;
           expect(
-            entries.where((e) => e.value == ProfileFavoriteModules.addAction),
+            entries.where(
+              (e) =>
+                  e.id ==
+                  ('profile-add-module', ProfileFavoriteModules.addAction),
+            ),
             hasLength(1),
           );
           expect(
-            entries.any((e) => PersonalProfileModuleIds.isFavorite(e.value!)),
+            entries.any(
+              (e) => PersonalProfileModuleIds.isFavorite(
+                (e.id as (String, String)).$2,
+              ),
+            ),
             isFalse,
           );
           expect(find.text(title), findsOneWidget);

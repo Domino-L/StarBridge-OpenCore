@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "producerManifestSha256": "a620395cda5147250e1cf8c0eaa41ed39526db1cd4becafadcbe7ad3e02d74f4",
+  "producerAttempt": "host-editor-green-04",
+  "producerReceiptSha256": "eea93cfed810f8c9e91be65b49e83e15881ee27eb3a8bc30717eeacc52db1cc8",
+  "producerInputManifestSha256": "65daf574e19e31c4e15aa1bf4e6a84b7787dc4687739a6cf1dbb360eb71d8c19",
+  "producerDllSha256": {
+    "server": "6e4171cadeae4b9125ab5f4c2c77c8495df6b7d0fe5f85ea36b1d9d6b2e42c39",
+    "host": "926a67772ea0ad6702bc41e0e9317693d3c9ba26b388babd680d2283c08daf8e"
+  },
+  "producerLogSha256": "30900339592ec7a0344b4f1f9d59810fad0db823faaadec5507690fda0b731bc",
+  "syntheticEnvelopeInConsumer": true,
+  "scenes": [
+    "lifecycle: actual editor/publish/edit/withdraw through real loopback V3/A1/Storage/Directory; synthetic root DI only",
+    "lost-ack: actual durable HTTP commit with injected response loss, then reconstructed Host own query after departure/positive flags off",
+    "local-ack: actual durable HTTP commit with explicit local journal acknowledgement-replace failpoint, then reconstructed Host own query"
+  ],
+  "status": "Exact24 actual payload bytes. Test Bridge envelope/account and coordinator ports are synthetic; no actual account/RSI Owner acceptance",
+  "files": [
+    {
+      "name": "lifecycle-01-editor-request.json",
+      "sha256": "d7cc89eeb642814b22927fc6c1c302c3ae9c131f5e735c0b4cdaefd3cc663442",
+      "bytes": 49
+    },
+    {
+      "name": "lifecycle-01-editor-response.json",
+      "sha256": "f8afa17bf82d932ad1732854b0fbfddd81175f165b5b1997a5c6afaf9e858c9f",
+      "bytes": 171
+    },
+    {
+      "name": "lifecycle-02-publish-request.json",
+      "sha256": "7a0856384ccf1f98f44b70a5cd8c6179734a790628add0c903d39eb0025c09c4",
+      "bytes": 207
+    },
+    {
+      "name": "lifecycle-02-publish-response.json",
+      "sha256": "1b3f957f38f95e630b5f0386366fb8935db2b4e2210dcc503213005ff06cafe6",
+      "bytes": 193
+    },
+    {
+      "name": "lifecycle-03-editor-request.json",
+      "sha256": "d7cc89eeb642814b22927fc6c1c302c3ae9c131f5e735c0b4cdaefd3cc663442",
+      "bytes": 49
+    },
+    {
+      "name": "lifecycle-03-editor-response.json",
+      "sha256": "8897b63a484657481cb6234f9c5fee4fd03c52e3b48aef9b977b276ae5137302",
+      "bytes": 286
+    },
+    {
+      "name": "lifecycle-04-edit-request.json",
+      "sha256": "bcf899ea49db657482c477971446306c0b19b6cf35879518b7ad21beda0ac8ad",
+      "bytes": 264
+    },
+    {
+      "name": "lifecycle-04-edit-response.json",
+      "sha256": "f629488907a6f455c3300ac370cb297d64a2355b1e5269094f1b689d1b8281cb",
+      "bytes": 190
+    },
+    {
+      "name": "lifecycle-05-editor-request.json",
+      "sha256": "d7cc89eeb642814b22927fc6c1c302c3ae9c131f5e735c0b4cdaefd3cc663442",
+      "bytes": 49
+    },
+    {
+      "name": "lifecycle-05-editor-response.json",
+      "sha256": "6d79b175751dc4c4280cd3c86e8d21ea4e97a6156ef22e05c6e94d0735d38a1c",
+      "bytes": 293
+    },
+    {
+      "name": "lifecycle-06-withdraw-request.json",
+      "sha256": "6c9a91b965979618dfa1e607c7ec0989b7e88d38b5b697d60302147cd173ed23",
+      "bytes": 214
+    },
+    {
+      "name": "lifecycle-06-withdraw-response.json",
+      "sha256": "8cdebe396bf801ed4cfa28521742d67084b75f97eb15cf3abc7b3a3d5a03a9c3",
+      "bytes": 194
+    },
+    {
+      "name": "local-ack-01-unknown-request.json",
+      "sha256": "25d2554eebaef0fd5bdcf2e869380d131d4520bbd3c86f5ee332cd951d697e0d",
+      "bytes": 278
+    },
+    {
+      "name": "local-ack-01-unknown-response.json",
+      "sha256": "0ffc6c41f20eb45b3446a534f0bb910fce8149d0db3bc5209ddd399fe7da14b6",
+      "bytes": 201
+    },
+    {
+      "name": "local-ack-02-pending-request.json",
+      "sha256": "4f6601bfd379de9c7b4cc8e5b6414e2306146610f4d661e0f369ddea73059bcf",
+      "bytes": 47
+    },
+    {
+      "name": "local-ack-02-pending-response.json",
+      "sha256": "b4dcffa54c6b9f060d38ab03fc27a79d25ca9ec3d752b4e59f73a021ff2fa94f",
+      "bytes": 236
+    },
+    {
+      "name": "local-ack-03-restarted-query-request.json",
+      "sha256": "476e9f91abe757462e3b7a7266e3073bdaf51604da2e28c966142f39136d3553",
+      "bytes": 81
+    },
+    {
+      "name": "local-ack-03-restarted-query-response.json",
+      "sha256": "8b0c33f9d5d6e2afc3078645e942f93a15231c4be842f6f458320726f102bc84",
+      "bytes": 160
+    },
+    {
+      "name": "lost-ack-01-unknown-request.json",
+      "sha256": "bcb6e35d1cb0cc5c619bcb09b9c4e99814d521c14b4c525e17afb9e50488a29b",
+      "bytes": 278
+    },
+    {
+      "name": "lost-ack-01-unknown-response.json",
+      "sha256": "18eddd9b4868bd98905a2916a12a430016d5483a6be35d25902a3a2a44f56102",
+      "bytes": 201
+    },
+    {
+      "name": "lost-ack-02-pending-request.json",
+      "sha256": "4f6601bfd379de9c7b4cc8e5b6414e2306146610f4d661e0f369ddea73059bcf",
+      "bytes": 47
+    },
+    {
+      "name": "lost-ack-02-pending-response.json",
+      "sha256": "dd01f2aa15a2bd305b1a202522661827d3beccf59ab501807aaef4685effc63d",
+      "bytes": 236
+    },
+    {
+      "name": "lost-ack-03-restarted-query-request.json",
+      "sha256": "6ecef066880270a1dad9cd1ec82b4ae9db630c36c27e46768d7fd5855f90b8c4",
+      "bytes": 81
+    },
+    {
+      "name": "lost-ack-03-restarted-query-response.json",
+      "sha256": "b240ce0f7c73d9e855ffcbc903b9a87c6e2044fc79d00dadefcd415a41226338",
+      "bytes": 160
+    }
+  ]
+}

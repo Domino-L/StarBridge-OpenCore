@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import '../shell/widgets/attention_badge.dart';
 
@@ -45,12 +50,17 @@ class BridgeMenuAction extends StatefulWidget {
     required this.label,
     required this.child,
     this.onPressed,
+    this.focusNode,
     this.selected = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
   });
   final String label;
   final Widget child;
   final VoidCallback? onPressed;
+
+  /// A popup can own its actual trigger focus, including visible return.
+  /// Null retains the original locally-owned focus lifecycle.
+  final FocusNode? focusNode;
   final bool selected;
   final EdgeInsetsGeometry padding;
   @override
@@ -59,51 +69,123 @@ class BridgeMenuAction extends StatefulWidget {
 
 class _BridgeMenuActionState extends State<BridgeMenuAction> {
   bool hovered = false, focused = false;
+  final _ownedFocus = FocusNode();
+  FocusNode get _focus => widget.focusNode ?? _ownedFocus;
+
+  void _activate(InteractionSource source) =>
+      runStarBridgeSynchronousActivation(
+        source,
+        () => widget.onPressed?.call(),
+      );
+
   @override
-  Widget build(BuildContext context) {
+  void dispose() {
+    _ownedFocus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      StarBridgeInteractionRegion(child: Builder(builder: _face));
+
+  Widget _face(BuildContext context) {
     final ink = MenuBridgeColors.of(context);
+    final data = InteractionScope.of(context);
+    if (data.suite != InteractionSuite.standard) {
+      final action = SuitePressable(
+        kind: PressableKind.row,
+        focusNode: _focus,
+        selected: widget.selected,
+        semanticLabel: widget.label,
+        semanticSelected: widget.selected,
+        excludeChildSemantics: true,
+        baseRadius: 0,
+        onActivate: widget.onPressed == null ? null : _activate,
+        builder: (context, visual) => Container(
+          padding: widget.padding,
+          decoration: BoxDecoration(
+            color: visual.hover > 0 || visual.focused
+                ? ink.selected.withValues(alpha: .22)
+                : Colors.transparent,
+            border: Border(
+              top: BorderSide(
+                color: visual.hover > 0 || visual.focused || widget.selected
+                    ? ink.blue
+                    : Colors.transparent,
+              ),
+              bottom: BorderSide(
+                color: visual.focused ? ink.blue : Colors.transparent,
+              ),
+            ),
+          ),
+          child: widget.child,
+        ),
+      );
+      return widget.onPressed == null
+          ? IgnorePointer(child: ExcludeFocus(child: action))
+          : action;
+    }
     final highlighted = hovered || focused || widget.selected;
     return Semantics(
       button: true,
       enabled: widget.onPressed != null,
       selected: widget.selected,
       label: widget.label,
-      onTap: widget.onPressed,
-      child: FocusableActionDetector(
-        enabled: widget.onPressed != null,
-        mouseCursor: widget.onPressed == null
-            ? SystemMouseCursors.basic
-            : SystemMouseCursors.click,
-        onShowHoverHighlight: (value) => setState(() => hovered = value),
-        onShowFocusHighlight: (value) => setState(() => focused = value),
-        actions: {
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              widget.onPressed?.call();
-              return null;
+      onTap: widget.onPressed == null
+          ? null
+          : () => _activate(InteractionSource.keyboard),
+      child: CallbackShortcuts(
+        bindings: {
+          for (final key in [
+            LogicalKeyboardKey.enter,
+            LogicalKeyboardKey.numpadEnter,
+            LogicalKeyboardKey.space,
+          ])
+            SingleActivator(key): () {
+              if (widget.onPressed != null) {
+                _activate(InteractionSource.keyboard);
+              }
             },
-          ),
         },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onPressed,
-          child: ExcludeSemantics(
-            child: Container(
-              padding: widget.padding,
-              decoration: BoxDecoration(
-                color: hovered || focused
-                    ? ink.selected.withValues(alpha: .22)
-                    : Colors.transparent,
-                border: Border(
-                  top: BorderSide(
-                    color: highlighted ? ink.blue : Colors.transparent,
-                  ),
-                  bottom: BorderSide(
-                    color: focused ? ink.blue : Colors.transparent,
+        child: FocusableActionDetector(
+          focusNode: _focus,
+          enabled: widget.onPressed != null,
+          mouseCursor: widget.onPressed == null
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
+          onShowHoverHighlight: (value) => setState(() => hovered = value),
+          onShowFocusHighlight: (value) => setState(() => focused = value),
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                _activate(InteractionSource.keyboard);
+                return null;
+              },
+            ),
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onPressed == null
+                ? null
+                : () => _activate(InteractionSource.pointer),
+            child: ExcludeSemantics(
+              child: Container(
+                padding: widget.padding,
+                decoration: BoxDecoration(
+                  color: hovered || focused
+                      ? ink.selected.withValues(alpha: .22)
+                      : Colors.transparent,
+                  border: Border(
+                    top: BorderSide(
+                      color: highlighted ? ink.blue : Colors.transparent,
+                    ),
+                    bottom: BorderSide(
+                      color: focused ? ink.blue : Colors.transparent,
+                    ),
                   ),
                 ),
+                child: widget.child,
               ),
-              child: widget.child,
             ),
           ),
         ),

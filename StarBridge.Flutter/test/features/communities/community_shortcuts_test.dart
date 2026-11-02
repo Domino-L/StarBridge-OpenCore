@@ -23,6 +23,7 @@ class QueuedPort implements CommunitiesPort {
   final reads = <Completer<CommunityDirectory>>[];
   final writes = <String>[];
   bool queued = false;
+  bool onlinePaused = false;
   List<CommunityCard> rows = List.generate(
     40,
     (i) => CommunityCard(
@@ -42,6 +43,9 @@ class QueuedPort implements CommunitiesPort {
     String? after,
     String? filters,
   }) {
+    if (onlinePaused) {
+      return Future.error(const CommunityFailure('onlinePaused'));
+    }
     if (!queued) return Future.value(CommunityDirectory(view, query, rows));
     final request = Completer<CommunityDirectory>();
     reads.add(request);
@@ -61,6 +65,53 @@ class QueuedPort implements CommunitiesPort {
 
 void main() {
   setUpAll(loadFonts);
+  for (final locale in AppStrings.supportedLocales) {
+    testWidgets('organization pause copy is honest in $locale', (tester) async {
+      final model = CommunitiesModule(QueuedPort()..onlinePaused = true);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: locale,
+          supportedLocales: AppStrings.supportedLocales,
+          localizationsDelegates: const [
+            AppStringsDelegate(),
+            ...GlobalMaterialLocalizations.delegates,
+          ],
+          theme: buildStarBridgeTheme(
+            FutureRestraintStyle.resolve(AppearanceMode.dark),
+            locale,
+          ),
+          home: Scaffold(
+            body: SizedBox(
+              width: 260,
+              child: CommunityShortcuts(
+                module: model,
+                iconOnly: false,
+                selected: false,
+                activate: () async => true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final strings = AppStrings.resolve(locale);
+      expect(
+        find.text(strings.text('communities.shortcutsOnlinePaused')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(strings.text('communities.shortcutsLoadFailed')),
+        findsNothing,
+      );
+      expect(
+        find.text(strings.text('communities.shortcutsUnavailable')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    });
+  }
   test('Old joined reads cannot restore memberships after a write or account change', () async {
     final port = QueuedPort()..queued = true;
     final model = CommunitiesModule(port);

@@ -6,9 +6,9 @@ internal static class ScmDeviceId
 {
     private const string FileName = "scm-device.id";
 
-    internal static string LoadOrCreate()
+    internal static string LoadOrCreate(string? dataRoot = null)
     {
-        var path = Path.Combine(StarBridge.HostRuntime.HostDataRoot.CurrentRoot, FileName);
+        var path = Path.Combine(dataRoot ?? StarBridge.HostRuntime.HostDataRoot.CurrentRoot, FileName);
         try
         {
             if (File.Exists(path))

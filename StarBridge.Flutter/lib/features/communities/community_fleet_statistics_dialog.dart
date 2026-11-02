@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../shared/ships/ship_catalog_display.dart';
 import 'community_ship_distribution_chart.dart';
 import 'community_fleet_summary.dart';
@@ -112,8 +114,12 @@ class CommunityFleetStatisticsDialog extends StatelessWidget {
               const SizedBox(height: 12),
               Align(
                 alignment: AlignmentDirectional.centerEnd,
-                child: TextButton(
-                  onPressed: onClose ?? () => Navigator.of(context).pop(),
+                child: StarBridgeActionButton(
+                  controlKey: const Key('community-statistics-close'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: (source) => onClose != null
+                      ? onClose!()
+                      : dismissStarBridgeDialog(context, source: source),
                   child: Text(t('close')),
                 ),
               ),

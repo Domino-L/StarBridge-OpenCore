@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_segmented_control.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -123,7 +128,8 @@ class NotificationSourceRuleRow extends StatelessWidget {
                     Text(
                       rule.displayName,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                     SizedBox(height: tokens.space.xxs),
@@ -132,7 +138,8 @@ class NotificationSourceRuleRow extends StatelessWidget {
                           ? strings.text(_sourceKindKey(rule.kind))
                           : '${strings.text(_sourceKindKey(rule.kind))} · ${rule.contextLabel}',
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -188,7 +195,9 @@ class _SourceModeSelector extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 390) {
-          return DropdownButtonFormField<NotificationSourceMode>(
+          return StarBridgeSelectFormField<NotificationSourceMode>(
+            identity: ('notification-source-mode', sourceRef, value),
+            controlKey: ValueKey('notification-source-mode-$sourceRef-control'),
             key: ValueKey(('notification-source-mode-$sourceRef', value)),
             initialValue: value,
             isExpanded: true,
@@ -211,29 +220,29 @@ class _SourceModeSelector extends StatelessWidget {
                 : null,
           );
         }
-        return SegmentedButton<NotificationSourceMode>(
-          key: Key('notification-source-mode-$sourceRef'),
+        return StarBridgeSegmentedControl<NotificationSourceMode>(
+          controlKey: Key('notification-source-mode-$sourceRef'),
           segments: [
             for (final mode in NotificationSourceMode.values)
-              ButtonSegment(
+              StarBridgeSegment(
                 value: mode,
                 icon: StarBridgeIcon(
                   _sourceModeIcon(mode),
                   size: context.tokens.icons.small,
                 ),
-                label: Text(strings.text(_sourceModeKey(mode))),
+                label: strings.text(_sourceModeKey(mode)),
               ),
           ],
-          selected: {value},
-          onSelectionChanged: enabled
-              ? (selection) {
-                  final next = selection.first;
+          value: value,
+          onActivate: enabled
+              ? (next, source) {
                   if (next != value) {
-                    onChanged(next);
+                    unawaited(
+                      runStarBridgeActivation(source, () => onChanged(next)),
+                    );
                   }
                 }
               : null,
-          showSelectedIcon: false,
         );
       },
     );

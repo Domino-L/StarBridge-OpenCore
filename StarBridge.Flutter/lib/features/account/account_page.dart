@@ -2,12 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'account_models.dart';
 import 'account_module.dart';
 import 'account_session_views.dart';
 import 'account_signed_in_view.dart';
+import 'game_identity_verification.dart';
 import 'account_view_components.dart';
+import 'account_operation_motion.dart';
+import 'account_visible_reads.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({
@@ -15,6 +21,7 @@ class AccountPage extends StatefulWidget {
     this.footer,
     this.localStatus,
     this.localRecognition,
+    this.gameIdentity,
     super.key,
   });
 
@@ -22,6 +29,7 @@ class AccountPage extends StatefulWidget {
   final Widget? footer;
   final Widget? localStatus;
   final Widget? localRecognition;
+  final GameIdentityVerificationPort? gameIdentity;
 
   @override
   State<AccountPage> createState() => _AccountPageState();
@@ -29,9 +37,29 @@ class AccountPage extends StatefulWidget {
 
 class _AccountPageState extends State<AccountPage> {
   final ScrollController _scrollController = ScrollController();
+  // 2026-10-21: after a sign-in this page showed cached details for over a
+  // minute while the warm-up queue yielded to the user's clicks. What the page
+  // shows is read now and is not cancelled by clicks while it is open.
+  late void Function() _releaseVisibleReads;
+
+  @override
+  void initState() {
+    super.initState();
+    _releaseVisibleReads = widget.module.holdVisibleReads();
+  }
+
+  @override
+  void didUpdateWidget(AccountPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.module, widget.module)) {
+      _releaseVisibleReads();
+      _releaseVisibleReads = widget.module.holdVisibleReads();
+    }
+  }
 
   @override
   void dispose() {
+    _releaseVisibleReads();
     _scrollController.dispose();
     super.dispose();
   }
@@ -42,7 +70,8 @@ class _AccountPageState extends State<AccountPage> {
     return ValueListenableBuilder<AccountProjection>(
       valueListenable: widget.module.projection,
       builder: (context, projection, _) {
-        return Scrollbar(
+        final owner = widget.module;
+        final content = Scrollbar(
           controller: _scrollController,
           thumbVisibility: true,
           child: SingleChildScrollView(
@@ -69,8 +98,27 @@ class _AccountPageState extends State<AccountPage> {
                         actionKey: failure.retryable
                             ? 'account.action.retry'
                             : null,
-                        onAction: failure.retryable
-                            ? () => unawaited(widget.module.refresh())
+                        onActionSource: failure.retryable
+                            ? (source) {
+                                if (!mounted ||
+                                    !identical(widget.module, owner) ||
+                                    owner.projection.value.generation !=
+                                        projection.generation ||
+                                    !identical(
+                                      owner.projection.value.failure,
+                                      failure,
+                                    )) {
+                                  return;
+                                }
+                                unawaited(
+                                  runAccountMotionCommand(
+                                    owner,
+                                    AccountOperation.refreshing,
+                                    source,
+                                    owner.refresh,
+                                  ),
+                                );
+                              }
                             : null,
                       ),
                       SizedBox(height: tokens.space.md),
@@ -105,6 +153,9 @@ class _AccountPageState extends State<AccountPage> {
                       AccountSessionState.signedIn => AccountSignedInView(
                         projection: projection,
                         module: widget.module,
+                        localStatus: widget.localStatus,
+                        localRecognition: widget.localRecognition,
+                        gameIdentity: widget.gameIdentity,
                       ),
                       AccountSessionState.legacySignedIn ||
                       AccountSessionState.legacyUnavailable =>
@@ -113,8 +164,10 @@ class _AccountPageState extends State<AccountPage> {
                           module: widget.module,
                         ),
                     },
-                    if (widget.localStatus != null ||
-                        widget.localRecognition != null) ...[
+                    if (projection.sessionState !=
+                            AccountSessionState.signedIn &&
+                        (widget.localStatus != null ||
+                            widget.localRecognition != null)) ...[
                       SizedBox(height: tokens.space.md),
                       LayoutBuilder(
                         builder: (context, constraints) {
@@ -154,6 +207,20 @@ class _AccountPageState extends State<AccountPage> {
               ),
             ),
           ),
+        );
+        return LoadingContentProbe(
+          route: '/settings/account',
+          status: switch (projection.sessionState) {
+            AccountSessionState.loading => LoadingContentStatus.waiting,
+            AccountSessionState.signedIn ||
+            AccountSessionState.legacySignedIn =>
+              projection.isBusy
+                  ? LoadingContentStatus.partial
+                  : LoadingContentStatus.data,
+            _ => LoadingContentStatus.unavailable,
+          },
+          items: projection.profile == null ? 0 : 1,
+          child: content,
         );
       },
     );

@@ -20,6 +20,7 @@ FeatureDescriptor createFriendsFeature({
   Future<void> Function(BuildContext, String)? openCommunityInvite,
   Future<void> Function(BuildContext, DirectMessagesModule)?
   sendCommunityInvite,
+  void Function(String section)? openSection,
 }) => FeatureDescriptor(
   id: messagesOnly ? 'messages' : 'friends',
   route: messagesOnly ? '/messages' : '/friends',
@@ -30,6 +31,7 @@ FeatureDescriptor createFriendsFeature({
   order: messagesOnly ? 9 : 10,
   attentionCount: attentionCount,
   prefetch: module?.prefetch,
+  openSection: openSection,
   buildDestination: (_) => FriendsPage(
     messagesOnly: messagesOnly,
     separateMessages: separateMessages,

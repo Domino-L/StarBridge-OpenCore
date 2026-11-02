@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import 'menu_bridge_style.dart';
+import 'menu_recovery_busy.dart';
 
 /// Interruption confirmation, not an account/content recovery mechanism.
 class MenuRecoveryPrompt extends StatelessWidget {
@@ -9,9 +12,11 @@ class MenuRecoveryPrompt extends StatelessWidget {
     required this.onChoose,
     this.busy = false,
     this.failed = false,
+    this.busySource = InteractionSource.programmatic,
   });
   final ValueChanged<String> onChoose;
   final bool busy, failed;
+  final InteractionSource busySource;
   @override
   Widget build(BuildContext context) {
     final locale = Localizations.localeOf(context);
@@ -57,20 +62,24 @@ class MenuRecoveryPrompt extends StatelessWidget {
                     ),
                   ),
                 if (busy)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 16),
-                    child: LinearProgressIndicator(),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: MenuRecoveryBusy(source: busySource),
                   ),
               ],
             ),
             actions: [
-              TextButton(
-                onPressed: busy ? null : () => onChoose('restore'),
+              StarBridgeActionButton(
+                controlKey: const Key('menu-recovery-restore'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: busy ? null : (_) => onChoose('restore'),
                 child: Text(text('恢复窗口', '恢復視窗', 'Restore windows')),
               ),
-              FilledButton(
+              StarBridgeActionButton(
+                controlKey: const Key('menu-recovery-start-clean'),
+                kind: StarBridgeActionKind.primary,
                 autofocus: true,
-                onPressed: busy ? null : () => onChoose('startClean'),
+                onActivate: busy ? null : (_) => onChoose('startClean'),
                 child: Text(text('仅打开菜单', '僅開啟選單', 'Open menu only')),
               ),
             ],

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/features/direct_messages/direct_messages_module.dart';
 import 'package:starbridge_flutter/features/direct_messages/example_direct_messages.dart';
 
@@ -13,7 +12,8 @@ class Sender implements DirectMessagesPort, DirectMessageSender {
   final example = ExampleDirectMessages();
   final events = StreamController<void>.broadcast();
   final writes = <(String, String, String)>[];
-  final reply = Completer<DirectSendResult>();
+  final replies = <Completer<DirectSendResult>>[];
+  Completer<DirectSendResult> get reply => replies.first;
   DirectMessage? confirmed;
   bool allowed = true;
   String? stateOverride;
@@ -48,6 +48,8 @@ class Sender implements DirectMessagesPort, DirectMessageSender {
     String clientMessageId,
   ) {
     writes.add((ref, text, clientMessageId));
+    final reply = Completer<DirectSendResult>();
+    replies.add(reply);
     return reply.future;
   }
 
@@ -65,74 +67,152 @@ class Sender implements DirectMessagesPort, DirectMessageSender {
   Future<void> close() => events.close();
 }
 
-Future<DirectMessagesModule> opened(Sender port) async {
-  final m = DirectMessagesModule(port);
+Future<DirectMessagesModule> opened(
+  Sender port, {
+  List<Duration> retryDelays = DirectMessageSendQueue.defaultRetryDelays,
+}) async {
+  final m = DirectMessagesModule(port, sendRetryDelays: retryDelays);
   await m.refresh();
   await m.open(m.visible.single);
   return m;
 }
 
+// User choice 2026-10-21 "A2": a sent message appears at once with a clock,
+// the composer clears, history replaces the local copy; failures keep the
+// text and retry with the same clientMessageId (the relay deduplicates on it).
 void main() {
-  test('send waits for ack, prevents duplicate clicks and reloads latest without clearing unread', () async {
-    final p = Sender();
-    final module = await opened(p);
-    addTearDown(module.dispose);
-    module.editDraft('消息\n正文');
-    final sending = module.send();
-    await module.send();
-    expect(p.writes, hasLength(1));
-    expect(module.draft, '消息\n正文');
-    expect(module.messages.last.sequence, 60);
-    p.confirmed = p.ack();
-    p.reply.complete(DirectSendResult('sent', message: p.confirmed));
-    await sending;
-    expect(module.sendStatus, 'sent');
-    expect(module.draft, isEmpty);
-    expect(module.messages.last.sequence, 61);
-    expect(module.rows.first.unread, 2);
-  });
+  test(
+    'a sent message appears at once and history replaces its local copy',
+    () async {
+      final p = Sender();
+      final module = await opened(p);
+      addTearDown(module.dispose);
+      module.editDraft('消息\n正文');
+      await module.send();
+      expect(module.draft, isEmpty, reason: 'the composer is free at once');
+      expect(module.outgoing.single.text, '消息\n正文');
+      expect(module.outgoing.single.state, DirectOutgoingState.sending);
+      expect(p.writes, hasLength(1));
+      await module.send();
+      expect(p.writes, hasLength(1), reason: 'an empty composer sends nothing');
+      expect(module.messages.last.sequence, 60);
+      p.confirmed = p.ack();
+      p.reply.complete(DirectSendResult('sent', message: p.confirmed));
+      await pumpEventQueue();
+      expect(module.messages.last.sequence, 61);
+      expect(module.outgoing, isEmpty, reason: 'never shown twice');
+      expect(module.rows.first.unread, 2);
+    },
+  );
 
-  test('unknown retains draft, cannot resend, and history confirms exact outgoing intent', () async {
-    final p = Sender();
-    final m = await opened(p);
-    addTearDown(m.dispose);
-    m.editDraft('消息');
-    final sending = m.send();
-    p.reply.complete(const DirectSendResult('unknown'));
-    await sending;
-    expect(m.awaitingConfirmation, isTrue);
-    expect(m.draft, '消息');
-    await m.send();
-    await m.load();
-    expect(p.writes, hasLength(1));
-    expect(m.awaitingConfirmation, isTrue);
-    p.confirmed = p.ack();
-    await m.load();
-    expect(m.awaitingConfirmation, isFalse);
-    expect(m.sendStatus, 'sent');
-    expect(m.draft, isEmpty);
-  });
+  test(
+    'later messages wait for the earlier one, keeping their order',
+    () async {
+      final p = Sender();
+      final m = await opened(p);
+      addTearDown(m.dispose);
+      m.editDraft('一');
+      await m.send();
+      m.editDraft('二');
+      await m.send();
+      expect(m.outgoing.map((o) => o.text), ['一', '二']);
+      expect(p.writes.map((w) => w.$2), ['一']);
+      p.reply.complete(DirectSendResult('sent', message: p.ack()));
+      await pumpEventQueue();
+      expect(p.writes.map((w) => w.$2), ['一', '二']);
+    },
+  );
 
-  test('explicit rejection keeps draft, revoked permissions and long text disable sending', () async {
-    final p = Sender();
-    final m = await opened(p);
-    addTearDown(m.dispose);
-    m.editDraft('x' * 1001);
-    await m.send();
-    expect(p.writes, isEmpty);
-    m.editDraft('消息');
-    final sending = m.send();
-    p.reply.complete(
-      const DirectSendResult('rejected', error: 'request_pending'),
-    );
-    await sending;
-    expect(m.draft, '消息');
-    expect(m.readyToSend, isFalse);
-    expect(m.awaitingConfirmation, isFalse);
-    p.allowed = false;
-    await m.load();
-    expect(m.readyToSend, isFalse);
-  });
+  test(
+    'an uncertain result retries with the same id and reconciles by history',
+    () async {
+      final p = Sender();
+      final m = await opened(p, retryDelays: const [Duration.zero]);
+      addTearDown(m.dispose);
+      m.editDraft('消息');
+      await m.send();
+      p.reply.complete(const DirectSendResult('unknown'));
+      await pumpEventQueue();
+      expect(p.writes, hasLength(2));
+      expect(p.writes[1].$3, p.writes[0].$3, reason: 'same clientMessageId');
+      expect(m.outgoing.single.state, DirectOutgoingState.sending);
+      // The first attempt had in fact arrived: the relay answers duplicate.
+      p.confirmed = p.ack();
+      p.replies[1].complete(
+        DirectSendResult('duplicate', message: p.confirmed),
+      );
+      await pumpEventQueue();
+      expect(m.outgoing, isEmpty);
+      expect(m.messages.where((x) => x.id == p.writes[0].$3), hasLength(1));
+    },
+  );
+
+  test(
+    'retries are bounded, then the message fails and keeps its text',
+    () async {
+      final p = Sender();
+      final m = await opened(p, retryDelays: const [Duration.zero]);
+      addTearDown(m.dispose);
+      m.editDraft('消息');
+      await m.send();
+      p.reply.complete(const DirectSendResult('unknown'));
+      await pumpEventQueue();
+      p.replies[1].complete(const DirectSendResult('unknown'));
+      await pumpEventQueue();
+      expect(p.writes, hasLength(2));
+      expect(m.outgoing.single.state, DirectOutgoingState.failed);
+      expect(m.outgoing.single.text, '消息');
+      // The user retries: same id, fresh budget.
+      m.retrySend(m.outgoing.single.id);
+      expect(p.writes, hasLength(3));
+      expect(p.writes[2].$3, p.writes[0].$3);
+      expect(m.outgoing.single.state, DirectOutgoingState.sending);
+    },
+  );
+
+  test(
+    'explicit rejection fails at once, keeps the text and disables sending',
+    () async {
+      final p = Sender();
+      final m = await opened(p);
+      addTearDown(m.dispose);
+      m.editDraft('x' * 1001);
+      await m.send();
+      expect(p.writes, isEmpty);
+      m.editDraft('消息');
+      await m.send();
+      p.reply.complete(
+        const DirectSendResult('rejected', error: 'request_pending'),
+      );
+      await pumpEventQueue();
+      expect(p.writes, hasLength(1), reason: 'a rejection is not retried');
+      expect(m.outgoing.single.state, DirectOutgoingState.failed);
+      expect(m.outgoing.single.error, 'request_pending');
+      expect(m.outgoing.single.text, '消息');
+      expect(m.sendStatus, 'request_pending');
+      expect(m.readyToSend, isFalse);
+      p.allowed = false;
+      await m.load();
+      expect(m.readyToSend, isFalse);
+    },
+  );
+
+  test(
+    'a restored connection sends a waiting message without backoff',
+    () async {
+      final p = Sender();
+      final m = await opened(p, retryDelays: const [Duration(hours: 1)]);
+      addTearDown(m.dispose);
+      m.editDraft('排队');
+      await m.send();
+      p.reply.complete(const DirectSendResult('unknown'));
+      await pumpEventQueue();
+      expect(p.writes, hasLength(1));
+      m.connectionRestored();
+      expect(p.writes, hasLength(2));
+      expect(p.writes[1].$3, p.writes[0].$3);
+    },
+  );
 
   for (final state in ['request_incoming', 'request_outgoing']) {
     test(
@@ -161,28 +241,31 @@ void main() {
       final m = await opened(p);
       addTearDown(m.dispose);
       m.editDraft('private');
-      final sending = m.send();
+      await m.send();
       p.events.add(null);
       await Future<void>.delayed(Duration.zero);
+      expect(m.outgoing, isEmpty, reason: 'sends never cross the boundary');
       p.reply.complete(DirectSendResult('sent', message: p.ack()));
-      await sending;
+      await pumpEventQueue();
       expect(m.draft, isEmpty);
       expect(m.messages, isEmpty);
       expect(m.selected, isNull);
       expect(m.sendStatus, isNull);
+      expect(m.outgoing, isEmpty);
     },
   );
 
   test('malformed success is uncertain, not success', () async {
     final p = Sender();
-    final m = await opened(p);
+    final m = await opened(p, retryDelays: const []);
     addTearDown(m.dispose);
     m.editDraft('消息');
-    final sending = m.send();
+    await m.send();
     p.reply.complete(const DirectSendResult('sent'));
-    await sending;
-    expect(m.sendStatus, 'outcome_unknown');
-    expect(m.draft, '消息');
+    await pumpEventQueue();
+    expect(m.outgoing.single.state, DirectOutgoingState.failed);
+    expect(m.outgoing.single.error, 'unknown');
+    expect(m.outgoing.single.text, '消息');
   });
 
   for (final locale in [
@@ -201,9 +284,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField), '待发送\n第二行');
       await tester.pump();
-      await tester.tap(
-        find.byTooltip(AppStrings.resolve(locale).text('direct.backList')),
-      );
+      await tester.tap(find.byKey(const ValueKey('chat-back-list')));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       await tester.tap(

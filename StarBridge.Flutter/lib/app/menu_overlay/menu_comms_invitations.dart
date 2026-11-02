@@ -1,3 +1,6 @@
+
+import 'menu_overlay_text.dart';
+import 'menu_overlay_locale.dart';
 import '../../features/communities/communities_module.dart';
 import '../../features/communities/community_admission_controller.dart';
 import '../../features/communities/community_invite_port.dart';
@@ -15,6 +18,7 @@ final class MenuCommsInvitations extends MenuFeatureSession {
   MenuCommsInvitations(
     this.port,
     void Function(Map<String, Object?>) publish, {
+    super.locale,
     this.createPrivacy,
   }) : super(publish, port.invalidations);
   final CommunitiesPort port;
@@ -87,10 +91,16 @@ final class MenuCommsInvitations extends MenuFeatureSession {
     return port.close();
   }
 
-  String inviteText(String key) =>
-      communityInviteCopy[key]?.$1 ?? '暂时无法完成，请刷新后重试。';
-  String sendText(String key) =>
-      invitationSendCopy[key]?.$1 ?? '暂时无法完成，请刷新后重试。';
+  Object inviteText(String key) => MenuOverlayComputed(
+    (strings) =>
+        menuOverlayRecord(strings.locale, communityInviteCopy[key]) ??
+        strings.text('menu.overlay.errors.retry'),
+  );
+  Object sendText(String key) => MenuOverlayComputed(
+    (strings) =>
+        menuOverlayRecord(strings.locale, invitationSendCopy[key]) ??
+        strings.text('menu.overlay.errors.retry'),
+  );
 
   @override
   Future<Map<String, Object?>> read() async {
@@ -107,41 +117,64 @@ final class MenuCommsInvitations extends MenuFeatureSession {
     final rows = <Map<String, Object?>>[];
     final progress = sender.progress;
     if (sender.error != null) {
-      actions.add(button('重新读取发送记录', (_) => sender.load()));
+      actions.add(
+        button(
+          MenuOverlayText('menu.overlay.comms.reloadInvites'),
+          (_) => sender.load(),
+        ),
+      );
     }
     if (_records || sender.activeOperationId != null) {
       for (final item in sender.items.take(128)) {
         rows.add({
           'title': '${item.sourceName} → ${item.destinationName}',
-          'detail': '${item.requestedAt.toLocal()} · ${sendText(item.phase)}',
+          'detail': MenuOverlayJoin([
+            item.requestedAt.toLocal(),
+            sendText(item.phase),
+          ], ' · '),
           'buttons': [
             if (item.phase != 'sent') ...[
-              button('核对发送结果', (_) => sender.recover(item.operationId)),
+              button(
+                MenuOverlayText('menu.overlay.comms.checkInvite'),
+                (_) => sender.recover(item.operationId),
+              ),
               if ({'prepared', 'generating', 'ready'}.contains(item.phase))
                 button(
-                  '继续发送',
+                  MenuOverlayText('menu.overlay.comms.continueInvite'),
                   (_) => sender.recover(
                     item.operationId,
                     action: InvitationRecoveryAction.continueSending,
                   ),
-                  confirm:
-                      '继续向 ${item.destinationName} 发送 ${item.sourceName} 的邀请？',
+                  confirm: MenuOverlayText(
+                    'menu.overlay.comms.continueInviteConfirm',
+                    {
+                      'recipient': item.destinationName,
+                      'organization': item.sourceName,
+                    },
+                  ),
                 ),
               if (item.phase == 'sending')
                 button(
-                  '重试投递',
+                  MenuOverlayText('menu.overlay.comms.retryDelivery'),
                   (_) => sender.recover(
                     item.operationId,
                     action: InvitationRecoveryAction.retryDelivery,
                     retryConfirmed: true,
                   ),
-                  confirm: '请先核对聊天记录；只有确认未收到邀请后才重试投递。',
+                  confirm: MenuOverlayText(
+                    'menu.overlay.comms.retryDeliveryConfirm',
+                  ),
                 ),
             ],
           ],
         });
       }
-      actions.add(button('刷新发送记录', (_) => sender.load()));
+      actions.add(
+        button(
+          MenuOverlayText('menu.overlay.comms.refreshInvites'),
+          (_) => sender.load(),
+        ),
+      );
     } else {
       final directory = await port.read(view: 'mine', query: '', after: _after);
       if (!current(epoch)) throw StateError('retired');
@@ -154,7 +187,7 @@ final class MenuCommsInvitations extends MenuFeatureSession {
           'buttons': [
             if (sender.canStart && _canSend?.call() == true)
               button(
-                '发送此组织邀请',
+                MenuOverlayText('menu.overlay.comms.sendInvite'),
                 (_) async {
                   if (_canSend?.call() != true) throw StateError('retired');
                   await sender.start(
@@ -164,35 +197,46 @@ final class MenuCommsInvitations extends MenuFeatureSession {
                     maxUses: 1,
                   );
                 },
-                confirm:
-                    '向 ${_recipient!.name} 发送 ${row.name} 的邀请？有效期 7 天，可使用 1 次。',
+                confirm: MenuOverlayText(
+                  'menu.overlay.comms.sendInviteConfirm',
+                  {'recipient': _recipient!.name, 'organization': row.name},
+                ),
               ),
           ],
         });
       }
       if (directory.next != null) {
         actions.add(
-          button('更多组织', (_) async {
+          button(MenuOverlayText('menu.overlay.comms.moreOrganizations'), (
+            _,
+          ) async {
             _after = directory.next;
           }),
         );
       }
       if (_after != null) {
         actions.add(
-          button('返回首批组织', (_) async {
+          button(MenuOverlayText('menu.overlay.comms.firstOrganizations'), (
+            _,
+          ) async {
             _after = null;
           }),
         );
       }
     }
     return {
-      'title': _records ? '邀请发送记录' : '邀请 ${_recipient?.name ?? ""} 加入组织',
-      'notice': [
+      'title': _records
+          ? MenuOverlayText('menu.overlay.comms.inviteHistory')
+          : MenuOverlayText('menu.overlay.comms.inviteTitle', {
+              'name': _recipient?.name ?? "",
+            }),
+      'notice': MenuOverlayJoin([
         if (progress != null) sendText(progress.status),
         if (sender.error != null) sendText(sender.error!),
         if (!_records && sender.activeOperationId == null) sendText('sendInfo'),
-        if (!_records && _canSend?.call() != true) '会话权限已过期，请返回聊天并刷新后再发送。',
-      ].join('\n'),
+        if (!_records && _canSend?.call() != true)
+          MenuOverlayText('menu.overlay.comms.invitePermissionExpired'),
+      ], '\n'),
       'rows': rows,
       'buttons': actions,
     };
@@ -213,57 +257,98 @@ final class MenuCommsInvitations extends MenuFeatureSession {
     final actions = <Map<String, Object?>>[];
     final rows = <Map<String, Object?>>[];
     if (model.outcome == null && !model.sharing) {
-      actions.add(button('重新验证邀请', (_) => model.verify(_code!)));
+      actions.add(
+        button(
+          MenuOverlayText('menu.overlay.comms.verifyInvite'),
+          (_) => model.verify(_code!),
+        ),
+      );
     }
     if (preview != null) {
       rows.add({
         'title': preview.name,
-        'detail':
-            '负责人：${preview.commander}\n成员：${preview.memberCount}\n'
-            '有效期：${preview.expiresAt?.toLocal() ?? "长期有效"}\n'
-            '剩余次数：${preview.remainingUses < 0 ? "不限" : preview.remainingUses}\n'
-            '${inviteText(preview.alreadyMember
-                ? "already"
+        'detail': MenuOverlayJoin([
+          MenuOverlayText('menu.overlay.comms.inviteOwnerCount', {
+            'owner': preview.commander,
+            'count': preview.memberCount,
+          }),
+          MenuOverlayText('menu.overlay.comms.inviteExpiry', {
+            'expiry':
+                preview.expiresAt?.toLocal() ??
+                const MenuOverlayText('menu.overlay.comms.neverExpires'),
+          }),
+          MenuOverlayText('menu.overlay.comms.inviteUses', {
+            'count': preview.remainingUses < 0
+                ? const MenuOverlayText('menu.overlay.comms.unlimited')
+                : preview.remainingUses,
+          }),
+          inviteText(
+            preview.alreadyMember
+                ? 'already'
                 : preview.membershipConflict
-                ? "membershipConflict"
-                : "direct")}',
+                ? 'membershipConflict'
+                : 'direct',
+          ),
+        ]),
       });
       if (!preview.alreadyMember &&
           !preview.membershipConflict &&
           !model.expired &&
           model.outcome == null) {
         if (!model.sharing) {
-          actions.add(button('确认共享设置', (_) => model.reviewSharing()));
+          actions.add(
+            button(
+              MenuOverlayText('menu.overlay.comms.reviewSharing'),
+              (_) => model.reviewSharing(),
+              role: 'reviewSharing',
+            ),
+          );
         }
         final draft = model.draft;
         if (model.sharing && draft != null) {
-          void toggle(String label, bool enabled, void Function() change) {
+          void toggle(
+            Object label,
+            bool enabled,
+            void Function() change, {
+            String role = 'toggleSharing',
+          }) {
             rows.add({
               'title': label,
-              'detail': enabled ? '已开启' : '已关闭',
+              'detail': enabled
+                  ? MenuOverlayText('menu.overlay.comms.enabled')
+                  : MenuOverlayText('menu.overlay.comms.disabled'),
               'buttons': [
-                button(enabled ? '关闭' : '开启', (_) async {
-                  change();
-                }),
+                button(
+                  enabled
+                      ? MenuOverlayText('menu.overlay.comms.disable')
+                      : MenuOverlayText('menu.overlay.comms.enable'),
+                  (_) async {
+                    change();
+                  },
+                  role: role,
+                ),
               ],
             });
           }
 
           rows.add({
-            'title': '加入前确认共享设置',
-            'detail':
-                '${inviteText("scopeWarning")}\n${inviteText("publicationWarning")}',
+            'title': MenuOverlayText('menu.overlay.comms.sharingBeforeJoin'),
+            'detail': MenuOverlayJoin([
+              inviteText('scopeWarning'),
+              inviteText('publicationWarning'),
+            ], '\n'),
           });
           toggle(
-            '实时状态共享',
+            MenuOverlayText('menu.overlay.comms.liveSharing'),
             draft.publicationEnabled,
             () => model.edit(
               draft.copyWith(publicationEnabled: !draft.publicationEnabled),
             ),
+            role: 'togglePublication',
           );
           if (draft.publicationEnabled) {
             toggle(
-              '所有成员可见',
+              MenuOverlayText('menu.overlay.comms.allMembers'),
               draft.fleetAllMembersCanView,
               () => model.edit(
                 draft.copyWith(
@@ -273,7 +358,7 @@ final class MenuCommsInvitations extends MenuFeatureSession {
             );
             if (!draft.fleetAllMembersCanView) {
               toggle(
-                '组织管理员可见',
+                MenuOverlayText('menu.overlay.comms.admins'),
                 draft.fleetAdministratorsCanView,
                 () => model.edit(
                   draft.copyWith(
@@ -283,13 +368,13 @@ final class MenuCommsInvitations extends MenuFeatureSession {
                 ),
               );
             }
-            for (final entry in const {
-              1: '在线状态',
-              2: '当前飞船',
-              4: '当前位置',
-              8: '服务器信息',
-              16: '活动事件',
-              32: '个人机库',
+            for (final entry in {
+              1: MenuOverlayText('menu.overlay.comms.onlineStatus'),
+              2: MenuOverlayText('menu.display.shipLabel'),
+              4: MenuOverlayText('menu.overlay.comms.currentLocation'),
+              8: MenuOverlayText('menu.overlay.comms.serverInfo'),
+              16: MenuOverlayText('menu.overlay.comms.events'),
+              32: MenuOverlayText('menu.overlay.comms.hangar'),
             }.entries) {
               toggle(
                 entry.value,
@@ -301,20 +386,31 @@ final class MenuCommsInvitations extends MenuFeatureSession {
             }
           }
           rows.add({
-            'title': '成员分组',
-            'detail': '保留已选的 ${draft.fleetVisibilityGroupIds.length} 个分组。',
+            'title': MenuOverlayText('menu.overlay.comms.groups'),
+            'detail': MenuOverlayText('menu.overlay.comms.keepGroups', {
+              'count': draft.fleetVisibilityGroupIds.length,
+            }),
           });
           actions.add(
-            button(model.acknowledged ? '取消确认' : '我已确认共享选择', (_) async {
-              model.acknowledge(!model.acknowledged);
-            }),
+            button(
+              model.acknowledged
+                  ? MenuOverlayText('menu.overlay.comms.unacknowledge')
+                  : MenuOverlayText('menu.overlay.comms.acknowledge'),
+              (_) async {
+                model.acknowledge(!model.acknowledged);
+              },
+              role: 'acknowledgeSharing',
+            ),
           );
           if (model.canJoin) {
             actions.add(
               button(
-                '保存选择并加入',
+                MenuOverlayText('menu.overlay.comms.saveJoin'),
                 (_) => model.join(),
-                confirm: '保存当前共享选择并加入 ${preview.name}？',
+                confirm: MenuOverlayText('menu.overlay.comms.saveJoinConfirm', {
+                  'name': preview.name,
+                }),
+                role: 'joinOrganization',
               ),
             );
           }
@@ -323,19 +419,25 @@ final class MenuCommsInvitations extends MenuFeatureSession {
     }
     if (model.error == 'privacySaveFailed' ||
         model.error == 'privacyUnavailable') {
-      actions.add(button('重新读取共享设置', (_) => model.reviewSharing()));
+      actions.add(
+        button(
+          MenuOverlayText('menu.overlay.comms.reloadSharing'),
+          (_) => model.reviewSharing(),
+        ),
+      );
     }
     return {
-      'title': '组织邀请',
+      'title': MenuOverlayText('menu.overlay.comms.organizationInvite'),
       'rows': rows,
       'buttons': actions,
-      'notice': [
+      'notice': MenuOverlayJoin([
         if (model.expired) inviteText('inviteInvalid'),
         if (model.error != null) inviteText(model.error!),
         if (model.savedChoices) inviteText('savedChoices'),
-        if (model.outcome?.status == 'accepted') '已加入组织。',
+        if (model.outcome?.status == 'accepted')
+          MenuOverlayText('menu.overlay.comms.joinedOrganization'),
         if (model.outcome?.status == 'unknown') inviteText('outcomeUnknown'),
-      ].join('\n'),
+      ], '\n'),
     };
   }
 }

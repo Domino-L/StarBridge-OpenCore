@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -52,7 +55,7 @@ class _OfficialFleetOverviewSectionState
       valueListenable: widget.module.projection,
       builder: (context, projection, _) {
         final tokens = context.tokens;
-        return Column(
+        final content = Column(
           key: const Key('official-fleet-overview'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -87,6 +90,24 @@ class _OfficialFleetOverviewSectionState
               ),
             },
           ],
+        );
+        return LoadingContentProbe(
+          route: '/fleet',
+          status: switch (projection.availability) {
+            OfficialFleetOverviewAvailability.idle ||
+            OfficialFleetOverviewAvailability.loading =>
+              LoadingContentStatus.waiting,
+            OfficialFleetOverviewAvailability.unavailable =>
+              LoadingContentStatus.unavailable,
+            OfficialFleetOverviewAvailability.available =>
+              LoadingContentStatus.data,
+          },
+          items:
+              projection.availability ==
+                  OfficialFleetOverviewAvailability.available
+              ? 1
+              : 0,
+          child: content,
         );
       },
     );

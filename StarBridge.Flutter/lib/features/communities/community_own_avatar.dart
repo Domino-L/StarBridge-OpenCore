@@ -9,6 +9,26 @@ abstract interface class CommunityOwnAvatarSource {
   String? get ownAvatarImageData;
 }
 
+/// The signed-in account's own chat presentation. Showing your own messages
+/// needs no author proof, and hiding your profile does not hide it from you.
+abstract interface class CommunityOwnIdentitySource
+    implements CommunityOwnAvatarSource {
+  String? get ownChatName;
+}
+
+/// The current account's own avatar bytes, whatever version a message carries.
+Uint8List? ownCommunityAvatarBytes(Object source) {
+  if (source is! CommunityOwnAvatarSource) return null;
+  final data = source.ownAvatarImageData;
+  return data == null
+      ? null
+      : readOwnCommunityAvatar(
+          source,
+          isSelf: true,
+          version: sha256.convert(utf8.encode(data)).toString(),
+        );
+}
+
 Uint8List? readOwnCommunityAvatar(
   Object source, {
   required bool isSelf,

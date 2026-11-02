@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -11,8 +14,8 @@ import '../game_log/game_session_overview.dart';
 Future<void> showLocalGameRecognitionDialog(
   BuildContext context,
   GameLogController? controller,
-) => showDialog<void>(
-  context: context,
+) => showStarBridgeDialog<void>(
+  context,
   builder: (_) => LocalGameRecognitionDialog(controller: controller),
 );
 
@@ -76,16 +79,18 @@ class LocalGameRecognitionDialog extends StatelessWidget {
                 alignment: WrapAlignment.end,
                 spacing: tokens.space.sm,
                 children: [
-                  OutlinedButton(
-                    key: const Key('local-game-recognition-refresh'),
-                    onPressed: unsupported || !value.visible || value.busy
+                  StarBridgeActionButton(
+                    controlKey: const Key('local-game-recognition-refresh'),
+                    onActivate: unsupported || !value.visible || value.busy
                         ? null
-                        : () => controller!.run(),
+                        : (_) => controller!.run(),
                     child: Text(copy.refresh),
                   ),
-                  TextButton(
-                    key: const Key('settings-entry-close'),
-                    onPressed: () => Navigator.of(context).pop(),
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('settings-entry-close'),
+                    onActivate: (source) =>
+                        dismissStarBridgeDialog(context, source: source),
                     child: Text(copy.close),
                   ),
                 ],

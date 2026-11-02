@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -26,7 +28,7 @@ class InvitedLobby extends LobbySource implements RoomInvitationsPort {
   int count = 1;
   Completer<RoomCommandResult>? gate;
   Future<PartyRoom> get room async =>
-      (await source.read()).directory!.rooms.first;
+      (resolvedMenuCopy(await source.read())).directory!.rooms.first;
   @override
   Future<RoomReadResult> read() async {
     if (unavailable) return const RoomReadResult(RoomReadState.unavailable);

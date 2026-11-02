@@ -4,6 +4,8 @@ const simplifiedGeneralSettingsStrings = <String, String>{
   'settings.accountIdentity': '账号与识别',
   'settings.accountIdentity.description': 'SCM 账号、RSI 身份与本机识别',
   'settings.generalData': '常规与数据',
+  'settings.firstUse': '继续首次使用设置',
+  'settings.firstUse.description': '继续游戏日志、身份与本机功能设置',
   'settings.generalData.description': '界面语言、明暗模式与动态效果',
   'settings.syncPrivacy': '同步与隐私',
   'settings.syncPrivacy.description': '跨端同步、可见范围与缓存策略',
@@ -32,10 +34,19 @@ const simplifiedGeneralSettingsStrings = <String, String>{
   'settings.general.appearance.light': '浅色',
   'settings.general.appearance.lightDescription': '适合白天、阅读与高环境亮度',
   'settings.general.motion.title': '动画体验',
+  'settings.general.interaction.title': '交互动效风格',
+  'settings.general.interaction.description': '保存在这台设备上。减少动态效果优先；未接入的控件保持原样。',
+  'settings.general.interaction.standard': '简洁',
+  'settings.general.interaction.rail': '滑轨',
+  'settings.general.interaction.scan': '扫描',
+  'settings.general.interaction.glow': '光晕',
   'settings.general.motion.description': '减少非必要过渡，同时保留状态变化和操作结果。',
   'settings.general.motion.reduce': '减少动态效果',
   'settings.general.motion.reduceDescription':
       '收敛页面切换、水波和非必要位移；系统已要求减少动画时仍会优先遵循系统。',
+  'settings.general.holiday.title': '节日外观',
+  'settings.general.holiday.description':
+      '节日期间自动换上特别版的图标、主色和背景印花，过了节日自动改回。只是换装饰，布局和功能都不变。',
   'settings.general.behavior.title': '启动与后台',
   'settings.general.behavior.description': '控制登录 Windows 后的启动方式，以及关闭主窗口后的应用行为。',
   'settings.general.behavior.closeSummary.tray': '关闭窗口后：继续在系统托盘运行',
@@ -66,6 +77,7 @@ const simplifiedGeneralSettingsStrings = <String, String>{
   'settings.lifecycle.startup.saveFailed': '启动设置未能保存，请检查后台连接后重试。',
   'settings.general.deviceNotice': '界面与启动偏好保存在本机；时长同步与公开展示按上方设置执行。',
   'settings.general.loading': '正在读取当前设备设置…',
+  'settings.general.saving': '正在保存到当前设备…',
   'settings.general.unavailable.title': '暂时无法读取应用设置',
   'settings.general.retry': '重新读取',
   'settings.general.error.hostUnavailable':
@@ -90,6 +102,8 @@ const traditionalGeneralSettingsStrings = <String, String>{
   'settings.accountIdentity': '帳號與識別',
   'settings.accountIdentity.description': 'SCM 帳號、RSI 身分與本機識別',
   'settings.generalData': '一般與資料',
+  'settings.firstUse': '繼續首次使用設定',
+  'settings.firstUse.description': '繼續遊戲日誌、身分與本機功能設定',
   'settings.generalData.description': '介面語言、明暗模式與動態效果',
   'settings.syncPrivacy': '同步與隱私',
   'settings.syncPrivacy.description': '跨端同步、可見範圍與快取策略',
@@ -118,10 +132,19 @@ const traditionalGeneralSettingsStrings = <String, String>{
   'settings.general.appearance.light': '淺色',
   'settings.general.appearance.lightDescription': '適合白天、閱讀與高環境亮度',
   'settings.general.motion.title': '動畫體驗',
+  'settings.general.interaction.title': '互動動效風格',
+  'settings.general.interaction.description': '儲存在這台裝置上。減少動態效果優先；未接入的控制項保持原樣。',
+  'settings.general.interaction.standard': '簡潔',
+  'settings.general.interaction.rail': '滑軌',
+  'settings.general.interaction.scan': '掃描',
+  'settings.general.interaction.glow': '光暈',
   'settings.general.motion.description': '減少非必要過渡，同時保留狀態變化和操作結果。',
   'settings.general.motion.reduce': '減少動態效果',
   'settings.general.motion.reduceDescription':
       '收斂頁面切換、水波和非必要位移；系統已要求減少動畫時仍會優先遵循系統。',
+  'settings.general.holiday.title': '節日外觀',
+  'settings.general.holiday.description':
+      '節日期間自動換上特別版的圖示、主色和背景印花，過了節日自動改回。只是換裝飾，版面和功能都不變。',
   'settings.general.behavior.title': '啟動與背景執行',
   'settings.general.behavior.description':
       '控制登入 Windows 後的啟動方式，以及關閉主視窗後的應用程式行為。',
@@ -154,6 +177,7 @@ const traditionalGeneralSettingsStrings = <String, String>{
   'settings.lifecycle.startup.saveFailed': '啟動設定未能儲存，請檢查背景連線後再試。',
   'settings.general.deviceNotice': '介面與啟動偏好儲存在本機；時數同步與公開展示依上方設定執行。',
   'settings.general.loading': '正在讀取目前裝置設定…',
+  'settings.general.saving': '正在儲存到目前裝置…',
   'settings.general.unavailable.title': '暫時無法讀取應用程式設定',
   'settings.general.retry': '重新讀取',
   'settings.general.error.hostUnavailable':
@@ -179,6 +203,9 @@ const englishGeneralSettingsStrings = <String, String>{
   'settings.accountIdentity.description':
       'SCM account, RSI identity, and local recognition',
   'settings.generalData': 'General & data',
+  'settings.firstUse': 'Continue first-use setup',
+  'settings.firstUse.description':
+      'Continue game log, identity and local feature setup',
   'settings.generalData.description':
       'Interface language, light or dark appearance, and motion',
   'settings.syncPrivacy': 'Sync & privacy',
@@ -213,9 +240,17 @@ const englishGeneralSettingsStrings = <String, String>{
   'settings.general.appearance.lightDescription':
       'For daylight, reading, and bright rooms',
   'settings.general.motion.title': 'Motion',
+  'settings.general.interaction.title': 'Interaction style',
+  'settings.general.interaction.description': 'Saved on this device. Reduce motion takes priority; controls not yet integrated keep their existing behavior.',
+  'settings.general.interaction.standard': 'Standard',
+  'settings.general.interaction.rail': 'Rail',
+  'settings.general.interaction.scan': 'Scan',
+  'settings.general.interaction.glow': 'Glow',
   'settings.general.motion.description': 'Reduce non-essential transitions while preserving state changes and outcomes.',
   'settings.general.motion.reduce': 'Reduce motion',
   'settings.general.motion.reduceDescription': 'Limits page movement, ripples, and non-essential transitions. A system reduce-motion request still takes priority.',
+  'settings.general.holiday.title': 'Holiday look',
+  'settings.general.holiday.description': 'During a holiday the icon, accent colour and background print change on their own and switch back afterwards. Decoration only: layout and features stay the same.',
   'settings.general.behavior.title': 'Startup & background',
   'settings.general.behavior.description': 'Control what happens after Windows sign-in and when the main window closes.',
   'settings.general.behavior.closeSummary.tray':
@@ -252,6 +287,7 @@ const englishGeneralSettingsStrings = <String, String>{
   'settings.lifecycle.startup.saveFailed': 'The startup setting could not be saved. Check the background connection and try again.',
   'settings.general.deviceNotice': 'Appearance and startup preferences stay on this device. Playtime syncing and public visibility follow the settings above.',
   'settings.general.loading': 'Reading settings for this device…',
+  'settings.general.saving': 'Saving settings on this device…',
   'settings.general.unavailable.title':
       'Application settings are temporarily unavailable',
   'settings.general.retry': 'Read again',

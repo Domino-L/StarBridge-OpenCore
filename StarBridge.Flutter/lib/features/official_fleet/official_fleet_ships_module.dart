@@ -19,12 +19,13 @@ abstract interface class OfficialFleetShipsModule {
 }
 
 OfficialFleetShipsModule createOfficialFleetShipsModule(
-  OfficialFleetShipsPort port,
-) => _DefaultOfficialFleetShipsModule(port);
+  OfficialFleetShipsPort port, {
+  DateTime Function()? now,
+}) => _DefaultOfficialFleetShipsModule(port, now ?? DateTime.now);
 
 final class _DefaultOfficialFleetShipsModule
     implements OfficialFleetShipsModule {
-  _DefaultOfficialFleetShipsModule(this._port) {
+  _DefaultOfficialFleetShipsModule(this._port, this._now) {
     _subscription = _port.invalidations.listen((_) {
       if (!_disposed && _query != null) {
         unawaited(refresh());
@@ -33,12 +34,14 @@ final class _DefaultOfficialFleetShipsModule
   }
 
   final OfficialFleetShipsPort _port;
+  final DateTime Function() _now;
   final ValueNotifier<OfficialFleetShipsProjection> _projection = ValueNotifier(
     const OfficialFleetShipsProjection.idle(),
   );
   late final StreamSubscription<void> _subscription;
   OfficialFleetShipsQuery? _query;
   int _requestRevision = 0;
+  Future<void>? _readTask;
   bool _suspended = true;
   bool _disposed = false;
 
@@ -58,6 +61,8 @@ final class _DefaultOfficialFleetShipsModule
       }
       return;
     }
+    reset();
+    _suspended = false;
     _query = OfficialFleetShipsQuery(sourceRef: sourceRef);
     await refresh();
   }
@@ -89,24 +94,66 @@ final class _DefaultOfficialFleetShipsModule
     if (_disposed || _suspended || query == null) {
       return;
     }
-    _query = update(query);
+    final next = update(query);
+    if (_sameQuery(query, next)) return refresh();
+    _query = next;
+    _readTask = null;
     await refresh();
   }
 
   @override
-  Future<void> refresh() async {
+  Future<void> refresh() {
     final query = _query;
     if (_disposed || _suspended || query == null) {
-      return;
+      return Future.value();
     }
+    if (_readTask != null) return _readTask!;
     final revision = ++_requestRevision;
-    _projection.value = OfficialFleetShipsProjection.loading(query);
+    final previous = _projection.value;
+    _projection.value =
+        previous.availability == OfficialFleetShipsAvailability.available &&
+            previous.query != null &&
+            _sameQuery(previous.query!, query)
+        ? OfficialFleetShipsProjection.refreshing(previous)
+        : OfficialFleetShipsProjection.loading(query);
+    return _readTask = _read(query, revision).whenComplete(() {
+      if (revision == _requestRevision) _readTask = null;
+    });
+  }
+
+  Future<void> _read(OfficialFleetShipsQuery query, int revision) async {
     try {
       final snapshot = await _port.read(query);
       if (_disposed || revision != _requestRevision) {
         return;
       }
-      _projection.value = OfficialFleetShipsProjection.fromSnapshot(snapshot);
+      if (!_sameQuery(snapshot.query, query) ||
+          snapshot.ships.any((ship) => ship.shipRef.trim().isEmpty) ||
+          snapshot.ships.map((ship) => ship.shipRef).toSet().length !=
+              snapshot.ships.length) {
+        throw StateError('Invalid fleet ship projection');
+      }
+      final previous = _projection.value;
+      _projection.value =
+          snapshot.availability == OfficialFleetShipsAvailability.unavailable &&
+              snapshot.transientFailure &&
+              previous.availability ==
+                  OfficialFleetShipsAvailability.available &&
+              previous.query != null &&
+              _sameQuery(previous.query!, query)
+          ? OfficialFleetShipsProjection.retained(
+              previous,
+              failureKey:
+                  snapshot.failureKey ?? 'officialFleet.error.transient',
+            )
+          : OfficialFleetShipsProjection.fromSnapshot(
+              snapshot,
+              lastReadAtUtc:
+                  snapshot.availability ==
+                      OfficialFleetShipsAvailability.available
+                  ? _now().toUtc()
+                  : null,
+            );
     } on Object {
       if (_disposed || revision != _requestRevision) {
         return;
@@ -126,6 +173,7 @@ final class _DefaultOfficialFleetShipsModule
       return;
     }
     ++_requestRevision;
+    _readTask = null;
     _suspended = true;
     if (!preserveQuery) {
       _query = null;
@@ -145,3 +193,10 @@ final class _DefaultOfficialFleetShipsModule
     unawaited(_port.close());
   }
 }
+
+bool _sameQuery(OfficialFleetShipsQuery a, OfficialFleetShipsQuery b) =>
+    a.sourceRef == b.sourceRef &&
+    a.search == b.search &&
+    a.filter == b.filter &&
+    a.pageNumber == b.pageNumber &&
+    a.pageSize == b.pageSize;

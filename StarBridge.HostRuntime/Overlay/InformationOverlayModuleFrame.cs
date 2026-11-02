@@ -23,7 +23,7 @@ public sealed class InformationOverlaySourceSnapshot
         Func<DateTimeOffset>? clock = null, DateTimeOffset? realtimeValidUntil = null, bool realtimeRedacted = false)
     {
         if (lease.Mode == OverlaySourceMode.Room ? room?.RoomId != lease.Id || community is not null :
-            lease.Mode != OverlaySourceMode.Community || community?.Code != lease.Id || room is not null)
+            lease.Mode is not (OverlaySourceMode.Community or OverlaySourceMode.Fleet) || community?.Code != lease.Id || room is not null)
             throw new ArgumentException("Source receipt does not match its content.");
         Lease = lease;
         AuthorityStamp = authorityStamp;
@@ -59,18 +59,23 @@ public sealed class InformationOverlaySourceSnapshot
         if (now >= RealtimeValidUntil && !_realtimeRedacted)
             return LazyInitializer.EnsureInitialized(ref _withoutRealtime, () => new(Lease, CommunicationValidUntil,
                 room: Room is null ? null : Room with { Members = Room.Members.Select(m => m with
-                    { Presence = "Unknown", Ship = "", Location = "", ServerRegion = "", LocationHiddenReason = null,
+                    { Presence = "Unknown", Ship = "", Location = "", ServerRegion = "", ServerShard = null, LocationHiddenReason = null,
                         ArrivalPendingConfirmation = false, ArrivalTargetCode = null }).ToArray() },
                 community: Community is null ? null : Community with { Members = Community.Members.Select(m => m with
-                    { Presence = "Unknown", Ship = "", Location = "", ServerRegion = "", LocationHiddenReason = null,
+                    { Presence = "Unknown", Ship = "", Location = "", ServerRegion = "", ServerShard = null, LocationHiddenReason = null,
                         ArrivalPendingConfirmation = false, ArrivalTargetCode = null }).ToArray() },
                 authorityStamp: AuthorityStamp, clock: _clock, realtimeValidUntil: RealtimeValidUntil, realtimeRedacted: true)).At(now);
-        return now < CommunicationValidUntil ? this :
-            LazyInitializer.EnsureInitialized(ref _withoutCommunication, () => new(Lease, CommunicationValidUntil,
+        if (now >= CommunicationValidUntil)
+            return LazyInitializer.EnsureInitialized(ref _withoutCommunication, () => new(Lease, CommunicationValidUntil,
             room: Room is null ? null : Room with { Messages = [] },
             community: Community is null ? null : Community with
                 { AnnouncementTitle = "", AnnouncementText = "", Messages = [] }, authorityStamp: AuthorityStamp,
                 clock: _clock, realtimeValidUntil: RealtimeValidUntil, realtimeRedacted: _realtimeRedacted));
+        // A retained receipt must honor author expiry even between source reads.
+        var community = Community?.WithoutExpiredChatAuthors(now);
+        return ReferenceEquals(community, Community) ? this : new(Lease, CommunicationValidUntil,
+            room: Room, community: community, authorityStamp: AuthorityStamp, clock: _clock,
+            realtimeValidUntil: RealtimeValidUntil, realtimeRedacted: _realtimeRedacted);
     }
 }
 
@@ -78,6 +83,22 @@ public sealed record InformationOverlayModuleContent(OverlayResolvedSource Sourc
     InformationOverlaySourceSnapshot? Snapshot, bool ShowSourceLabel)
 {
     public IReadOnlyList<InformationOverlayModuleContent>? ChatSources { get; init; }
+    /// <summary>Recomputed by every batch read after authority checks; see InformationOverlayModuleSourceDisplay.</summary>
+    public InformationOverlayModuleSourceDisplay Display { get; init; } = InformationOverlayModuleSourceDisplay.None;
+}
+
+/// <summary>
+/// Display-only naming for one module, never a read key or grant. Name is the room
+/// title or organization name (never an id); for an unavailable organization it comes
+/// only from the current membership directory, so a revoked name is never shown.
+/// OwnSource means the module has its own binding rather than following the shared choice.
+/// SignedOut means there is no account at all, which explains every remote source.
+/// RoomAbsent means Host confirmed the account is in no room, rather than a room lapsing.
+/// </summary>
+public sealed record InformationOverlayModuleSourceDisplay(string? Name, bool OwnSource, bool SignedOut,
+    bool RoomAbsent = false)
+{
+    public static InformationOverlayModuleSourceDisplay None { get; } = new(null, false, false);
 }
 
 public sealed record InformationOverlayModuleReadResult(InformationOverlayModuleFrame? Frame, string? FailureCode = null);
@@ -97,11 +118,12 @@ public sealed class InformationOverlayModuleFrame
     private readonly Func<bool> _isCurrent;
     private readonly Func<InformationOverlaySourceSnapshot, bool> _isAuthorized;
     private readonly Func<OverlayResolvedSource, InformationOverlaySourceSnapshot?> _readSource;
+    private readonly OverlayModuleSourceRequests _requests;
 
     private InformationOverlayModuleFrame(OverlayModuleSourcePlan plan,
         Dictionary<string, InformationOverlaySourceSnapshot> sources, Func<bool> isCurrent,
         Func<InformationOverlaySourceSnapshot, bool> isAuthorized,
-        Func<OverlayResolvedSource, InformationOverlaySourceSnapshot?> readSource)
+        Func<OverlayResolvedSource, InformationOverlaySourceSnapshot?> readSource, OverlayModuleSourceRequests requests)
     {
         Plan = plan;
         OwnerKey = plan.OwnerKey;
@@ -110,16 +132,23 @@ public sealed class InformationOverlayModuleFrame
         _isCurrent = isCurrent;
         _isAuthorized = isAuthorized;
         _readSource = readSource;
+        _requests = requests;
     }
 
+    /// <param name="communityName">Display-only membership directory lookup, read at
+    /// display time for unavailable organizations. It never authorizes or reads content.</param>
+    /// <param name="signedOut">No account context exists (anonymous or first-use local).</param>
+    /// <param name="roomAbsent">Host confirmed the account is in no room (display wording only).</param>
     internal static InformationOverlayModuleFrame Capture(OverlayPresetSources preset,
         OverlaySourceResolutionContext context,
         Func<OverlayResolvedSource, InformationOverlaySourceSnapshot?> read,
         Func<bool> isCurrent, Func<InformationOverlaySourceSnapshot, bool> isAuthorized,
-        OverlaySourceBinding? temporaryChoice = null, IReadOnlyCollection<OverlaySourceModule>? activeModules = null)
+        OverlaySourceBinding? temporaryChoice = null, IReadOnlyCollection<OverlaySourceModule>? activeModules = null,
+        Func<string, string?>? communityName = null, bool signedOut = false, bool roomAbsent = false)
     {
         // Resolve and reject the source limit before doing any resource reads.
         var plan = OverlayModuleSourceResolver.Resolve(preset, context, temporaryChoice, activeModules);
+        var requests = OverlayModuleSourceRequests.From(preset, context, temporaryChoice, plan, communityName, signedOut, roomAbsent);
         var sources = new Dictionary<string, InformationOverlaySourceSnapshot>(StringComparer.Ordinal);
         if (isCurrent())
             foreach (var source in plan.AllSources.Where(s => s.ResourceKey is not null)
@@ -132,15 +161,20 @@ public sealed class InformationOverlayModuleFrame
                     sources.Add(source.ResourceKey!, snapshot);
             }
         if (!isCurrent()) sources.Clear();
-        return new(plan, sources, isCurrent, isAuthorized, read);
+        return new(plan, sources, isCurrent, isAuthorized, read, requests);
     }
 
     internal static InformationOverlayModuleReadResult TryCapture(OverlayPresetSources preset,
         OverlaySourceResolutionContext context, Func<OverlayResolvedSource, InformationOverlaySourceSnapshot?> read,
         Func<bool> isCurrent, Func<InformationOverlaySourceSnapshot, bool> isAuthorized,
-        OverlaySourceBinding? temporaryChoice = null, IReadOnlyCollection<OverlaySourceModule>? activeModules = null)
+        OverlaySourceBinding? temporaryChoice = null, IReadOnlyCollection<OverlaySourceModule>? activeModules = null,
+        Func<string, string?>? communityName = null, bool signedOut = false, bool roomAbsent = false)
     {
-        try { return new(Capture(preset, context, read, isCurrent, isAuthorized, temporaryChoice, activeModules)); }
+        try
+        {
+            return new(Capture(preset, context, read, isCurrent, isAuthorized, temporaryChoice, activeModules,
+                communityName, signedOut, roomAbsent));
+        }
         catch (OverlaySourceLimitException) { return new(null, "overlay.sources_limit_exceeded"); }
     }
 
@@ -213,9 +247,14 @@ public sealed class InformationOverlayModuleFrame
                 { Source = new(content.Source.Mode, null, false, current ? "source_unavailable" : "identity_unavailable"), Snapshot = null };
             return content;
         }
-        foreach (var module in modules.Keys.ToArray()) modules[module] = Validate(module, modules[module]);
+        // Names are attached only after validation, from the content that survived it.
+        foreach (var module in modules.Keys.ToArray())
+            modules[module] = _requests.Describe(module, Validate(module, modules[module]), OwnerKey);
         if (chat.Length > 0) modules[OverlaySourceModule.Chat] = modules[OverlaySourceModule.Chat] with
-            { ChatSources = Array.AsReadOnly(chat.Select(item => Validate(OverlaySourceModule.Chat, item)).ToArray()) };
+        {
+            ChatSources = Array.AsReadOnly(chat.Select((item, index) =>
+                _requests.DescribeChat(index, Validate(OverlaySourceModule.Chat, item), OwnerKey)).ToArray())
+        };
         return new ReadOnlyDictionary<OverlaySourceModule, InformationOverlayModuleContent>(modules);
     }
 }

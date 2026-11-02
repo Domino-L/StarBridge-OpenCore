@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_slider.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'overlay_calm_display_controls.dart';
 import 'overlay_workspace_models.dart';
 
 const _moduleKeyByGroup = <String, String>{
@@ -62,13 +65,11 @@ class OverlayWorkspaceModuleStyleControls extends StatelessWidget {
         ),
         if (item != null) ...[
           SizedBox(height: tokens.space.xs),
-          SwitchListTile(
-            key: Key('overlay-module-lock-$moduleKey'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              AppStrings.of(context)
-                  .text('overlay.workspace.layout.lockPositionSize'),
-            ),
+          StarBridgeSwitch.tile(
+            controlKey: Key('overlay-module-lock-$moduleKey'),
+            preserveNativeTile: true,
+            label: AppStrings.of(context)
+                .text('overlay.workspace.layout.lockPositionSize'),
             value: item.isLocked,
             onChanged: (value) =>
                 onLayoutChanged(item.copyWith(isLocked: value), false),
@@ -119,6 +120,14 @@ class OverlayWorkspaceModuleStyleControls extends StatelessWidget {
             }
           },
         ),
+        if (moduleKey case 'Squads' || 'Members' || 'Chat')
+          OverlayCalmDisplayControls(
+            settings: settings,
+            onSettingChanged: onSettingChanged,
+            chatBarrage:
+                moduleKey == 'Chat' &&
+                settings['chatDisplayMode'] == 'FullScreenBarrage',
+          ),
       ],
     );
   }
@@ -160,12 +169,13 @@ class _OpacityControl extends StatelessWidget {
               ),
             ],
           ),
-          Slider(
+          StarBridgeSlider(
+            semanticLabel: label,
             value: value.clamp(minimum, 1),
             min: minimum,
             max: 1,
             divisions: divisions,
-            label: '${(value * 100).round()}%',
+            valueLabel: (value) => '${(value * 100).round()}%',
             onChanged: onChanged,
           ),
         ],

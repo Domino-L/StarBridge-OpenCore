@@ -11,6 +11,8 @@ public sealed partial class AccountBridgeRuntime
     private OverlayRoomRefreshDriver? _liveModuleCommunities;
     public void ConfigureLiveOverlayUpdates(IInformationOverlayLiveUpdateSink sink)
     {
+        using var configuration = EnterAccountBusinessConfiguration();
+        if (configuration is null) throw new InvalidOperationException("Account background work has retired.");
         if (_liveOverlaySink is not null) throw new InvalidOperationException("Live overlay updates already configured.");
         _liveOverlaySink = sink;
         _overlayCommunities?.SetModuleMode(() => sink.ModuleDemand is not null,
@@ -25,16 +27,17 @@ public sealed partial class AccountBridgeRuntime
         _liveRoomRefresh = new(() =>
         {
             var owner = GameplayOwner();
-            var enabled = !_disposed && sink.HasDisplayDemand && (sink.ModuleDemand is { } demand
+            var enabled = !_disposed && !_localBusinessRetired &&
+                (sink.HasDisplayDemand || sink.ModuleDemand is not null && sink.HasStandbyDemand) && (sink.ModuleDemand is { } demand
                 ? ModuleRequestsRoomRefresh(demand, owner.Context, owner.Generation)
                 : CurrentOverlaySceneMode == "room" || CurrentOverlaySceneMode == "auto" && CurrentRoomOverlay is not null);
             return (owner.Context, owner.Generation, enabled);
         }, async (owner, token) =>
         {
             try { await _host.GetPartyRoomsAsync(owner, token).ConfigureAwait(false); }
-            finally { if (!_disposed) sink.RequestContentRefresh(); }
+            finally { if (!_disposed && !_localBusinessRetired) sink.RequestContentRefresh(); }
         }, successInterval: () => ModuleRoomRefreshInterval(sink),
-            demandIdentity: () => sink.ModuleDemand?.RefreshIdentity);
+            demandIdentity: () => sink.ModuleDemand?.RefreshIdentity, startDriver: !_firstUseCandidate);
         if (_moduleCommunityDriverEnabled && _overlayCommunities is not null)
             _liveModuleCommunities = new(() =>
             {
@@ -44,15 +47,21 @@ public sealed partial class AccountBridgeRuntime
             {
                 var request = CaptureModuleCommunityRequest();
                 if (request is not null && request.Owner == owner)
+                {
+                    if (request.FleetConfirmation)
+                        await _overlayCommunities.RefreshFleetMembershipAsync(owner, request.Generation, token).ConfigureAwait(false);
                     await _overlayCommunities.RefreshModuleSourcesAsync(owner, request.Generation, request.Codes, token,
                         request.CommunicationCodes).ConfigureAwait(false);
+                }
             }, successInterval: () => _overlayCommunities.ModuleRefreshDelay,
-                demandIdentity: () => CaptureModuleCommunityRequest()?.Identity);
+                demandIdentity: () => CaptureModuleCommunityRequest()?.Identity, startDriver: !_firstUseCandidate);
     }
 
     private TimeSpan ModuleRoomRefreshInterval(IInformationOverlayLiveUpdateSink sink)
     {
         if (sink.ModuleDemand is null) return TimeSpan.FromSeconds(1);
+        // Background renewal only needs to beat the 30-second room lease.
+        if (!sink.HasDisplayDemand) return TimeSpan.FromSeconds(15);
         var owner = GameplayOwner();
         var confirmingLimit = owner.Context is not null &&
             _moduleSourceBudget.RequiresRoomConfirmation(OverlaySceneChoiceStore.Hash(owner.Context), owner.Generation);
@@ -92,8 +101,16 @@ public sealed partial class AccountBridgeRuntime
         _ = generation;
         // The render-thread read rechecks the actual owner. Waking it must not
         // wait for a source poll, or turn a completed logout into a UI failure.
-        if (!_disposed)
+        if (!_disposed && !_localBusinessRetired)
             try { _liveOverlaySink?.RequestContentRefresh(); } catch { }
+    }
+
+    private Task RetireLiveOverlayUpdatesAsync()
+    {
+        var rooms = _liveRoomRefresh;
+        var communities = _liveModuleCommunities;
+        DisposeLiveOverlayUpdates();
+        return Task.WhenAll(rooms?.Completion ?? Task.CompletedTask, communities?.Completion ?? Task.CompletedTask);
     }
 
     private void DisposeLiveOverlayUpdates()

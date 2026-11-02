@@ -3,15 +3,25 @@ import 'package:flutter/material.dart';
 import '../../design_system/styles/future_restraint_style.dart';
 import '../../design_system/theme/theme_builder.dart';
 import '../../design_system/tokens/color_tokens.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 /// Use the client's dark theme directly. Menu layout and window opacity are
 /// separate concerns, not reasons to introduce another color system.
-ThemeData buildMenuOverlayTheme(Locale locale, {bool reduceMotion = false}) =>
-    buildStarBridgeTheme(
-      FutureRestraintStyle.resolve(AppearanceMode.dark)
-          .withReducedMotion(reduceMotion),
-      locale,
-    );
+ThemeData buildMenuOverlayTheme(
+  Locale locale, {
+  bool reduceMotion = false,
+  InteractionSuite interactionSuite = InteractionSuite.standard,
+}) => buildStarBridgeTheme(
+  () {
+    final tokens = FutureRestraintStyle.resolve(AppearanceMode.dark);
+    // QualityPass ⑧: the in-game menu keeps its previous fonts.
+    return tokens
+        .copyWith(typography: tokens.typography.withClassicFamilies())
+        .withReducedMotion(reduceMotion);
+  }(),
+  locale,
+  interactionSuite: interactionSuite,
+);
 
 /// Stills application effects, not the tickers used by interaction/visible read
 /// receipts. Freezing an entire surface would leave switches visually stale.
@@ -33,11 +43,12 @@ class MenuPresentation extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) {
-    final reduced =
-        safeMode || reduceMotion || MediaQuery.disableAnimationsOf(context);
+    final interaction = resolveStarBridgeInteraction(context);
+    final reduced = safeMode || reduceMotion || interaction.reduceMotion;
     final theme = buildMenuOverlayTheme(
       Localizations.localeOf(context),
       reduceMotion: reduced,
+      interactionSuite: interaction.suite,
     );
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
@@ -54,7 +65,7 @@ class MenuPresentation extends StatelessWidget {
             waitDuration: Duration(milliseconds: tooltipDelayMilliseconds),
           ),
         ),
-        child: child,
+        child: StarBridgeInteractionRegion(child: child),
       ),
     );
   }

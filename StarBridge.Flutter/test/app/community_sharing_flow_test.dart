@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/runtime/community_sharing_flow.dart';
 import 'package:starbridge_flutter/app/runtime/startup_prompt_queue.dart';
@@ -45,7 +46,7 @@ void main() {
       await h.settle(tester);
       expect(
         tester
-            .widget<CheckboxListTile>(
+            .widget<StarBridgeCheckboxTile>(
               find.byKey(const Key('community-sharing-events')),
             )
             .value,
@@ -53,7 +54,7 @@ void main() {
       );
       expect(
         tester
-            .widget<CheckboxListTile>(
+            .widget<StarBridgeCheckboxTile>(
               find.byKey(const Key('community-sharing-event-location')),
             )
             .value,
@@ -61,7 +62,7 @@ void main() {
       );
       expect(
         tester
-            .widget<CheckboxListTile>(
+            .widget<StarBridgeCheckboxTile>(
               find.byKey(const Key('community-sharing-event-presence')),
             )
             .value,
@@ -88,7 +89,7 @@ void main() {
       for (final kind in ['presence', 'server', 'ship', 'location', 'life']) {
         expect(
           tester
-              .widget<CheckboxListTile>(
+              .widget<StarBridgeCheckboxTile>(
                 find.byKey(Key('community-sharing-event-$kind')),
               )
               .value,
@@ -216,7 +217,7 @@ void main() {
       await h.settle(tester);
       expect(
         tester
-            .widget<CheckboxListTile>(
+            .widget<StarBridgeCheckboxTile>(
               find.byKey(const Key('community-sharing-hangar')),
             )
             .value,
@@ -326,7 +327,7 @@ void main() {
       for (final bit in [1, 2, 4, 8]) {
         expect(
           tester
-              .widget<CheckboxListTile>(
+              .widget<StarBridgeCheckboxTile>(
                 find.byKey(Key('community-sharing-$bit')),
               )
               .value,
@@ -502,7 +503,7 @@ void main() {
       for (final bit in [1, 2, 4, 8]) {
         expect(
           tester
-              .widget<CheckboxListTile>(
+              .widget<StarBridgeCheckboxTile>(
                 find.byKey(Key('community-sharing-$bit')),
               )
               .value,
@@ -545,7 +546,7 @@ void main() {
       expect(h.port.writes, 0);
       expect(
         tester
-            .widget<CheckboxListTile>(
+            .widget<StarBridgeCheckboxTile>(
               find.byKey(const Key('community-sharing-1')),
             )
             .value,

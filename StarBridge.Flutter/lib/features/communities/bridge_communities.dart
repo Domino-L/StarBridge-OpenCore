@@ -1,14 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../../platform/bridge/bridge_client_session.dart';
+import '../../shared/downloadable_image_cache.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 import 'communities_module.dart';
 import 'community_creation_port.dart';
 import 'community_logo_port.dart';
+import 'community_wide_image_port.dart';
 import 'community_image_data.dart';
 import 'community_workspace_port.dart';
 import 'community_directory_metadata_port.dart';
 import 'community_visitor_profile_port.dart';
+import 'community_cached_presentation_port.dart';
+import 'offline_community_reader.dart';
 import '../personal_profile/bridge_personal_profile_adapter.dart';
 import '../personal_profile/personal_profile_models.dart';
 
@@ -23,12 +30,90 @@ final class BridgeCommunities extends CommunityBridgeTransport
         CommunityBridgeManagement,
         CommunityBridgeHangar
     implements
+        DownloadableImageCache,
         CommunityVisitorProfilePort,
         CommunityCreationPort,
         CommunityLogoPort,
+        CommunityWideImagePort,
         CommunityDirectoryMetadataPort,
+        CommunityProgressiveDirectoryPort,
+        CommunityCachedPresentationPort,
         CommunityWorkspacePort {
-  BridgeCommunities(super.session, {super.ownAvatar});
+  BridgeCommunities(
+    super.session, {
+    super.ownAvatar,
+    super.connectionMode,
+    this.retainedReadId,
+    this.retainedPreviousReadId,
+    this.retainedSelectionChanges,
+  }) {
+    _selection = (session.activeGeneration, retainedReadId?.call());
+    retainedSelectionChanges?.addListener(_selectionChanged);
+  }
+  final String? Function()? retainedReadId;
+  final String? Function()? retainedPreviousReadId;
+  final Listenable? retainedSelectionChanges;
+  int _imageEpoch = 0;
+  bool _imagesPaused = false;
+  @override
+  void beginImageMaintenance() {
+    _imagesPaused = true;
+    _imageEpoch++;
+  }
+
+  @override
+  void endImageMaintenance() {
+    _imageEpoch++;
+    _imagesPaused = false;
+  }
+
+  late (int, String?) _selection;
+  final _selectionChanges =
+      StreamController<CommunityCachedSelectionChange>.broadcast(sync: true);
+  void _selectionChanged() {
+    if (isClosed) return;
+    final next = (session.activeGeneration, retainedReadId?.call());
+    final previous = _selection;
+    if (next == previous) return;
+    _selection = next;
+    // Explicit offline reads belong to the mode revision, not this descriptor.
+    if (connectionMode?.allowsOnlineTraffic == false) return;
+    final retained = next.$2 != null;
+    final renewal =
+        retained &&
+        next.$1 == previous.$1 &&
+        previous.$2 != null &&
+        retainedPreviousReadId?.call() == previous.$2;
+    invalidateReadScope(notify: !retained);
+    if (retained) {
+      _selectionChanges.add(
+        renewal
+            ? CommunityCachedSelectionChange.renew
+            : CommunityCachedSelectionChange.replace,
+      );
+    }
+  }
+
+  late final _offline = OfflineCommunityReader(
+    session,
+    mode: connectionMode,
+    retainedReadId: retainedReadId,
+    epoch: () => requestEpoch,
+    request: readLocalDisplay,
+  );
+  @override
+  Stream<CommunityCachedLogo> get cachedLogoChanges => _offline.changes.stream;
+  @override
+  Stream<CommunityCachedSelectionChange> get cachedSelectionChanges =>
+      _selectionChanges.stream;
+  @override
+  Future<void> close() async {
+    retainedSelectionChanges?.removeListener(_selectionChanged);
+    await super.close();
+    await _offline.close();
+    await _selectionChanges.close();
+  }
+
   @override
   bool get visitorProfilesAvailable =>
       !isClosed &&
@@ -87,14 +172,72 @@ final class BridgeCommunities extends CommunityBridgeTransport
     hydrateLogos: false,
   );
 
+  @override
+  Future<CommunityDirectoryRead> readDirectoryProgressively({
+    required String view,
+    required String query,
+    String? after,
+    String? filters,
+  }) {
+    final ready = Completer<CommunityDirectoryRead>();
+    // Single-subscription: buffers logos that arrive before the owner listens.
+    final progress = StreamController<CommunityDirectory>();
+    var wanted = true;
+    // _readDirectory awaits its existing offline/admission path before this
+    // callback can run; the original physical completion is already assigned.
+    late final Future<CommunityDirectory> completion;
+    completion = _readDirectory(
+      view: view,
+      query: query,
+      after: after,
+      filters: filters,
+      hydrateLogos: true,
+      imagesWanted: () => wanted,
+      logoArrived: progress.add,
+      metadataReady: (page) => ready.complete(
+        CommunityDirectoryRead(
+          page,
+          images: completion,
+          progress: progress.stream,
+          retireImages: () => wanted = false,
+        ),
+      ),
+    );
+    unawaited(
+      completion
+          .then<void>((_) {}, onError: (Object _, StackTrace _) {})
+          .whenComplete(progress.close),
+    );
+    unawaited(
+      completion.then(
+        (page) {
+          // Cached/paused paths already return without waiting for online logos.
+          if (!ready.isCompleted) ready.complete(CommunityDirectoryRead(page));
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!ready.isCompleted) ready.completeError(error, stack);
+        },
+      ),
+    );
+    return ready.future;
+  }
+
   Future<CommunityDirectory> _readDirectory({
     required String view,
     required String query,
     String? after,
     String? filters,
     required bool hydrateLogos,
+    void Function(CommunityDirectory)? metadataReady,
+    void Function(CommunityDirectory)? logoArrived,
+    bool Function()? imagesWanted,
   }) async {
     final epoch = requestEpoch;
+    final imageEpoch = _imageEpoch;
+    bool imagesCurrent() =>
+        !_imagesPaused &&
+        imageEpoch == _imageEpoch &&
+        (imagesWanted?.call() ?? true);
     void current() {
       if (isClosed || epoch != requestEpoch) {
         throw const CommunityFailure('identityUnavailable');
@@ -102,6 +245,17 @@ final class BridgeCommunities extends CommunityBridgeTransport
     }
 
     try {
+      final cached = await _offline.read(
+        view: view,
+        query: query,
+        after: after,
+        filters: filters,
+        hydrate: hydrateLogos,
+        imagesCurrent: imagesCurrent,
+      );
+      if (cached != null) {
+        return imagesCurrent() ? cached : cached.withoutDownloadedLogos();
+      }
       final value = await sendRequest('communities.read', {
         'view': view,
         'query': query,
@@ -113,14 +267,17 @@ final class BridgeCommunities extends CommunityBridgeTransport
         throw const FormatException();
       }
       current();
+      if (!imagesCurrent()) return result.withoutDownloadedLogos();
       if (!hydrateLogos) return result;
       final rows = (value['items'] as List)
           .map((row) => Map<String, Object?>.from(row as Map))
           .toList();
+      if (!rows.any((row) => row['logoDeferred'] == true)) return result;
       var next = 0;
       Future<void> loadLogos() async {
         while (next < rows.length) {
           current();
+          if (!imagesCurrent()) return;
           final index = next++;
           final row = rows[index];
           if (row['logoDeferred'] != true) continue;
@@ -129,6 +286,7 @@ final class BridgeCommunities extends CommunityBridgeTransport
             final bytes = await assembleCommunityMedia(
               (offset, version) async {
                 current();
+                if (!imagesCurrent()) throw StateError('Retired image read');
                 final chunk = await readMedia(
                   result.items[index].targetRef,
                   'logo',
@@ -139,10 +297,16 @@ final class BridgeCommunities extends CommunityBridgeTransport
                 return chunk;
               },
               'logo',
-              checkCurrent: current,
+              checkCurrent: () {
+                current();
+                if (!imagesCurrent()) throw StateError('Retired image read');
+              },
             );
             current();
             row['logoImageData'] = 'data:$mime;base64,${base64Encode(bytes)}';
+            if (logoArrived != null && imagesCurrent()) {
+              logoArrived(parseCommunityDirectory({...value, 'items': rows}));
+            }
           } on Object {
             // One unavailable/corrupt image must not discard a directory page.
             current();
@@ -151,17 +315,29 @@ final class BridgeCommunities extends CommunityBridgeTransport
         }
       }
 
-      // Bound parallel Bridge work; all chunks remain account/epoch guarded.
-      await Future.wait(List.generate(3, (_) => loadLogos()));
-      current();
-      return parseCommunityDirectory({...value, 'items': rows});
+      Future<CommunityDirectory> hydrate() async {
+        // Bound parallel Bridge work; all chunks remain account/epoch guarded.
+        await Future.wait(List.generate(3, (_) => loadLogos()));
+        current();
+        final hydrated = parseCommunityDirectory({...value, 'items': rows});
+        return imagesCurrent() ? hydrated : hydrated.withoutDownloadedLogos();
+      }
+
+      if (metadataReady != null) {
+        metadataReady(result);
+        return await backgroundLoadingRead(hydrate);
+      }
+      return await hydrate();
     } on BridgeClientException catch (e) {
       throw CommunityFailure(switch (e.code) {
+        'account.local_mode' => 'onlinePaused',
         'communities.upgradeRequired' => 'upgradeRequired',
         'communities.refreshRequired' => 'refreshRequired',
         'communities.identityUnavailable' ||
         'account.reauthorization_required' => 'identityUnavailable',
         'communities.dataInvalid' => 'dataInvalid',
+        'communities.notAllowed' => 'notAllowed',
+        'communities.readTransient' => 'readTransient',
         _ => 'unavailable',
       });
     } on FormatException {
@@ -349,6 +525,99 @@ final class BridgeCommunities extends CommunityBridgeTransport
   @override
   Future<void> clearLogo() async {
     await sendRequest('communities.clearLogo', const {});
+  }
+
+  @override
+  bool get canPickWideImage =>
+      !isClosed && session.hostCapabilities.contains('communities.wideImage');
+
+  void _requireWideImage([String? kind]) {
+    if (!canPickWideImage) throw const CommunityFailure('unavailable');
+    if (kind != null && kind != 'banner' && kind != 'background') {
+      throw const FormatException();
+    }
+  }
+
+  @override
+  Future<CommunityLogoSource?> pickWideImage(String kind) async {
+    _requireWideImage(kind);
+    final value = await sendRequest('communities.pickWideImage', {
+      'kind': kind,
+    }, timeout: const Duration(minutes: 5));
+    if (value['status'] == 'cancelled') return null;
+    if (value['status'] != 'selected' || value['source'] is! Map) {
+      throw const FormatException();
+    }
+    final source = Map<String, Object?>.from(value['source'] as Map);
+    final ref = source['sourceRef'],
+        image = source['previewImageData'],
+        width = source['width'],
+        height = source['height'];
+    if (ref is! String ||
+        !RegExp(r'^[a-f0-9]{32}$').hasMatch(ref) ||
+        image is! String ||
+        !image.startsWith('data:image/png;base64,') ||
+        image.length > 700000 ||
+        width is! int ||
+        height is! int ||
+        width <= 0 ||
+        height <= 0 ||
+        width * height > 16 * 1024 * 1024 ||
+        base64Decode(image.substring(22)).isEmpty) {
+      throw const FormatException();
+    }
+    return CommunityLogoSource(ref, image, width, height);
+  }
+
+  @override
+  Future<String> cropWideImage(
+    String sourceRef,
+    String kind,
+    double x,
+    double y,
+    double width,
+  ) async {
+    _requireWideImage(kind);
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(sourceRef) ||
+        !x.isFinite ||
+        !y.isFinite ||
+        !width.isFinite ||
+        x < 0 ||
+        x > 1 ||
+        y < 0 ||
+        y > 1 ||
+        width < .2 ||
+        width > 1 ||
+        x + width > 1 + 1e-12) {
+      throw const FormatException();
+    }
+    final value = await sendRequest('communities.cropWideImage', {
+      'sourceRef': sourceRef,
+      'kind': kind,
+      'x': x,
+      'y': y,
+      'width': width,
+    });
+    final data = value['imageData'];
+    const prefix = 'data:image/jpeg;base64,';
+    if (value['status'] != 'cropped' ||
+        data is! String ||
+        !data.startsWith(prefix) ||
+        data.length > 2796236) {
+      throw const FormatException();
+    }
+    final bytes = base64Decode(data.substring(prefix.length));
+    if (bytes.isEmpty || bytes.length > 2 * 1024 * 1024) {
+      throw const FormatException();
+    }
+    return data;
+  }
+
+  @override
+  Future<void> clearWideImage() async {
+    _requireWideImage();
+    final value = await sendRequest('communities.clearWideImage', const {});
+    if (value['status'] != 'cleared') throw const FormatException();
   }
 }
 

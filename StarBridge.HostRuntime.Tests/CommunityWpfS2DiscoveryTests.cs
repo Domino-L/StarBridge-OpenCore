@@ -4,7 +4,7 @@ using System.Text.Json;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Communities;
 
-internal static class CommunityWpfS2DiscoveryTests
+internal static partial class CommunityWpfS2DiscoveryTests
 {
     internal static async Task Verify()
     {

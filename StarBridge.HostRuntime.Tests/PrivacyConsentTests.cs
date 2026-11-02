@@ -48,15 +48,17 @@ internal static class PrivacyConsentTests
             foreach (var other in new[] { owner with { Subject = "other" }, owner with { Authority = "other" }, owner with { Environment = "other" } })
                 Check(!store.HasPublicationConsent(other), "consent is isolated by full account scope");
             var disconnected = true;
+            var clearClock = new SharingTestClock();
             mode = PlayerPresenceVisibilityMode.Invisible;
             input = input with { IdentityConfirmed = false };
             using (var invisibleOutage = new PrivacyPublication(store, () => input,
                 (current, payload, token) => disconnected ? Task.FromException(new HttpRequestException()) : Send(current, payload, token),
-                startTimer: false, visibility: () => mode))
+                startTimer: false, visibility: () => mode, timeProvider: clearClock))
             {
                 await invisibleOutage.TickAsync();
                 Check(store.HasPublicationConsent(owner), "transient invisible withdrawal failure does not revoke remembered consent");
                 disconnected = false;
+                clearClock.Advance(60);
                 await invisibleOutage.TickAsync();
                 Check(!sent[^1].GetProperty("online").GetBoolean(), "invisible can withdraw without game identity evidence");
             }

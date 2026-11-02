@@ -18,6 +18,7 @@ import 'bridge_communities_test.dart' show CommunityHarness;
 import 'community_chat_test.dart' show chatPage;
 import 'community_chat_panel_test.dart' show showChat;
 import '../friends/social_layout_test.dart' show loadFonts;
+import 'community_holo_test_support.dart';
 
 class UnreadPort extends NavigationPort
     implements
@@ -93,6 +94,32 @@ void main() {
     attention.dispose();
     await source.close();
   });
+  test(
+    'chat-only attention reuses GETs and exposes failure without acknowledging',
+    () async {
+      final chat = FakeChat()..next = page([10, 12], unread: 2);
+      CommunityChatPort narrowPort = chat;
+      final projection = CommunityChatAttention.forChat(
+        narrowPort,
+        observeActivity: false,
+      );
+      addTearDown(projection.dispose);
+      addTearDown(chat.changes.close);
+      projection.bind(['a' * 32]);
+      await drain();
+      expect(projection.count('a' * 32), 2);
+      expect(chat.receipts, isEmpty);
+      chat.failure = const CommunityFailure('unavailable');
+      projection.refresh();
+      await drain();
+      expect(projection.readError('a' * 32), 'unavailable');
+      chat.failure = null;
+      projection.refresh();
+      await drain();
+      expect(projection.readError('a' * 32), isNull);
+      expect(chat.receipts, isEmpty);
+    },
+  );
   testWidgets(
     'background unread accepts a healthy bridge response after three seconds',
     (tester) async {
@@ -259,6 +286,60 @@ void main() {
     expect(source.previewReads, 2);
     expect(attention.count(card.targetRef), 2);
   });
+  test('periodic reconciliation never stacks behind a slow pass', () async {
+    final held = source.chat.heldRead = Completer();
+    attention.bind([card.targetRef]);
+    expect(source.previewReads, 1);
+    // Slow Host: several reconcile ticks arrive while the pass is in flight.
+    for (var i = 0; i < 5; i++) {
+      attention.refresh(reconcile: true);
+    }
+    source.chat.heldRead = null;
+    held.complete(page([1], latest: 1, unread: 1));
+    await drain();
+    expect(
+      source.previewReads,
+      1,
+      reason: 'A reconcile tick must not queue a follow-up read.',
+    );
+    attention.refresh(reconcile: true);
+    await drain();
+    expect(source.previewReads, 2, reason: 'An idle tick still reconciles.');
+    // Activity events keep their immediate follow-up behaviour.
+    final again = source.chat.heldRead = Completer();
+    source.activity.add(null);
+    source.activity.add(null);
+    source.chat.heldRead = null;
+    again.complete(page([2], latest: 2, unread: 2));
+    await drain();
+    expect(source.previewReads, 4);
+  });
+  test('periodic reconciliation leaves Host workers for page reads', () async {
+    final targets = [card.targetRef, 'b' * 32, 'c' * 32];
+    attention.bind(targets);
+    await drain();
+    final settled = source.previewReads;
+    expect(settled, 3);
+    final held = source.chat.heldRead = Completer();
+    attention.refresh(reconcile: true);
+    await drain();
+    expect(
+      source.previewReads - settled,
+      1,
+      reason: 'Reconciliation reads one organization at a time.',
+    );
+    // An activity event during the pass restores event concurrency.
+    source.activity.add(null);
+    await drain();
+    expect(source.previewReads - settled, 3);
+    source.chat.heldRead = null;
+    held.complete(page([1], latest: 1, unread: 1));
+    await drain();
+  });
+  test('shell reconciliation is only the net under activity hints', () {
+    expect(CommunityShortcutsReconcile.interval, const Duration(seconds: 10));
+    expect(CommunityShortcutsReconcile.fullPassTicks, 6);
+  });
   testWidgets('visible chat reads on activity without waiting for its timer', (
     tester,
   ) async {
@@ -377,11 +458,12 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
+          await enterCommunitySection(tester);
         }
         port.chat.next = page([1], latest: 1, unread: 1, older: false);
         // A healthy presence heartbeat does not guarantee a chat notification.
         // Stay outside chat and do not manufacture a workspace change event.
-        await tester.pump(const Duration(seconds: 4));
+        await tester.pump(const Duration(seconds: 61));
         await tester.pumpAndSettle();
         expect(
           port.chat.receipts,
@@ -437,7 +519,7 @@ void main() {
       expect(port.chat.receipts, isEmpty);
       final settledReads = port.previewReads;
       expect(module.chatAttention.needsReconciliation, isFalse);
-      await tester.pump(const Duration(seconds: 16));
+      await tester.pump(const Duration(seconds: 61));
       await tester.pumpAndSettle();
       expect(
         port.previewReads,

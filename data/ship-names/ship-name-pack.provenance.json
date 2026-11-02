@@ -1,6 +1,6 @@
 {
     "schemaVersion":  1,
-    "packRevision":  "2026-09-30.1",
+    "packRevision":  "2026-10-14.1",
     "coverage":  [
                      {
                          "selector":  "*",
@@ -12,6 +12,16 @@
                      }
                  ],
     "entryOverrides":  [
+                           {
+                               "runtimeId": "RSI_Constellation_Mk5_Centaurus",
+                               "sourceType": "field-observation",
+                               "sourceName": "StarBridge maintainer field observation",
+                               "sourceReference": "Exact raw ship identifier independently confirmed by maintainer; English model name checked against supplied RSI store page",
+                               "verifiedDate": "2026-10-14",
+                               "translator": "StarBridge maintainer approved display wording",
+                               "licenseOrPermission": "No license claim is made for game identifiers, names or marks. No personal log or screenshot is included.",
+                               "maintainer": "StarBridge contributors"
+                           },
                            {
                                "runtimeId": "AEGS_Sabre_Raven_EX",
                                "sourceType": "field-observation",

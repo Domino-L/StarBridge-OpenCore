@@ -82,6 +82,10 @@ public sealed class ShipPresentationCatalog
     {
         var name = _names.Find(original);
         var key = Key(original);
+        // Display-only official manufacturer label; never invent a runtime ID.
+        if (key == "GATACTYILUI") key = Key("Tyilui");
+        // Confirmed former internal name of Antares; no other variants match.
+        if (name?.RuntimeId == "RSI_Scorpius_Interdiction") key = Key("Scorpius Antares");
         Row? row;
         if (!_byCatalogId.TryGetValue(original, out row) &&
             !_rows.TryGetValue(key, out row) && name?.RuntimeId is { } runtimeId)
@@ -91,8 +95,21 @@ public sealed class ShipPresentationCatalog
         if (name is null && row is not null) name = _names.Find(row.English);
         return new(name?.ChineseName ?? row?.Chinese, name?.TraditionalChineseName, row?.CombatSize,
             row is null ? null : "catalog-" + Key(row.English).ToLowerInvariant(),
-            row?.Category, row?.SizeClass, row?.DeliveryStatus, row?.PriceUsd, row?.ImageKey, row?.English ?? name?.EnglishName, row?.IconKey,
+            row?.Category, row?.SizeClass, row?.DeliveryStatus, row?.PriceUsd, row?.ImageKey ?? ApprovedSharedImage(name?.RuntimeId), row?.English ?? name?.EnglishName, row?.IconKey,
             _review.Find(original, name?.RuntimeId), row?.Manufacturer ?? ShipNameIndex.ManufacturerName(name?.RuntimeId));
+    }
+
+    // Explicit artwork-only approval. Original and replica remain separate identities;
+    // no catalog facts or inferred special-edition fallbacks cross this boundary.
+    private string? ApprovedSharedImage(string? runtimeId)
+    {
+        var title = runtimeId switch {
+            "ESPR_Blade" or "VNCL_Blade" => "Blade",
+            "ESPR_Glaive" or "VNCL_Glaive" => "Glaive",
+            "ESPR_Stinger" or "VNCL_Stinger" => "Stinger",
+            _ => null
+        };
+        return title is not null && _rows.TryGetValue(Key(title), out var row) ? row?.ImageKey : null;
     }
 
     /// <summary>Same exact-name fallback used by S2 profile presentation. Never registers a runtime alias.</summary>

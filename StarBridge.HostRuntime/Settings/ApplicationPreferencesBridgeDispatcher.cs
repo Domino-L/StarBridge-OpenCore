@@ -17,6 +17,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
     private readonly MenuSessionRecoveryStore? _menuRecovery;
     public IMenuHotkeyPreferences? MenuHotkeyPreferences => _menu;
     private readonly Lazy<string?> _initialLocale;
+    private readonly Lazy<ApplicationPreferencesSnapshot> _initialPresentation;
+    public string CurrentAppearanceMode => Volatile.Read(ref _current)?.Snapshot.AppearanceMode ?? _initialPresentation.Value.AppearanceMode;
+    public bool CurrentReduceMotion => (Volatile.Read(ref _current)?.Snapshot.MotionPreference ?? _initialPresentation.Value.MotionPreference) == "reduce";
 
     // Native presentation reads the committed immutable snapshot, never a Flutter
     // draft. Before the first request, seed it without applying startup settings.
@@ -62,12 +65,28 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
                                throw new ArgumentNullException(nameof(startupRegistration));
         _generation = generation ?? (() => 0);
         _initialLocale = new(() => _store.Load().Snapshot.LocaleOverride);
+        _initialPresentation = new(() => _store.Load().Snapshot);
     }
 
     public event Action<BridgeEnvelope>? EventReady
     {
         add { }
         remove { }
+    }
+
+    // Inspect saved device choices without Current() synchronizing Windows startup
+    // or caching a recovered default as the running application's preferences.
+    internal async ValueTask<ApplicationPreferencesReadResult> InspectLocalSetupAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            return _store.Load();
+        }
+        finally { _gate.Release(); }
     }
 
     public async ValueTask<BridgeDispatchBatch> DispatchAsync(
@@ -207,6 +226,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
             "localeOverride",
             "appearanceMode",
             "motionPreference",
+            "interactionStyle",
+            "appearancePreviewGuideSeen",
+            "holidayAppearance",
             "applicationBehavior");
         if (!patch.EnumerateObject().Any())
         {
@@ -337,6 +359,12 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
             LocaleOverride = localeOverride,
             AppearanceMode = appearanceMode,
             MotionPreference = motionPreference,
+            InteractionStyle = patch.TryGetProperty("interactionStyle", out var interactionValue)
+                ? RequireNonEmptyString(interactionValue, "interactionStyle") : current.InteractionStyle,
+            AppearancePreviewGuideSeen = patch.TryGetProperty("appearancePreviewGuideSeen", out _)
+                ? RequireBoolean(patch, "appearancePreviewGuideSeen") : current.AppearancePreviewGuideSeen,
+            HolidayAppearance = patch.TryGetProperty("holidayAppearance", out _)
+                ? RequireBoolean(patch, "holidayAppearance") : current.HolidayAppearance,
             LaunchAtStartup = launchAtStartup,
             KeepRunningInBackground = keepRunningInBackground,
             StartMinimized = startMinimized,
@@ -361,6 +389,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
                     ["localeOverride"] = result.Snapshot.LocaleOverride,
                     ["appearanceMode"] = result.Snapshot.AppearanceMode,
                     ["motionPreference"] = result.Snapshot.MotionPreference,
+                    ["interactionStyle"] = result.Snapshot.InteractionStyle,
+                    ["appearancePreviewGuideSeen"] = result.Snapshot.AppearancePreviewGuideSeen,
+                    ["holidayAppearance"] = result.Snapshot.HolidayAppearance,
                     ["applicationBehavior"] = new Dictionary<string, object?>
                     {
                         ["launchAtStartup"] = result.Snapshot.LaunchAtStartup,

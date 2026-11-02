@@ -8,6 +8,7 @@ enum AccountReviewState {
   signedIn,
   cached,
   mismatch,
+  verificationRequired,
   reauthorizationRequired,
 }
 
@@ -243,6 +244,10 @@ final class InMemoryAccountAdapter implements AccountPort {
       AccountReviewState.mismatch => _signedInSnapshot(
         2,
         identityState: AccountIdentityState.mismatch,
+      ),
+      AccountReviewState.verificationRequired => _signedInSnapshot(
+        2,
+        identityState: AccountIdentityState.verificationRequired,
       ),
       AccountReviewState.signedIn => _signedInSnapshot(2),
     };

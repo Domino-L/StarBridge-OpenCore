@@ -4,19 +4,32 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'community_chat_read_schedule.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/window/native_viewport_visibility.dart';
+import '../common/organization_holo.dart';
+import '../common/social_read_activity.dart';
 import 'community_chat_composer.dart';
 import 'community_chat_controller.dart';
 import 'community_activity_port.dart';
 import 'community_chat_media_cache.dart';
 import 'community_avatar_cache.dart';
 import 'community_chat_copy.dart';
+import 'community_chat_holo_effects.dart';
+import 'community_chat_holo_parts.dart';
+import 'community_chat_panel_parts.dart';
 import 'community_chat_message_tile.dart';
 import 'community_local_message_tile.dart';
 import 'community_own_avatar.dart';
 import 'community_chat_port.dart';
+import 'community_chat_author_viewport.dart';
 import 'community_preset_port.dart';
 import 'community_preset_dialog.dart';
 
@@ -28,11 +41,13 @@ class CommunityChatPanel extends StatefulWidget {
     required this.onBack,
     this.avatars,
     this.controller,
+    this.onBackSource,
     super.key,
   });
   final CommunityChatPort port;
   final String targetRef, name;
   final VoidCallback onBack;
+  final ValueChanged<InteractionSource>? onBackSource;
   final CommunityAvatarCache? avatars;
   final CommunityChatController? controller;
   @override
@@ -40,17 +55,26 @@ class CommunityChatPanel extends StatefulWidget {
 }
 
 class CommunityChatPanelState extends State<CommunityChatPanel>
-    with WidgetsBindingObserver {
+    with
+        WidgetsBindingObserver,
+        TickerProviderStateMixin,
+        CommunityChatHoloEffects<CommunityChatPanel> {
   late CommunityChatController model;
   late CommunityChatMediaCache media;
+  late SocialReadActivityBinding _readActivity;
+  late SocialReadActivityBinding _sendActivity;
   final _text = TextEditingController(), _scroll = ScrollController();
   final _keys = <String, GlobalKey>{};
   bool _readScheduled = false, _followLatest = true, _dialogOpen = false;
+  // Older history loads by itself when the reader scrolls up (as in WeChat);
+  // a failed load waits for the button instead of retrying in a loop.
+  bool _olderFailed = false, _userScrollingUp = false;
   bool _restoring = false, _positionScheduled = false;
   bool _autoScrolling = false, _readingLayoutPending = false;
+  StarBridgeDialogRoute<bool>? _leaveConfirmation;
   int _positionGeneration = 0, _observedLatest = 0;
   int? _lastSequence;
-  Timer? _poll;
+  late final CommunityChatReadDriver _reads;
   StreamSubscription<void>? _activity;
   String t(String key) => communityChatText(context, key);
   @override
@@ -59,14 +83,17 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_scrollChanged);
     _start();
-    _poll = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (mounted &&
-          _syncContext() &&
-          !model.invalidated &&
-          model.error != 'refreshRequired') {
-        unawaited(model.refresh(silent: true));
-      }
-    });
+    _reads = CommunityChatReadDriver(
+      port: () => widget.port,
+      model: () => model,
+      canRead: () => mounted && _syncContext(),
+      onInputChanged: () => mounted
+          ? setState(() {
+              _syncContext();
+              _scheduleRead();
+            })
+          : null,
+    );
   }
 
   void _start() {
@@ -74,14 +101,25 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     _activity = widget.port is CommunityActivityPort
         ? (widget.port as CommunityActivityPort).workspaceChanges.listen((_) {
             if (mounted && _syncContext()) {
-              unawaited(model.refresh(silent: true));
+              unawaited(_reads.pushedRead(model));
             }
           })
         : null;
     model =
         widget.controller ??
         CommunityChatController(widget.port, widget.targetRef, localEcho: true);
+    model.retireAuthors();
     media = model.media(avatars: widget.avatars);
+    _readActivity = SocialReadActivityBinding(
+      model,
+      () => model.showProgress,
+      initialRead: !model.hasLoaded,
+    );
+    _sendActivity = SocialReadActivityBinding(
+      model,
+      () => model.sending,
+      initialRead: false,
+    );
     model.addListener(_changed);
     _text.text = model.draft;
     _lastSequence = model.messages.lastOrNull?.sequence;
@@ -93,20 +131,33 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     } else if (_lastSequence != null) {
       _jumpAfterLayout();
     }
+    holoReset(model);
+    _olderFailed = false;
     unawaited(model.enter());
   }
 
   @override
   void didUpdateWidget(covariant CommunityChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.port == widget.port &&
+        oldWidget.avatars == widget.avatars &&
+        oldWidget.controller != null &&
+        identical(oldWidget.controller, widget.controller) &&
+        oldWidget.targetRef != widget.targetRef) {
+      media = model.media(avatars: widget.avatars);
+      return;
+    }
     if (oldWidget.port != widget.port ||
         oldWidget.avatars != widget.avatars ||
         oldWidget.targetRef != widget.targetRef ||
         oldWidget.controller != widget.controller) {
+      _dismissLeaveConfirmation();
       _rememberPosition();
       _positionGeneration++;
       _restoring = false;
       model.removeListener(_changed);
+      _readActivity.dispose();
+      _sendActivity.dispose();
       model.setReadingContext(visible: false, foreground: false);
       if (oldWidget.controller == null) model.dispose();
       _text.clear();
@@ -124,23 +175,22 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
         TickerMode.valuesOf(context).enabled &&
         NativeViewportScope.isActive(context) &&
         (ModalRoute.of(context)?.isCurrent ?? true);
-    final foreground =
-        WidgetsBinding.instance.lifecycleState == null ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
-    model.setReadingContext(visible: visible, foreground: foreground);
-    return visible && foreground;
+    _reads.syncContext(model, visible: visible);
+    return visible && _reads.inFront;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    model.retireAuthors();
     _syncContext();
     _scheduleRead();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _syncContext();
+    // Names go at once, even with nothing else about to redraw.
+    setState(_syncContext);
     if (state == AppLifecycleState.resumed) {
       _scheduleRead();
       WidgetsBinding.instance.scheduleFrame();
@@ -149,11 +199,15 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
 
   void _changed() {
     if (!mounted) return;
-    if (model.invalidated) media.invalidate();
+    if (model.invalidated) {
+      _dismissLeaveConfirmation();
+      media.invalidate();
+    }
     if (_text.text != model.draft) _text.text = model.draft;
     final last = model.messages.lastOrNull?.sequence;
-    final changed = last != _lastSequence;
+    final changed = last != _lastSequence, previous = _lastSequence;
     _lastSequence = last;
+    holoObserve(model, previousLast: previous, following: _followLatest);
     if (_followLatest) _observedLatest = last ?? 0;
     final retained = model.messages.map((m) => m.messageRef).toSet();
     _keys.removeWhere((key, _) => !retained.contains(key));
@@ -163,6 +217,7 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
   }
 
   void _scrollChanged() {
+    model.retireAuthors(notify: true);
     _scheduleRead();
     if (_positionScheduled) return;
     _positionScheduled = true;
@@ -312,25 +367,10 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
       if (!mounted || _restoring || _readingLayoutPending || !_syncContext()) {
         return;
       }
-      CommunityChatMessage? through;
-      for (final message in model.messages) {
-        final element = _keys[message.messageRef]?.currentContext;
-        final box = element?.findRenderObject();
-        final viewport = element
-            ?.findAncestorRenderObjectOfType<RenderViewport>();
-        if (box is! RenderBox ||
-            viewport == null ||
-            !box.attached ||
-            !box.hasSize) {
-          continue;
-        }
-        final bounds = box.localToGlobal(Offset.zero) & box.size;
-        final visible = viewport.localToGlobal(Offset.zero) & viewport.size;
-        if (bounds.overlaps(visible) &&
-            bounds.intersect(visible).height >= 16) {
-          through = message;
-        }
-      }
+      final visible = visibleCommunityChatMessages(model.messages, _keys);
+      model.observeAuthors(visible);
+      final through = visible.lastOrNull;
+      model.renewLapsedReceipt().then((ok) => ok ? _scheduleRead(retry: true) : 0);
       if (through != null) {
         unawaited(model.acknowledgeVisible(through.messageRef, retry: retry));
       }
@@ -341,52 +381,75 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     _followLatest = false;
     _rememberPosition();
     final current = model;
+    setState(() => holoLoadingOlder = true);
     await current.loadOlder();
+    if (mounted) {
+      setState(() {
+        holoLoadingOlder = false;
+        _olderFailed = current.error != null;
+      });
+    }
     if (mounted && model == current && current.viewport != null) {
       _restorePosition(current.viewport!);
     }
   }
 
-  Future<bool> confirmLeave() async {
-    if (model.sending || _dialogOpen) return false;
-    if (model.draft.isNotEmpty ||
-        model.draftAttachment != null ||
-        model.sendUncertain) {
+  void _autoOlder() {
+    if (model.hasOlder &&
+        !model.loading &&
+        !holoLoadingOlder &&
+        !_olderFailed) {
+      unawaited(_older());
+    }
+  }
+
+  Future<bool> confirmLeave({InteractionSource? source}) async {
+    final current = model;
+    if (current.sending || _dialogOpen) return false;
+    if (current.draft.isNotEmpty ||
+        current.draftAttachment != null ||
+        current.sendUncertain) {
       _dialogOpen = true;
       _syncContext();
-      final leave = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: Text(t('leaveTitle')),
-          content: Text(t('leaveBody')),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(t('stay')),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(t('leave')),
-            ),
-          ],
-        ),
+      final leave = await showCommunityChatLeaveDialog(
+        context,
+        source: source ?? StarBridgeActivationOrigin.sourceOf(context),
+        onRouteCreated: (route) => _leaveConfirmation = route,
       );
+      _leaveConfirmation = null;
       _dialogOpen = false;
-      if (!mounted || leave != true) {
+      if (!mounted ||
+          model != current ||
+          current.invalidated ||
+          leave != true) {
         if (mounted) _scheduleRead();
         return false;
       }
-      model.discardDraft();
+      current.discardDraft();
     }
     return mounted;
   }
 
-  Future<void> _back() async {
-    if (await confirmLeave() && mounted) widget.onBack();
+  Future<void> _back(InteractionSource source) async {
+    if (await confirmLeave(source: source) && mounted) {
+      if (widget.onBackSource != null) {
+        widget.onBackSource!(currentStarBridgeActivationSource);
+      } else {
+        widget.onBack();
+      }
+    }
   }
 
-  Future<void> _sharePreset() async {
+  void _dismissLeaveConfirmation() {
+    final route = _leaveConfirmation;
+    _leaveConfirmation = null;
+    if (route == null) return;
+    scheduleMicrotask(() {
+      if (route.isActive) route.navigator?.removeRoute(route, false);
+    });
+  }
+
+  Future<void> _sharePreset(InteractionSource source) async {
     final port = widget.port;
     final current = model;
     if (_dialogOpen || !current.canSubmit || port is! CommunityPresetPort) {
@@ -395,11 +458,10 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     _dialogOpen = true;
     _syncContext();
     try {
-      final attachment = await showDialog<Map<String, Object?>>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) =>
-            CommunityPresetDialog(port: port as CommunityPresetPort),
+      final attachment = await showCommunityPresetDialog(
+        context,
+        port: port as CommunityPresetPort,
+        source: source,
       );
       if (mounted &&
           model == current &&
@@ -418,12 +480,15 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
 
   @override
   void dispose() {
+    _dismissLeaveConfirmation();
     _rememberPosition();
     _positionGeneration++;
-    _poll?.cancel();
+    _reads.dispose();
     unawaited(_activity?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     model.removeListener(_changed);
+    _readActivity.dispose();
+    _sendActivity.dispose();
     model.setReadingContext(visible: false, foreground: false);
     if (widget.controller == null) model.dispose();
     _scroll.dispose();
@@ -431,231 +496,304 @@ class CommunityChatPanelState extends State<CommunityChatPanel>
     super.dispose();
   }
 
-  Widget _notice(String key, {VoidCallback? retry}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            t(key),
-            style: TextStyle(color: context.tokens.colors.warning),
-          ),
-        ),
-        if (retry != null)
-          TextButton(onPressed: retry, child: Text(t('retry'))),
-      ],
-    ),
-  );
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.tokens.surfaces.panel.fill,
-        border: Border.all(color: context.tokens.surfaces.panel.border),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              IconButton(
-                onPressed: model.sending ? null : _back,
-                tooltip: t('back'),
-                icon: const StandardIcon(StandardIconSemantic.arrowBack),
+    final holo = OrganizationHolo.of(context);
+    final fresh = holoNewCount(model, _observedLatest);
+    return CommunityChatHoloAmbient(
+      child: Container(
+        padding: holo ? EdgeInsets.zero : const EdgeInsets.all(16),
+        decoration: holo
+            ? null
+            : BoxDecoration(
+                color: context.tokens.surfaces.panel.fill,
+                border: Border.all(color: context.tokens.surfaces.panel.border),
+                borderRadius: BorderRadius.circular(6),
               ),
-              Expanded(
-                child: Text(
-                  '${widget.name} · ${t('title')}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                StarBridgeIconAction(
+                  controlKey: const Key('community-chat-back'),
+                  onActivate: model.sending ? null : _back,
+                  label: t('back'),
+                  icon: const StandardIcon(StandardIconSemantic.arrowBack),
                 ),
-              ),
-              IconButton(
-                onPressed: model.loading || model.invalidated
-                    ? null
-                    : model.refresh,
-                tooltip: t('refresh'),
-                icon: const StandardIcon(StandardIconSemantic.refresh),
-              ),
-            ],
-          ),
-          if (model.showProgress)
-            const LinearProgressIndicator(minHeight: 2)
-          else
-            const SizedBox(height: 2),
-          if (model.error != null) _notice(model.error!),
-          if (model.receiptError != null)
-            _notice(
-              'readFailed',
-              retry: () {
-                _scheduleRead(retry: true);
-                WidgetsBinding.instance.scheduleFrame();
-              },
-            ),
-          if (model.hasOlder)
-            Align(
-              alignment: Alignment.center,
-              child: TextButton(
-                onPressed: model.loading ? null : _older,
-                child: Text(t('older')),
-              ),
-            ),
-          Expanded(
-            child: model.messages.isEmpty && model.localMessages.isEmpty
-                ? Center(
-                    child: Text(
-                      model.loading ? '' : t(model.error ?? 'empty'),
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : NotificationListener<ScrollNotification>(
-                    onNotification: (event) {
-                      if (!_restoring &&
-                          !_autoScrolling &&
-                          event.depth == 0 &&
-                          (event is ScrollUpdateNotification ||
-                              event is ScrollEndNotification)) {
-                        final follow = event.metrics.extentAfter < 36;
-                        if (follow != _followLatest) {
-                          setState(() => _followLatest = follow);
-                        }
-                        if (follow) _observedLatest = _lastSequence ?? 0;
-                        _rememberPosition();
-                      }
-                      _scheduleRead();
-                      return false;
-                    },
-                    child: ListView.builder(
-                      controller: _scroll,
-                      // Desktop scrollbar paints inside the viewport; keep
-                      // message avatars and bubbles outside its hit area.
-                      padding: const EdgeInsetsDirectional.only(end: 20),
-                      itemCount:
-                          model.messages.length + model.localMessages.length,
-                      itemBuilder: (context, index) {
-                        if (index >= model.messages.length) {
-                          final local = model
-                              .localMessages[index - model.messages.length];
-                          return CommunityLocalMessageTile(
-                            key: ObjectKey(local),
-                            message: local,
-                            composerOccupied:
-                                model.draft.isNotEmpty ||
-                                model.draftAttachment != null,
-                            avatar: widget.port is CommunityOwnAvatarSource
-                                ? (widget.port as CommunityOwnAvatarSource)
-                                      .ownAvatarImageData
-                                : null,
-                            onRetry: model.canRetry(local)
-                                ? () => model.submit(retry: local)
-                                : null,
-                            onRestore: model.canRestore(local)
-                                ? () => model.restoreLocalDraft(local)
-                                : null,
-                            onCheck: model.loading
-                                ? null
-                                : () => model.refresh(silent: true),
-                          );
-                        }
-                        final message = model.messages[index];
-                        return CommunityChatMessageTile(
-                          key: _keys.putIfAbsent(
-                            message.messageRef,
-                            GlobalKey.new,
-                          ),
-                          port: widget.port,
-                          mediaCache: media,
-                          targetRef: widget.targetRef,
-                          message: message,
-                        );
-                      },
-                    ),
-                  ),
-          ),
-          if (!_followLatest || model.hasNewer)
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 44),
-                  backgroundColor: context.tokens.surfaces.panel.fill,
+                Expanded(
+                  child: CommunityChatTitle('${widget.name} · ${t('title')}'),
                 ),
-                onPressed: () {
-                  _positionGeneration++;
-                  _restoring = false;
-                  setState(() {
-                    _followLatest = true;
-                    _observedLatest = _lastSequence ?? 0;
-                  });
-                  _jumpAfterLayout();
-                  unawaited(model.refresh());
+                StarBridgeIconAction(
+                  controlKey: const Key('community-chat-refresh'),
+                  onActivate: model.loading || model.invalidated
+                      ? null
+                      : (_) => model.refresh(),
+                  label: t('refresh'),
+                  icon: const StandardIcon(StandardIconSemantic.refresh),
+                ),
+              ],
+            ),
+            if (holo) holoSignal(),
+            if (model.showProgress)
+              SocialReadActivity(
+                key: ValueKey((model, _readActivity.revision)),
+                source: _readActivity.source,
+                opening: _readActivity.opening,
+                label: t('refresh'),
+              )
+            else
+              const SizedBox(height: 2),
+            if (model.error != null) CommunityChatNotice(model.error!),
+            if (model.receiptError != null)
+              CommunityChatNotice(
+                communityChatReceiptCopyKey(model.receiptError),
+                retry: () {
+                  _scheduleRead(retry: true);
+                  WidgetsBinding.instance.scheduleFrame();
                 },
-                icon: const StandardIcon(
-                  StandardIconSemantic.arrowDownward,
-                  size: 16,
+              ),
+            if (model.hasOlder && holoLoadingOlder)
+              const CommunityChatOlderProgress()
+            else if (model.hasOlder)
+              Align(
+                alignment: Alignment.center,
+                child: StarBridgeActionButton(
+                  controlKey: const Key('community-chat-older'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: model.loading
+                      ? null
+                      : (_) {
+                          _olderFailed = false;
+                          unawaited(_older());
+                        },
+                  child: Text(t('older')),
                 ),
-                label: Text(
-                  t(
-                    (_lastSequence ?? 0) > _observedLatest
-                        ? 'newMessages'
-                        : 'latest',
+              ),
+            Expanded(
+              child: model.messages.isEmpty && model.localMessages.isEmpty
+                  ? holo && model.loading && !model.hasLoaded
+                        ? const CommunityChatHoloSkeleton()
+                        : Center(
+                            child: Text(
+                              model.loading ? '' : t(model.error ?? 'empty'),
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (event) {
+                        if (!_restoring &&
+                            !_autoScrolling &&
+                            event.depth == 0 &&
+                            (event is ScrollUpdateNotification ||
+                                event is ScrollEndNotification)) {
+                          final follow = event.metrics.extentAfter < 36;
+                          if (follow != _followLatest) {
+                            setState(() => _followLatest = follow);
+                          }
+                          if (follow) _observedLatest = _lastSequence ?? 0;
+                          _rememberPosition();
+                        }
+                        // Only the reader's own scroll counts, never a jump.
+                        if (event is UserScrollNotification &&
+                            event.depth == 0) {
+                          _userScrollingUp =
+                              event.direction == ScrollDirection.forward;
+                        }
+                        // As in WeChat: nearing the top loads older history.
+                        if (_userScrollingUp &&
+                            event is ScrollUpdateNotification &&
+                            event.depth == 0 &&
+                            (event.scrollDelta ?? 0) < 0 &&
+                            event.metrics.extentBefore < 240 &&
+                            !_restoring &&
+                            !_autoScrolling) {
+                          _autoOlder();
+                        }
+                        _scheduleRead();
+                        return false;
+                      },
+                      child: ListView.builder(
+                        controller: _scroll,
+                        // Desktop scrollbar paints inside the viewport; keep
+                        // message avatars and bubbles outside its hit area.
+                        padding: const EdgeInsetsDirectional.only(end: 20),
+                        itemCount:
+                            model.messages.length + model.localMessages.length,
+                        itemBuilder: (context, index) {
+                          if (index >= model.messages.length) {
+                            final local = model
+                                .localMessages[index - model.messages.length];
+                            final localTile = CommunityLocalMessageTile(
+                              key: ObjectKey(local),
+                              message: local,
+                              source: _sendActivity.source,
+                              composerOccupied:
+                                  model.draft.isNotEmpty ||
+                                  model.draftAttachment != null,
+                              avatar: widget.port is CommunityOwnAvatarSource
+                                  ? (widget.port as CommunityOwnAvatarSource)
+                                        .ownAvatarImageData
+                                  : null,
+                              onRetry: model.canRetry(local)
+                                  ? () => model.submit(retry: local)
+                                  : null,
+                              onRestore: model.canRestore(local)
+                                  ? () => model.restoreLocalDraft(local)
+                                  : null,
+                              onCheck: model.loading
+                                  ? null
+                                  : () => model.refresh(silent: true),
+                            );
+                            return holoTile(
+                              local,
+                              local.state == 'sending'
+                                  ? CommunityChatHoloSending(child: localTile)
+                                  : localTile,
+                            );
+                          }
+                          final message = model.messages[index];
+                          final tile = CommunityChatMessageTile(
+                            key: _keys.putIfAbsent(message.messageRef, GlobalKey.new),
+                            port: widget.port,
+                            mediaCache: media,
+                            targetRef: widget.targetRef,
+                            message: model.presentAuthor(message),
+                            authorIsCurrent: model.authorIsCurrent,
+                            seenAuthors: model.seenAuthors,
+                          );
+                          final shown = holoTile(message.messageRef, tile);
+                          final day =
+                              holo &&
+                              communityChatNewDay(
+                                index == 0
+                                    ? null
+                                    : model.messages[index - 1].createdAt,
+                                message.createdAt,
+                              );
+                          final unread =
+                              holo && message.messageRef == holoUnreadRef;
+                          if (!day && !unread) return shown;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (day) CommunityChatDayBreak(message.createdAt),
+                              if (unread) const CommunityChatUnreadBreak(),
+                              shown,
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+            ),
+            if (!_followLatest || model.hasNewer)
+              OrganizationHoloFace(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: StarBridgeActionButton(
+                    controlKey: const Key('community-chat-latest'),
+                    nativeStyle: holo
+                        ? organizationHoloButton(context)
+                        : OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 44),
+                            backgroundColor: context.tokens.surfaces.panel.fill,
+                          ),
+                    onActivate: (_) {
+                      _positionGeneration++;
+                      _restoring = false;
+                      setState(() {
+                        _followLatest = true;
+                        _observedLatest = _lastSequence ?? 0;
+                      });
+                      _jumpAfterLayout();
+                      unawaited(model.refresh());
+                    },
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StandardIcon(
+                          StandardIconSemantic.arrowDownward,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            holo && fresh > 0
+                                ? t('newCount').replaceAll('{count}', '$fresh')
+                                : t(
+                                    (_lastSequence ?? 0) > _observedLatest
+                                        ? 'newMessages'
+                                        : 'latest',
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          if (model.sendError != null &&
-              (!model.localEcho || model.localMessages.isEmpty))
-            _notice(
-              model.sendError!,
-              retry: model.sendUncertain ? () => model.refresh() : null,
-            ),
-          if (model.localEcho && model.localMessages.length >= 20)
-            _notice('localLimit', retry: () => model.refresh(silent: true)),
-          if (model.draftAttachment case final attachment?)
-            ListTile(
-              dense: true,
-              title: Text(attachment['title'] as String? ?? t('preset')),
-              subtitle: Text(t('preset')),
-              trailing: IconButton(
-                onPressed: model.sending
-                    ? null
-                    : () => model.setDraftAttachment(null),
-                tooltip: t('removeAttachment'),
-                icon: const StandardIcon(StandardIconSemantic.close),
+            if (model.sendError != null &&
+                (!model.localEcho || model.localMessages.isEmpty))
+              CommunityChatNotice(
+                model.sendError!,
+                retry: model.sendUncertain ? () => model.refresh() : null,
               ),
-            ),
-          if (widget.port is CommunityPresetPort &&
-              (widget.port as CommunityPresetPort).communityPresetsAvailable)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: model.canSubmit ? _sharePreset : null,
-                icon: const StandardIcon(
-                  StandardIconSemantic.attachFile,
-                  size: 16,
+            if (model.localEcho && model.localMessages.length >= 20)
+              CommunityChatNotice(
+                'localLimit',
+                retry: () => model.refresh(silent: true),
+              ),
+            if (model.draftAttachment case final attachment?)
+              ListTile(
+                dense: true,
+                title: Text(attachment['title'] as String? ?? t('preset')),
+                subtitle: Text(t('preset')),
+                trailing: StarBridgeIconAction(
+                  onActivate: model.sending
+                      ? null
+                      : (_) => model.setDraftAttachment(null),
+                  label: t('removeAttachment'),
+                  icon: const StandardIcon(StandardIconSemantic.close),
                 ),
-                label: Text(t('sharePreset')),
               ),
+            if (widget.port is CommunityPresetPort &&
+                (widget.port as CommunityPresetPort).communityPresetsAvailable)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: model.canSubmit ? _sharePreset : null,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const StandardIcon(
+                        StandardIconSemantic.attachFile,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(t('sharePreset')),
+                    ],
+                  ),
+                ),
+              ),
+            CommunityChatComposer(
+              inputKey: const ValueKey('community-chat-input'),
+              controller: _text,
+              enabled: !model.invalidated,
+              onChanged: model.updateDraft,
+              onSend: model.canSubmit
+                  ? () {
+                      _followLatest = true;
+                      unawaited(model.submit());
+                      _jumpAfterLayout();
+                    }
+                  : null,
+              canSend:
+                  model.draft.trim().isNotEmpty ||
+                  model.draftAttachment != null,
             ),
-          CommunityChatComposer(
-            inputKey: const ValueKey('community-chat-input'),
-            controller: _text,
-            enabled: !model.invalidated,
-            onChanged: model.updateDraft,
-            onSend: model.canSubmit
-                ? () {
-                    _followLatest = true;
-                    unawaited(model.submit());
-                    _jumpAfterLayout();
-                  }
-                : null,
-            canSend:
-                model.draft.trim().isNotEmpty || model.draftAttachment != null,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

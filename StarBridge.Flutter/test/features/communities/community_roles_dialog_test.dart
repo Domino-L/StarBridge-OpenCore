@@ -169,7 +169,7 @@ void main() {
         find.byKey(const ValueKey('role-name')),
         'Private role draft',
       );
-      await tester.tap(find.byTooltip(copy(tester, 'close')));
+      await tester.tap(find.byKey(const Key('roles-close')));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       port.events.add(null);

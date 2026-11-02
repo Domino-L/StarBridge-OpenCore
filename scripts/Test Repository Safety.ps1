@@ -9,6 +9,8 @@ if ([string]::IsNullOrWhiteSpace($Root)) {
 }
 
 $Root = [IO.Path]::GetFullPath($Root)
+# Run before the general content scan; this also scans untracked product source.
+& (Join-Path $PSScriptRoot 'Test Product Input Safety.ps1') -Root $Root
 $gitDirectory = Join-Path $Root ".git"
 if (-not (Test-Path -LiteralPath $gitDirectory)) {
     throw "Repository safety check requires a Git working tree."
@@ -47,6 +49,19 @@ foreach ($inventoryRelative in @('flutter-packages.json', 'open-core/flutter-pac
         if (!$licensePath.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'License path escaped repository.' }
         if (!(Test-Path -LiteralPath $licensePath) -or (Get-FileHash -LiteralPath $licensePath).Hash -ne $package.licenseSha256) { throw 'Reviewed Flutter license changed.' }
         $reviewedLicensePaths[$licensePath] = $true
+    }
+}
+# Fonts in the reviewed asset manifest keep their upstream notice verbatim.
+$assetInventoryPath = Join-Path $Root 'open-core/client-assets.json'
+if (!(Test-Path -LiteralPath $assetInventoryPath)) { $assetInventoryPath = Join-Path $Root 'client-assets.json' }
+if (Test-Path -LiteralPath $assetInventoryPath) {
+    foreach ($asset in (Get-Content -LiteralPath $assetInventoryPath -Raw | ConvertFrom-Json).files) {
+        if ($asset.licenseFile -like 'StarBridge.Flutter/assets/font-licenses/*') {
+            $fontLicenseRoot = [IO.Path]::GetFullPath((Join-Path $Root 'StarBridge.Flutter/assets/font-licenses')).TrimEnd('\') + '\'
+            $fontLicense = [IO.Path]::GetFullPath((Join-Path $Root $asset.licenseFile))
+            if (!$fontLicense.StartsWith($fontLicenseRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Font license path escaped the reviewed directory.' }
+            $reviewedLicensePaths[$fontLicense] = $true
+        }
     }
 }
 $clientPackagingFiles = @(
@@ -121,7 +136,7 @@ try {
             foreach ($match in [regex]::Matches($emailText, $emailPattern)) {
                 $email = $match.Value.ToLowerInvariant()
                 if ($email -notmatch '@example\.(?:com|org|net)$' -and
-                    $email -notmatch '@example\.invalid$') {
+                    $email -notmatch '@example\.(?:invalid|test)$') {
                     $findings.Add("$relativePath [non-example email]")
                     break
                 }

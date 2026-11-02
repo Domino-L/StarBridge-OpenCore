@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../shared/inline_image_cache.dart';
 
 import '../../features/personal_profile/personal_profile_module.dart';
@@ -47,11 +48,13 @@ class _MenuProfileWindowPageState extends State<MenuProfileWindowPage> {
     child: PersonalProfilePage(
       module: module,
       isVisitor: true,
-      pageToolbar: TextButton(
-        onPressed:
+      pageToolbar: StarBridgeActionButton(
+        controlKey: const ValueKey('menu-profile-toolbar-refresh'),
+        kind: StarBridgeActionKind.quiet,
+        onActivate:
             widget.view.state == 'loading' || widget.view.state == 'revoked'
             ? null
-            : widget.onRefresh,
+            : (_) => widget.onRefresh(),
         child: Text(AppStrings.of(context).text('profile.refresh')),
       ),
     ),

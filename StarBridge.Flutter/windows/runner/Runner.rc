@@ -57,6 +57,10 @@ END
 IDI_APP_ICON            ICON                    "resources\\app_icon_dark_surface.ico"
 IDI_APP_ICON_DARK_SURFACE ICON                  "resources\\app_icon_dark_surface.ico"
 IDI_APP_ICON_LIGHT_SURFACE ICON                 "resources\\app_icon_light_surface.ico"
+IDI_APP_ICON_XMAS_DARK_SURFACE ICON             "resources\\app_icon_xmas_dark_surface.ico"
+IDI_APP_ICON_XMAS_LIGHT_SURFACE ICON            "resources\\app_icon_xmas_light_surface.ico"
+IDI_APP_ICON_HALLOWEEN_DARK_SURFACE ICON        "resources\\app_icon_halloween_dark_surface.ico"
+IDI_APP_ICON_HALLOWEEN_LIGHT_SURFACE ICON       "resources\\app_icon_halloween_light_surface.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////

@@ -34,6 +34,9 @@ internal sealed partial class OverlayCommunitySource
     internal async Task RefreshModuleSourcesAsync(BridgeAccountContext owner, long generation,
         IReadOnlyList<string> requested, CancellationToken token, IReadOnlyList<string>? communicationCodes = null)
     {
+        using var work = _retirement.Enter(token);
+        if (work is null) return;
+        token = work.Token;
         await _moduleReadGate.WaitAsync(token).ConfigureAwait(false);
         var scope = (Owner: (BridgeAccountContext?)owner, Generation: generation);
         try

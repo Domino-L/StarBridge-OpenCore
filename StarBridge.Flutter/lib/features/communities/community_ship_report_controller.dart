@@ -17,10 +17,24 @@ final class CommunityShipReportController extends ChangeNotifier {
   String details = '';
   CommunityShipReportIntent? intent;
   CommunityShipReportOutcome? outcome;
-  bool busy = false, _closed = false;
+  bool busy = false, _closed = false, _sourceRetired = false;
   bool get unknown => outcome?.status == 'unknown';
   bool get accepted => outcome?.status == 'accepted';
-  bool get editable => !busy && !unknown && !accepted && !_closed;
+  bool get editable =>
+      !busy && !unknown && !accepted && !_closed && !_sourceRetired;
+  bool get sourceRetired => _sourceRetired;
+  bool get canCheck =>
+      !busy &&
+      unknown &&
+      !_closed &&
+      (port is! CommunityShipReportReceiptScope ||
+          (port as CommunityShipReportReceiptScope)
+              .reportReceiptQueryAvailable);
+  void retireSource() {
+    _sourceRetired = true;
+    notifyListeners();
+  }
+
   bool get dirty =>
       !accepted && (reason != null || details.isNotEmpty || unknown);
   void edit(String? nextReason, String nextDetails) {
@@ -58,7 +72,7 @@ final class CommunityShipReportController extends ChangeNotifier {
   }
 
   Future<void> check() async {
-    if (busy || _closed || !unknown || intent == null) return;
+    if (!canCheck || intent == null) return;
     await _run(true);
   }
 

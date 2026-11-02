@@ -20,7 +20,7 @@ internal sealed record CommunityProfileSaveResult(string Status, string? Error =
 internal sealed partial class CommunityClient
 {
     private sealed record ProfileEdit(string Code, string Scope, string TargetRef, long Revision,
-        JsonElement Profile, bool CanEditProfile, bool CanEditLogo, bool CanEditBanner, DateTimeOffset Expires);
+        JsonElement Profile, bool CanEditProfile, bool CanEditLogo, bool CanEditBanner, bool WideImagesSupported, DateTimeOffset Expires);
     private sealed record ProfileAttempt(string Hash, CommunityProfileSaveResult Result);
     private readonly ConcurrentDictionary<string, ProfileEdit> _profileEdits = new();
     private readonly ConcurrentDictionary<string, ProfileAttempt> _profileAttempts = new();
@@ -62,6 +62,8 @@ internal sealed partial class CommunityClient
         var name = Text(root, "name", 512);
         var hasLogo = root.GetProperty("hasLogo").GetBoolean();
         var hasBanner = root.GetProperty("hasBanner").GetBoolean();
+        var hasBackground = root.TryGetProperty("hasBackground", out var background) && background.GetBoolean();
+        var wideImagesSupported = SupportsWideImages(root);
         lock (_profileCacheGate)
         {
             if (epoch != _profileEpoch) throw new AccountBridgeHostException("communities.identityUnavailable");
@@ -73,14 +75,23 @@ internal sealed partial class CommunityClient
             _targets[targetRef] = new(code, scope, DateTimeOffset.UtcNow.AddMinutes(5));
             var editRef = Guid.NewGuid().ToString("N");
             _profileEdits[editRef] = new(code, scope, targetRef, revision, profile, access["canEditProfile"],
-                access["canEditLogo"], access["canEditBanner"], DateTimeOffset.UtcNow.AddMinutes(30));
+                access["canEditLogo"], access["canEditBanner"], wideImagesSupported, DateTimeOffset.UtcNow.AddMinutes(30));
             return new
             {
-                schemaVersion = 1, targetRef, editRef, code, name, profileRevision = revision, hasLogo, hasBanner,
-                access, profile
+                schemaVersion = 1, targetRef, editRef, code, name, profileRevision = revision, hasLogo, hasBanner, hasBackground,
+                wideImagesSupported, access, profile
             };
         }
     }
+
+    // Presence flags describe stored media, not the server's upload contract.
+    private static bool SupportsWideImages(JsonElement root) =>
+        root.TryGetProperty("mediaProjectionVersion", out var version) && version.ValueKind == JsonValueKind.Number &&
+        version.TryGetInt32(out var number) && number >= 1;
+
+    private static bool RequiresWideImages(JsonElement changes) =>
+        changes.TryGetProperty("bannerImageData", out _) || changes.TryGetProperty("backgroundImageData", out _) ||
+        changes.TryGetProperty("clearBackgroundImage", out _);
 
     private static (long Revision, JsonElement Profile, Dictionary<string, bool> Access) ParseProfile(JsonElement root, string code)
     {
@@ -139,7 +150,7 @@ internal sealed partial class CommunityClient
                     if (!CommunityProfileEditingRules.TextFits(entry.Name, entry.Value.GetString()!) ||
                         (entry.Name == "type" && !CommunityProfileEditingRules.TagsFit(entry.Value.GetString()!))) throw Invalid();
                 }
-                else if (ProfileFlags.Contains(entry.Name) || entry.Name is "clearLogoImage" or "clearBannerImage")
+                else if (ProfileFlags.Contains(entry.Name) || entry.Name is "clearLogoImage" or "clearBannerImage" or "clearBackgroundImage")
                     entry.Value.GetBoolean();
                 else if (entry.Name == "logoImageData")
                 {
@@ -147,6 +158,11 @@ internal sealed partial class CommunityClient
                     var comma = data.IndexOf(',');
                     if (comma < 0 || data[..comma] is not ("data:image/png;base64" or "data:image/jpeg;base64" or "data:image/bmp;base64") ||
                         Convert.FromBase64String(data[(comma + 1)..]).Length is 0 or > 512 * 1024) throw Invalid();
+                }
+                else if (entry.Name is "bannerImageData" or "backgroundImageData")
+                {
+                    var data = Text(changes, entry.Name, StarBridge.Communities.CommunityImageUpload.MaximumTextLength);
+                    if (StarBridge.Communities.CommunityImageUpload.Normalize(data) is null) throw Invalid();
                 }
                 else if (entry.Name == "activityWindows")
                 {
@@ -166,7 +182,7 @@ internal sealed partial class CommunityClient
                     if (systems.Length == 0 || systems.Any(id => id is not ("stanton" or "pyro" or "nyx"))) throw Invalid();
                 }
                 else if (entry.Name == "externalContacts") ReadProfileContacts(changes);
-                else throw Invalid(); // In particular, no roles, identity, revision, URL or arbitrary banner upload.
+                else throw Invalid(); // No roles, identity, revision or remote image URL.
             }
             if (changes.TryGetProperty("joinPolicy", out var policy) && policy.GetString() is not ("Open" or "Approval" or "Invite")) throw Invalid();
             if (changes.TryGetProperty("publicMemberScaleMode", out var memberScale) && memberScale.GetString() is not ("Exact" or "Approx" or "Hidden")) throw Invalid();
@@ -175,7 +191,9 @@ internal sealed partial class CommunityClient
                 !TimeZoneInfo.GetSystemTimeZones().Any(value => value.Id == zone.GetString())) throw Invalid();
             foreach (var key in new[] { "inviteCodeCreationPolicy", "fleetInvitationCardPolicy" })
                 if (changes.TryGetProperty(key, out var value) && value.GetString() is not ("all_members" or "management" or "commander")) throw Invalid();
-            if (changes.TryGetProperty("logoImageData", out _) && changes.TryGetProperty("clearLogoImage", out var clear) && clear.GetBoolean()) throw Invalid();
+            foreach (var kind in new[] { "Logo", "Banner", "Background" })
+                if (changes.TryGetProperty(char.ToLowerInvariant(kind[0]) + kind[1..] + "ImageData", out _) &&
+                    changes.TryGetProperty("clear" + kind + "Image", out var clear) && clear.GetBoolean()) throw Invalid();
         }
         catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or FormatException or JsonException)
         { throw Invalid(); }
@@ -198,13 +216,15 @@ internal sealed partial class CommunityClient
             if (_profileAttempts.Count >= 256) return new("rejected", "refreshRequired");
             var edit = ResolveProfileEdit(editRef, scope);
             var changes = body.GetProperty("changes");
+            if (!edit.WideImagesSupported && RequiresWideImages(changes))
+                return new("rejected", "wideImagesUnsupported");
             var sections = new HashSet<string>();
             var outgoing = edit.Profile.EnumerateObject().Where(row => row.Name != "name").ToDictionary(row => row.Name, row => (object?)row.Value.Clone());
             foreach (var entry in changes.EnumerateObject())
             {
-                var section = entry.Name switch { "name" => "name", "logoText" or "logoImageData" or "clearLogoImage" => "logo", "clearBannerImage" => "banner",
+                var section = entry.Name switch { "name" => "name", "logoText" or "logoImageData" or "clearLogoImage" => "logo", "bannerImageData" or "clearBannerImage" => "banner", "backgroundImageData" or "clearBackgroundImage" => "background",
                     "description" => "description", "emailNotificationsEnabled" => "email-notifications", _ => "profile" };
-                if (!(section switch { "logo" => edit.CanEditLogo, "banner" => edit.CanEditBanner, _ => edit.CanEditProfile }))
+                if (!(section switch { "logo" => edit.CanEditLogo, "banner" or "background" => edit.CanEditBanner, _ => edit.CanEditProfile }))
                     return new("rejected", "notAllowed");
                 sections.Add(section);
                 outgoing[entry.Name] = entry.Value.Clone();

@@ -14,6 +14,12 @@ public sealed record GameLogSettings(long Revision = 0, string? Path = null, boo
 /// </summary>
 public sealed class GameLogSettingsStore(string root)
 {
+    internal Func<BridgeAccountContext, BridgeAccountContext>? ResolveOwner { get; set; }
+    private BridgeAccountContext StorageOwner(BridgeAccountContext owner)
+    {
+        try { return ResolveOwner?.Invoke(owner) ?? owner; }
+        catch (Privacy.LocalPrivacyException error) { throw new IOException("Business ownership is not verified.", error); }
+    }
     private readonly string _directory = Path.Combine(Path.GetFullPath(root), "game-log-local-v1");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, PropertyNameCaseInsensitive = false, MaxDepth = 8 };
@@ -30,17 +36,34 @@ public sealed class GameLogSettingsStore(string root)
     private sealed record LegacyData(int SchemaVersion, string Owner, LegacySettings Settings, string Integrity);
     public Lease Open(BridgeAccountContext owner)
     {
+        var authentication = owner;
+        owner = StorageOwner(authentication);
         if (!owner.IsComplete) throw new IOException();
         var hash = Hash(JsonSerializer.SerializeToUtf8Bytes(new[] { owner.Environment, owner.Authority, owner.Subject }));
         CheckTree(_directory);
         Directory.CreateDirectory(_directory);
         var path = Path.Combine(_directory, hash + ".json");
         CheckTree(path + ".lock");
-        return new(path, hash, new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+        var lease = new Lease(path, hash, new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)) {
+            EnsureOwnerCurrent = () => {
+                if (StorageOwner(authentication) != owner) throw new IOException("Business ownership changed.");
+            }
+        };
+        try { lease.ValidateOwner(); return lease; }
+        catch { lease.Dispose(); throw; }
     }
     public sealed class Lease(string path, string owner, FileStream writeLock) : IDisposable
     {
+        internal Action? EnsureOwnerCurrent { get; init; }
+        internal void ValidateOwner() => EnsureOwnerCurrent?.Invoke();
         public GameLogSettings Read()
+        {
+            ValidateOwner();
+            var result = ReadCore();
+            ValidateOwner();
+            return result;
+        }
+        private GameLogSettings ReadCore()
         {
             CheckTree(path);
             if (!File.Exists(path)) return new();
@@ -134,6 +157,7 @@ public sealed class GameLogSettingsStore(string root)
                 }
                 CheckTree(path);
                 if (!current()) throw new OperationCanceledException();
+                ValidateOwner();
                 if (before.Revision == 0) File.Move(temporary, path);
                 else File.Replace(temporary, path, null);
                 return next;

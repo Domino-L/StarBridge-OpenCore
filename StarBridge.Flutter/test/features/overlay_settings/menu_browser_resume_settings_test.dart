@@ -183,9 +183,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<SwitchListTile>(
-              find.byKey(const Key('menu-browser-resume-toggle')),
-            )
+            .widget<Switch>(find.byKey(const Key('menu-browser-resume-toggle')))
             .value,
         false,
       );
@@ -227,9 +225,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<SwitchListTile>(
-            find.byKey(const Key('menu-browser-resume-toggle')),
-          )
+          .widget<Switch>(find.byKey(const Key('menu-browser-resume-toggle')))
           .value,
       false,
     );

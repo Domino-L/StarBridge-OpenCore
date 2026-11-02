@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'application_support_copy.dart';
 import 'application_support_models.dart';
@@ -10,8 +13,8 @@ import 'installation_check_copy.dart';
 Future<void> showInstallationCheckDialog(
   BuildContext context,
   ApplicationSupportModule module,
-) => showDialog<void>(
-  context: context,
+) => showStarBridgeDialog<void>(
+  context,
   builder: (_) => InstallationCheckDialog(module: module),
 );
 
@@ -65,11 +68,12 @@ class _InstallationCheckDialogState extends State<InstallationCheckDialog> {
                     ),
                   ),
                 SizedBox(height: tokens.space.md),
-                FilledButton(
-                  key: const Key('installation-check-scan'),
-                  onPressed: loading
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.primary,
+                  controlKey: const Key('installation-check-scan'),
+                  onActivate: loading
                       ? null
-                      : () {
+                      : (_) {
                           setState(() => _requested = true);
                           widget.module.refresh();
                         },
@@ -85,9 +89,8 @@ class _InstallationCheckDialogState extends State<InstallationCheckDialog> {
                 for (final action in ['repair', 'uninstall', 'clean'])
                   Padding(
                     padding: EdgeInsets.only(top: tokens.space.sm),
-                    child: OutlinedButton(
-                      key: Key('installation-check-$action'),
-                      onPressed: null,
+                    child: StarBridgeActionButton(
+                      controlKey: Key('installation-check-$action'),
                       child: Text(t(action)),
                     ),
                   ),
@@ -95,8 +98,11 @@ class _InstallationCheckDialogState extends State<InstallationCheckDialog> {
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const Key('installation-check-close'),
+              onActivate: (source) =>
+                  dismissStarBridgeDialog(context, source: source),
               child: Text(t('close')),
             ),
           ],

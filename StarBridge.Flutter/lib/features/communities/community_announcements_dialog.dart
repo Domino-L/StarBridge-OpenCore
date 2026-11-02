@@ -12,12 +12,20 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../direct_messages/communication_time_formatter.dart';
 import 'community_announcements_controller.dart';
 import 'community_announcements_copy.dart';
 import 'community_announcements_port.dart';
 import 'community_announcements_refresh.dart';
 import 'community_editor_surface.dart';
+import 'community_announcements_form.dart';
+import '../common/organization_announcement_outcomes_dialog.dart';
 
 class CommunityAnnouncementEntry extends StatefulWidget {
   const CommunityAnnouncementEntry({
@@ -43,6 +51,11 @@ class CommunityAnnouncementEntry extends StatefulWidget {
 class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
     with CommunityAnnouncementsRefresh<CommunityAnnouncementEntry> {
   late CommunityAnnouncementsController model;
+  StarBridgeDialogRoute<void>? _route;
+  void _retireInactiveRoute() {
+    if (!model.active) retireStarBridgeDialog(_route);
+  }
+
   final _editorKey = GlobalKey<CommunityAnnouncementsDialogState>();
   Future<bool> confirmLeave() async =>
       await _editorKey.currentState?.confirmLeave() ?? true;
@@ -54,12 +67,32 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
     _start();
   }
 
+  Timer? _deferredEnter;
+
   void _start() {
     model =
         widget.controller ??
         CommunityAnnouncementsController(widget.port, widget.targetRef);
-    unawaited(model.enter());
+    model.addListener(_retireInactiveRoute);
+    _deferredEnter?.cancel();
+    _deferredEnter = null;
+    // A shared controller that already shows a page is re-entered after the
+    // screen switch has played, so the switch never rebuilds the workspace
+    // mid-animation (loading line 2026-10-29: 切到上屏卡顿).
+    if (widget.controller != null && model.page != null) {
+      _deferredEnter = Timer(enterDelay, () {
+        _deferredEnter = null;
+        if (mounted && identical(model, widget.controller)) {
+          unawaited(model.enter());
+        }
+      });
+    } else {
+      unawaited(model.enter());
+    }
   }
+
+  /// Longer than the screen switch (520 ms).
+  static const enterDelay = Duration(milliseconds: 700);
 
   @override
   void didUpdateWidget(covariant CommunityAnnouncementEntry oldWidget) {
@@ -68,6 +101,8 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
         oldWidget.targetRef != widget.targetRef ||
         oldWidget.controller != widget.controller) {
       final previous = model;
+      previous.removeListener(_retireInactiveRoute);
+      retireStarBridgeDialog(_route);
       if (oldWidget.controller == null) scheduleMicrotask(previous.dispose);
       _start();
     }
@@ -75,18 +110,26 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
 
   @override
   void dispose() {
+    _deferredEnter?.cancel();
     final previous = model;
+    previous.removeListener(_retireInactiveRoute);
+    retireStarBridgeDialog(_route);
     if (widget.controller == null) scheduleMicrotask(previous.dispose);
     super.dispose();
   }
 
-  Future<void> _open() async {
+  Future<void> _open({bool create = false}) async {
     final current = model;
-    await showDialog<void>(
-      context: context,
+    if (_route != null || !current.active) return;
+    StarBridgeDialogRoute<void>? opened;
+    await showStarBridgeDialog<void>(
+      context,
       barrierDismissible: false,
-      builder: (_) => CommunityAnnouncementsDialog(model: current),
+      builder: (_) =>
+          CommunityAnnouncementsDialog(model: current, startCreating: create),
+      onRouteCreated: (route) => _route = opened = route,
     );
+    if (identical(_route, opened)) _route = null;
     if (mounted &&
         current == model &&
         current.active &&
@@ -122,9 +165,25 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-                TextButton(
-                  key: const ValueKey('community-announcement-history-entry'),
-                  onPressed: model.active ? _open : null,
+                if (model.showManagementActions) ...[
+                  StarBridgeActionButton(
+                    controlKey: const ValueKey(
+                      'community-announcement-create-entry',
+                    ),
+                    kind: StarBridgeActionKind.primary,
+                    onActivate: model.active
+                        ? (_) => _open(create: true)
+                        : null,
+                    child: Text(t('create')),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                StarBridgeActionButton(
+                  controlKey: const ValueKey(
+                    'community-announcement-history-entry',
+                  ),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: model.active ? (_) => _open() : null,
                   child: Text(t('history')),
                 ),
               ],
@@ -138,8 +197,10 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
               if (model.active)
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: model.loading ? null : () => model.refresh(),
+                  child: StarBridgeActionButton(
+                    controlKey: const Key('announcement-entry-refresh'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: model.loading ? null : (_) => model.refresh(),
                     child: Text(t('refresh')),
                   ),
                 ),
@@ -161,17 +222,25 @@ class CommunityAnnouncementEntryState extends State<CommunityAnnouncementEntry>
             context,
             model.loading ? 'loading' : model.error ?? 'empty',
           );
-      return OutlinedButton.icon(
-        key: const ValueKey('community-announcement-entry'),
-        onPressed: model.active ? _open : null,
-        icon: const StandardIcon(StandardIconSemantic.campaign),
-        label: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            '${communityAnnouncementText(context, 'current')} · $title',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+      return StarBridgeActionButton(
+        controlKey: const ValueKey('community-announcement-entry'),
+        onActivate: model.active ? (_) => _open() : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const StandardIcon(StandardIconSemantic.campaign),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${communityAnnouncementText(context, 'current')} · $title',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     },
@@ -182,9 +251,11 @@ class CommunityAnnouncementsDialog extends StatefulWidget {
   const CommunityAnnouncementsDialog({
     required this.model,
     this.embedded = false,
+    this.startCreating = false,
     super.key,
   });
   final CommunityAnnouncementsController model;
+  final bool startCreating; // Open straight into a new announcement.
   final bool embedded;
   @override
   State<CommunityAnnouncementsDialog> createState() =>
@@ -198,7 +269,7 @@ class CommunityAnnouncementsDialogState
   @override
   CommunityAnnouncementsController get announcementModel => model;
   final title = TextEditingController(), content = TextEditingController();
-  final dialogs = <Route<dynamic>>[];
+  final dialogs = <StarBridgeDialogRoute<bool>>[];
   CommunityAnnouncement? selected;
   bool confirming = false;
   String t(String key) => communityAnnouncementText(context, key);
@@ -209,12 +280,34 @@ class CommunityAnnouncementsDialogState
     content.text = model.content;
     model.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && model.active) unawaited(model.refresh());
+      if (mounted && model.active) {
+        unawaited(() async {
+          await model.refresh();
+          if (mounted && model.active) await model.prepareManagement();
+          if (mounted &&
+              model.active &&
+              widget.startCreating &&
+              model.showManagementActions &&
+              model.writable) {
+            await _edit(true);
+          }
+        }());
+      }
     });
   }
 
   void _changed() {
     if (!mounted) return;
+    if (model.page == null &&
+        const {
+          'notAllowed',
+          'notFound',
+          'refreshRequired',
+        }.contains(model.error)) {
+      for (final route in dialogs.toList()) {
+        retireStarBridgeDialog(route);
+      }
+    }
     if (model.invalidated) {
       title.clear();
       content.clear();
@@ -222,11 +315,15 @@ class CommunityAnnouncementsDialogState
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         for (final route in dialogs.toList().reversed) {
-          if (route.isActive) route.navigator?.removeRoute(route);
+          retireStarBridgeDialog(route);
         }
         if (!widget.embedded) {
           final route = ModalRoute.of(context);
-          if (route?.isActive == true) route!.navigator?.removeRoute(route);
+          if (route is StarBridgeDialogRoute) {
+            retireStarBridgeDialog(route);
+          } else if (route?.isActive == true) {
+            route!.navigator?.removeRoute(route);
+          }
         } else {
           setState(() {});
         }
@@ -252,10 +349,33 @@ class CommunityAnnouncementsDialogState
 
   @override
   void dispose() {
+    for (final route in dialogs.toList()) {
+      retireStarBridgeDialog(route);
+    }
     model.removeListener(_changed);
     title.dispose();
     content.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CommunityAnnouncementsDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.model != widget.model) {
+      oldWidget.model.removeListener(_changed);
+      for (final route in dialogs.toList()) {
+        retireStarBridgeDialog(route);
+      }
+      title.text = model.title;
+      content.text = model.content;
+      selected = null;
+      model.addListener(_changed);
+    }
+  }
+
+  Future<void> _refresh() async {
+    await model.refresh();
+    if (mounted && model.active) await model.prepareManagement();
   }
 
   Future<bool> _confirm(
@@ -266,30 +386,45 @@ class CommunityAnnouncementsDialogState
   }) async {
     if (confirming || model.saving || !model.active) return false;
     setState(() => confirming = true);
-    final route = DialogRoute<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(heading),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('cancel')),
-          ),
-          TextButton(
-            style: danger
-                ? semanticActionStyle(context, ActionTone.danger)
-                : null,
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    dialogs.add(route);
+    StarBridgeDialogRoute<bool>? route;
     try {
-      return await Navigator.of(context).push(route) == true &&
+      return await showStarBridgeDialog<bool>(
+                context,
+                useRootNavigator: false,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  title: Text(heading),
+                  content: Text(body),
+                  actions: [
+                    StarBridgeActionButton(
+                      controlKey: const Key('announcement-confirm-cancel'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: false,
+                      ),
+                      child: Text(communityAnnouncementText(context, 'cancel')),
+                    ),
+                    StarBridgeActionButton(
+                      controlKey: const Key('announcement-confirm-accept'),
+                      kind: StarBridgeActionKind.quiet,
+                      tone: danger ? ActionTone.danger : null,
+                      onActivate: (source) => dismissStarBridgeDialog(
+                        context,
+                        source: source,
+                        result: true,
+                      ),
+                      child: Text(action),
+                    ),
+                  ],
+                ),
+                onRouteCreated: (opened) {
+                  route = opened;
+                  dialogs.add(opened);
+                },
+              ) ==
+              true &&
           mounted &&
           model.active;
     } finally {
@@ -316,14 +451,17 @@ class CommunityAnnouncementsDialogState
 
   Future<void> _close() async {
     if (await confirmLeave() && mounted && !widget.embedded) {
-      Navigator.of(context).pop();
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+      );
     }
   }
 
   Future<bool> confirmLeave() async => !model.active ? true : _discard();
 
-  void _edit(bool create) {
-    if (model.startEditing(create: create)) {
+  Future<void> _edit(bool create) async {
+    if (await model.prepareEditing(create: create) && mounted) {
       title.text = model.title;
       content.text = model.content;
       setState(() => selected = null);
@@ -389,25 +527,26 @@ class CommunityAnnouncementsDialogState
           spacing: 8,
           runSpacing: 8,
           children: [
-            OutlinedButton(
-              onPressed: () => setState(() => selected = item),
+            StarBridgeActionButton(
+              controlKey: ValueKey(
+                'announcement-details-${item.announcementRef}',
+              ),
+              onActivate: (_) => setState(() => selected = item),
               child: Text(t('details')),
             ),
-            if (current && model.canManage && !model.editing) ...[
-              OutlinedButton(
-                onPressed: model.writable && !confirming
-                    ? () => _edit(false)
+            if (current && model.showManagementActions && !model.editing) ...[
+              StarBridgeActionButton(
+                controlKey: const Key('announcement-edit'),
+                onActivate: model.writable && !confirming
+                    ? (_) => _edit(false)
                     : null,
                 child: Text(t('edit')),
               ),
-              OutlinedButton(
-                style: semanticActionStyle(
-                  context,
-                  ActionTone.danger,
-                  emphasis: ActionEmphasis.outlined,
-                ),
-                onPressed: model.writable && !confirming
-                    ? () => _withdraw(item)
+              StarBridgeActionButton(
+                controlKey: const Key('announcement-withdraw'),
+                tone: ActionTone.danger,
+                onActivate: model.writable && !confirming
+                    ? (_) => _withdraw(item)
                     : null,
                 child: Text(t('withdraw')),
               ),
@@ -418,61 +557,17 @@ class CommunityAnnouncementsDialogState
   Widget _editor() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
-        t(model.editBaseline == null ? 'create' : 'edit'),
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      if (model.editBaseline == null)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(t('publishBody')),
-        ),
-      const SizedBox(height: 12),
-      TextField(
-        key: const ValueKey('announcement-title'),
-        controller: title,
-        style: Theme.of(context).textTheme.bodyMedium,
-        enabled: !model.saving && !confirming,
-        maxLength: 48,
-        decoration: InputDecoration(labelText: t('title')),
-        onChanged: (_) => model.updateDraft(title.text, content.text),
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        key: const ValueKey('announcement-content'),
-        controller: content,
-        style: Theme.of(context).textTheme.bodyMedium,
-        enabled: !model.saving && !confirming,
-        minLines: 7,
-        maxLines: 14,
-        maxLength: 1200,
-        decoration: InputDecoration(labelText: t('content')),
-        onChanged: (_) => model.updateDraft(title.text, content.text),
-      ),
-      if (model.staleDraft) _status('announcementsChanged'),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          FilledButton(
-            onPressed: model.writable && !model.staleDraft && !confirming
-                ? model.save
-                : null,
-            child: Text(
-              t(
-                model.saving
-                    ? 'saving'
-                    : model.editBaseline == null
-                    ? 'publish'
-                    : 'save',
-              ),
-            ),
-          ),
-          OutlinedButton(
-            onPressed: !model.saving && !confirming ? _discard : null,
-            child: Text(t('discard')),
-          ),
-        ],
+      CommunityAnnouncementsForm(
+        title: title,
+        content: content,
+        creating: model.editBaseline == null,
+        saving: model.saving,
+        confirming: confirming,
+        stale: model.staleDraft,
+        canSave: model.writable,
+        onChanged: () => model.updateDraft(title.text, content.text),
+        onSave: model.save,
+        onDiscard: _discard,
       ),
       if (model.uncertain && model.page != null) ...[
         const Divider(height: 28),
@@ -483,8 +578,10 @@ class CommunityAnnouncementsDialogState
           Text(t('empty')),
         for (final item in model.history) _summary(item),
         if (model.page!.next != null)
-          TextButton(
-            onPressed: model.loading ? null : model.loadMore,
+          StarBridgeActionButton(
+            controlKey: const Key('announcement-more'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: model.loading ? null : (_) => model.loadMore(),
             child: Text(t('more')),
           ),
       ],
@@ -494,7 +591,11 @@ class CommunityAnnouncementsDialogState
   Widget build(BuildContext context) => PopScope(
     canPop: widget.embedded,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) unawaited(_close());
+      if (!didPop) {
+        unawaited(
+          runStarBridgeActivation<void>(InteractionSource.keyboard, _close),
+        );
+      }
     },
     child: CommunityEditorSurface(
       embedded: widget.embedded,
@@ -518,37 +619,85 @@ class CommunityAnnouncementsDialogState
                     t('center'),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  TextButton.icon(
-                    onPressed: model.loading || model.saving || confirming
+                  StarBridgeActionButton(
+                    controlKey: const Key('announcement-refresh'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: model.loading || model.saving || confirming
                         ? null
-                        : model.refresh,
-                    icon: const StandardIcon(
-                      StandardIconSemantic.refresh,
-                      size: 18,
+                        : (_) => _refresh(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StandardIcon(
+                          StandardIconSemantic.refresh,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(t('refresh')),
+                      ],
                     ),
-                    label: Text(t('refresh')),
                   ),
-                  if (model.canManage && !model.editing)
-                    FilledButton.icon(
-                      onPressed: model.writable && !confirming
-                          ? () => _edit(true)
-                          : null,
-                      icon: const StandardIcon(
-                        StandardIconSemantic.add,
-                        size: 18,
+                  if (model.management?.port.outcomesAvailable == true)
+                    StarBridgeActionButton(
+                      controlKey: const Key('announcement-own-outcomes'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: (_) => showOrganizationAnnouncementOutcomes(
+                        context,
+                        model.management!.outcomes,
                       ),
-                      label: Text(t('create')),
+                      child: Text(t('ownOutcomes')),
+                    ),
+                  if (model.showManagementActions && !model.editing)
+                    StarBridgeActionButton(
+                      controlKey: const Key('announcement-create'),
+                      kind: StarBridgeActionKind.primary,
+                      onActivate: model.writable && !confirming
+                          ? (_) => _edit(true)
+                          : null,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const StandardIcon(
+                            StandardIconSemantic.add,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(t('create')),
+                        ],
+                      ),
                     ),
                 ],
               ),
               if (model.showProgress) const LinearProgressIndicator(),
               if (model.error != null) _status(model.error!),
-              if (model.writeError != null) _status(model.writeError!),
+              if (model.writeError != null)
+                _status(
+                  model.writeError == 'outcomeUnknown' &&
+                          model.management != null
+                      ? 'officialOutcomeUnknown'
+                      : model.writeError!,
+                ),
               if (model.success != null) _status(model.success!, success: true),
-              if (model.uncertain)
-                TextButton(
-                  onPressed: model.canReviewUnknown && !confirming
-                      ? () async {
+              if (model.uncertain && model.management != null)
+                StarBridgeActionButton(
+                  controlKey: const Key('announcement-query-original'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: !model.saving && !confirming
+                      ? (_) => model.management!.originalIntent == null
+                            ? showOrganizationAnnouncementOutcomes(
+                                context,
+                                model.management!.outcomes,
+                              )
+                            : model.queryOriginalOutcome()
+                      : null,
+                  child: Text(t('queryOriginal')),
+                ),
+              if (model.uncertain && model.management == null)
+                StarBridgeActionButton(
+                  controlKey: const Key('announcement-review-unknown'),
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: model.canReviewUnknown && !confirming
+                      ? (_) async {
                           if (await _confirm(
                             t('reviewed'),
                             t('reviewBody'),
@@ -567,13 +716,21 @@ class CommunityAnnouncementsDialogState
                     if (selected != null) ...[
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () => setState(() => selected = null),
-                          icon: const StandardIcon(
-                            StandardIconSemantic.arrowBack,
-                            size: 18,
+                        child: StarBridgeActionButton(
+                          controlKey: const Key('announcement-back'),
+                          kind: StarBridgeActionKind.quiet,
+                          onActivate: (_) => setState(() => selected = null),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const StandardIcon(
+                                StandardIconSemantic.arrowBack,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(t('back')),
+                            ],
                           ),
-                          label: Text(t('back')),
                         ),
                       ),
                       CommunityAnnouncementDetails(
@@ -608,8 +765,11 @@ class CommunityAnnouncementsDialogState
                       if (model.page?.next != null)
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: OutlinedButton(
-                            onPressed: model.loading ? null : model.loadMore,
+                          child: StarBridgeActionButton(
+                            controlKey: const Key('announcement-more'),
+                            onActivate: model.loading
+                                ? null
+                                : (_) => model.loadMore(),
                             child: Text(t('more')),
                           ),
                         ),
@@ -621,8 +781,12 @@ class CommunityAnnouncementsDialogState
               if (!widget.embedded)
                 Align(
                   alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: model.saving || confirming ? null : _close,
+                  child: StarBridgeActionButton(
+                    controlKey: const Key('announcement-close'),
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: model.saving || confirming
+                        ? null
+                        : (_) => _close(),
                     child: Text(t('close')),
                   ),
                 ),

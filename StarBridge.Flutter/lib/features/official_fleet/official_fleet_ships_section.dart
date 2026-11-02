@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
 import '../../shared/ships/ship_catalog_display.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -13,6 +15,7 @@ import 'official_fleet_ships_module.dart';
 import 'official_fleet_ships_summary.dart';
 import 'official_fleet_ships_toolbar.dart';
 import 'official_fleet_support_views.dart';
+import 'official_fleet_refresh_notice.dart';
 
 class OfficialFleetShipsSection extends StatefulWidget {
   const OfficialFleetShipsSection({
@@ -140,6 +143,12 @@ class _ShipsContent extends StatelessWidget {
         ),
         SizedBox(height: tokens.space.md),
         OfficialFleetShipSummary(projection: projection),
+        OfficialFleetRefreshNotice(
+          active: projection.isRefreshing,
+          refreshFailed: projection.refreshFailed,
+          lastReadAtUtc: projection.lastReadAtUtc,
+          key: const Key('official-fleet-ships-refreshing'),
+        ),
         SizedBox(height: tokens.space.md),
         OfficialFleetShipsToolbar(
           projection: projection,
@@ -557,7 +566,7 @@ class _RequestState extends StatelessWidget {
     final color = switch (state) {
       OfficialFleetShipRequestState.requestable => tokens.colors.success,
       OfficialFleetShipRequestState.unavailable => tokens.colors.warning,
-      OfficialFleetShipRequestState.ownedByViewer => tokens.colors.accent,
+      OfficialFleetShipRequestState.ownedByViewer => tokens.colors.stateAccent,
     };
     return _OutlinedLabel(
       label: AppStrings.of(context).text(_requestStateKey(state)),
@@ -619,15 +628,19 @@ class _ShipsPaginationState extends State<_ShipsPagination> {
         ),
         SizedBox(
           width: 72,
-          child: TextField(
-            key: const Key('official-fleet-ships-jump-input'),
-            controller: _pageController,
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              hintText: strings.text('officialFleet.ships.pageNumber'),
+          child: StarBridgeFieldFrame(
+            enabled: true,
+            builder: (_, focus) => TextField(
+              focusNode: focus,
+              key: const Key('official-fleet-ships-jump-input'),
+              controller: _pageController,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                hintText: strings.text('officialFleet.ships.pageNumber'),
+              ),
+              onSubmitted: (_) => _jump(),
             ),
-            onSubmitted: (_) => _jump(),
           ),
         ),
         OutlinedButton(

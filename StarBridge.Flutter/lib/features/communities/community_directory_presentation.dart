@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/controls/semantic_action_style.dart';
 import 'communities_module.dart';
 import 'community_directory_card.dart';
 import 'community_gameplay_tags.dart';
@@ -53,7 +55,7 @@ final class CommunityDirectoryPresentation {
         children: [
           Row(
             children: [
-              CommunityLogo(data: row.logo, size: 44),
+              CommunityLogo(data: row.logo, size: 44, downloadedBy: row),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -66,7 +68,11 @@ final class CommunityDirectoryPresentation {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     Text(
-                      t('relation.${row.relationship}'),
+                      t(
+                        row.displayOnly
+                            ? 'cachedMembershipUnknown'
+                            : 'relation.${row.relationship}',
+                      ),
                       style: TextStyle(color: tone),
                     ),
                   ],
@@ -87,7 +93,9 @@ final class CommunityDirectoryPresentation {
                 Text('${t('activeTime')} · ${row.activeTime}'),
               if (row.memberCount != null)
                 Text('${t('members')} · ${row.memberCount}'),
-              Text(t('mode.${row.joinMode}')),
+              Text(
+                t(row.displayOnly ? 'cachedReadOnly' : 'mode.${row.joinMode}'),
+              ),
             ],
           ),
           if (row.recruiting ||
@@ -159,19 +167,17 @@ final class CommunityDirectoryPresentation {
             alignment: WrapAlignment.end,
             children: [
               if (!detail)
-                OutlinedButton(
-                  onPressed: model.writing ? null : () => model.open(row),
+                StarBridgeActionButton(
+                  controlKey: ValueKey('community-fallback-details-${row.key}'),
+                  onActivate: model.writing ? null : (_) => model.open(row),
                   child: Text(t('details')),
                 ),
               for (final action in row.actions)
-                OutlinedButton(
-                  style: action == 'leave'
-                      ? OutlinedButton.styleFrom(
-                          foregroundColor: context.tokens.colors.warning,
-                        )
-                      : null,
-                  onPressed: model.canExecute(row)
-                      ? () => onAction(row, action)
+                StarBridgeActionButton(
+                  controlKey: ValueKey('community-fallback-${row.key}-$action'),
+                  tone: action == 'leave' ? ActionTone.warning : null,
+                  onActivate: model.canExecute(row)
+                      ? (_) => onAction(row, action)
                       : null,
                   child: Text(t('action.$action')),
                 ),

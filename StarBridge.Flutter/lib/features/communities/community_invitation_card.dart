@@ -1,8 +1,10 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import 'community_invitation_attachment.dart';
 
 class CommunityInvitationCard extends StatelessWidget {
@@ -62,8 +64,9 @@ class CommunityInvitationCard extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed: busy ? null : onOpen,
+          StarBridgeActionButton(
+            controlKey: const Key('community-invitation-card-open'),
+            onActivate: busy || onOpen == null ? null : (_) => onOpen!(),
             child: Text(t('viewInvite')),
           ),
           if (onOpen == null)

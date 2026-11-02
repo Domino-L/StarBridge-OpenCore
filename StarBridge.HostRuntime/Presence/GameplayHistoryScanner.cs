@@ -1,12 +1,13 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Win32.SafeHandles;
+using static StarBridge.HostRuntime.Presence.CheckedGameLogAccess;
 
 namespace StarBridge.HostRuntime.Presence;
 
 public record GameplayHistoryPreview(long Seconds, int Sessions, int IncompleteSessions, int SkippedFiles);
+public sealed record GameplayHistoryProgress(string Phase, int ProcessedFiles, int TotalFiles,
+    long ReadBytes, long TotalBytes);
 
 /// <summary>
 /// Read-only preview of top-level logbackups/*.log beside a local Game.log.
@@ -16,28 +17,27 @@ public record GameplayHistoryPreview(long Seconds, int Sessions, int IncompleteS
 /// </summary>
 /// <remarks>
 /// UTF-8 (optional BOM), CR/LF/CRLF and a final unterminated line are supported.
+/// Like WPF, malformed bytes in ordinary text are replaced rather than rejecting
+/// the entire archive file. Identity and timestamp evidence must still be valid.
 /// Missing/foreign/ambiguous identities and invalid sessions are skipped.
 /// Duplicate intervals are complete only if every copy reports a clean exit.
-/// Bounds fail the whole preview rather than returning a silently partial total.
+/// Like WPF, archive count/size and elapsed time do not reject valid history.
+/// Files stream sequentially; memory holds one line and the interval index, not
+/// complete files. Cancellation is checked between read blocks and lines.
 /// Windows directory handles pin ancestors against rename/replacement during the
 /// scan; files are opened with OPEN_REPARSE_POINT and verified by handle.
 /// Only each file's initial length is read; concurrent in-place writes are not an
 /// atomic snapshot. Read handles briefly prevent rename/deletion of scanned files.
-/// Cancellation throws OperationCanceledException. The time budget is cooperative:
+/// Cancellation throws OperationCanceledException. Cancellation is cooperative:
 /// it cannot interrupt an OS filesystem call already in progress.
 /// GameplayTimeException codes: gameplay.history_path (unsafe input),
 /// gameplay.history_empty (no attributable duration), gameplay.history_unavailable
-/// (filesystem/encoding unavailable), gameplay.history_limit (resource/deadline bound).
+/// (filesystem unavailable), gameplay.history_limit (regex timeout only).
 /// </remarks>
 public static class GameplayHistoryScanner
 {
-    private const int MaximumFiles = 512;
-    private const int MaximumLineBytes = 64 * 1024;
-    private const long MaximumFileBytes = 64L * 1024 * 1024;
-    private const long MaximumTotalBytes = 256L * 1024 * 1024;
-    private static readonly TimeSpan TimeBudget = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan MaximumSessionLength = TimeSpan.FromHours(24);
-    private static readonly UTF8Encoding Utf8 = new(false, true);
+    private static readonly UTF8Encoding Utf8 = new(false, false);
 
     // Canonical PlayerOnline rule from RegexLogEventParser, with token boundaries.
     // A nickname alone (chat, party, ship owner, etc.) is not local identity evidence.
@@ -51,14 +51,20 @@ public static class GameplayHistoryScanner
     ];
 
     public static GameplayHistoryPreview Scan(string gameLogPath, string verifiedHandle,
-        DateTimeOffset cutoff, CancellationToken cancellation = default) =>
-        ScanCore(gameLogPath, verifiedHandle, cutoff, cancellation, TimeProvider.System);
+        DateTimeOffset cutoff, CancellationToken cancellation = default,
+        Action<GameplayHistoryProgress>? progress = null) =>
+        ScanWithProgress(gameLogPath, verifiedHandle, cutoff, cancellation, TimeProvider.System, progress);
 
-    // Instance clock seam keeps deadline/cancellation tests deterministic without global state.
+    // Instance clock seam keeps progress/cancellation tests deterministic without global state.
     private static GameplayHistoryPreview ScanCore(string gameLogPath, string verifiedHandle,
-        DateTimeOffset cutoff, CancellationToken cancellation, TimeProvider clock)
+        DateTimeOffset cutoff, CancellationToken cancellation, TimeProvider clock) =>
+        ScanWithProgress(gameLogPath, verifiedHandle, cutoff, cancellation, clock, null);
+
+    private static GameplayHistoryPreview ScanWithProgress(string gameLogPath, string verifiedHandle,
+        DateTimeOffset cutoff, CancellationToken cancellation, TimeProvider clock,
+        Action<GameplayHistoryProgress>? progress)
     {
-        var budget = new ScanBudget(clock, cancellation);
+        var budget = new ScanBudget(clock, cancellation, progress);
         budget.Check();
         if (!OperatingSystem.IsWindows()) throw Error("unavailable");
         var path = ValidatePath(gameLogPath);
@@ -73,17 +79,18 @@ public static class GameplayHistoryScanner
 
         try
         {
-            using var liveGuard = PinnedDirectories.Open(Path.GetDirectoryName(path)!, budget);
+            using var liveGuard = PinnedDirectories.Open(Path.GetDirectoryName(path)!, budget.Check);
             CheckTree(path, directory: false, budget);
             using (OpenChecked(path, directory: false, readContent: false)) { }
             var backups = Path.Combine(Path.GetDirectoryName(path)!, "logbackups");
             try { CheckTree(backups, directory: true, budget); }
             catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
             { throw Error("empty"); }
-            using var backupGuard = PinnedDirectories.Open(backups, budget);
+            using var backupGuard = PinnedDirectories.Open(backups, budget.Check);
 
             var files = new List<(string Path, long Length)>();
             long totalBytes = 0;
+            budget.Report(new("discovering", 0, 0, 0, 0));
             var options = new EnumerationOptions
             {
                 RecurseSubdirectories = false, IgnoreInaccessible = false,
@@ -93,31 +100,32 @@ public static class GameplayHistoryScanner
             foreach (var file in Directory.EnumerateFiles(backups, "*.log", options))
             {
                 budget.Check();
-                if (files.Count == MaximumFiles) throw Error("limit");
                 CheckTree(file, directory: false, budget);
                 var length = new FileInfo(file).Length;
-                if (length > MaximumFileBytes || length > MaximumTotalBytes - totalBytes)
-                    throw Error("limit");
-                totalBytes += length;
+                totalBytes = checked(totalBytes + length);
                 files.Add((file, length));
+                budget.Report(new("discovering", 0, files.Count, 0, totalBytes));
             }
 
             var block = new byte[16 * 1024];
-            var line = new byte[MaximumLineBytes];
+            var line = new byte[64 * 1024];
+            budget.Report(new("scanning", 0, files.Count, 0, totalBytes), force: true);
             foreach (var file in files)
             {
                 budget.Check();
                 Interval? interval;
                 try
                 {
-                    interval = ReadInterval(file.Path, file.Length, handle, cutoff, now, budget, block, line);
+                    interval = ReadInterval(file.Path, file.Length, handle, cutoff, now, budget, block, ref line);
                 }
                 catch (Exception e) when (ReadError(e))
                 {
                     unreadable++;
                     skipped++;
+                    budget.FileFinished();
                     continue;
                 }
+                budget.FileFinished();
                 if (interval is null) { skipped++; continue; }
                 var key = (interval.Start, interval.End);
                 if (intervals.TryGetValue(key, out var previous))
@@ -147,6 +155,7 @@ public static class GameplayHistoryScanner
             seconds += Seconds(start, end);
             budget.Check();
             if (seconds <= 0) throw Error("empty");
+            budget.Complete();
             return new(seconds, ordered.Length, ordered.Count(v => !v.CleanExit), skipped);
         }
         catch (RegexMatchTimeoutException) { throw Error("limit"); }
@@ -154,14 +163,13 @@ public static class GameplayHistoryScanner
     }
 
     private static Interval? ReadInterval(string path, long expectedLength, string handle,
-        DateTimeOffset cutoff, DateTimeOffset now, ScanBudget budget, byte[] block, byte[] line)
+        DateTimeOffset cutoff, DateTimeOffset now, ScanBudget budget, byte[] block, ref byte[] line)
     {
         CheckTree(path, directory: false, budget);
         using var fileHandle = OpenChecked(path, directory: false, readContent: true);
         using var stream = new FileStream(fileHandle, FileAccess.Read, block.Length);
         CheckTree(path, directory: false, budget);
         var length = stream.Length;
-        if (length > MaximumFileBytes) throw Error("limit");
         if (length != expectedLength) throw new IOException();
 
         var state = new Session(handle, cutoff, now);
@@ -175,6 +183,7 @@ public static class GameplayHistoryScanner
             var read = stream.Read(block, 0, (int)Math.Min(remaining, block.Length));
             if (read == 0) throw new IOException(); // Truncated during the snapshot.
             remaining -= read;
+            budget.Read(read);
             for (var i = 0; i < read; i++)
             {
                 var value = block[i];
@@ -190,7 +199,9 @@ public static class GameplayHistoryScanner
                 }
                 else
                 {
-                    if (used == line.Length) throw Error("limit");
+                    // WPF reads a full line too; a long continuation must not
+                    // discard an otherwise valid session or the entire archive.
+                    if (used == line.Length) Array.Resize(ref line, checked(line.Length * 2));
                     line[used++] = value;
                 }
             }
@@ -230,7 +241,10 @@ public static class GameplayHistoryScanner
             if (malformed) _invalid = true;
             if (stamp is { } timestamp)
             {
-                if (timestamp > now || (_last is { } last && timestamp < last)) _invalid = true;
+                // Worker threads may flush older events after newer events. Like
+                // WPF, use the file's first/last timestamps, not strict line order.
+                // Future timestamps and invalid final intervals still fail closed.
+                if (timestamp > now) _invalid = true;
                 _first ??= timestamp;
                 _last = timestamp;
             }
@@ -332,78 +346,26 @@ public static class GameplayHistoryScanner
             throw Error("path");
     }
 
-    private sealed class PinnedDirectories : IDisposable
+    private sealed class ScanBudget(TimeProvider clock, CancellationToken cancellation,
+        Action<GameplayHistoryProgress>? progress)
     {
-        private readonly List<SafeFileHandle> _handles = [];
-        internal static PinnedDirectories Open(string path, ScanBudget budget)
-        {
-            var guard = new PinnedDirectories();
-            try
-            {
-                var parents = new Stack<string>();
-                for (string? current = path; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
-                    parents.Push(current);
-                while (parents.TryPop(out var parent))
-                {
-                    budget.Check();
-                    guard._handles.Add(OpenChecked(parent, directory: true, readContent: false));
-                }
-                return guard;
-            }
-            catch { guard.Dispose(); throw; }
-        }
-        public void Dispose()
-        {
-            for (var i = _handles.Count - 1; i >= 0; i--) _handles[i].Dispose();
-        }
-    }
-
-    private static SafeFileHandle OpenChecked(string path, bool directory, bool readContent)
-    {
-        // OPEN_EXISTING only. No DELETE sharing: checked objects cannot be replaced
-        // while a descendant is opened. ReadWrite sharing still permits game writes.
-        const uint openReparsePoint = 0x00200000;
-        const uint backupSemantics = 0x02000000;
-        const uint sequentialScan = 0x08000000;
-        var handle = CreateFile(path, readContent ? 0x80000000u : 0u,
-            directory ? FileShare.Read : FileShare.ReadWrite,
-            IntPtr.Zero, 3, openReparsePoint | (directory ? backupSemantics : sequentialScan), IntPtr.Zero);
-        try
-        {
-            if (handle.IsInvalid || !GetFileInformationByHandle(handle, out var info))
-                throw new IOException();
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0 ||
-                ((info.Attributes & FileAttributes.Directory) != 0) != directory)
-                throw Error("path");
-            return handle;
-        }
-        catch { handle.Dispose(); throw; }
-    }
-
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string name, uint access, FileShare share,
-        IntPtr security, uint disposition, uint flags, IntPtr template);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileInformation
-    {
-        internal FileAttributes Attributes;
-        internal System.Runtime.InteropServices.ComTypes.FILETIME Creation, Access, Write;
-        internal uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
-    }
-
-    private sealed class ScanBudget(TimeProvider clock, CancellationToken cancellation)
-    {
-        private readonly long _started = clock.GetTimestamp();
+        private long _reported = clock.GetTimestamp();
+        private GameplayHistoryProgress _value = new("discovering", 0, 0, 0, 0);
         internal void Check()
         {
+            _ = clock.GetTimestamp();
             cancellation.ThrowIfCancellationRequested();
-            if (clock.GetElapsedTime(_started) >= TimeBudget) throw Error("limit");
         }
+        internal void Report(GameplayHistoryProgress value, bool force = false)
+        {
+            _value = value;
+            if (!force && clock.GetElapsedTime(_reported) < TimeSpan.FromMilliseconds(100)) return;
+            _reported = clock.GetTimestamp();
+            progress?.Invoke(value);
+        }
+        internal void Read(int bytes) => Report(_value with { ReadBytes = _value.ReadBytes + bytes });
+        internal void FileFinished() => Report(_value with { ProcessedFiles = _value.ProcessedFiles + 1 }, force: true);
+        internal void Complete() => Report(_value with { Phase = "complete" }, force: true);
     }
 
     private sealed record Interval(DateTimeOffset Start, DateTimeOffset End, bool CleanExit);

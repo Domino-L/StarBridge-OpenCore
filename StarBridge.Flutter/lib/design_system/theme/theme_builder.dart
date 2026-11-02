@@ -1,13 +1,60 @@
 import 'package:flutter/material.dart';
 
 import '../tokens/starbridge_tokens.dart';
+import '../interaction/starbridge_interaction_theme.dart';
 
-ThemeData buildStarBridgeTheme(StarBridgeTokens tokens, Locale locale) {
+ThemeData buildStarBridgeTheme(
+  StarBridgeTokens tokens,
+  Locale locale, {
+  InteractionSuite interactionSuite = InteractionSuite.standard,
+}) {
+  final theme = _buildTheme(tokens, locale, interactionSuite);
+  // Material fills the styles this theme does not declare, such as the
+  // bodyLarge of a checkbox title. They take the same digits and width.
+  final declared = theme.textTheme.bodyMedium;
+  TextStyle? same(TextStyle? style) => style?.copyWith(
+    fontFeatures: declared?.fontFeatures,
+    fontVariations: declared?.fontVariations,
+  );
+  final text = theme.textTheme;
+  return theme.copyWith(
+    textTheme: text.copyWith(
+      displayLarge: same(text.displayLarge),
+      displayMedium: same(text.displayMedium),
+      headlineLarge: same(text.headlineLarge),
+      headlineMedium: same(text.headlineMedium),
+      titleSmall: same(text.titleSmall),
+      bodyLarge: same(text.bodyLarge),
+      labelSmall: same(text.labelSmall),
+    ),
+  );
+}
+
+ThemeData _buildTheme(
+  StarBridgeTokens tokens,
+  Locale locale,
+  InteractionSuite interactionSuite,
+) {
   final colors = tokens.colors;
   final surfaces = tokens.surfaces;
   final typography = tokens.typography;
   final fallback = typography.fallbacksFor(locale);
   final brightness = tokens.isDark ? Brightness.dark : Brightness.light;
+
+  // QualityPass ④ (user 2026-10-29): light text on a dark ground reads
+  // heavier, so dark mode drops one step on the variable wght axis — body
+  // 400 → 380, titles 600 → 560. Light mode keeps the token weights.
+  FontWeight tuned(FontWeight weight) {
+    if (!tokens.isDark) return weight;
+    final value = weight.value;
+    return FontWeight(value >= 550 ? value - 40 : value - 20);
+  }
+
+  // Saira at full width runs about 9% wider than Source Sans 3 in English.
+  // 88 on its width axis runs about 2% under the old width, so wrapped text still fits.
+  final latinWidth = locale.languageCode.toLowerCase() == 'zh'
+      ? null
+      : typography.latinUiWidthAxis;
 
   TextStyle ui(
     double size, {
@@ -15,37 +62,48 @@ ThemeData buildStarBridgeTheme(StarBridgeTokens tokens, Locale locale) {
     Color? color,
     double? height,
     double? tracking,
+    String? family,
   }) {
     return TextStyle(
-      fontFamily: typography.uiFamily,
+      fontFamily: family ?? typography.uiFamily,
       fontFamilyFallback: fallback,
       fontSize: size,
-      fontWeight: weight ?? typography.bodyWeight,
+      fontWeight: tuned(weight ?? typography.bodyWeight),
       color: color ?? colors.textPrimary,
       height: height,
       letterSpacing: tracking,
+      // QualityPass ①: digits are equal width everywhere, so prices, counts
+      // and timers do not shift sideways when they change.
+      fontFeatures: const [FontFeature.tabularFigures()],
+      fontVariations: latinWidth == null
+          ? null
+          : [FontVariation('wdth', latinWidth)],
     );
   }
 
   final textTheme = TextTheme(
     displaySmall: ui(
       typography.display,
+      family: typography.headingFamily,
       weight: typography.displayWeight,
       tracking: typography.displayTracking,
       height: 1.18,
     ),
     headlineSmall: ui(
       typography.headline,
+      family: typography.headingFamily,
       weight: typography.displayWeight,
       height: 1.24,
     ),
     titleLarge: ui(
       typography.title,
+      family: typography.headingFamily,
       weight: typography.titleWeight,
       height: 1.3,
     ),
     titleMedium: ui(
       typography.titleSmall,
+      family: typography.headingFamily,
       weight: typography.emphasisWeight,
       height: 1.34,
     ),
@@ -320,6 +378,14 @@ ThemeData buildStarBridgeTheme(StarBridgeTokens tokens, Locale locale) {
       linearTrackColor: surfaces.raised.fill,
       circularTrackColor: surfaces.raised.fill,
     ),
-    extensions: <ThemeExtension<dynamic>>[tokens],
+    extensions: <ThemeExtension<dynamic>>[
+      tokens,
+      StarBridgeInteractionTheme(
+        suite: interactionSuite,
+        reduceMotion:
+            !tokens.motion.splashEnabled &&
+            tokens.motion.surfaceEnter == Duration.zero,
+      ),
+    ],
   );
 }

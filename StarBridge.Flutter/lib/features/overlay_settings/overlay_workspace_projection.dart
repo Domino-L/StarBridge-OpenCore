@@ -18,6 +18,7 @@ final class OverlayWorkspaceProjection {
     this.renderMode,
     this.hotkey,
     this.sources,
+    this.appearanceOptions = const OverlayAppearanceOptions.empty(),
     this.failure,
     this.dirty = false,
   });
@@ -43,6 +44,7 @@ final class OverlayWorkspaceProjection {
       layout: snapshot.layout,
       renderMode: snapshot.renderMode,
       hotkey: snapshot.hotkey,
+      appearanceOptions: snapshot.appearanceOptions,
       sources: snapshot.sourcePresetsEnabled
           ? snapshot.presets.where((p) => p.isActive).firstOrNull?.sources
           : null,
@@ -59,6 +61,7 @@ final class OverlayWorkspaceProjection {
   final String? renderMode;
   final OverlayWorkspaceHotkey? hotkey;
   final OverlayPresetSources? sources;
+  final OverlayAppearanceOptions appearanceOptions;
   final OverlaySettingsFailure? failure;
   final bool dirty;
 
@@ -85,6 +88,7 @@ final class OverlayWorkspaceProjection {
     String? renderMode,
     OverlayWorkspaceHotkey? hotkey,
     OverlayPresetSources? sources,
+    OverlayAppearanceOptions? appearanceOptions,
     OverlaySettingsFailure? failure,
     bool clearFailure = false,
     bool? dirty,
@@ -98,6 +102,7 @@ final class OverlayWorkspaceProjection {
     renderMode: renderMode ?? this.renderMode,
     hotkey: hotkey ?? this.hotkey,
     sources: sources ?? this.sources,
+    appearanceOptions: appearanceOptions ?? this.appearanceOptions,
     failure: clearFailure ? null : failure ?? this.failure,
     dirty: dirty ?? this.dirty,
   );

@@ -18,9 +18,60 @@ internal static class HelpSupportTests
             await links.DispatchAsync(Link(new { schemaVersion = 1 }, 1));
             Check(opened == 1, "custom URLs and stale requests cannot launch browser");
         }
+        var destinations = new List<Uri>();
+        using (var website = new HelpSupportBridgeDispatcher(null, () => 2, openRsiOrganization: destinations.Add))
+        {
+            BridgeEnvelope Link(object payload, long epoch = 2) => BridgeEnvelope.Request(
+                "helpSupport.openRsiOrganization", Guid.NewGuid().ToString(), epoch, payload);
+            foreach (var sid in new[] { "ASTER", "A", "0123456789" })
+            {
+                var result = (await website.DispatchAsync(Link(new { schemaVersion = 1, sid }))).Response;
+                Check(result.Status == "ok" && result.Payload.GetProperty("opened").GetBoolean(), "RSI launcher confirmed");
+                Check(destinations.Last().AbsoluteUri == "https://robertsspaceindustries.com/orgs/" + sid, "fixed official origin and path");
+            }
+            foreach (var sid in new[] { "", "lower", "ABCDEFGHIJK", "../ASTER", "ASTER?x=1", "ASTER#x", "ASTER/", "A%2FB", "Ａ", "A\n", "A\\B", "https://evil.example" })
+                Check((await website.DispatchAsync(Link(new { schemaVersion = 1, sid }))).Response.Status == "error", "invalid SID stays local");
+            await website.DispatchAsync(Link(new { schemaVersion = 1, sid = "ASTER", url = "https://evil.example" }));
+            await website.DispatchAsync(Link(new { schemaVersion = 1, sid = 1 }));
+            await website.DispatchAsync(Link(new { schemaVersion = 1, sid = "ASTER" }, 1));
+            await website.DispatchAsync(Link(new { schemaVersion = 1, sid = "ASTER" }) with
+                { AccountContext = new BridgeAccountContext("synthetic", "test", "viewer") });
+            using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+            await website.DispatchAsync(Link(new { schemaVersion = 1, sid = "ASTER" }), cancelled.Token);
+            Check(destinations.Count == 3, "stale, malformed, account and cancelled requests do not open browser");
+        }
+        using (var offline = new HelpSupportBridgeDispatcher(null, () => 2,
+            network: new StarBridge.HostRuntime.Lifecycle.DeviceNetworkAdmission(() => false), openRsiOrganization: destinations.Add))
+        {
+            var result = await offline.DispatchAsync(BridgeEnvelope.Request("helpSupport.openRsiOrganization", Guid.NewGuid().ToString(), 2,
+                new { schemaVersion = 1, sid = "ASTER" }));
+            Check(result.Response.Status == "error" && destinations.Count == 3, "explicit offline does not launch external browser");
+        }
+        Check(HelpSupportBridgeDispatcher.Capabilities.Contains("helpSupport.openRsiOrganization"), "only actual callable is advertised");
+        // SCM users change their avatar on the RSI profile settings page (fixed URL).
+        var profilePages = new List<Uri>();
+        using (var rsiProfile = new HelpSupportBridgeDispatcher(null, () => 2, openRsiOrganization: profilePages.Add))
+        {
+            BridgeEnvelope Open(object payload, long epoch = 2) => BridgeEnvelope.Request(
+                "helpSupport.openRsiProfileSettings", Guid.NewGuid().ToString(), epoch, payload);
+            var profileOpened = (await rsiProfile.DispatchAsync(Open(new { schemaVersion = 1 }))).Response;
+            Check(profileOpened.Status == "ok" && profilePages.Single().AbsoluteUri == "https://robertsspaceindustries.com/en/account/settings/profile",
+                "RSI profile settings opens the fixed official page");
+            Check((await rsiProfile.DispatchAsync(Open(new { schemaVersion = 1, url = "https://evil.example" }))).Response.Status == "error" &&
+                (await rsiProfile.DispatchAsync(Open(new { schemaVersion = 1 }, 1))).Response.Status == "error" &&
+                profilePages.Count == 1, "no caller URL and no stale request opens a page");
+        }
+        using (var offlineProfile = new HelpSupportBridgeDispatcher(null, () => 2,
+            network: new StarBridge.HostRuntime.Lifecycle.DeviceNetworkAdmission(() => false), openRsiOrganization: profilePages.Add))
+            Check((await offlineProfile.DispatchAsync(BridgeEnvelope.Request("helpSupport.openRsiProfileSettings", Guid.NewGuid().ToString(), 2,
+                new { schemaVersion = 1 }))).Response.Status == "error" && profilePages.Count == 1, "explicit offline does not open RSI");
+        Check(HelpSupportBridgeDispatcher.Capabilities.Contains("helpSupport.openRsiProfileSettings"), "RSI profile settings is advertised");
         var handler = new Transport();
         long generation = 2;
-        using var dispatcher = new HelpSupportBridgeDispatcher(new Uri("https://support.example/"), () => generation, handler);
+        var capability = new AppStatsHeartbeatRuntime.RelayCapability();
+        Check(capability.Protocol is null, "relay capability starts unknown");
+        using var dispatcher = new HelpSupportBridgeDispatcher(new Uri("https://support.example/"), () => generation, handler,
+            appStatsCapability: capability);
         BridgeEnvelope Request(string name, object? payload = null) => BridgeEnvelope.Request(name, Guid.NewGuid().ToString(), generation, payload ?? new { schemaVersion = 1 });
         var history = (await dispatcher.DispatchAsync(Request("helpSupport.history"))).Response;
         Check(history.Status == "ok" && history.Payload.GetProperty("edition").GetString() == "starbridge", "embedded product history");
@@ -58,6 +109,13 @@ internal static class HelpSupportTests
             Check(expected.HasValue ? hasCount && value.GetInt64() == expected : !hasCount,
                 "missing or invalid count is unknown, valid zero remains zero");
         }
+        Check(capability.Protocol == 1, "old GET records legacy capability");
+        handler.ProtocolJson = "2";
+        await dispatcher.DispatchAsync(Request("helpSupport.stats"));
+        Check(capability.Protocol == 2, "home stats GET upgrades shared heartbeat capability");
+        handler.ProtocolJson = null;
+        await dispatcher.DispatchAsync(Request("helpSupport.stats"));
+        Check(capability.Protocol == 1, "old GET revokes shared modern capability");
         Console.WriteLine("PASS help support offline history, stats, feedback validation and no implicit upload/retry");
     }
     private static void Check(bool value, string label) { if (!value) throw new Exception(label); }
@@ -68,6 +126,7 @@ internal static class HelpSupportTests
         internal HttpMethod? LastMethod;
         internal string? LastBody;
         internal string? AccountCountJson;
+        internal string? ProtocolJson;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Calls++; LastMethod = request.Method;
@@ -76,7 +135,7 @@ internal static class HelpSupportTests
             if (Fail) throw new HttpRequestException("synthetic transport loss");
             return new(HttpStatusCode.OK) { Content = new StringContent(request.Method == HttpMethod.Get
                 ? "{\"downloadCount\":5,\"onlineUserCount\":2,\"fleetCount\":3,\"overlayUsageSeconds\":3600,\"updatedAt\":\"2026-09-15T12:00:00Z\"" +
-                    (AccountCountJson is null ? "" : ",\"registeredAccountCount\":" + AccountCountJson) + "}" : "{}") };
+                    (AccountCountJson is null ? "" : ",\"registeredAccountCount\":" + AccountCountJson) + (ProtocolJson is null ? "" : ",\"heartbeatProtocol\":" + ProtocolJson) + "}" : "{}") };
         }
     }
 }

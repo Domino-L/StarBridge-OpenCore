@@ -2,7 +2,7 @@ import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
-enum OverlaySourceMode { none, auto, room, community }
+enum OverlaySourceMode { none, auto, room, community, fleet }
 
 enum OverlaySourceModule { notice, overview, members, chat, events }
 
@@ -21,6 +21,11 @@ final class OverlaySourceBinding {
     : mode = OverlaySourceMode.room,
       communityCode = null,
       ownerKey = null;
+  // Each account's own main fleet: no code or owner to carry between devices.
+  const OverlaySourceBinding.fleet()
+    : mode = OverlaySourceMode.fleet,
+      communityCode = null,
+      ownerKey = null;
 
   factory OverlaySourceBinding.community(String code, String owner) {
     if (!_key(code) || !_key(owner)) {
@@ -32,6 +37,12 @@ final class OverlaySourceBinding {
   final OverlaySourceMode mode;
   final String? communityCode;
   final String? ownerKey;
+
+  /// A source a plan can switch to automatically or show chat from.
+  bool get isConcrete =>
+      mode == OverlaySourceMode.room ||
+      mode == OverlaySourceMode.community ||
+      mode == OverlaySourceMode.fleet;
 
   factory OverlaySourceBinding.fromMap(Map<String, Object?> value) {
     _exact(value, {'mode', 'communityCode', 'ownerKey'});
@@ -48,6 +59,7 @@ final class OverlaySourceBinding {
       'none' => const OverlaySourceBinding.follow(),
       'auto' => const OverlaySourceBinding.automatic(),
       'room' => const OverlaySourceBinding.room(),
+      'fleet' => const OverlaySourceBinding.fleet(),
       _ => throw const FormatException('Invalid source mode.'),
     };
   }
@@ -91,13 +103,12 @@ final class OverlayPresetSources {
         chatSources.any(
           (s) =>
               s.mode != OverlaySourceMode.room &&
-              s.mode != OverlaySourceMode.community,
+              s.mode != OverlaySourceMode.community &&
+              s.mode != OverlaySourceMode.fleet,
         )) {
       throw const FormatException('Invalid chat sources.');
     }
-    if (autoSwitch &&
-        binding.mode != OverlaySourceMode.room &&
-        binding.mode != OverlaySourceMode.community) {
+    if (autoSwitch && !binding.isConcrete) {
       throw const FormatException(
         'Automatic switching requires a concrete source.',
       );
@@ -141,6 +152,18 @@ final class OverlayPresetSources {
               ? const OverlaySourceBinding.room()
               : const OverlaySourceBinding.follow(),
       },
+      // Same rule as the Host codec: the main fleet carries no identity, so a
+      // multi-source chat that includes it keeps its room and fleet entries.
+      chatSources:
+          chatSources.any((source) => source.mode == OverlaySourceMode.fleet)
+          ? chatSources
+                .where(
+                  (source) =>
+                      source.mode == OverlaySourceMode.room ||
+                      source.mode == OverlaySourceMode.fleet,
+                )
+                .toList()
+          : const [],
     );
   }
 

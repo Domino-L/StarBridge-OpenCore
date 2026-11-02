@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_field.dart';
+
 import '../../app/localization/app_strings.dart';
 import 'overlay_settings_help.dart';
 import '../../platform/window/menu_social_preferences.dart';
@@ -16,8 +19,11 @@ class MenuSocialSettingsCard extends StatelessWidget {
         section: 'social',
         read: (settings) => MenuSocialPreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuSocialEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuSocialEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }
 
@@ -26,10 +32,12 @@ class MenuSocialEditor extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
     this.showTitle = true,
   });
   final MenuSocialPreferences value;
   final bool showTitle;
+  final bool enabled;
   final ValueChanged<MenuSocialPreferences> onChanged;
   @override
   Widget build(BuildContext context) {
@@ -41,51 +49,59 @@ class MenuSocialEditor extends StatelessWidget {
           Text(text('title'), style: Theme.of(context).textTheme.titleLarge),
         OverlaySettingsHelp(text('hint')),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          key: ValueKey('menu-social-sort-${value.friendSort}'),
-          initialValue: value.friendSort,
-          isExpanded: true,
+        StarBridgeSelectField<String>(
+          key: ValueKey('menu-social-sort'),
+          identity: 'menu-social-sort',
+          value: value.friendSort,
           decoration: InputDecoration(labelText: text('friendSort')),
-          items: [
+          options: [
             for (final id in MenuSocialPreferences.sorts)
-              DropdownMenuItem(value: id, child: Text(text(id))),
+              StarBridgeSelectOption(value: id, label: text(id)),
           ],
-          onChanged: (v) {
-            if (v != null) onChanged(value.copyWith(friendSort: v));
-          },
+          onSelected: !enabled
+              ? null
+              : (v, _) {
+                  onChanged(value.copyWith(friendSort: v));
+                },
         ),
         Material(
           type: MaterialType.transparency,
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('notifications')),
+          child: StarBridgeSwitch.tile(
+            key: const Key('menu-social-notifications'),
+            label: text('notifications'),
             value: value.notifications,
-            onChanged: (v) => onChanged(value.copyWith(notifications: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.copyWith(notifications: v)),
           ),
         ),
-        DropdownButtonFormField<String>(
-          key: ValueKey('menu-social-preview-${value.preview}'),
-          initialValue: value.preview,
-          isExpanded: true,
+        StarBridgeSelectField<String>(
+          key: ValueKey('menu-social-preview'),
+          identity: 'menu-social-preview',
+          value: value.preview,
           decoration: InputDecoration(labelText: text('preview')),
-          items: [
+          options: [
             for (final id in MenuSocialPreferences.previews)
-              DropdownMenuItem(value: id, child: Text(text(id))),
+              StarBridgeSelectOption(value: id, label: text(id)),
           ],
-          onChanged: value.notifications
-              ? (v) {
-                  if (v != null) onChanged(value.copyWith(preview: v));
+          onSelected: !enabled
+              ? null
+              : value.notifications
+              ? (v, _) {
+                  onChanged(value.copyWith(preview: v));
                 }
               : null,
         ),
         OverlaySettingsHelp(text('privacyHint')),
         Material(
           type: MaterialType.transparency,
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('sound')),
+          child: StarBridgeSwitch.tile(
+            key: const Key('menu-social-sound'),
+            label: text('sound'),
             value: value.sound,
-            onChanged: value.notifications
+            onChanged: !enabled
+                ? null
+                : value.notifications
                 ? (v) => onChanged(value.copyWith(sound: v))
                 : null,
           ),
@@ -93,12 +109,13 @@ class MenuSocialEditor extends StatelessWidget {
         OverlaySettingsHelp(text('soundHint')),
         Material(
           type: MaterialType.transparency,
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('showAvatars')),
+          child: StarBridgeSwitch.tile(
+            label: text('showAvatars'),
             key: const ValueKey('menu-social-avatars'),
             value: value.showAvatars,
-            onChanged: (v) => onChanged(value.copyWith(showAvatars: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.copyWith(showAvatars: v)),
           ),
         ),
         OverlaySettingsHelp(text('avatarHint')),

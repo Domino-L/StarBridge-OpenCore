@@ -1,6 +1,7 @@
 #ifndef RUNNER_MENU_IMAGE_NATIVE_H_
 #define RUNNER_MENU_IMAGE_NATIVE_H_
 #include <windows.h>
+#include <tlhelp32.h>
 #include <gdiplus.h>
 #include <algorithm>
 #include <cmath>
@@ -59,6 +60,22 @@ inline std::unique_ptr<Gdiplus::Bitmap> Edited(Gdiplus::Bitmap& source, const Ed
 inline bool IsGame(const std::wstring& path) {
   const auto slash = path.find_last_of(L"\\/");
   return _wcsicmp(path.substr(slash == std::wstring::npos ? 0 : slash+1).c_str(), L"StarCitizen.exe") == 0;
+}
+// By name from a process snapshot: no handle to the process is opened. False when
+// the snapshot is unavailable, so a caller can ask again.
+inline bool ReadProcessIsGame(DWORD pid, bool& game) {
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) return false;
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  game = false;
+  bool found = false;
+  for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
+    if (entry.th32ProcessID == pid) { game = IsGame(entry.szExeFile); found = true; break; }
+  }
+  const DWORD error = found ? ERROR_NO_MORE_FILES : GetLastError();
+  CloseHandle(snapshot);
+  return error == ERROR_NO_MORE_FILES;
 }
 inline bool PinVisible(bool pinned, bool menu, bool capturing, bool game) {
   return pinned && !menu && !capturing && game;

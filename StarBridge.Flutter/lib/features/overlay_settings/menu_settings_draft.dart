@@ -5,6 +5,7 @@ import '../../platform/bridge/bridge_client_session.dart';
 import 'menu_additional_settings_draft.dart';
 
 import '../../platform/window/menu_display_preferences.dart';
+import '../../platform/window/menu_desktop_widgets.dart';
 import '../../platform/window/menu_toolbar_preferences.dart';
 import '../../platform/window/menu_restore_preferences.dart';
 import '../../platform/window/menu_social_preferences.dart';
@@ -223,6 +224,7 @@ Map<String, Object?> _normalized(Map<String, Object?> settings) => {
   ...?MenuImagePreferences.fromSettings(settings)?.toSettingsPatch(),
   ...?MenuScreenshotPreferences.fromSettings(settings)?.toSettingsPatch(),
   'toolbar': MenuToolbarPreferences.parse(settings['toolbar'])?.toMap(),
+  'widgets': MenuDesktopWidgets.parse(settings['widgets'])?.toMap(),
 };
 
 bool _same(Object? a, Object? b) {

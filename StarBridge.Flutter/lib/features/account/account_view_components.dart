@@ -4,6 +4,10 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import 'account_models.dart';
 
 class AccountMessagePanel extends StatelessWidget {
@@ -12,6 +16,7 @@ class AccountMessagePanel extends StatelessWidget {
     required this.messageKey,
     this.actionKey,
     this.onAction,
+    this.onActionSource,
     super.key,
   });
 
@@ -19,6 +24,7 @@ class AccountMessagePanel extends StatelessWidget {
   final String messageKey;
   final String? actionKey;
   final VoidCallback? onAction;
+  final ValueChanged<InteractionSource>? onActionSource;
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +66,14 @@ class AccountMessagePanel extends StatelessWidget {
             SizedBox(width: tokens.space.sm),
             Expanded(child: Text(strings.text(messageKey))),
             if (actionKey case final key?)
-              TextButton(onPressed: onAction, child: Text(strings.text(key))),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('account-message-action'),
+                onActivate:
+                    onActionSource ??
+                    (onAction == null ? null : (_) => onAction!()),
+                child: Text(strings.text(key)),
+              ),
           ],
         ),
       ),
@@ -202,7 +215,8 @@ class AccountFreshnessBadge extends StatelessWidget {
         child: Text(
           strings.text(labelKey),
           maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          overflow: TextOverflow.fade,
+          softWrap: false,
           style: Theme.of(context).textTheme.labelMedium
               ?.copyWith(color: color),
         ),
@@ -288,6 +302,18 @@ accountIdentityPresentation(
     AccountIdentityState.awaitingGameIdentity => (
       icon: StarBridgeIconSemantic.pending,
       bodyKey: 'account.identity.awaiting',
+      color: tokens.colors.info,
+      background: tokens.colors.infoSoft,
+    ),
+    AccountIdentityState.verificationRequired => (
+      icon: StarBridgeIconSemantic.warning,
+      bodyKey: 'account.identity.verificationRequired',
+      color: tokens.colors.warning,
+      background: tokens.colors.warningSoft,
+    ),
+    AccountIdentityState.verificationPending => (
+      icon: StarBridgeIconSemantic.pending,
+      bodyKey: 'account.identity.verificationPending',
       color: tokens.colors.info,
       background: tokens.colors.infoSoft,
     ),

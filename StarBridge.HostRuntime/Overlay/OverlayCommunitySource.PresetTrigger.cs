@@ -25,6 +25,7 @@ internal sealed partial class OverlayCommunitySource
         var room = _presetRoomTrigger();
         if (!room.Known) return null;
         if (room.Room is not null) return "room:" + room.Room;
+        if (WantsFleet) return FleetLease(_scope.Owner!, _scope.Generation) is not null ? "fleet" : null;
         if (catalogFailed || _catalogAt == default || _now() - _catalogAt >= TimeSpan.FromSeconds(30) || _scope.Owner is null) return null;
         var context = PeekResolutionContext(_scope.Owner, _scope.Generation, null);
         if (context is null) return null;

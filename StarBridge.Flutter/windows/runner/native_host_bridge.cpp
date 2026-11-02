@@ -1,4 +1,5 @@
 #include "native_host_bridge.h"
+#include "primary_window_bridge_lease.h"
 
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
@@ -20,7 +21,10 @@
 namespace {
 
 constexpr UINT kPipeEventMessage = WM_APP + 0x53;
-constexpr size_t kMaximumFrameBytes = 1024 * 1024;
+// Transport allocation ceiling. Dart and Host codecs enforce the per-message
+// 1 MiB limit, with 8 MiB for communities.saveProfile requests and 4 MiB for
+// communities.cropWideImage responses (2 MiB JPEG plus base64/JSON overhead).
+constexpr size_t kMaximumFrameBytes = 8 * 1024 * 1024;
 constexpr size_t kMaximumQueuedFrames = 128;
 
 enum class PipeEventKind { kConnected, kFrame, kDisconnected };
@@ -120,6 +124,7 @@ class NativeHostBridge::Impl {
  public:
   Impl(HWND window, flutter::BinaryMessenger* messenger)
       : window_(window),
+        primary_window_lease_(window),
         channel_(std::make_unique<
                  flutter::MethodChannel<flutter::EncodableValue>>(
             messenger, "starbridge/native-host",
@@ -295,6 +300,7 @@ class NativeHostBridge::Impl {
               generation == generation_.load()) {
             {
               std::scoped_lock lock(state_mutex_);
+              primary_window_lease_.Publish(pipe);
               pipe_ = pipe;
               connected_ = true;
             }
@@ -396,6 +402,7 @@ class NativeHostBridge::Impl {
     }
     {
       std::scoped_lock lock(state_mutex_);
+      primary_window_lease_.Clear();
       connected_ = false;
       if (pipe_ != INVALID_HANDLE_VALUE) {
         CancelIoEx(pipe_, nullptr);
@@ -415,6 +422,7 @@ class NativeHostBridge::Impl {
     shutting_down_ = true;
     {
       std::scoped_lock lock(state_mutex_);
+      primary_window_lease_.Clear();
       connected_ = false;
       if (pipe_ != INVALID_HANDLE_VALUE) {
         CancelIoEx(pipe_, nullptr);
@@ -447,6 +455,7 @@ class NativeHostBridge::Impl {
   }
 
   HWND window_ = nullptr;
+  PrimaryWindowBridgeLease primary_window_lease_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   std::mutex state_mutex_;
   std::mutex write_mutex_;

@@ -375,6 +375,40 @@ void main() {
       expect(h.connection.saves.length, 1);
     },
   );
+  test(
+    'publication change events are gated by capability and generation',
+    () async {
+      BridgeEnvelope change(int generation) => BridgeEnvelope.fromJson({
+        'protocolVersion': 1,
+        'messageType': 'event',
+        'name': 'privacy.publicationChanged',
+        'sessionGeneration': generation,
+        'sequence': 2,
+        'payload': <String, Object?>{'schemaVersion': 1},
+      });
+      final older = Harness(publication: true);
+      addTearDown(older.close);
+      expect(older.adapter.publicationEventsSupported, isFalse);
+
+      final h = Harness(publication: true, publicationEvents: true);
+      addTearDown(h.close);
+      expect(h.adapter.publicationEventsSupported, isTrue);
+      var changes = 0;
+      final subscription = h.adapter.publicationChanges.listen(
+        (_) => changes++,
+      );
+      addTearDown(subscription.cancel);
+      h.connection.stream.add(change(7));
+      h.connection.stream.add(change(6));
+      await Future<void>.delayed(Duration.zero);
+      expect(changes, 1, reason: 'A stale-generation event is ignored.');
+      expect(
+        h.connection.requests,
+        isEmpty,
+        reason: 'The event itself performs no request.',
+      );
+    },
+  );
   test('an invalidation prevents late reads from enabling a save', () async {
     final h = Harness();
     addTearDown(h.close);
@@ -417,6 +451,7 @@ class Harness {
   Harness({
     bool capability = true,
     bool publication = false,
+    bool publicationEvents = false,
     bool communities = false,
     bool members = false,
   }) {
@@ -426,6 +461,7 @@ class Harness {
           ? [
               'privacy.local',
               if (publication) 'privacy.publication',
+              if (publicationEvents) 'privacy.publicationEvents',
               if (communities) 'privacy.communityScopes',
               if (members) 'privacy.communityMemberScopes',
             ]

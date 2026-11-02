@@ -1,12 +1,24 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
+
 import 'community_visible_refresh.dart';
 
 import 'package:flutter/material.dart';
 
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../party_rooms/room_display.dart' show roomDate;
+import '../common/social_read_activity.dart';
 import 'community_logs_controller.dart';
 import 'community_logs_copy.dart';
 import 'community_logs_port.dart';
@@ -28,17 +40,32 @@ class CommunityLogsDialog extends StatefulWidget {
   State<CommunityLogsDialog> createState() => CommunityLogsDialogState();
 }
 
-class CommunityLogsDialogState extends State<CommunityLogsDialog> with CommunityVisibleRefresh<CommunityLogsDialog> {
+class CommunityLogsDialogState extends State<CommunityLogsDialog>
+    with CommunityVisibleRefresh<CommunityLogsDialog> {
   @override
-  Future<void> refreshVisibleCommunity() => model.snapshot == null ? Future<void>.value() : model.load(offset: model.snapshot!.offset, quiet: true);
+  Future<void> refreshVisibleCommunity() => model.snapshot == null
+      ? Future<void>.value()
+      : model.load(offset: model.snapshot!.offset, quiet: true);
   Future<bool> confirmLeave() async => !model.submitting;
   late final model = CommunityLogsController(widget.port, widget.targetRef);
   final search = TextEditingController();
   StreamSubscription<void>? _contextSubscription;
+  late final SocialReadActivityBinding _reading, _deleting;
   String t(String key) => communityLogsText(context, key);
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading && model.snapshot == null,
+      initialRead: true,
+      phaseIdentity: () => model.readEpoch,
+    );
+    _deleting = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(_changed);
     _contextSubscription = widget.contextInvalidations?.listen(
       (_) => model.invalidate(),
@@ -53,6 +80,8 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
 
   @override
   void dispose() {
+    _reading.dispose();
+    _deleting.dispose();
     unawaited(_contextSubscription?.cancel());
     model.removeListener(_changed);
     model.dispose();
@@ -113,11 +142,19 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
             if (!confirmation && model.canDelete)
               Align(
                 alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  style: semanticActionStyle(context, ActionTone.danger),
-                  onPressed: () => model.selectForDeletion(row),
-                  icon: const StandardIcon(StandardIconSemantic.delete, size: 18),
-                  label: Text(t('delete')),
+                child: StarBridgeActionButton(
+                  controlKey: ValueKey('log-delete-${row.logRef}'),
+                  kind: StarBridgeActionKind.quiet,
+                  tone: ActionTone.danger,
+                  onActivate: (_) => model.selectForDeletion(row),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const StandardIcon(StandardIconSemantic.delete, size: 18),
+                      const SizedBox(width: 8),
+                      Text(t('delete')),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -126,6 +163,7 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
   @override
   Widget build(BuildContext context) {
     final page = model.snapshot, selected = model.pendingDeletion;
+    final activity = model.submitting ? _deleting : _reading;
     return PopScope(
       canPop: !model.submitting,
       child: CommunityEditorAlertSurface(
@@ -140,7 +178,22 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if ((model.loading && model.snapshot == null) || model.submitting)
-                const LinearProgressIndicator(),
+                KeyedSubtree(
+                  key: ValueKey((model.submitting, activity.revision)),
+                  child: SocialReadActivity(
+                    key: ValueKey(
+                      model.submitting
+                          ? 'logs-delete-activity'
+                          : 'logs-read-activity',
+                    ),
+                    source: activity.source,
+                    opening: activity.opening,
+                    label: t(
+                      model.submitting ? 'activityDeleting' : 'activityReading',
+                    ),
+                    height: 4,
+                  ),
+                ),
               if (selected != null) ...[
                 Expanded(
                   child: SingleChildScrollView(
@@ -168,8 +221,9 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
                     runSpacing: 8,
                     children: [
                       for (final type in communityLogFilters)
-                        ChoiceChip(
-                          label: Text(t(type)),
+                        StarBridgeChoiceChip(
+                          controlKey: ValueKey('log-filter-$type'),
+                          label: t(type),
                           selected: model.type == type,
                           onSelected: model.loading
                               ? null
@@ -181,20 +235,30 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
                     ],
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: search,
-                    maxLength: 128,
-                    enabled: !model.loading,
-                    onSubmitted: (_) => model.load(search: search.text),
-                    decoration: InputDecoration(
-                      labelText: t('search'),
-                      counterText: '',
-                      suffixIcon: IconButton(
-                        tooltip: t('search'),
-                        onPressed: model.loading
-                            ? null
-                            : () => model.load(search: search.text),
-                        icon: const StandardIcon(StandardIconSemantic.search),
+                  StarBridgeFieldFrame(
+                    builder: (_, focus) => TextField(
+                      key: const Key('log-search'),
+                      focusNode: focus,
+                      controller: search,
+                      maxLength: 128,
+                      enabled: !model.loading,
+                      onSubmitted: (_) => unawaited(
+                        runStarBridgeActivation<void>(
+                          InteractionSource.keyboard,
+                          () => model.load(search: search.text),
+                        ),
+                      ),
+                      decoration: InputDecoration(
+                        labelText: t('search'),
+                        counterText: '',
+                        suffixIcon: StarBridgeIconAction(
+                          controlKey: const Key('log-search-submit'),
+                          label: t('search'),
+                          onActivate: model.loading
+                              ? null
+                              : (_) => model.load(search: search.text),
+                          icon: const StandardIcon(StandardIconSemantic.search),
+                        ),
                       ),
                     ),
                   ),
@@ -246,10 +310,12 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
                             )
                             .replaceAll('{total}', '${page.matchedCount}'),
                       ),
-                      TextButton(
-                        onPressed: page.offset == 0 || model.loading
+                      StarBridgeActionButton(
+                        controlKey: const Key('log-previous'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: page.offset == 0 || model.loading
                             ? null
-                            : () => model.load(
+                            : (_) => model.load(
                                 offset: (page.offset - 20).clamp(
                                   0,
                                   page.offset,
@@ -257,10 +323,12 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
                               ),
                         child: Text(t('previous')),
                       ),
-                      TextButton(
-                        onPressed: page.next == null || model.loading
+                      StarBridgeActionButton(
+                        controlKey: const Key('log-next'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: page.next == null || model.loading
                             ? null
-                            : () => model.load(offset: page.next!),
+                            : (_) => model.load(offset: page.next!),
                         child: Text(t('next')),
                       ),
                     ],
@@ -271,28 +339,37 @@ class CommunityLogsDialogState extends State<CommunityLogsDialog> with Community
         ),
         actions: [
           if (selected != null) ...[
-            TextButton(
-              onPressed: model.submitting ? null : model.cancelDeletion,
+            StarBridgeActionButton(
+              controlKey: const Key('log-keep'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: model.submitting
+                  ? null
+                  : (_) => model.cancelDeletion(),
               child: Text(t('keep')),
             ),
-            FilledButton(
-              style: semanticActionStyle(
-                context,
-                ActionTone.danger,
-                emphasis: ActionEmphasis.filled,
-              ),
-              onPressed: model.submitting ? null : model.confirmDeletion,
+            StarBridgeActionButton(
+              controlKey: const Key('log-confirm-delete'),
+              kind: StarBridgeActionKind.primary,
+              tone: ActionTone.danger,
+              onActivate: model.submitting
+                  ? null
+                  : (_) => model.confirmDeletion(),
               child: Text(t('delete')),
             ),
           ] else ...[
             if (!model.invalidated)
-              TextButton(
-                onPressed: model.loading ? null : () => model.load(),
+              StarBridgeActionButton(
+                controlKey: const Key('log-reload'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: model.loading ? null : (_) => model.load(),
                 child: Text(t('reload')),
               ),
             if (!widget.embedded)
-              TextButton(
-                onPressed: () => Navigator.pop(context),
+              StarBridgeActionButton(
+                controlKey: const Key('log-close'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: (source) =>
+                    dismissStarBridgeDialog(context, source: source),
                 child: Text(t('close')),
               ),
           ],

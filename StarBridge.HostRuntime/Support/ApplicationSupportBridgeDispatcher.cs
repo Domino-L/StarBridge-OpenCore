@@ -14,6 +14,7 @@ public sealed class ApplicationSupportBridgeDispatcher : IBridgeRequestDispatche
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _disposed;
     private readonly Uri? _relayUri;
+    private readonly Lifecycle.DeviceNetworkAdmission? _network;
     private FlutterInstallationMaintenance? _installation;
     private long _installationGeneration;
 
@@ -22,13 +23,15 @@ public sealed class ApplicationSupportBridgeDispatcher : IBridgeRequestDispatche
         string? applicationExecutablePath,
         Func<string?>? gameLogPath = null,
         Func<long>? generation = null,
-        Uri? relayUri = null)
+        Uri? relayUri = null, Lifecycle.DeviceNetworkAdmission? network = null,
+        Action? clearImageReadCaches = null)
         : this(CreateWindowsRuntime(
             dataRoot,
             applicationExecutablePath,
-            gameLogPath), generation)
+            gameLogPath, clearImageReadCaches), generation)
     {
         _relayUri = relayUri;
+        _network = network;
         _installation = new FlutterInstallationMaintenance(applicationExecutablePath);
     }
 
@@ -125,7 +128,7 @@ public sealed class ApplicationSupportBridgeDispatcher : IBridgeRequestDispatche
 
             var snapshot = _inspector.Inspect();
             if (_relayUri != null)
-                snapshot = snapshot with { Connection = await DiagnosticConnectionProbe.CheckAsync(_relayUri, cancellationToken) };
+                snapshot = snapshot with { Connection = await DiagnosticConnectionProbe.CheckAsync(_relayUri, cancellationToken, network: _network) };
             return new BridgeDispatchBatch(ToResponse(request, snapshot), []);
         }
         catch (BridgeProtocolException exception)
@@ -257,8 +260,8 @@ public sealed class ApplicationSupportBridgeDispatcher : IBridgeRequestDispatche
     private static WindowsApplicationSupportInspector CreateWindowsRuntime(
         string dataRoot,
         string? applicationExecutablePath,
-        Func<string?>? gameLogPath) =>
-        new(dataRoot, applicationExecutablePath, gameLogPath);
+        Func<string?>? gameLogPath, Action? clearImageReadCaches) =>
+        new(dataRoot, applicationExecutablePath, gameLogPath, clearImageReadCaches: clearImageReadCaches);
 
     public void Dispose()
     {

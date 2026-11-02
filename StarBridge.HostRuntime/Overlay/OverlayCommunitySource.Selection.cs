@@ -14,10 +14,20 @@ internal sealed partial class OverlayCommunitySource
         if (_scope.Owner is null || _moduleDemand() is not { Sources: { } policy } demand) return null;
         var context = CaptureResolutionContext(_scope.Owner, _scope.Generation, _moduleRoomLease());
         if (context is null) return new(null, null, null, "unavailable");
+        // The picker shows what the overlay will display once open. While it is
+        // closed nothing renews organization reads, so a lapsed read is not a
+        // lost source: every directory organization resolves as readable here.
+        // Native display keeps resolving with real leases only.
+        var communities = new Dictionary<string, OverlaySourceLease>(context.Communities, StringComparer.Ordinal);
+        foreach (var target in _catalog)
+            communities.TryAdd(target.Code, new(OverlaySourceMode.Community, target.Code, context.OwnerKey,
+                context.Generation, context.Now.AddSeconds(40)));
+        context = context with { Communities = communities };
         string? Id(OverlaySourceBinding? source) => source?.Mode switch
         {
             OverlaySourceMode.Auto => "auto",
             OverlaySourceMode.Room => "room",
+            OverlaySourceMode.Fleet => "fleet",
             OverlaySourceMode.Community => source.OwnerKey == context.OwnerKey &&
                 _catalog.Any(row => row.Code == source.CommunityCode) ? "org:" + source.CommunityCode : "missing",
             _ => null
@@ -27,6 +37,7 @@ internal sealed partial class OverlayCommunitySource
         string? ResolvedId(OverlayResolvedSource source) => source.Available ? source.Mode switch
         {
             OverlaySourceMode.Room => "room",
+            OverlaySourceMode.Fleet => "fleet",
             OverlaySourceMode.Community => "org:" + source.Id,
             OverlaySourceMode.Local => "local",
             _ => null
@@ -38,7 +49,8 @@ internal sealed partial class OverlayCommunitySource
             new(OverlaySourceBinding.Automatic, modules: new Dictionary<OverlaySourceModule, OverlaySourceBinding>
             { [OverlaySourceModule.Notice] = choice }), context, activeModules: [OverlaySourceModule.Notice]).Modules[OverlaySourceModule.Notice]);
         var resolutions = new Dictionary<string, string?>
-        { ["auto"] = ResolveChoice(OverlaySourceBinding.Automatic), ["room"] = ResolveChoice(new(OverlaySourceMode.Room)) };
+        { ["auto"] = ResolveChoice(OverlaySourceBinding.Automatic), ["room"] = ResolveChoice(new(OverlaySourceMode.Room)),
+            ["fleet"] = ResolveChoice(new(OverlaySourceMode.Fleet)) };
         foreach (var target in _catalog)
             resolutions["org:" + target.Code] = ResolveChoice(new(OverlaySourceMode.Community, target.Code, context.OwnerKey));
         var actual = ResolvedId(plan.PresetSource);

@@ -1,8 +1,17 @@
+import 'community_tag_localization.dart';
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
 
 import 'community_creation_controller.dart';
 import 'community_creation_copy.dart';
@@ -10,6 +19,8 @@ import 'community_creation_port.dart';
 import 'community_logo_crop.dart';
 import 'community_logo_port.dart';
 import 'community_tag_picker.dart';
+import '../common/social_read_activity.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 class CommunityCreationDialog extends StatefulWidget {
   const CommunityCreationDialog({
@@ -32,7 +43,11 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
     widget.invalidations,
   );
   final _form = GlobalKey<FormState>();
-  final _dialogs = <Route<dynamic>>[];
+  late final SocialReadActivityBinding _reading, _saving;
+  ValueGetter<InteractionSource>? _imageSource;
+  int _imageRevision = 0;
+  final _dialogs = <StarBridgeDialogRoute<dynamic>>[];
+  bool choosingTags = false;
   bool choosingImage = false, imageFailed = false, confirming = false;
   bool get busy => model.locked || choosingImage;
   CommunityLogoPort? get images => widget.port is CommunityLogoPort
@@ -43,6 +58,16 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _saving = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(changed);
     unawaited(model.load());
   }
@@ -51,7 +76,7 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
     if (!mounted) return;
     if (model.invalidated) {
       for (final route in _dialogs.toList().reversed) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        retireStarBridgeDialog(route);
       }
       final route = ModalRoute.of(context);
       if (route?.isActive == true) route!.navigator?.removeRoute(route);
@@ -60,39 +85,61 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
     setState(() {});
   }
 
-  Future<T?> dialog<T>(Widget child) async {
-    final route = DialogRoute<T>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => child,
-    );
-    _dialogs.add(route);
+  Future<T?> dialog<T>(WidgetBuilder builder) async {
+    StarBridgeDialogRoute<T>? opened;
     try {
-      return await Navigator.of(context).push(route);
+      return await showStarBridgeDialog<T>(
+        context,
+        builder: builder,
+        barrierDismissible: false,
+        useRootNavigator: false,
+        onRouteCreated: (route) {
+          opened = route;
+          _dialogs.add(route);
+          if (choosingImage && mounted) setState(() {});
+        },
+      );
     } finally {
-      _dialogs.remove(route);
+      _dialogs.remove(opened);
+      if (choosingImage && mounted) setState(() {});
     }
   }
 
   Future<void> leave() async {
     if (confirming || choosingImage || model.submitting) return;
     if (model.outcome?.status == 'unknown') {
-      Navigator.pop(context, model.outcome);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: model.outcome,
+      );
       return;
     }
     if (model.dirty) {
       confirming = true;
       final discard = await dialog<bool>(
-        AlertDialog(
+        (dialogContext) => AlertDialog(
           title: Text(t('leaveTitle')),
           content: Text(t('leaveBody')),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const Key('community-create-discard-cancel'),
+              onActivate: (source) => dismissStarBridgeDialog(
+                dialogContext,
+                source: source,
+                result: false,
+              ),
               child: Text(t('continue')),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('community-create-discard-confirm'),
+              onActivate: (source) => dismissStarBridgeDialog(
+                dialogContext,
+                source: source,
+                result: true,
+              ),
               child: Text(t('discard')),
             ),
           ],
@@ -101,23 +148,40 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
       confirming = false;
       if (!mounted || discard != true) return;
     }
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+      );
+    }
   }
 
   Future<void> submit() async {
     if (busy || confirming || !_form.currentState!.validate()) return;
     confirming = true;
     final confirmed = await dialog<bool>(
-      AlertDialog(
+      (dialogContext) => AlertDialog(
         title: Text(t('title')),
         content: Text('${model.draft!['name']}\n\n${t('confirmBody')}'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: const Key('community-create-confirm-cancel'),
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: false,
+            ),
             child: Text(t('continue')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: const Key('community-create-confirm-save'),
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: true,
+            ),
             child: Text(t('title')),
           ),
         ],
@@ -127,13 +191,19 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
     if (!mounted || model.invalidated || confirmed != true) return;
     await model.submit();
     if (mounted && model.outcome?.status == 'accepted') {
-      Navigator.pop(context, model.outcome);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: model.outcome,
+      );
     }
   }
 
   Future<void> pickLogo() async {
     final port = images;
     if (busy || port == null || !port.canPickLogo) return;
+    _imageSource = captureStarBridgeActivationSource();
+    _imageRevision++;
     setState(() {
       choosingImage = true;
       imageFailed = false;
@@ -142,7 +212,7 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
       final source = await port.pickLogo();
       if (!mounted || model.invalidated || source == null) return;
       final cropped = await dialog<String>(
-        CommunityLogoCrop(port: port, source: source),
+        (_) => CommunityLogoCrop(port: port, source: source),
       );
       if (mounted && !model.invalidated && cropped != null) {
         model.update('logoImageData', cropped);
@@ -158,22 +228,36 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
         }
       }
       if (mounted) setState(() => choosingImage = false);
+      _imageSource = null;
     }
   }
 
   Future<void> chooseTags() async {
-    final tags = await dialog<List<String>>(
-      CommunityTagPicker(
-        options: model.options!,
-        selected: List<String>.from(model.draft!['tagIds'] as List),
-      ),
-    );
-    if (mounted && tags != null) model.update('tagIds', tags);
+    if (busy || confirming || choosingTags || model.options == null) return;
+    choosingTags = true;
+    try {
+      final tags = await dialog<List<String>>(
+        (_) => CommunityTagPicker(
+          options: model.options!,
+          selected: List<String>.from(model.draft!['tagIds'] as List),
+        ),
+      );
+      if (mounted && !model.invalidated && tags != null) {
+        model.update('tagIds', tags);
+      }
+    } finally {
+      choosingTags = false;
+    }
   }
 
   @override
   void dispose() {
+    for (final route in _dialogs.toList().reversed) {
+      retireStarBridgeDialog(route);
+    }
     model.removeListener(changed);
+    _reading.dispose();
+    _saving.dispose();
     model.dispose();
     super.dispose();
   }
@@ -187,23 +271,27 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
     bool required = false,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
-    child: TextFormField(
-      key: ValueKey('create-$key'),
-      initialValue: model.draft![key] as String,
+    child: StarBridgeFieldFrame(
       enabled: !busy,
-      maxLength: max,
-      minLines: lines,
-      maxLines: lines,
-      decoration: InputDecoration(
-        labelText: t(label ?? key),
-        helperText: hint == null ? null : t(hint),
-        helperMaxLines: 3,
+      builder: (_, focus) => TextFormField(
+        focusNode: focus,
+        key: ValueKey('create-$key'),
+        initialValue: model.draft![key] as String,
+        enabled: !busy,
+        maxLength: max,
+        minLines: lines,
+        maxLines: lines,
+        decoration: InputDecoration(
+          labelText: t(label ?? key),
+          helperText: hint == null ? null : t(hint),
+          helperMaxLines: 3,
+        ),
+        onChanged: (value) => model.update(key, value),
+        validator: required
+            ? (value) =>
+                  value == null || value.trim().isEmpty ? t('required') : null
+            : null,
       ),
-      onChanged: (value) => model.update(key, value),
-      validator: required
-          ? (value) =>
-                value == null || value.trim().isEmpty ? t('required') : null
-          : null,
     ),
   );
 
@@ -215,7 +303,8 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
         preview = Image.memory(
           base64Decode(value.split(',').last),
           fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => const StandardIcon(StandardIconSemantic.brokenImage),
+          errorBuilder: (_, _, _) =>
+              const StandardIcon(StandardIconSemantic.brokenImage),
         );
       } catch (_) {
         /* Preserve the draft; report on submit. */
@@ -232,15 +321,20 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             SizedBox(width: 80, height: 80, child: preview),
-            OutlinedButton(
-              onPressed: busy || images?.canPickLogo != true ? null : pickLogo,
+            StarBridgeActionButton(
+              controlKey: const Key('community-create-pick-logo'),
+              onActivate: busy || images?.canPickLogo != true
+                  ? null
+                  : (_) => pickLogo(),
               child: Text(t('pickLogo')),
             ),
             if (value != null)
-              TextButton(
-                onPressed: busy
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('community-create-remove-logo'),
+                onActivate: busy
                     ? null
-                    : () => model.update('logoImageData', null),
+                    : (_) => model.update('logoImageData', null),
                 child: Text(t('removeLogo')),
               ),
           ],
@@ -285,15 +379,38 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
               const SizedBox(height: 16),
               Expanded(
                 child: model.loading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? Center(
+                        child: SizedBox(
+                          width: 160,
+                          height: 40,
+                          child: Center(
+                            child: KeyedSubtree(
+                              key: ValueKey((
+                                'creation-read',
+                                _reading.revision,
+                              )),
+                              child: SocialReadActivity(
+                                key: const ValueKey('creation-read-activity'),
+                                source: _reading.source,
+                                opening: _reading.opening,
+                                label: t('loadingOptions'),
+                                height: 4,
+                                circularStandard: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
                     : model.options == null
                     ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(t('optionsUnavailable')),
-                            TextButton(
-                              onPressed: model.load,
+                            StarBridgeActionButton(
+                              kind: StarBridgeActionKind.quiet,
+                              controlKey: const Key('community-create-reload'),
+                              onActivate: (_) => model.load(),
                               child: Text(t('retry')),
                             ),
                           ],
@@ -326,9 +443,16 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                                     (tag) => (model.draft!['tagIds'] as List)
                                         .contains(tag.id),
                                   ))
-                                    Chip(label: Text(tag.name)),
-                                  OutlinedButton(
-                                    onPressed: busy ? null : chooseTags,
+                                    Chip(
+                                      label: Text(tag.localizedName(context)),
+                                    ),
+                                  StarBridgeActionButton(
+                                    controlKey: const Key(
+                                      'community-create-tags',
+                                    ),
+                                    onActivate: busy
+                                        ? null
+                                        : (_) => chooseTags(),
                                     child: Text(t('chooseTags')),
                                   ),
                                 ],
@@ -358,10 +482,12 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                                           'pyro',
                                           'nyx',
                                         ])
-                                          FilterChip(
-                                            label: Text(
-                                              '${system[0].toUpperCase()}${system.substring(1)}',
+                                          StarBridgeChoiceChip.filter(
+                                            controlKey: ValueKey(
+                                              'community-create-system-$system',
                                             ),
+                                            label:
+                                                '${system[0].toUpperCase()}${system.substring(1)}',
                                             selected:
                                                 (model.draft!['activeSystemIds']
                                                         as List)
@@ -399,7 +525,11 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                                 ),
                               ),
                               const SizedBox(height: 16),
-                              DropdownButtonFormField<String>(
+                              StarBridgeSelectFormField<String>(
+                                identity: 'community-create-join-policy',
+                                controlKey: const Key(
+                                  'community-create-join-policy',
+                                ),
                                 initialValue:
                                     model.draft!['joinPolicy'] as String,
                                 decoration: InputDecoration(
@@ -450,7 +580,9 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                               ),
                               Text(t('overnight')),
                               const SizedBox(height: 12),
-                              DropdownButtonFormField<String>(
+                              StarBridgeSelectFormField<String>(
+                                identity: 'community-create-zone',
+                                controlKey: const Key('community-create-zone'),
                                 initialValue:
                                     model.draft!['timeZoneId'] as String,
                                 decoration: InputDecoration(
@@ -464,7 +596,8 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                                       child: Text(
                                         zone.name,
                                         maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        overflow: TextOverflow.fade,
+                                        softWrap: false,
                                       ),
                                     ),
                                 ],
@@ -479,7 +612,27 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                       ),
               ),
               if (model.submitting || choosingImage && _dialogs.isEmpty)
-                const LinearProgressIndicator(),
+                KeyedSubtree(
+                  key: ValueKey((
+                    model.submitting,
+                    model.submitting ? _saving.revision : _imageRevision,
+                    model.submitting ? _saving.source : _imageSource?.call(),
+                  )),
+                  child: SocialReadActivity(
+                    key: ValueKey(
+                      model.submitting
+                          ? 'creation-save-activity'
+                          : 'creation-image-activity',
+                    ),
+                    source: model.submitting
+                        ? _saving.source
+                        : _imageSource?.call() ??
+                              InteractionSource.programmatic,
+                    opening: false,
+                    label: t(model.submitting ? 'creating' : 'pickLogo'),
+                    height: 4,
+                  ),
+                ),
               if (model.outcome != null && model.outcome!.status != 'accepted')
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
@@ -500,8 +653,12 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                 overflowSpacing: 8,
                 alignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: model.submitting || choosingImage ? null : leave,
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('community-create-leave'),
+                    onActivate: model.submitting || choosingImage
+                        ? null
+                        : (_) => leave(),
                     child: Text(
                       t(
                         model.outcome?.status == 'unknown'
@@ -510,8 +667,12 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                       ),
                     ),
                   ),
-                  FilledButton(
-                    onPressed: busy || model.options == null ? null : submit,
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.primary,
+                    controlKey: const Key('community-create-submit'),
+                    onActivate: busy || model.options == null
+                        ? null
+                        : (_) => submit(),
                     child: Text(t(model.submitting ? 'creating' : 'title')),
                   ),
                 ],

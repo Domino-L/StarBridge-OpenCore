@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -86,7 +87,8 @@ class PlayerActivityNotificationPanel extends StatelessWidget {
                               : '开始游玩 Star Citizen',
                           style: TextStyle(color: tokens.colors.success),
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
                         ),
                         Text(
                           en
@@ -96,7 +98,8 @@ class PlayerActivityNotificationPanel extends StatelessWidget {
                               : '好友 · 示例组织成员 · 同房间',
                           style: Theme.of(context).textTheme.bodySmall,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
                         ),
                       ],
                     ),
@@ -396,59 +399,47 @@ class _CompactToggle extends StatelessWidget {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     final title = titleOverride ?? strings.text(titleKey);
-    return Semantics(
-      container: true,
-      enabled: enabled,
-      toggled: value,
-      label: title,
-      child: ExcludeSemantics(
-        child: Material(
-          color: value
-              ? color.withValues(alpha: 0.09)
-              : tokens.surfaces.panel.fill,
-          borderRadius: tokens.shape.small,
-          child: InkWell(
-            onTap: enabled ? () => onChanged(!value) : null,
-            borderRadius: tokens.shape.small,
-            child: Container(
-              padding: EdgeInsets.all(tokens.space.sm),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: value
-                      ? color.withValues(alpha: 0.55)
-                      : tokens.surfaces.panel.border,
-                  width: tokens.stroke.hairline,
-                ),
-                borderRadius: tokens.shape.small,
-              ),
-              child: Row(
-                children: [
-                  StarBridgeIcon(
-                    icon,
-                    size: tokens.icons.medium,
-                    color: enabled ? color : tokens.colors.textDisabled,
-                  ),
-                  SizedBox(width: tokens.space.xs),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-                  ),
-                  Switch(
-                    key: settingKey,
-                    value: value,
-                    onChanged: enabled
-                        ? (next) async {
-                            await onChanged(next);
-                          }
-                        : null,
-                  ),
-                ],
-              ),
+    return Material(
+      color: value ? color.withValues(alpha: 0.09) : tokens.surfaces.panel.fill,
+      borderRadius: tokens.shape.small,
+      child: StarBridgeSwitch.tile(
+        value: value,
+        label: title,
+        controlKey: settingKey,
+        onChanged: enabled
+            ? (next) {
+                onChanged(next);
+              }
+            : null,
+        rowBuilder: (control) => Container(
+          padding: EdgeInsets.all(tokens.space.sm),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: value
+                  ? color.withValues(alpha: 0.55)
+                  : tokens.surfaces.panel.border,
+              width: tokens.stroke.hairline,
             ),
+            borderRadius: tokens.shape.small,
+          ),
+          child: Row(
+            children: [
+              StarBridgeIcon(
+                icon,
+                size: tokens.icons.medium,
+                color: enabled ? color : tokens.colors.textDisabled,
+              ),
+              SizedBox(width: tokens.space.xs),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+              control,
+            ],
           ),
         ),
       ),

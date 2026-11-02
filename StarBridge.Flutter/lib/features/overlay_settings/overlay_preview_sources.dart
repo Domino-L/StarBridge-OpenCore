@@ -37,6 +37,7 @@ final class OverlayPreviewSourcePresentation {
       OverlaySourceMode.none => null,
       OverlaySourceMode.auto => 'auto',
       OverlaySourceMode.room => 'room',
+      OverlaySourceMode.fleet => 'fleet',
       OverlaySourceMode.community =>
         source.ownerKey == scenes?.sourceOwnerKey &&
                 scenes!.targets.any(
@@ -126,6 +127,11 @@ class OverlayPreviewSourceScope extends StatelessWidget {
               ?.name ??
           strings.text('overlay.source.missing');
     }
+    if (id == 'fleet') {
+      final scope = context.dependOnInheritedWidgetOfExactType<_SourceScope>();
+      return scope?.scenes?.fleetLabel(strings.text) ??
+          strings.text('overlay.source.fleet');
+    }
     return strings.text('overlay.source.${id == 'local' ? 'localName' : id}');
   }
 }
@@ -173,7 +179,8 @@ class OverlayPreviewSourceTitle extends StatelessWidget {
             child: Text(
               OverlayPreviewSourceScope.label(context, id),
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              overflow: TextOverflow.fade,
+              softWrap: false,
               style: TextStyle(
                 fontSize: 10,
                 color: tokens.colors.textSecondary,

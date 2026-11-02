@@ -12,7 +12,8 @@ internal enum FleetServerRelationshipKind
 
 /// <summary>
 /// Resolves the actionable relationship between a visible fleet member and the
-/// local player's server. Raw server identifiers stay inside this seam.
+/// local player's server. Returns only the relationship; the overlay overview's
+/// short shard form comes from OverlayShardPresentation.
 /// </summary>
 internal static class FleetServerRelationship
 {

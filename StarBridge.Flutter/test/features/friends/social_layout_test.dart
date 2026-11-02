@@ -70,6 +70,8 @@ Future<void> loadFonts() async {
   for (final font in {
     'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
     'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+    'Saira': 'assets/fonts/Saira-VF.ttf',
+    'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
     'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
   }.entries) {
     await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();

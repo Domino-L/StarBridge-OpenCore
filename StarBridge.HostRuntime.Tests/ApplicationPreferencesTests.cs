@@ -4,6 +4,126 @@ using System.Text.Json;
 
 internal static class ApplicationPreferencesTests
 {
+    internal static async Task PreviewGuidePersistsIndependently()
+    {
+        var root = CreateRoot();
+        try
+        {
+            new ApplicationPreferencesStore(root).Save(ApplicationPreferencesSnapshot.Default with
+            {
+                LocaleOverride = "en-US", MotionPreference = "reduce", KeepRunningInBackground = false
+            });
+            using (var dispatcher = new ApplicationPreferencesBridgeDispatcher(root, () => 3))
+            {
+                var read = await dispatcher.DispatchAsync(Request("guide-read", 3));
+                AssertEqual(false, read.Response.Payload.GetProperty("preferences").GetProperty("appearancePreviewGuideSeen").GetBoolean(), "guide initially unseen");
+                var saved = await dispatcher.DispatchAsync(Request("guide-seen", 3,
+                    ApplicationPreferencesRequestNames.Update,
+                    new { schemaVersion = 1, expectedRevision = 0, patch = new { appearancePreviewGuideSeen = true } }));
+                AssertEqual("ok", saved.Response.Status, "guide flag saved through local preferences");
+                AssertEqual(true, saved.Response.Payload.GetProperty("preferences").GetProperty("appearancePreviewGuideSeen").GetBoolean(), "guide seen acknowledged");
+            }
+            using var reopened = new ApplicationPreferencesBridgeDispatcher(root, () => 4);
+            var reread = await reopened.DispatchAsync(Request("guide-reopen", 4));
+            AssertEqual(true, reread.Response.Payload.GetProperty("preferences").GetProperty("appearancePreviewGuideSeen").GetBoolean(), "guide survives restart");
+            var preferences = reread.Response.Payload.GetProperty("preferences");
+            AssertEqual("en-US", preferences.GetProperty("localeOverride").GetString(), "guide retains locale");
+            AssertEqual("reduce", preferences.GetProperty("motionPreference").GetString(), "guide retains motion preference");
+            AssertEqual(false, preferences.GetProperty("applicationBehavior").GetProperty("keepRunningInBackground").GetBoolean(), "guide retains close behavior");
+            AssertEqual(1, Directory.GetFiles(root).Length, "guide only uses existing preference file, no overlay save");
+            Console.WriteLine("PASS local preview guide acknowledgement persists independently");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    internal static async Task HolidayAppearancePersistsIndependently()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var expected = ApplicationPreferencesSnapshot.Default with
+            {
+                Revision = 7,
+                LocaleOverride = "en-US",
+                AppearanceMode = "light",
+                MotionPreference = "reduce",
+                InteractionStyle = "glow",
+                AppearancePreviewGuideSeen = true,
+                KeepRunningInBackground = false,
+                StartMinimized = true,
+                StartupChoiceMade = true,
+                CloseBehaviorChoiceMade = true,
+                BackgroundHintShown = true
+            };
+            var store = new ApplicationPreferencesStore(root);
+            store.Save(expected);
+            foreach (var enabled in new[] { false, true })
+            {
+                using (var dispatcher = new ApplicationPreferencesBridgeDispatcher(root, () => 3))
+                {
+                    var saved = await dispatcher.DispatchAsync(Request("holiday-save", 3,
+                        ApplicationPreferencesRequestNames.Update,
+                        new { schemaVersion = 1, expectedRevision = expected.Revision,
+                            patch = new { holidayAppearance = enabled } }));
+                    AssertEqual(BridgeResponseStatuses.Ok, saved.Response.Status, "holiday patch saved");
+                    AssertEqual(enabled, saved.Response.Payload.GetProperty("preferences").GetProperty("holidayAppearance").GetBoolean(),
+                        "holiday patch response");
+                }
+                expected = expected with { Revision = expected.Revision + 1, HolidayAppearance = enabled };
+                var loaded = store.Load();
+                AssertEqual(ApplicationPreferencesStorageStates.Ready, loaded.StorageState, "holiday file ready");
+                AssertEqual(expected, loaded.Snapshot, "holiday-only patch preserves every other preference");
+                using var stored = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "application-preferences.v1.json")));
+                AssertEqual(enabled, stored.RootElement.GetProperty("holidayAppearance").GetBoolean(), "holiday persisted in JSON");
+                using var reopened = new ApplicationPreferencesBridgeDispatcher(root, () => 4);
+                var reread = await reopened.DispatchAsync(Request("holiday-reopen", 4));
+                AssertEqual(BridgeResponseStatuses.Ok, reread.Response.Status, "holiday reopened");
+                AssertEqual(enabled, reread.Response.Payload.GetProperty("preferences").GetProperty("holidayAppearance").GetBoolean(),
+                    "holiday survives restart");
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    internal static async Task HolidayAppearanceRejectsInvalidPatches()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var store = new ApplicationPreferencesStore(root);
+            var expected = ApplicationPreferencesSnapshot.Default with { LocaleOverride = "zh-TW" };
+            store.Save(expected);
+            var path = Path.Combine(root, "application-preferences.v1.json");
+            var originalJson = File.ReadAllText(path);
+            using var dispatcher = new ApplicationPreferencesBridgeDispatcher(root, () => 3);
+            foreach (var patchJson in new[]
+            {
+                """{"holidayAppearance":"false"}""",
+                """{"holidayAppearance":null}""",
+                """{"holidayAppearance":0}""",
+                """{"holidayAppearance":{}}""",
+                """{"holidayAppearance":[]}""",
+                """{"holidayAppearance":false,"unknownHolidayField":true}""",
+                """{"unknownHolidayField":true}"""
+            })
+            {
+                using var patch = JsonDocument.Parse(patchJson);
+                var rejected = await dispatcher.DispatchAsync(Request("holiday-invalid", 3,
+                    ApplicationPreferencesRequestNames.Update,
+                    new { schemaVersion = 1, expectedRevision = 0, patch = patch.RootElement }));
+                AssertEqual(BridgeResponseStatuses.Error, rejected.Response.Status, "invalid holiday patch rejected");
+                AssertEqual(BridgeErrorCodes.InvalidEnvelope, rejected.Response.Error?.Code, "invalid holiday patch code");
+                AssertEqual(originalJson, File.ReadAllText(path), "invalid patch leaves file unchanged");
+                AssertEqual(expected, store.Load().Snapshot, "invalid patch leaves stored snapshot unchanged");
+                var current = await dispatcher.DispatchAsync(Request("holiday-after-invalid", 3));
+                AssertEqual(0L, current.Response.Payload.GetProperty("revision").GetInt64(), "invalid patch leaves revision unchanged");
+                AssertEqual(true, current.Response.Payload.GetProperty("preferences").GetProperty("holidayAppearance").GetBoolean(),
+                    "invalid patch leaves cached holiday preference unchanged");
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     internal static async Task LivePresentationLanguage()
     {
         var root = CreateRoot();
@@ -61,6 +181,7 @@ internal static class ApplicationPreferencesTests
                 AssertEqual(JsonValueKind.Null, defaultPreferences.GetProperty("localeOverride").ValueKind, "default locale override");
                 AssertEqual("dark", defaultPreferences.GetProperty("appearanceMode").GetString(), "default appearance");
                 AssertEqual("followSystem", defaultPreferences.GetProperty("motionPreference").GetString(), "default motion");
+                AssertEqual(true, defaultPreferences.GetProperty("holidayAppearance").GetBoolean(), "default holiday appearance");
                 var defaultBehavior = defaultPreferences.GetProperty("applicationBehavior");
                 AssertEqual(false, defaultBehavior.GetProperty("launchAtStartup").GetBoolean(), "default startup");
                 AssertEqual(true, defaultBehavior.GetProperty("keepRunningInBackground").GetBoolean(), "default background");
@@ -219,6 +340,9 @@ internal static class ApplicationPreferencesTests
 
             AssertEqual(BridgeResponseStatuses.Ok, response.Response.Status, "older v1 status");
             AssertEqual("ready", response.Response.Payload.GetProperty("storageState").GetString(), "older v1 state");
+            AssertEqual(3L, response.Response.Payload.GetProperty("revision").GetInt64(), "older v1 revision retained");
+            AssertEqual(true, response.Response.Payload.GetProperty("preferences").GetProperty("holidayAppearance").GetBoolean(),
+                "older v1 missing holiday appearance defaults to true");
             var behavior = response.Response.Payload
                 .GetProperty("preferences")
                 .GetProperty("applicationBehavior");

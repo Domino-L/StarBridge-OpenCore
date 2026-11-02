@@ -1,0 +1,261 @@
+{
+  "ownerDocument": {
+    "schemaVersion": 3,
+    "publicId": "synthetic-public-id",
+    "isPublic": true,
+    "visibility": "public",
+    "revision": 7,
+    "updatedAt": "2026-10-29T12:00:00Z",
+    "avatarStyle": 1,
+    "wallpaperId": "none",
+    "identity": {
+      "callsign": "Synthetic Pilot",
+      "gameId": "Synthetic-Pilot",
+      "avatarAssetId": null,
+      "callSignOrigin": "custom",
+      "avatarOrigin": "unknown"
+    },
+    "content": {
+      "showOnlineTime": true,
+      "onlineTimeStart": "19:30",
+      "onlineTimeEnd": "23:00",
+      "activityRhythm": "稳定活跃",
+      "introduction": "Synthetic introduction",
+      "skilledRoles": [
+        "pilot"
+      ],
+      "supportCapabilities": [
+        "medical"
+      ],
+      "participationInterests": [
+        "mining"
+      ],
+      "shipWishlist": [
+        "synthetic-ship"
+      ],
+      "favoriteShipCodes": [
+        "synthetic-ship"
+      ],
+      "modules": [
+        {
+          "id": "skilled-roles",
+          "span": 2,
+          "isVisible": true,
+          "order": 0,
+          "position": 0
+        },
+        {
+          "id": "favorite-ships",
+          "span": 1,
+          "isVisible": true,
+          "order": 1,
+          "position": 1,
+          "favoriteShipIds": [
+            "0123456789abcdef0123456789abcdef"
+          ]
+        }
+      ],
+      "availabilityTimeZoneId": "Asia/Shanghai",
+      "availabilityWindows": [
+        {
+          "days": [
+            1,
+            2,
+            3
+          ],
+          "startTime": "19:30",
+          "endTime": "23:00"
+        }
+      ],
+      "presenceIntent": "looking-for-group"
+    },
+    "fleetAffiliation": {
+      "fleetName": "Synthetic Fleet",
+      "fleetCode": "SYNTH",
+      "fleetLogoAssetId": null,
+      "positionTitle": "Member",
+      "positionColor": "#336699"
+    },
+    "hangar": null,
+    "gameplayStatistics": {
+      "playTimeSeconds": 3600,
+      "downedCount": 1,
+      "deathCount": 2,
+      "updatedAt": "2026-10-29T12:00:00Z",
+      "historicalPlayTimeSeconds": 7200,
+      "historicalSessionCount": 3,
+      "historicalIncompleteSessionCount": 1,
+      "historyImportedAt": "2026-10-28T12:00:00Z",
+      "historyImportState": "imported"
+    },
+    "isGameplayStatisticsPublic": true,
+    "presentation": {
+      "schemaVersion": 1,
+      "origins": {
+        "introduction": "custom",
+        "layout": "default",
+        "favorites": "custom",
+        "schedule": "imported",
+        "playStyle": "unknown",
+        "wishlist": "linkedLegacy",
+        "avatarStyle": "default",
+        "wallpaper": "default"
+      },
+      "sourceVersion": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  },
+  "visitorDocument": {
+    "schemaVersion": 3,
+    "publicId": "synthetic-public-id",
+    "isPublic": true,
+    "visibility": "public",
+    "revision": 7,
+    "updatedAt": "2026-10-29T12:00:00Z",
+    "avatarStyle": 1,
+    "wallpaperId": "none",
+    "identity": {
+      "callsign": "Synthetic Pilot",
+      "gameId": "",
+      "avatarAssetId": null,
+      "callSignOrigin": "custom",
+      "avatarOrigin": "unknown"
+    },
+    "content": {
+      "showOnlineTime": true,
+      "onlineTimeStart": "19:30",
+      "onlineTimeEnd": "23:00",
+      "activityRhythm": "稳定活跃",
+      "introduction": "Synthetic introduction",
+      "skilledRoles": [
+        "pilot"
+      ],
+      "supportCapabilities": [
+        "medical"
+      ],
+      "participationInterests": [
+        "mining"
+      ],
+      "shipWishlist": [
+        "synthetic-ship"
+      ],
+      "favoriteShipCodes": [
+        "synthetic-ship"
+      ],
+      "modules": [
+        {
+          "id": "skilled-roles",
+          "span": 2,
+          "isVisible": true,
+          "order": 0,
+          "position": 0
+        },
+        {
+          "id": "favorite-ships",
+          "span": 1,
+          "isVisible": true,
+          "order": 1,
+          "position": 1,
+          "favoriteShipIds": [
+            "0123456789abcdef0123456789abcdef"
+          ]
+        }
+      ],
+      "availabilityTimeZoneId": "Asia/Shanghai",
+      "availabilityWindows": [
+        {
+          "days": [
+            1,
+            2,
+            3
+          ],
+          "startTime": "19:30",
+          "endTime": "23:00"
+        }
+      ],
+      "presenceIntent": "looking-for-group"
+    },
+    "fleetAffiliation": {
+      "fleetName": "Synthetic Fleet",
+      "fleetCode": "SYNTH",
+      "fleetLogoAssetId": null,
+      "positionTitle": "Member",
+      "positionColor": "#336699"
+    },
+    "hangar": null,
+    "gameplayStatistics": {
+      "playTimeSeconds": 3600,
+      "downedCount": 1,
+      "deathCount": 2,
+      "updatedAt": "2026-10-29T12:00:00Z",
+      "historicalPlayTimeSeconds": 7200,
+      "historicalSessionCount": 3,
+      "historicalIncompleteSessionCount": 1,
+      "historyImportedAt": "2026-10-28T12:00:00Z",
+      "historyImportState": "imported"
+    },
+    "isGameplayStatisticsPublic": true,
+    "fleetAffiliationStatus": "shown"
+  },
+  "restrictedVisitor": {
+    "schemaVersion": 1,
+    "restricted": true,
+    "visibility": "friendsOnly",
+    "publicHeader": {
+      "callsign": "Synthetic Pilot",
+      "avatarAssetId": "data:image/png;base64,AAAA",
+      "callSignOrigin": "custom",
+      "avatarOrigin": "unknown",
+      "tradeWindow": {
+        "days": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0
+        ],
+        "start": "19:30",
+        "end": "23:00",
+        "timezoneId": 77
+      }
+    }
+  },
+  "restrictedLegacy": {
+    "schemaVersion": 1,
+    "legacyAccountId": "historical-member",
+    "restricted": true,
+    "visibility": "friendsOnly",
+    "publicHeader": {
+      "callsign": "Synthetic Pilot",
+      "avatarAssetId": "data:image/png;base64,AAAA",
+      "callSignOrigin": "custom",
+      "avatarOrigin": "unknown",
+      "tradeWindow": {
+        "days": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0
+        ],
+        "start": "19:30",
+        "end": "23:00",
+        "timezoneId": 77
+      }
+    }
+  },
+  "visitorRefusals": {
+    "notAvailable": {
+      "code": "PERSONAL_PROFILE_NOT_AVAILABLE"
+    },
+    "temporarilyUnavailable": {
+      "code": "PERSONAL_PROFILE_TEMPORARILY_UNAVAILABLE"
+    },
+    "readRequired": {
+      "code": "PROFILE_READ_REQUIRED"
+    }
+  }
+}

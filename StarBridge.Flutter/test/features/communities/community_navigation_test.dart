@@ -7,6 +7,7 @@ import 'package:starbridge_flutter/app/shell/shell_layout_mode.dart';
 import 'package:starbridge_flutter/app/shell/widgets/navigation_pane.dart';
 import 'package:starbridge_flutter/app/shell/widgets/navigation_item.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/communities/communities_feature.dart';
@@ -18,6 +19,7 @@ import 'package:starbridge_flutter/features/communities/example_communities.dart
 
 import '../friends/social_layout_test.dart' show loadFonts;
 import 'community_workspace_view_test.dart' show host;
+import 'community_holo_test_support.dart';
 
 Widget shell(CommunitiesModule module) {
   final feature = createCommunitiesFeature(module: module);
@@ -93,6 +95,7 @@ void main() {
       await tester.tap(shortcut);
       await tester.pumpAndSettle();
       expect(module.selected?.key, module.joined.last.key);
+      await enterCommunitySection(tester);
       expect(
         find.byKey(const Key('community-internal-workspace')),
         findsOneWidget,
@@ -147,13 +150,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.byType(CommunityChatPanel), findsOneWidget);
-      await tester.tap(find.widgetWithText(TextButton, '继续编辑'));
+      await tester.tap(find.widgetWithText(StarBridgeActionButton, '继续编辑'));
       await tester.pumpAndSettle();
       expect(find.text('保留草稿'), findsOneWidget);
-      final chat = tester.state<CommunityChatPanelState>(find.byType(CommunityChatPanel));
+      final chat = tester.state<CommunityChatPanelState>(
+        find.byType(CommunityChatPanel),
+      );
       await tester.tap(find.byKey(const ValueKey('community-section-members')));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, '丢弃草稿并返回'));
+      await tester.tap(find.widgetWithText(StarBridgeActionButton, '丢弃草稿并返回'));
       await tester.pumpAndSettle();
       expect(chat.model.draft, isEmpty);
       await tester.tap(find.byKey(const ValueKey('community-section-chat')));

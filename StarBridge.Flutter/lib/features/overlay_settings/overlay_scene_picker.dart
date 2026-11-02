@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/shell/chrome/overlay_source_labels.dart';
 import '../../app/shell/widgets/overlay_source_menu.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_scene_projection.dart';
 
@@ -27,10 +28,11 @@ class OverlayScenePicker extends StatelessWidget {
             triggerKey: const Key('overlay-source-picker'),
           );
           if (compact) {
-            return Tooltip(
+            return StarBridgeTooltip(
               message: strings.text(
                 view.fallbackReasonKey ?? overlaySourceHint(view),
               ),
+              consumeEscape: false,
               child: menu,
             );
           }

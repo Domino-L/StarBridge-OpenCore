@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -131,7 +133,8 @@ void main() {
       await warming;
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(
-        ((session.currentView['organization'] as Map)['overview']
+        ((resolvedMenuCopy(session.currentView)['organization']
+                as Map)['overview']
             as Map)['online'],
         3,
       );

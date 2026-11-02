@@ -5,14 +5,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);STARBRIDGE_HOST_RUNTIME</DefineConstants>
+    <!-- Temporary, private diagnostic candidate only; off in ordinary builds. -->
+    <DefineConstants Condition="'$(StarBridgeSessionProbeEnabled)' == 'true'">$(DefineConstants);STARBRIDGE_SESSION_PROBE</DefineConstants>
+    <StarBridgeMemberReadProbeEnabled Condition="'$(StarBridgeMemberReadProbeEnabled)' == ''">false</StarBridgeMemberReadProbeEnabled>
+    <DefineConstants Condition="'$(StarBridgeMemberReadProbeEnabled)' == 'true'">$(DefineConstants);STARBRIDGE_MEMBER_READ_PROBE</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup>
-    <StarBridgeEnableOverlaySourcePresets Condition="'$(StarBridgeEnableOverlaySourcePresets)' == ''">false</StarBridgeEnableOverlaySourcePresets>
+    <!-- Saved source-preset workspaces are a normal client capability. Only
+         explicitly selected diagnostic profiles may compile this support out. -->
+    <StarBridgeEnableOverlaySourcePresets Condition="'$(StarBridgeEnableOverlaySourcePresets)' == ''">true</StarBridgeEnableOverlaySourcePresets>
     <DefineConstants Condition="'$(StarBridgeEnableOverlaySourcePresets)' == 'true'">$(DefineConstants);STARBRIDGE_OVERLAY_SOURCE_PRESETS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="StarBridgeEnableOverlaySourcePresets" Value="$(StarBridgeEnableOverlaySourcePresets)" />
+    <AssemblyMetadata Include="StarBridgeAcceptanceMediaFree" Value="$(StarBridgeAcceptanceMediaFree)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -50,9 +57,12 @@
     <EmbeddedResource Include="../StarBridge.Desktop/Data/ship-loaner-matrix.tsv"
                       LogicalName="StarBridge.ShipLoanerMatrix.tsv"
                       Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/ship-loaner-matrix.tsv')" />
+    <EmbeddedResource Include="../StarBridge.Desktop/Data/starbridge_location_catalog.json"
+                      LogicalName="StarBridge.LocationHierarchy.json"
+                      Condition="'$(StarBridgeAcceptanceMediaFree)' != 'true' and Exists('../StarBridge.Desktop/Data/starbridge_location_catalog.json')" />
     <EmbeddedResource Include="..\data\location-names\location-name-pack.json"
                       LogicalName="StarBridge.LocationCatalog.json"
-                      Condition="Exists('..\data\location-names\location-name-pack.json')" />
+                      Condition="'$(StarBridgeAcceptanceMediaFree)' != 'true' and Exists('..\data\location-names\location-name-pack.json')" />
     <EmbeddedResource Include="../StarBridge.Desktop/Data/location-names-zh.txt"
                       LogicalName="StarBridge.LocationCompatibilityNames.txt"
                       Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/location-names-zh.txt')" />
@@ -62,4 +72,16 @@
                       Condition="'$(StarBridgeIncludeThirdPartyMedia)' == 'true' and Exists('../StarBridge.Flutter/assets/ships/catalog-manifest.json')" />
   </ItemGroup>
 
+  <!-- Optional externally owned modules; public builds never import these. -->
+  <Import Project="$(StarBridgePrivateAppearanceRoot)/Host/StarBridge.PrivateHost.projitems"
+          Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and '$(StarBridgePrivateAppearanceRoot)' != '' and Exists('$(StarBridgePrivateAppearanceRoot)/Host/StarBridge.PrivateHost.projitems')" />
+  <Import Project="$(StarBridgePrivateOfflineReceiptRoot)/Host/StarBridge.OfflineReceipts.projitems"
+          Condition="'$(StarBridgeIncludeCommercialAppearances)' == 'true' and '$(StarBridgePrivateOfflineReceiptRoot)' != '' and Exists('$(StarBridgePrivateOfflineReceiptRoot)/Host/StarBridge.OfflineReceipts.projitems')" />
+  <ItemGroup>
+    <AssemblyMetadata Include="StarBridgeMemberReadProbeEnabled" Value="$(StarBridgeMemberReadProbeEnabled)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../shared/community-queries/CommunityImageUpload.cs" Link="Communities/CommunityImageUpload.cs" />
+  </ItemGroup>
 </Project>

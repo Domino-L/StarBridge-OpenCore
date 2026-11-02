@@ -5,6 +5,13 @@ import '../common/user_interaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show InteractionScope, ProgressPhase, SuiteProgressBar;
 
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -37,6 +44,20 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
   String? _lastMessageId;
   Timer? _timeRefresh;
   bool _openingInvite = false;
+  late bool _wasLoading;
+  InteractionSource? _readSource, _requestedReadSource;
+
+  // Only classify this wait's presentation. The original read/older functions
+  // still own guards, cursors, follow state, errors and asynchronous completion.
+  void _readFrom(InteractionSource source, Future<void> Function() read) {
+    _requestedReadSource = source;
+    try {
+      unawaited(read());
+    } finally {
+      _requestedReadSource = null;
+    }
+  }
+
   Future<void> _openInvitation(String code) async {
     final open = widget.openCommunityInvite;
     if (_openingInvite || open == null || !widget.module.available) return;
@@ -51,6 +72,7 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
   @override
   void initState() {
     super.initState();
+    _wasLoading = widget.module.loading;
     _timeRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
@@ -63,9 +85,26 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.module.loading && _readSource == null) {
+      _readSource = resolveStarBridgeInitialReadSource(
+        context,
+        InteractionSource.programmatic,
+      );
+    }
+  }
+
   void _changed() {
     if (!mounted) return;
     final module = widget.module;
+    if (module.loading != _wasLoading) {
+      _readSource = module.loading
+          ? _requestedReadSource ?? InteractionSource.programmatic
+          : null;
+      _wasLoading = module.loading;
+    }
     if (_text.text != module.draft) _text.text = module.draft;
     if (module.messages.lastOrNull?.id != _lastMessageId &&
         module.followLatest) {
@@ -78,6 +117,29 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
     _lastMessageId = module.messages.lastOrNull?.id;
     setState(() {});
   }
+
+  Widget _readWait(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        final label = roomActionText(context, 'working');
+        return Semantics(
+          key: const Key('room-chat-reading'),
+          liveRegion: true,
+          label: '${roomActionText(context, 'chat')} · $label',
+          child: ExcludeSemantics(
+            child:
+                _readSource == InteractionSource.keyboard || data.reduceMotion
+                ? Text(label)
+                : const SuiteProgressBar(
+                    value: null,
+                    phase: ProgressPhase.running,
+                  ),
+          ),
+        );
+      },
+    ),
+  );
 
   @override
   void dispose() {
@@ -122,18 +184,24 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              TextButton(
-                onPressed: module.loading || module.sending
+              StarBridgeActionButton(
+                controlKey: const Key('room-chat-refresh'),
+                kind: StarBridgeActionKind.quiet,
+                onActivate: module.loading || module.sending
                     ? null
-                    : module.refresh,
+                    : (source) => _readFrom(source, module.refresh),
                 child: Text(t('refreshMessages')),
               ),
             ],
           ),
-          if (module.loading) const LinearProgressIndicator(),
+          if (module.loading) _readWait(context),
           if (module.hasOlder)
-            TextButton(
-              onPressed: module.loading ? null : _older,
+            StarBridgeActionButton(
+              controlKey: const Key('room-chat-older'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: module.loading
+                  ? null
+                  : (source) => _readFrom(source, _older),
               child: Text(t('older')),
             ),
           Expanded(
@@ -222,16 +290,25 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                                           module.presetsAvailable)
                                         Align(
                                           alignment: Alignment.centerLeft,
-                                          child: TextButton.icon(
-                                            onPressed: () => roomPresetDialog(
-                                              context,
-                                              module,
-                                              message: message,
+                                          child: StarBridgeActionButton(
+                                            kind: StarBridgeActionKind.quiet,
+                                            onActivate: (source) =>
+                                                roomPresetDialog(
+                                                  context,
+                                                  module,
+                                                  message: message,
+                                                  source: source,
+                                                ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const StarBridgeIcon(
+                                                  StarBridgeIconSemantic.add,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(t('importPreset')),
+                                              ],
                                             ),
-                                            icon: const StarBridgeIcon(
-                                              StarBridgeIconSemantic.add,
-                                            ),
-                                            label: Text(t('importPreset')),
                                           ),
                                         ),
                                     ],
@@ -245,16 +322,21 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                   ),
           ),
           if (!module.followLatest || module.unread > 0)
-            TextButton(
-              onPressed: module.loading || module.sending
+            StarBridgeActionButton(
+              controlKey: const Key('room-chat-latest'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: module.loading || module.sending
                   ? null
-                  : () => module.refresh(latest: true),
+                  : (source) =>
+                        _readFrom(source, () => module.refresh(latest: true)),
               child: Text('${t('latest')} · ${module.unread}'),
             ),
           if (module.error != null) RoomFeedback(module.error!),
           if (module.uncertain)
-            TextButton(
-              onPressed: module.acknowledgeUncertain,
+            StarBridgeActionButton(
+              controlKey: const Key('room-chat-review-send'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: (_) => module.acknowledgeUncertain(),
               child: Text(t('reviewSend')),
             ),
           RoomChatComposer(
@@ -282,23 +364,31 @@ class _RoomChatPanelState extends State<RoomChatPanel> {
                       module.attachmentDraft!['title'] as String? ?? '',
                     ),
                     subtitle: Text(t('presetDraft')),
-                    trailing: IconButton(
-                      tooltip: t('removeAttachment'),
-                      onPressed: module.sending || module.uncertain
+                    trailing: StarBridgeIconAction(
+                      label: t('removeAttachment'),
+                      onActivate: module.sending || module.uncertain
                           ? null
-                          : module.clearAttachment,
+                          : (_) => module.clearAttachment(),
                       icon: const StarBridgeIcon(
                         StarBridgeIconSemantic.windowClose,
                       ),
                     ),
                   ),
             leadingAction: module.presetsAvailable
-                ? TextButton.icon(
-                    onPressed: module.sending || module.uncertain
+                ? StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    onActivate: module.sending || module.uncertain
                         ? null
-                        : () => roomPresetDialog(context, module),
-                    icon: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
-                    label: Text(t('sharePreset')),
+                        : (source) =>
+                              roomPresetDialog(context, module, source: source),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StarBridgeIcon(StarBridgeIconSemantic.overlay),
+                        const SizedBox(width: 8),
+                        Text(t('sharePreset')),
+                      ],
+                    ),
                   )
                 : null,
           ),

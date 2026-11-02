@@ -12,6 +12,7 @@ import 'package:starbridge_flutter/platform/window/menu_preview_window_port.dart
 import 'package:starbridge_flutter/platform/window/overlay_editor_window_port.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/app/product_features.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/localization/overlay_settings_strings.dart';
@@ -34,6 +35,14 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_settings_pa
 import 'package:starbridge_flutter/features/overlay_settings/overlay_preview_identity.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_models.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_rules.dart';
+import 'package:starbridge_flutter/app/composition/account_shell_chrome.dart';
+import 'package:starbridge_flutter/features/account/account_module.dart';
+import 'package:starbridge_flutter/features/onboarding/connection_mode_controller.dart';
+
+import '../../release/pending_offline_resume_chrome_test.dart'
+    show PausedAccountPort;
+import '../onboarding/connection_mode_test.dart' show ModePort, modeFact;
+
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_shortcut_summary.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_preset_bar.dart';
@@ -55,6 +64,8 @@ import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
+import 'overlay_saved_snapshot.dart';
+
 class _MenuReadLease implements MenuFriendsReadLease {
   @override
   void show(bool visible) {}
@@ -63,75 +74,271 @@ class _MenuReadLease implements MenuFriendsReadLease {
 }
 
 void main() {
-  testWidgets(
-    'import preview requires confirmation and preserves current draft',
-    (tester) async {
-      tester.view.physicalSize = const Size(1280, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final port = _MemoryWorkspacePort(_workspaceSnapshot());
-      final module = OverlaySettingsModule(
-        InMemoryOverlaySettingsAdapter(),
-        workspacePort: port,
-      );
-      addTearDown(module.dispose);
-      await module.initialize();
-      module.workspace!.updateSetting('showNotice', false);
-      final imported = _workspaceSnapshot();
-      final payload = jsonEncode({
-        'schemaVersion': 1,
-        'name': '导入示例',
-        'settings': imported.settings!.toMap(),
-        'layout': imported.layout.map((item) => item.toMap()).toList(),
-      });
-      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
-      await tester.pumpAndSettle();
-      Future<void> preview() async {
-        await tester.tap(find.byKey(const Key('overlay-preset-manage')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('导入'));
-        await tester.pumpAndSettle();
-        await tester.enterText(
-          find.descendant(
-            of: find.byType(AlertDialog),
-            matching: find.byType(TextField),
-          ),
-          payload,
-        );
-        await tester.tap(find.text('查看导入预览'));
-        await tester.pumpAndSettle();
-      }
+  test('an archived transition or theme alone keeps a valid appearance', () {
+    final nightShadow = _completeWorkspaceSettings()
+      ..['skin'] = 'NightShadow'
+      ..['requestedSkin'] = 'NightShadow'
+      ..['theme'] = 'NightShadow'
+      ..['startupTransitionStyle'] = 'NightShadowCrimsonFold';
+    for (final legacy in <Object>['LagrangeWeaveEquilibrium', 6, '6']) {
+      final migrated = OverlayWorkspaceSettings.fromMap({
+        ...nightShadow,
+        'startupTransitionStyle': legacy,
+      }).toMap();
+      expect(migrated['skin'], 'NightShadow');
+      expect(migrated['requestedSkin'], 'NightShadow');
+      expect(migrated['theme'], 'NightShadow');
+      expect(migrated['startupTransitionStyle'], 'BridgeTerminal');
+    }
+    final themeOnly = OverlayWorkspaceSettings.fromMap({
+      ...nightShadow,
+      'theme': 'LagrangeWeave',
+    }).toMap();
+    expect(themeOnly['skin'], 'NightShadow');
+    expect(themeOnly['theme'], 'Default');
+    expect(themeOnly['startupTransitionStyle'], 'NightShadowCrimsonFold');
+  });
 
-      await preview();
-      expect(find.byType(OverlayPresetImportPreview), findsOneWidget);
-      expect(port.lastMutation, isNull);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(OverlayPresetImportPreview),
-          matching: find.text('取消'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(port.lastMutation, isNull);
-      expect(module.workspace!.projection.value.dirty, isTrue);
-      await preview();
-      await tester.tap(find.byKey(const Key('overlay-import-confirm')));
-      await tester.pumpAndSettle();
+  test(
+    'archived appearance JSON migrates settings, presets and workspace fields',
+    () {
+      final expected = _completeWorkspaceSettings()
+        ..['opacity'] = 0.63
+        ..['crosshairColor'] = '#34D5FF'
+        ..['crosshairSize'] = 117.0
+        ..['autoThemeByShip'] = true
+        ..['nightShadowBloom'] = 'Strong';
+      final cases = <Map<String, Object?>>[
+        for (final field in ['skin', 'requestedSkin', 'theme'])
+          {field: 'LagrangeWeave'},
+        {'startupTransitionStyle': 'LagrangeWeaveEquilibrium'},
+        {'skin': 2},
+        {'requestedSkin': 2},
+        {'theme': 14},
+        {'startupTransitionStyle': 6},
+        {
+          'skin': 'LagrangeWeave',
+          'requestedSkin': 'LagrangeWeave',
+          'theme': 'LagrangeWeave',
+          'startupTransitionStyle': 'LagrangeWeaveEquilibrium',
+        },
+      ];
+      final layout = _workspaceLayout();
+      for (final legacy in cases) {
+        final source = stringMap(
+          jsonDecode(jsonEncode({...expected, ...legacy})),
+        );
+        expect(OverlayWorkspaceSettings.fromMap(source).toMap(), expected);
+        final preset = OverlayWorkspacePreset.fromMap({
+          'id': 'old-plan',
+          'name': 'Archived fixture',
+          'isActive': true,
+          'storageState': 'ready',
+          'settings': source,
+          'layout': layout,
+        });
+        expect(preset.id, 'old-plan');
+        expect(preset.name, 'Archived fixture');
+        expect(preset.storageState, 'ready');
+        expect(preset.settings.toMap(), expected);
+        expect(
+          preset.layout.map((item) => item.toMap()).toList(),
+          layout
+              .map((item) => OverlayWorkspaceLayoutItem.fromMap(item).toMap())
+              .toList(),
+        );
+      }
       expect(
-        port.lastMutation?.kind,
-        OverlayWorkspaceMutationKind.importPreset,
+        () => OverlayWorkspaceSettings.fromMap({
+          ...expected,
+          'skin': 'LagrangeWeave',
+          'opacity': 'invalid',
+        }),
+        throwsFormatException,
       );
-      expect(port.lastMutation?.name, '导入示例');
-      expect(module.workspace!.projection.value.dirty, isTrue);
       expect(
-        module.workspace!.projection.value.settings!['showNotice'],
-        isFalse,
+        overlayWorkspaceAppearanceRules.containsKey('LagrangeWeave'),
+        false,
       );
-      expect(module.workspace!.canUndo, isTrue);
-      expect(tester.takeException(), isNull);
+      for (final field in overlayWorkspaceFieldSpecs) {
+        expect(field.options, isNot(contains('LagrangeWeave')));
+        expect(field.options, isNot(contains('LagrangeWeaveEquilibrium')));
+      }
     },
   );
+  test(
+    'archived workspace bridge JSON keeps revision, hotkey, layout and presets',
+    () async {
+      final expected = _completeWorkspaceSettings()..['opacity'] = 0.63;
+      final legacy = {
+        ...expected,
+        'skin': 'LagrangeWeave',
+        'requestedSkin': 'LagrangeWeave',
+        'theme': 'LagrangeWeave',
+        'startupTransitionStyle': 'LagrangeWeaveEquilibrium',
+      };
+      final pair = InMemoryBridgeConnection.createPair();
+      final session = BridgeClientSession(
+        connection: pair.client,
+        sessionGeneration: 9,
+      )..acceptHostCapabilities(['overlay.workspace']);
+      final subscription = pair.host.incoming.listen((request) {
+        unawaited(
+          pair.host.send(
+            BridgeEnvelope(
+              protocolVersion: 1,
+              messageType: 'response',
+              name: request.name,
+              correlationId: request.correlationId,
+              sessionGeneration: 9,
+              status: 'ok',
+              payload: {
+                'schemaVersion': 1,
+                'revision': 42,
+                'storageState': 'ready',
+                'activePresetId': 'old-plan',
+                'renderMode': 'DirectComposition',
+                'appearances': _workspaceAppearanceMaps(),
+                'hotkey': {
+                  'binding': 'Ctrl+Shift+O',
+                  'enabled': true,
+                  'runtimeState': 'unavailable',
+                },
+                'settings': legacy,
+                'layout': _workspaceLayout(),
+                'presets': [
+                  {
+                    'id': 'old-plan',
+                    'name': 'Archived fixture',
+                    'isActive': true,
+                    'storageState': 'ready',
+                    'settings': legacy,
+                    'layout': _workspaceLayout(),
+                  },
+                ],
+              },
+            ),
+          ),
+        );
+      });
+      addTearDown(subscription.cancel);
+      addTearDown(session.close);
+      final result = await BridgeOverlayWorkspaceAdapter(session).read();
+      expect(result.availability, OverlayWorkspaceAvailability.available);
+      expect(result.revision, 42);
+      expect(result.storageState, 'ready');
+      expect(result.activePresetId, 'old-plan');
+      expect(result.hotkey?.binding, 'Ctrl+Shift+O');
+      expect(result.settings!.toMap(), expected);
+      expect(result.presets.single.settings.toMap(), expected);
+      expect(result.presets.single.name, 'Archived fixture');
+      expect(
+        result.layout.map((item) => item.toMap()),
+        _workspaceLayout().map(
+          (item) => OverlayWorkspaceLayoutItem.fromMap(item).toMap(),
+        ),
+      );
+    },
+  );
+  test(
+    'workspace version mismatch is not reported as host unavailable',
+    () async {
+      final pair = InMemoryBridgeConnection.createPair();
+      final session = BridgeClientSession(
+        connection: pair.client,
+        sessionGeneration: 10,
+      )..acceptHostCapabilities(['overlay.workspace']);
+      final subscription = pair.host.incoming.listen((request) {
+        unawaited(
+          pair.host.send(
+            BridgeEnvelope(
+              protocolVersion: 1,
+              messageType: 'response',
+              name: request.name,
+              correlationId: request.correlationId,
+              sessionGeneration: 10,
+              status: 'error',
+              payload: const {},
+              error: const BridgeErrorBody(
+                code: 'overlay.workspace_version_unsupported',
+                message: 'Workspace version unsupported.',
+                retryable: false,
+              ),
+            ),
+          ),
+        );
+      });
+      addTearDown(subscription.cancel);
+      addTearDown(session.close);
+      final result = await BridgeOverlayWorkspaceAdapter(session).read();
+      expect(result.availability, OverlayWorkspaceAvailability.unavailable);
+      expect(result.failure?.name, 'versionUnsupported');
+    },
+  );
+  testWidgets('import preview requires confirmation and keeps current edits', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final port = _MemoryWorkspacePort(_workspaceSnapshot());
+    final module = OverlaySettingsModule(
+      InMemoryOverlaySettingsAdapter(),
+      workspacePort: port,
+    );
+    addTearDown(module.dispose);
+    await module.initialize();
+    module.workspace!.updateSetting('showNotice', false);
+    final imported = _workspaceSnapshot();
+    final payload = jsonEncode({
+      'schemaVersion': 1,
+      'name': '导入示例',
+      'settings': imported.settings!.toMap(),
+      'layout': imported.layout.map((item) => item.toMap()).toList(),
+    });
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    Future<void> preview() async {
+      await tester.tap(find.byKey(const Key('overlay-preset-manage')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('导入'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        payload,
+      );
+      await tester.tap(find.text('查看导入预览'));
+      await tester.pumpAndSettle();
+    }
+
+    // The edit saved on its own; previewing and cancelling write nothing.
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
+    await preview();
+    expect(find.byType(OverlayPresetImportPreview), findsOneWidget);
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(OverlayPresetImportPreview),
+        matching: find.text('取消'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
+    expect(module.workspace!.projection.value.dirty, isFalse);
+    await preview();
+    await tester.tap(find.byKey(const Key('overlay-import-confirm')));
+    await tester.pumpAndSettle();
+    expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.importPreset);
+    expect(port.lastMutation?.name, '导入示例');
+    expect(module.workspace!.projection.value.dirty, isFalse);
+    expect(module.workspace!.projection.value.settings!['showNotice'], isFalse);
+    expect(module.workspace!.canUndo, isTrue);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final width in [1280.0, 1440.0, 360.0]) {
     testWidgets('import detailed preview layout at $width', (tester) async {
@@ -264,7 +471,7 @@ void main() {
       final initial = OverlayWorkspaceSettings.fromMap(
         _completeWorkspaceSettings(),
       );
-      for (final skin in ['NightShadow', 'Verdict', 'LagrangeWeave']) {
+      for (final skin in ['NightShadow', 'Verdict']) {
         final themed = applyOverlayWorkspaceSettingChange(
           initial,
           'skin',
@@ -437,7 +644,7 @@ void main() {
   );
 
   testWidgets(
-    'silent overlay renewal preserves drafts including edits made during a read',
+    'silent overlay renewal keeps edits made during a read and saves them',
     (tester) async {
       final port = _MemoryWorkspacePort(_workspaceSnapshot());
       final module = OverlaySettingsModule(
@@ -452,12 +659,12 @@ void main() {
       port.pendingRead!.complete(port.snapshot);
       await renewal;
       port.pendingRead = null;
+      await tester.pump();
       expect(workspace.projection.value.settings!.toMap()['showNotice'], false);
-      expect(workspace.projection.value.dirty, true);
+      expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
+      expect(workspace.projection.value.dirty, false);
       await module.synchronize();
       expect(workspace.projection.value.settings!.toMap()['showNotice'], false);
-      expect(workspace.projection.value.dirty, true);
-      expect(port.lastMutation, isNull);
       expect(workspace.canUndo, true);
       module.dispose();
     },
@@ -641,6 +848,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'unsupported workspace explains version mismatch without editing',
+    (tester) async {
+      final workspace = _MemoryWorkspacePort(
+        const OverlayWorkspaceSnapshot.unavailable(
+          failure: OverlaySettingsFailure.versionUnsupported,
+        ),
+      );
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: workspace,
+      );
+      addTearDown(module.dispose);
+      await module.initialize();
+      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('当前版本不支持已保存的浮层配置。配置未被修改，请使用支持该配置的版本打开。'),
+        findsOneWidget,
+      );
+      expect(find.text('本机服务暂时不可用'), findsNothing);
+      expect(find.byType(Switch), findsNothing);
+      expect(find.byType(Slider), findsNothing);
+      expect(workspace.lastMutation, isNull);
+    },
+  );
+
   testWidgets('unavailable state offers retry without inactive controls', (
     tester,
   ) async {
@@ -662,36 +897,9 @@ void main() {
     expect(find.byType(Slider), findsNothing);
   });
 
-  testWidgets(
-    'information header shows saved binding instead of unsaved draft',
-    (tester) async {
-      final workspace = _MemoryWorkspacePort(_workspaceSnapshot());
-      final module = OverlaySettingsModule(
-        InMemoryOverlaySettingsAdapter(),
-        workspacePort: workspace,
-      );
-      addTearDown(module.dispose);
-      await module.initialize();
-      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
-      await tester.pumpAndSettle();
-      OverlayShortcutSummary summary() =>
-          tester.widget(find.byKey(const Key('information-header-shortcut')));
-      expect(summary().binding, 'Ctrl+Shift+O');
-      module.workspace!.updateHotkey(binding: 'Alt+O');
-      await tester.pump();
-      expect(summary().binding, 'Ctrl+Shift+O');
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('complete workspace page edits and saves through one revision', (
+  testWidgets('information header shows the saved binding once it is saved', (
     tester,
   ) async {
-    await tester.runAsync(_loadPreviewFonts);
-    tester.view.physicalSize = const Size(1280, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
     final workspace = _MemoryWorkspacePort(_workspaceSnapshot());
     final module = OverlaySettingsModule(
       InMemoryOverlaySettingsAdapter(),
@@ -699,121 +907,189 @@ void main() {
     );
     addTearDown(module.dispose);
     await module.initialize();
-
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
     await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('overlay-workspace-content')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-group-navigation')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-preview-stage')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-runtime-preview')), findsOneWidget);
-    if (!const bool.fromEnvironment('STARBRIDGE_PUBLIC_SOURCE')) {
-      await expectLater(
-        find.byType(OverlaySettingsPage),
-        matchesGoldenFile(
-          menuOverlayEnabled
-              ? 'goldens/overlay-workspace-1280.png'
-              : 'goldens/overlay-workspace-release-1280.png',
-        ),
-      );
-    }
-    expect(find.byKey(const Key('overlay-field-showNotice')), findsOneWidget);
-    expect(
-      find.byKey(const Key('overlay-module-text-opacity-Notice')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-background-opacity-Notice')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const Key('overlay-group-nav-fleetOverview')));
+    OverlayShortcutSummary summary() =>
+        tester.widget(find.byKey(const Key('information-header-shortcut')));
+    expect(summary().binding, 'Ctrl+Shift+O');
+    workspace.writeFailure = OverlaySettingsFailure.writeFailed;
+    module.workspace!.updateHotkey(binding: 'Alt+O');
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('overlay-module-text-opacity-Squads')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-background-opacity-Squads')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const Key('overlay-group-nav-members')));
+    expect(summary().binding, 'Ctrl+Shift+O', reason: 'not saved');
+    workspace.writeFailure = null;
+    expect(await module.workspace!.save(), isTrue);
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('overlay-field-memberNameMode')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-text-opacity-Members')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-background-opacity-Members')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const Key('overlay-group-nav-chat')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('overlay-module-text-opacity-Chat')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-background-opacity-Chat')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(const Key('overlay-group-nav-notice')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('overlay-field-showNotice')));
-    await tester.pump();
-    expect(find.text('有尚未保存的更改'), findsOneWidget);
-    await tester.tap(find.byTooltip('撤销'));
-    await tester.pump();
-    expect(find.text('已保存'), findsOneWidget);
-    await tester.tap(find.byTooltip('重做'));
-    await tester.pump();
-    expect(find.text('有尚未保存的更改'), findsOneWidget);
-    await tester.tap(find.text('保存更改'));
-    await tester.pumpAndSettle();
-    expect(
-      workspace.lastMutation?.kind,
-      OverlayWorkspaceMutationKind.saveActive,
-    );
-    expect(workspace.lastExpectedRevision, 42);
-    expect(find.text('已保存'), findsOneWidget);
-
-    expect(find.byKey(const Key('overlay-group-nav-appearance')), findsNothing);
-    await tester.tap(find.byKey(const Key('overlay-appearance-center-entry')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('overlay-appearance-center')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-field-theme')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-preview-stage')), findsNothing);
-
-    await tester.tap(find.byKey(const Key('overlay-appearance-center-back')));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('overlay-group-nav-events')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('overlay-field-eventNotificationSide')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-field-eventNotificationY')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-text-opacity-Events')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('overlay-module-background-opacity-Events')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('overlay-group-nav-layout')), findsNothing);
-    expect(find.byKey(const Key('overlay-preview-stage')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-settings-dock')), findsOneWidget);
-    expect(find.byKey(const Key('overlay-enter-fullscreen')), findsOneWidget);
+    expect(summary().binding, 'Alt+O');
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'complete workspace page edits save on their own through revisions',
+    (tester) async {
+      await tester.runAsync(_loadPreviewFonts);
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final workspace = _MemoryWorkspacePort(_workspaceSnapshot());
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: workspace,
+      );
+      addTearDown(module.dispose);
+      await module.initialize();
+
+      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('overlay-workspace-content')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('overlay-group-navigation')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-preview-stage')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-runtime-preview')), findsOneWidget);
+      if (!const bool.fromEnvironment('STARBRIDGE_PUBLIC_SOURCE')) {
+        await expectLater(
+          find.byType(OverlaySettingsPage),
+          matchesGoldenFile(
+            menuOverlayEnabled
+                ? 'goldens/overlay-workspace-1280.png'
+                : 'goldens/overlay-workspace-release-1280.png',
+          ),
+        );
+      }
+      expect(find.byKey(const Key('overlay-field-showNotice')), findsOneWidget);
+      expect(
+        find.byKey(const Key('overlay-module-text-opacity-Notice')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-background-opacity-Notice')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('overlay-group-nav-fleetOverview')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-module-text-opacity-Squads')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-background-opacity-Squads')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('overlay-group-nav-members')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-field-memberNameMode')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-text-opacity-Members')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-background-opacity-Members')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('overlay-group-nav-chat')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-module-text-opacity-Chat')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-background-opacity-Chat')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('overlay-group-nav-notice')));
+      await tester.pumpAndSettle();
+      String status() => tester
+          .widget<Text>(find.byKey(const Key('overlay-preset-save-status')))
+          .data!;
+      await tester.tap(find.byKey(const Key('overlay-field-showNotice')));
+      await tester.pump();
+      expect(
+        workspace.lastMutation?.kind,
+        OverlayWorkspaceMutationKind.saveActive,
+      );
+      expect(workspace.lastExpectedRevision, 42);
+      expect(status(), '已保存');
+      final edited = workspace.lastMutation!.settings!['showNotice'];
+      await tester.tap(find.byKey(const Key('overlay-preset-undo')));
+      await tester.pump();
+      expect(workspace.lastExpectedRevision, 43);
+      expect(workspace.lastMutation!.settings!['showNotice'], isNot(edited));
+      await tester.tap(find.byKey(const Key('overlay-preset-redo')));
+      await tester.pump();
+      expect(workspace.lastExpectedRevision, 44);
+      expect(workspace.lastMutation!.settings!['showNotice'], edited);
+      expect(status(), '已保存');
+      workspace.writeFailure = OverlaySettingsFailure.writeFailed;
+      await tester.tap(find.byKey(const Key('overlay-field-showNotice')));
+      await tester.pumpAndSettle();
+      expect(status(), '未保存');
+      expect(
+        find.byKey(const Key('overlay-workspace-discard-failed')),
+        findsOneWidget,
+      );
+      workspace.writeFailure = null;
+      await tester.tap(
+        find.byKey(const Key('overlay-workspace-retry-failure')),
+      );
+      await tester.pumpAndSettle();
+      expect(status(), '已保存');
+      expect(workspace.lastMutation!.settings!['showNotice'], isNot(edited));
+      expect(
+        find.byKey(const Key('overlay-workspace-retry-failure')),
+        findsNothing,
+      );
+
+      expect(
+        find.byKey(const Key('overlay-group-nav-appearance')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.byKey(const Key('overlay-appearance-center-entry')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-appearance-center')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('overlay-field-theme')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-preview-stage')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('overlay-appearance-center-back')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('overlay-group-nav-events')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-field-eventNotificationSide')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-field-eventNotificationY')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-text-opacity-Events')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('overlay-module-background-opacity-Events')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('overlay-group-nav-layout')), findsNothing);
+      expect(find.byKey(const Key('overlay-preview-stage')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-settings-dock')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-enter-fullscreen')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('selected group paints its fill on the material ink layer', (
     tester,
@@ -895,7 +1171,49 @@ void main() {
           .settings!['eventNotificationBackgroundOpacity'],
       0.35,
     );
+    expect(module.workspace!.projection.value.dirty, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a slider drag saves once when the pointer lifts', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final port = _MemoryWorkspacePort(_workspaceSnapshot());
+    final module = OverlaySettingsModule(
+      InMemoryOverlaySettingsAdapter(),
+      workspacePort: port,
+    );
+    addTearDown(module.dispose);
+    await module.initialize();
+    await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    final slider = find.descendant(
+      of: find.byKey(const Key('overlay-module-text-opacity-Notice')),
+      matching: find.byType(Slider),
+    );
+    final gesture = await tester.startGesture(tester.getCenter(slider));
+    for (var i = 0; i < 6; i++) {
+      await gesture.moveBy(const Offset(-12, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(port.saves, 0, reason: 'nothing is written mid-drag');
     expect(module.workspace!.projection.value.dirty, isTrue);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(port.saves, 1);
+    expect(module.workspace!.projection.value.dirty, isFalse);
+    final saved = port.lastMutation!.layout!.singleWhere(
+      (item) => item.key == 'Notice',
+    );
+    expect(saved.textOpacity, lessThan(1));
+    // A tap is still saved at once.
+    await tester.tap(find.byKey(const Key('overlay-field-showNotice')));
+    await tester.pumpAndSettle();
+    expect(port.saves, 2);
     expect(tester.takeException(), isNull);
   });
 
@@ -971,21 +1289,22 @@ void main() {
     );
     expect(port.lastMutation?.presetId, 'preset2');
     await tester.tap(
-      find.descendant(
-        of: find.byKey(const Key('overlay-preset-toolbar')),
-        matching: find.byType(DropdownButton<String>),
+      find.byKey(
+        ValueKey(
+          'overlay-preset-selector-${module.workspace!.projection.value.snapshot!.activePresetId}',
+        ),
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('新增预设').last);
+    await tester.tap(find.text('新增方案').last);
     await tester.pumpAndSettle();
     expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.createPreset);
-    expect(port.lastMutation?.name, '新预设');
+    expect(port.lastMutation?.name, '新方案');
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'B1 cancelling preset switch keeps the actual selection and draft',
+    'B1 switching plans asks nothing because edits are already saved',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 900);
       tester.view.devicePixelRatio = 1;
@@ -1003,23 +1322,20 @@ void main() {
       module.workspace!.updateSetting('showNotice', false);
       await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
       await tester.pumpAndSettle();
-      final selector = find.byKey(
-        const ValueKey('overlay-preset-selector-preset1'),
+      expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
+      expect(module.workspace!.projection.value.dirty, isFalse);
+      await tester.tap(
+        find.byKey(const ValueKey('overlay-preset-selector-preset1')),
       );
-      for (final choice in ['组队预设', '新增预设']) {
-        await tester.tap(selector);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(choice).last);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('取消'));
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<DropdownButton<String>>(selector).value,
-          'preset1',
-        );
-        expect(module.workspace!.projection.value.dirty, isTrue);
-        expect(port.lastMutation, isNull);
-      }
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('组队预设').last);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(
+        port.lastMutation?.kind,
+        OverlayWorkspaceMutationKind.activatePreset,
+      );
+      expect(port.lastMutation?.presetId, 'preset2');
       expect(tester.takeException(), isNull);
     },
   );
@@ -1082,11 +1398,18 @@ void main() {
       expect(module.workspace!.projection.value.dirty, isFalse);
       module.workspace!.updateSetting('showNotice', false);
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('overlay-workspace-save')), findsOneWidget);
-      module.workspace!.undo();
-      await tester.pumpAndSettle();
       expect(find.byKey(const Key('overlay-workspace-save')), findsNothing);
-      expect(find.byTooltip('重做'), findsOneWidget);
+      expect(module.workspace!.projection.value.dirty, isFalse);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('overlay-preset-save-status')))
+            .data,
+        '已保存',
+      );
+      await tester.tap(find.byKey(const Key('overlay-preset-undo')));
+      await tester.pumpAndSettle();
+      expect(module.workspace!.canRedo, isTrue);
+      expect(find.byKey(const Key('overlay-preset-redo')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
@@ -1121,8 +1444,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('组队房间'), findsNothing);
     expect(find.text('自动'), findsNothing);
-    expect(find.text('预设'), findsOneWidget);
-    expect(find.text('点击切换预设。'), findsOneWidget);
+    expect(find.text('方案'), findsOneWidget);
+    expect(find.text('点击切换方案。'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -1153,7 +1476,7 @@ void main() {
     expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.renamePreset);
     expect(port.lastMutation?.presetId, 'preset1');
     expect(port.lastMutation?.name, '深空行动');
-    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(module.workspace!.projection.value.dirty, isFalse);
     expect(module.workspace!.projection.value.settings!['showNotice'], isFalse);
     expect(tester.takeException(), isNull);
   });
@@ -1209,8 +1532,11 @@ void main() {
     expect(find.text('打开浮层'), findsOneWidget);
     await tester.tap(find.byKey(const Key('overlay-runtime-action')));
     await tester.pumpAndSettle();
-    expect(workspace.lastMutation, isNull);
-    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(
+      workspace.lastMutation?.kind,
+      OverlayWorkspaceMutationKind.saveActive,
+    );
+    expect(module.workspace!.projection.value.dirty, isFalse);
     expect(workspace.lastRuntimeAction, OverlayRuntimeAction.open);
     expect(workspace.lastRuntimeDraft?.settings['showNotice'], isFalse);
     expect(find.text('信息浮层正在显示'), findsOneWidget);
@@ -1218,13 +1544,14 @@ void main() {
 
     module.workspace!.updateSetting('showMembers', true);
     await tester.pumpAndSettle();
-    expect(workspace.lastMutation, isNull);
+    expect(workspace.lastMutation?.settings!['showMembers'], isTrue);
     expect(workspace.lastRuntimeAction, OverlayRuntimeAction.getState);
     expect(workspace.lastRuntimeDraft?.settings['showMembers'], isTrue);
 
-    module.workspace!.discardChanges();
+    module.workspace!.undo();
     await tester.pumpAndSettle();
     expect(module.workspace!.projection.value.dirty, isFalse);
+    expect(workspace.lastMutation?.settings!['showMembers'], isFalse);
     expect(workspace.lastRuntimeAction, OverlayRuntimeAction.getState);
     expect(workspace.lastRuntimeDraft?.settings['showNotice'], isFalse);
     expect(workspace.lastRuntimeDraft?.settings['showMembers'], isFalse);
@@ -1235,66 +1562,82 @@ void main() {
     expect(find.text('信息浮层已关闭'), findsOneWidget);
   });
 
-  testWidgets('leaving a dirty overlay workspace requires an explicit choice', (
-    tester,
-  ) async {
-    final workspace = _MemoryWorkspacePort(_workspaceSnapshot());
-    final module = OverlaySettingsModule(
-      InMemoryOverlaySettingsAdapter(),
-      workspacePort: workspace,
-    );
-    addTearDown(module.dispose);
-    await module.initialize();
-    bool? allowed;
-    await tester.pumpWidget(
-      _app(
-        Builder(
-          builder: (context) => TextButton(
-            key: const Key('attempt-overlay-leave'),
-            onPressed: () => unawaited(() async {
-              allowed = await confirmOverlayWorkspaceLeave(context, module);
-            }()),
-            child: const Text('leave'),
+  testWidgets(
+    'leaving waits for the last save and asks only after a failed one',
+    (tester) async {
+      final workspace = _MemoryWorkspacePort(_workspaceSnapshot());
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: workspace,
+      );
+      addTearDown(module.dispose);
+      await module.initialize();
+      bool? allowed;
+      await tester.pumpWidget(
+        _app(
+          Builder(
+            builder: (context) => TextButton(
+              key: const Key('attempt-overlay-leave'),
+              onPressed: () => unawaited(() async {
+                allowed = await confirmOverlayWorkspaceLeave(context, module);
+              }()),
+              child: const Text('leave'),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    module.workspace!.updateSetting('showNotice', false);
-    await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('overlay-unsaved-leave-dialog')),
-      findsOneWidget,
-    );
-    expect(allowed, isNull);
+      );
+      await tester.pumpAndSettle();
+      module.workspace!.updateSetting('showNotice', false);
+      await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-unsaved-leave-dialog')),
+        findsNothing,
+      );
+      expect(allowed, isTrue);
+      expect(
+        workspace.lastMutation?.kind,
+        OverlayWorkspaceMutationKind.saveActive,
+      );
 
-    await tester.tap(find.byKey(const Key('overlay-unsaved-leave-cancel')));
-    await tester.pumpAndSettle();
-    expect(allowed, isFalse);
-    expect(module.workspace!.projection.value.dirty, isTrue);
+      workspace.writeFailure = OverlaySettingsFailure.writeFailed;
+      module.workspace!.updateSetting('showNotice', true);
+      allowed = null;
+      await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-unsaved-leave-dialog')),
+        findsOneWidget,
+      );
+      expect(allowed, isNull);
+      await tester.tap(find.byKey(const Key('overlay-unsaved-leave-cancel')));
+      await tester.pumpAndSettle();
+      expect(allowed, isFalse);
+      expect(module.workspace!.projection.value.dirty, isTrue);
 
-    allowed = null;
-    await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('overlay-unsaved-leave-discard')));
-    await tester.pumpAndSettle();
-    expect(allowed, isTrue);
-    expect(module.workspace!.projection.value.dirty, isFalse);
-    expect(workspace.lastMutation, isNull);
+      allowed = null;
+      await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('overlay-unsaved-leave-discard')));
+      await tester.pumpAndSettle();
+      expect(allowed, isTrue);
+      expect(module.workspace!.projection.value.dirty, isFalse);
+      expect(
+        module.workspace!.projection.value.settings!['showNotice'],
+        isFalse,
+      );
 
-    module.workspace!.updateSetting('showNotice', false);
-    allowed = null;
-    await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('overlay-unsaved-leave-save')));
-    await tester.pumpAndSettle();
-    expect(allowed, isTrue);
-    expect(
-      workspace.lastMutation?.kind,
-      OverlayWorkspaceMutationKind.saveActive,
-    );
-  });
+      module.workspace!.updateSetting('showNotice', true);
+      allowed = null;
+      await tester.tap(find.byKey(const Key('attempt-overlay-leave')));
+      await tester.pumpAndSettle();
+      workspace.writeFailure = null;
+      await tester.tap(find.byKey(const Key('overlay-unsaved-leave-save')));
+      await tester.pumpAndSettle();
+      expect(allowed, isTrue);
+      expect(workspace.lastMutation?.settings!['showNotice'], isTrue);
+    },
+  );
 
   test(
     'bridge adapter reads and updates device settings without account data',
@@ -1374,7 +1717,7 @@ void main() {
   test(
     'workspace adapter preserves the complete WPF settings contract',
     () async {
-      expect(OverlayWorkspaceSettings.requiredFields, hasLength(73));
+      expect(OverlayWorkspaceSettings.requiredFields, hasLength(79));
       final pair = InMemoryBridgeConnection.createPair();
       final session = BridgeClientSession(
         connection: pair.client,
@@ -1434,7 +1777,7 @@ void main() {
       expect(result.activePresetId, 'preset1');
       expect(result.hotkey?.binding, 'Ctrl+Shift+O');
       expect(result.hotkey?.enabled, isTrue);
-      expect(result.appearances, hasLength(4));
+      expect(result.appearances, hasLength(3));
       expect(
         result.appearances
             .singleWhere((appearance) => appearance.id == 'NightShadow')
@@ -1447,7 +1790,9 @@ void main() {
             .isReleased,
         isFalse,
       );
-      expect(result.settings?.values, hasLength(73));
+      // The fixture Host predates calm display; its six fields get defaults.
+      expect(result.settings?.values, hasLength(79));
+      expect(result.settings?['calmDisplay'], 'Unset');
       expect(result.settings?['crosshairMode'], 'Cross');
       expect(result.layout, hasLength(4));
       expect(result.presets.single.name, '默认预设');
@@ -1462,7 +1807,7 @@ void main() {
           hotkey: result.hotkey!,
         ),
         const OverlayWorkspaceMutation.activatePreset('preset1'),
-        const OverlayWorkspaceMutation.createPreset('新预设'),
+        const OverlayWorkspaceMutation.createPreset('新方案'),
         const OverlayWorkspaceMutation.duplicatePreset('preset1', '作战'),
         const OverlayWorkspaceMutation.renamePreset('preset1', '默认'),
         const OverlayWorkspaceMutation.resetPreset('preset1'),
@@ -1944,7 +2289,7 @@ void main() {
     },
   );
 
-  testWidgets('fullscreen shares drafts, tools and undo with the workspace', (
+  testWidgets('fullscreen shares edits, tools and undo with the workspace', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1000);
@@ -2035,13 +2380,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('overlay-fullscreen-editor')), findsNothing);
     expect(window.entered, isFalse);
-    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(module.workspace!.projection.value.dirty, isFalse);
     expect(module.workspace!.canUndo, isTrue);
     expect(module.workspace!.projection.value.settings!['showMembers'], isTrue);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('fullscreen failure stays recoverable and keeps the draft', (
+  testWidgets('fullscreen failure stays recoverable and keeps the edits', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1000);
@@ -2063,7 +2408,7 @@ void main() {
     await tester.tap(find.byKey(const Key('overlay-enter-fullscreen')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('overlay-fullscreen-editor')), findsNothing);
-    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(module.workspace!.projection.value.settings!['showMembers'], isTrue);
     window.failEnter = false;
     await tester.tap(find.byKey(const Key('overlay-enter-fullscreen')));
     await tester.pumpAndSettle();
@@ -2077,7 +2422,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('overlay-fullscreen-editor')), findsNothing);
     expect(window.entered, isFalse);
-    expect(module.workspace!.projection.value.dirty, isTrue);
+    expect(module.workspace!.projection.value.settings!['showMembers'], isTrue);
+    expect(module.workspace!.projection.value.dirty, isFalse);
   });
   test('overlay copy exists in every locale and stays user-facing', () {
     for (final locale in AppStrings.supportedLocales) {
@@ -2430,7 +2776,7 @@ void editorRegressionTests() {
     }
   });
 
-  testWidgets('fixed appearance exposes its palette as read-only', (
+  testWidgets('fixed appearance keeps palette fields visible and read-only', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 900);
@@ -2465,20 +2811,152 @@ void editorRegressionTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('overlay-field-theme')), findsNothing);
+    // Settings are never hidden: the palette fields stay, dimmed with reason.
+    expect(find.byKey(const Key('overlay-field-theme')), findsOneWidget);
     expect(
       find.byKey(const Key('overlay-appearance-fixed-palette')),
       findsOneWidget,
     );
     expect(
       find.byKey(const Key('overlay-field-autoThemeByShip')),
-      findsNothing,
+      findsOneWidget,
     );
+    expect(find.text('当前外观使用固定配色'), findsNWidgets(2));
     expect(
       find.byKey(const Key('overlay-field-nightShadowBloom')),
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'without entitlement facts an appearance reads as unavailable offline, not locked',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final appearances = _workspaceAppearances()
+          .map(
+            (appearance) => appearance.id == 'NightShadow'
+                ? appearance.copyWith(isAvailable: false)
+                : appearance,
+          )
+          .toList(growable: false);
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: _MemoryWorkspacePort(
+          _workspaceSnapshot(appearancesOverride: appearances),
+        ),
+        editorWindow: _MemoryEditorWindow(),
+      );
+      addTearDown(module.dispose);
+      await module.initialize();
+      module.workspace!.setAppearanceQualificationUnknown(true);
+
+      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('overlay-appearance-center-entry')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('overlay-appearance-specimen-NightShadow')),
+        findsOneWidget,
+        reason: 'the appearance stays listed',
+      );
+      expect(find.text('离线时暂不可切换'), findsOneWidget);
+      expect(find.text('需要资格'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const Key('overlay-appearance-card-NightShadow')),
+      );
+      await tester.pumpAndSettle();
+      final button = find.byKey(
+        const Key('overlay-appearance-apply-NightShadow'),
+      );
+      expect(tester.widget<StarBridgeActionButton>(button).onActivate, isNull);
+      expect(
+        find.descendant(of: button, matching: find.text('离线时暂不可切换')),
+        findsOneWidget,
+      );
+      expect(find.text('当前账号暂不可用'), findsNothing);
+
+      module.workspace!.setAppearanceQualificationUnknown(false);
+      await tester.pumpAndSettle();
+      expect(find.text('离线时暂不可切换'), findsNothing);
+      expect(find.text('需要资格'), findsOneWidget);
+      expect(
+        find.descendant(of: button, matching: find.text('当前账号暂不可用')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  test(
+    'a locked appearance returns on its own once entitlements come back',
+    () {
+      final all = _workspaceAppearances();
+      final locked = all
+          .map(
+            (appearance) => appearance.id == 'NightShadow'
+                ? appearance.copyWith(isAvailable: false)
+                : appearance,
+          )
+          .toList(growable: false);
+      final chosen = applyOverlayWorkspaceSettingChange(
+        _workspaceSnapshot().settings!,
+        'skin',
+        'NightShadow',
+      );
+      final offline = applyOverlayWorkspaceAppearanceAvailability(
+        chosen,
+        locked,
+      );
+      expect(offline['skin'], 'Default');
+      expect(offline['requestedSkin'], 'NightShadow');
+      final online = applyOverlayWorkspaceAppearanceAvailability(offline, all);
+      expect(online['skin'], 'NightShadow');
+      expect(online['requestedSkin'], 'NightShadow');
+    },
+  );
+
+  test(
+    'the shell chrome tells the workspace when entitlement facts are gone',
+    () async {
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: _MemoryWorkspacePort(_workspaceSnapshot()),
+        editorWindow: _MemoryEditorWindow(),
+      );
+      final port = ModePort();
+      final mode = ConnectionModeController(port);
+      final account = createAccountModule(PausedAccountPort());
+      final chrome = AccountShellChrome(
+        base: InMemoryShellChrome(
+          initial: InMemoryShellChrome.connectedProjection,
+        ),
+        account: account,
+        overlay: module,
+      );
+      chrome.observeConnectionMode(mode);
+      addTearDown(() async {
+        chrome.dispose();
+        account.dispose();
+        mode.dispose();
+        module.dispose();
+        await port.events.close();
+      });
+      final unknown = module.workspace!.appearanceQualificationUnknown;
+      await mode.refresh();
+      expect(unknown.value, false);
+      port.current = modeFact('offline');
+      await mode.refresh();
+      expect(unknown.value, true);
+      port.current = modeFact('online');
+      await mode.refresh();
+      expect(unknown.value, false);
+    },
+  );
 
   testWidgets(
     'appearance selector follows the runtime catalog and preserves the server lock',
@@ -2528,19 +3006,19 @@ void editorRegressionTests() {
         find.byKey(const Key('overlay-appearance-card-NightShadow')),
       );
       await tester.pumpAndSettle();
-      final locked = tester.widget<FilledButton>(
+      final locked = tester.widget<StarBridgeActionButton>(
         find.byKey(const Key('overlay-appearance-apply-NightShadow')),
       );
-      expect(locked.onPressed, isNull);
+      expect(locked.onActivate, isNull);
 
       await tester.tap(
         find.byKey(const Key('overlay-appearance-card-Verdict')),
       );
       await tester.pumpAndSettle();
-      final unfinished = tester.widget<FilledButton>(
+      final unfinished = tester.widget<StarBridgeActionButton>(
         find.byKey(const Key('overlay-appearance-apply-Verdict')),
       );
-      expect(unfinished.onPressed, isNull);
+      expect(unfinished.onActivate, isNull);
       expect(
         find.byKey(const Key('overlay-appearance-preview-unavailable-Verdict')),
         findsOneWidget,
@@ -2592,10 +3070,10 @@ void editorRegressionTests() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<FilledButton>(
+          .widget<StarBridgeActionButton>(
             find.byKey(const Key('overlay-appearance-apply-Verdict')),
           )
-          .onPressed,
+          .onActivate,
       isNull,
     );
     module.workspace!.updateSetting('skin', 'Verdict');
@@ -2647,10 +3125,10 @@ void editorRegressionTests() {
     expect(find.text('制作中'), findsNothing);
     expect(
       tester
-          .widget<FilledButton>(
+          .widget<StarBridgeActionButton>(
             find.byKey(const Key('overlay-appearance-apply-Verdict')),
           )
-          .onPressed,
+          .onActivate,
       isNull,
     );
     module.workspace!.updateSetting('skin', 'Verdict');
@@ -2712,8 +3190,7 @@ void editorRegressionTests() {
       expect(settings['theme'], 'NightShadow');
       expect(settings['autoThemeByShip'], isFalse);
       expect(settings['startupTransitionStyle'], 'NightShadowFlowField');
-      expect(module.workspace!.projection.value.dirty, isTrue);
-      await module.workspace!.save();
+      expect(module.workspace!.projection.value.dirty, isFalse);
       expect(port.lastMutation?.settings?['skin'], 'NightShadow');
     },
   );
@@ -2988,7 +3465,7 @@ void editorRegressionTests() {
     }
 
     final baseline = await render();
-    for (final skin in ['NightShadow', 'LagrangeWeave', 'Verdict']) {
+    for (final skin in ['NightShadow', 'Verdict']) {
       settings = settings.withValue('skin', skin).withValue('theme', skin);
       expect(await render(), baseline);
       expect(find.text('已接入舰队频道，等待指挥同步'), findsOneWidget);
@@ -3069,7 +3546,7 @@ void editorRegressionTests() {
     );
   });
   test('native event chrome follows the same palette as other modules', () {
-    for (final name in ['Events', 'LagrangeWeave']) {
+    for (final name in ['Events']) {
       final exported = File(
         '../StarBridge.OverlayRuntime.Windows/Rendering/OverlayCompositionHudWindow.$name.cs',
       );
@@ -3135,8 +3612,8 @@ void editorRegressionTests() {
       await tester.pumpAndSettle();
       expect(find.text('已接入舰队频道，等待指挥同步'), findsOneWidget);
       expect(find.text('舰队总览'), findsAtLeast(1));
-      expect(find.textContaining('在线 3 / 4'), findsOneWidget);
-      expect(find.textContaining('游戏中 2 / 3'), findsOneWidget);
+      expect(find.textContaining('在线 3'), findsOneWidget);
+      expect(find.textContaining('游戏中 2'), findsOneWidget);
       expect(find.text('Alpha 小队'), findsNothing);
       expect(find.text('多米诺 (domino_CN)'), findsOneWidget);
       expect(find.textContaining('NOVA-7'), findsNothing);
@@ -3597,14 +4074,16 @@ void editorAdditionalTests() {
           ),
         );
       }
-      // Saving directly from a pixel field must commit the in-progress input.
+      // Ctrl+S from a pixel field commits the in-progress input and saves it.
       final pixelX = find.descendant(
         of: find.byKey(const Key('overlay-pixels-Members-x')),
         matching: find.byType(TextField),
       );
       await tester.ensureVisible(pixelX);
       await tester.enterText(pixelX, '320');
-      await tester.tap(find.byKey(const Key('overlay-fullscreen-save')));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
       expect(port.lastMutation?.kind, OverlayWorkspaceMutationKind.saveActive);
       expect(
@@ -3620,6 +4099,8 @@ void editorAdditionalTests() {
 Future<void> _loadPreviewFonts() async {
   for (final font in {
     'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+    'Saira': 'assets/fonts/Saira-VF.ttf',
+    'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
     'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
     'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
     'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
@@ -3699,6 +4180,7 @@ Map<String, Object?> _completeWorkspaceSettings() {
             ? field.minimum.round()
             : field.minimum,
       OverlayWorkspaceFieldKind.color => '#FFFFFF',
+      OverlayWorkspaceFieldKind.hotkey => '',
       OverlayWorkspaceFieldKind.eventTypes => 0,
       OverlayWorkspaceFieldKind.eventDurations => <String, Object?>{},
     };
@@ -3828,24 +4310,6 @@ List<Map<String, Object?>> _workspaceAppearanceMaps() => [
     'isAvailable': true,
   },
   {
-    'id': 'LagrangeWeave',
-    'displayNameZh': '拉格朗日织网',
-    'displayNameEn': 'Lagrange Weave',
-    'summaryZh': '旧预设兼容',
-    'summaryEn': 'Legacy preset compatibility',
-    'traitsZh': ['平衡点', '连接织网', '模块融合'],
-    'traitsEn': ['Equilibrium points', 'Connected mesh', 'Module fusion'],
-    'previewSurface': '#071215',
-    'previewPrimary': '#B7FF58',
-    'previewSecondary': '#48D8C8',
-    'locksTheme': true,
-    'supportsBloom': true,
-    'startupTransition': 'LagrangeWeaveEquilibrium',
-    'requiresEntitlement': false,
-    'isReleased': false,
-    'isAvailable': false,
-  },
-  {
     'id': 'Verdict',
     'displayNameZh': '裁决',
     'displayNameEn': 'Verdict',
@@ -3893,6 +4357,8 @@ final class _MemoryWorkspacePort implements OverlayWorkspacePort {
   Completer<OverlayWorkspaceSnapshot>? pendingRead;
   OverlayWorkspaceMutation? lastMutation;
   int? lastExpectedRevision;
+  OverlaySettingsFailure? writeFailure;
+  int saves = 0;
   OverlayRuntimeAction? lastRuntimeAction;
   String? lastRuntimeLanguage;
   OverlayWorkspaceRuntimeDraft? lastRuntimeDraft;
@@ -3921,6 +4387,13 @@ final class _MemoryWorkspacePort implements OverlayWorkspacePort {
   }) async {
     lastMutation = mutation;
     lastExpectedRevision = expectedRevision;
+    if (writeFailure case final failure?) {
+      return OverlayWorkspaceWriteResult.failed(failure);
+    }
+    if (mutation.kind == OverlayWorkspaceMutationKind.saveActive) {
+      saves++;
+      snapshot = savedOverlaySnapshot(snapshot, mutation);
+    }
     return OverlayWorkspaceWriteResult.completed(snapshot);
   }
 

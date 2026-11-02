@@ -15,12 +15,25 @@ public sealed class HostBridgeDispatcher : IBridgeRequestDispatcher
     private readonly Func<long> _generation;
     private readonly IReadOnlyList<string> _capabilities;
     private readonly Presence.LocalGamePresenceReader? _gamePresence;
+    private readonly Func<IReadOnlyList<string>>? _additionalCapabilities;
+    private IReadOnlyList<string> CurrentCapabilities {
+        get {
+            if (_additionalCapabilities is null) return _capabilities;
+            try {
+                var extra = _additionalCapabilities();
+                if (extra is null || extra.Any(cap => cap is not ("privacy.officialFleetScopes" or "privacy.officialFleetAudience" or "officialFleet.runtimeMembers" or "officialFleet.runtimeActivity"
+                    or "officialFleet.governance.activate" or "officialFleet.governance.revokeActivation" or "account.gameIdentity.v1"))) return _capabilities;
+                return _capabilities.Concat(extra).Distinct(StringComparer.Ordinal).ToArray();
+            } catch { return _capabilities; } // Missing/retiring owner cannot add protocol support.
+        }
+    }
 
     public HostBridgeDispatcher(
         string hostInstanceId,
         Func<long>? generation = null,
         IReadOnlyList<string>? capabilities = null,
-        Presence.LocalGamePresenceReader? gamePresence = null)
+        Presence.LocalGamePresenceReader? gamePresence = null,
+        Func<IReadOnlyList<string>>? additionalCapabilities = null)
     {
         _hostInstanceId = string.IsNullOrWhiteSpace(hostInstanceId)
             ? throw new ArgumentException("Host instance ID is required.", nameof(hostInstanceId))
@@ -28,6 +41,7 @@ public sealed class HostBridgeDispatcher : IBridgeRequestDispatcher
         _generation = generation ?? (() => 0);
         _capabilities = capabilities ?? DefaultCapabilities;
         _gamePresence = gamePresence;
+        _additionalCapabilities = additionalCapabilities;
     }
 
     public event Action<BridgeEnvelope>? EventReady
@@ -91,13 +105,17 @@ public sealed class HostBridgeDispatcher : IBridgeRequestDispatcher
         var minimum = RequireInt32(protocols, "minimum");
         var maximum = RequireInt32(protocols, "maximum");
         var requestedCapabilities = RequireStringList(request.Payload, "capabilities");
+        var generation = _generation();
+        if (_additionalCapabilities is not null && generation < 0) throw new BridgeProtocolException(BridgeErrorCodes.CapabilityUnavailable,"Current owner is transitioning.");
+        var capabilities = CurrentCapabilities;
+        if (_generation() != generation) throw new BridgeStaleGenerationException(generation, _generation());
         var response = BridgeHandshake.Negotiate(
             new BridgeHelloRequest(
                 new BridgeProtocolRange(minimum, maximum),
                 requestedCapabilities),
-            _capabilities,
+            capabilities,
             _hostInstanceId,
-            _generation());
+            generation);
         return BridgeEnvelope.Response(request, response, preserveRequestAccountContext: false);
     }
 
@@ -112,6 +130,12 @@ public sealed class HostBridgeDispatcher : IBridgeRequestDispatcher
                 generation);
         }
 
+        if (_additionalCapabilities is not null) {
+            var capabilities = CurrentCapabilities;
+            if (_generation() != generation) throw new BridgeStaleGenerationException(generation, _generation());
+            return BridgeEnvelope.Response(request, new { ready = true, hostInstanceId = _hostInstanceId,
+                hostCapabilities = capabilities }, preserveRequestAccountContext: false);
+        }
         return BridgeEnvelope.Response(
             request,
             new

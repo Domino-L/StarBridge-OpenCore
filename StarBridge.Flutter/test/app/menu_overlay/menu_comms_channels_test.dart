@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -21,7 +23,7 @@ Map<String, Object?> channel({
   'scope': scope,
   'title': '远航者 · 组织频道',
   'buttons': [
-    {'key': 'a1', 'label': '发送消息', 'limit': 1000},
+    {'key': 'a1', 'label': '发送消息', 'role': 'sendMessage', 'limit': 1000},
   ],
   'rows': [
     {'title': '北辰', 'detail': '准备好后在奥里森集合。'},
@@ -57,8 +59,8 @@ void main() {
       expect(view.state, 'ready');
       expect(view.organization!.tab, 'chat');
       expect(view.chat!.messages.length, view.rows.length);
-      expect(view.buttons.where((a) => a.label == '成员'), isEmpty);
-      final send = view.buttons.singleWhere((a) => a.label == '发送消息');
+      expect(view.buttons.where((a) => a.role == 'members'), isEmpty);
+      final send = view.buttons.singleWhere((a) => a.role == 'sendMessage');
       session.act(send.key, 'synthetic channel message');
       session.act(send.key, 'synthetic channel message');
       await tester.pump();
@@ -82,7 +84,10 @@ void main() {
     expect(view.state, 'ready');
     expect(view.notice, contains('尚未加入房间'));
     expect(view.buttons, isEmpty);
-    expect((await port.read()).directory!.currentRoomId, isNull);
+    expect(
+      (resolvedMenuCopy(await port.read())).directory!.currentRoomId,
+      isNull,
+    );
     session.dispose();
   });
   test('channel projection rejects mismatched metadata and self receipts', () {

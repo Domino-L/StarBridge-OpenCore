@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/friends_window/friends_window_app.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_caption_action.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 
@@ -103,7 +104,11 @@ void main() {
         '最大化': 'toggleMaximize',
         '关闭好友窗口': 'close',
       }.entries) {
-        await tester.tap(find.byTooltip(entry.key));
+        await tester.tap(
+          find.byWidgetPredicate(
+            (w) => w is StarBridgeCaptionAction && w.label == entry.key,
+          ),
+        );
         await tester.pumpAndSettle();
         expect(
           calls.lastWhere((c) => c.method == 'windowControl').arguments,
@@ -118,8 +123,11 @@ void main() {
         (_) {},
       );
       await tester.pumpAndSettle();
-      expect(find.byTooltip('还原'), findsOneWidget);
-      await tester.tap(find.byTooltip('还原'));
+      final restore = find.byWidgetPredicate(
+        (w) => w is StarBridgeCaptionAction && w.label == '还原',
+      );
+      expect(restore, findsOneWidget);
+      await tester.tap(restore);
       await tester.pumpAndSettle();
       expect(
         calls.lastWhere((c) => c.method == 'windowControl').arguments,

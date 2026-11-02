@@ -43,8 +43,9 @@ internal static class OverlayModuleLifecycleTests
             first.Window.Members.Any(member => member.Contains("Room member")) && first.Window.Chat.Count == 0,
             "First HWND model uses mixed sources and does not replay chat history.");
         Check(legacyReads == 0, "Mixed mode must never read or demand the legacy source.");
-        Check(first.Window.SourceLabels.Members == "Current room" && first.Window.SourceLabels.Events == "Current room" &&
-            first.Window.SourceLabels.Overview is null,
+        Check(first.Window.SourceLabels.Members == "Room fixture" && first.Window.SourceLabels.Events == "Room fixture" &&
+            first.Window.SourceLabels.Overview == "Organization fixture" &&
+            first.Window.SourceLabels.Own == (OverlayModuleFlags.Members | OverlayModuleFlags.Events),
             "Real HWND consumes independent module labels without changing the semantic skin titles.");
 
         var activity = new SharedActivityNotice("Room member", new("module-event", "PlayerDied", DateTimeOffset.UtcNow), () => true)
@@ -105,7 +106,8 @@ internal static class OverlayModuleLifecycleTests
         var expired = await WaitFor(observations, item => !item.Frame.Members.Available);
         Check(expired.Window.Members.SequenceEqual(["No visible members"]) && expired.Window.Notice == "Notice fixture" && expired.Frame.Overview.Available,
             "A room lease expiring without another input clears only its modules.");
-        Check(expired.Window.EmptyStates.Members == "Room information unavailable" && expired.Window.EmptyStates.Events == "Room information unavailable" &&
+        Check(expired.Window.EmptyStates.Members is { Headline: "The current room can't be reached right now", Expanded: true } &&
+            expired.Window.EmptyStates.Events is { Headline: "The current room can't be reached right now", Expanded: false } &&
             expired.Window.Visibility.ShowMembers && expired.Window.Visibility.ShowEventNotifications,
             "Actual HWND retains fixed member/event empty panels after the lease expires.");
         var communicationDeadline = fixture.ExpireCommunicationSoon();
@@ -115,7 +117,8 @@ internal static class OverlayModuleLifecycleTests
         Check(communicationExpired.Window.Notice.Length == 0 && communicationExpired.Window.Chat.Count == 0,
             "Communication expires on its own deadline while the authorized organization overview remains.");
         Check(communicationExpired.Window.Visibility.ShowNotice && communicationExpired.Window.Visibility.ShowChat &&
-            communicationExpired.Window.EmptyStates.Notice == "Organization unavailable" && communicationExpired.Window.EmptyStates.Chat == "Organization unavailable",
+            communicationExpired.Window.EmptyStates.Notice?.Headline == "This organization can't be reached right now" &&
+            communicationExpired.Window.EmptyStates.Chat?.Headline == "This organization can't be reached right now",
             "Actual HWND keeps notice and barrage source failure visible without fake messages or countdowns.");
         fixture.DenyOrganization();
         runtime.RequestContentRefresh();
@@ -156,6 +159,16 @@ internal static class OverlayModuleLifecycleTests
         Check(observations.Count == count, "Closed runtime neither publishes content nor runs a pending expiry refresh.");
         await runtime.ExecuteAsync(InformationOverlayRuntimeCommand.Close, workspace with { Sources = null, SourcePresetsEnabled = false });
         Check(runtime.ModuleDemand is null && !runtime.IsVisible, "Explicit v1 workspace restores the legacy contract without opening a window.");
+        var corruptOptions = workspace with { Sources = null, SourcePresetsEnabled = false, IsPresetCorrupt = true };
+        var beforeCorrupt = legacyReads;
+        foreach (var command in new[] { InformationOverlayRuntimeCommand.Sync, InformationOverlayRuntimeCommand.Open, InformationOverlayRuntimeCommand.Retry })
+        {
+            var invalid = await runtime.ExecuteAsync(command, corruptOptions);
+            Check(!invalid.IsVisible && invalid.FailureCode == "overlay.workspace_invalid_preset" && legacyReads == beforeCorrupt,
+                "Corrupt v1 appearance options cannot open, retry or refresh legacy content.");
+        }
+        await runtime.ExecuteAsync(InformationOverlayRuntimeCommand.Close, corruptOptions);
+        Check(!runtime.IsVisible, "Close remains available with corrupt appearance options.");
         Console.WriteLine("PASS real offscreen module HWND: first frame, delta updates, timed expiry, revoke, failure, account recovery and close");
     }
 

@@ -14,8 +14,15 @@ internal static class StarCitizenProcessProbe
         "StarCitizen_TECH-PREVIEW"
     ];
 
-    public static bool IsRunning() => TryGetStart(out _);
+    // Names only, so no handle to the game is opened.
+    public static bool IsRunning() => StarBridge.HostRuntime.Presence.ProcessSnapshotNames.Any(IsGameImageName);
 
+    internal static bool IsGameImageName(string imageName) =>
+        ProcessNames.Any(processName => processName.Equals(
+            System.IO.Path.GetFileNameWithoutExtension(imageName), StringComparison.OrdinalIgnoreCase));
+
+    // Reads the start time through a process handle: for the old WPF client only, never a
+    // release path (the input safety gate holds this).
     public static bool TryGetStart(out DateTimeOffset? startedAtUtc)
     {
         startedAtUtc = null;
@@ -115,16 +122,8 @@ internal static class StarCitizenProcessProbe
             return false;
         }
 
-        try
-        {
-            using var process = Process.GetProcessById((int)processId);
-            return ProcessNames.Any(processName =>
-                process.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            return false;
-        }
+        return StarBridge.HostRuntime.Presence.ProcessSnapshotNames.FindForeground(processId) is { } imageName &&
+            IsGameImageName(imageName);
     }
 
     [DllImport("user32.dll")]

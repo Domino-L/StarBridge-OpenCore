@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -95,7 +97,7 @@ class Harness {
       grant: (run) {
         final key = 'a${++serial}';
         actions[key] = run;
-        return {'key': key, 'label': '详情', 'limit': 128};
+        return {'key': key, 'label': '详情', 'role': 'details', 'limit': 128};
       },
       changed: () => changes++,
       denied: () => denials++,
@@ -157,10 +159,12 @@ void main() {
   ) async {
     session.show(true);
     await flush(tester);
-    final members = MenuFeatureView.parse(session.currentView);
+    final members = MenuFeatureView.parse(
+      resolvedMenuCopy(session.currentView),
+    );
     session.act(members.organization!.sections['announcements']!, '');
     await flush(tester);
-    final result = MenuFeatureView.parse(session.currentView);
+    final result = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     expect(result.organization!.tab, 'announcements');
     return result;
   }
@@ -178,12 +182,17 @@ void main() {
       await flush(tester);
       expect(port.detailReads, 1);
       expect(
-        MenuFeatureView.parse(session.currentView).organization!.tab,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .organization!
+            .tab,
         'announcements',
       );
       port.listGate!.complete();
       await refresh;
-      expect(MenuFeatureView.parse(session.currentView).state, 'ready');
+      expect(
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).state,
+        'ready',
+      );
       session.dispose();
     },
   );
@@ -200,15 +209,27 @@ void main() {
       port.directoryGate = Completer<void>();
       session.act(ready.rows.first.buttons.single.key, '');
       await flush(tester);
-      expect(jsonEncode(session.currentView), isNot(contains('远航准备通知')));
+      expect(
+        jsonEncode(resolvedMenuCopy(session.currentView)),
+        isNot(contains('远航准备通知')),
+      );
       port.listGate!.complete();
       await oldRead;
-      expect(jsonEncode(session.currentView), isNot(contains('远航准备通知')));
+      expect(
+        jsonEncode(resolvedMenuCopy(session.currentView)),
+        isNot(contains('远航准备通知')),
+      );
       port.directoryGate!.complete();
       await flush(tester);
-      expect(MenuFeatureView.parse(session.currentView).state, 'ready');
+      expect(
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).state,
+        'ready',
+      );
       await session.refresh();
-      expect(MenuFeatureView.parse(session.currentView).state, 'ready');
+      expect(
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).state,
+        'ready',
+      );
       session.dispose();
     },
   );

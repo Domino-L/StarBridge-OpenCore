@@ -4,6 +4,7 @@ import '../../app/localization/app_strings.dart';
 import 'community_profile_copy.dart';
 
 const communityRolesCopy = <String, (String, String, String)>{
+  'saving': ('正在保存并读取最新身份组…', '正在儲存並讀取最新身分組…', 'Saving and refreshing roles…'),
   'loading': ('正在读取身份组…', '正在讀取身分組…', 'Loading roles…'),
   'unavailable': (
     '身份组暂时无法读取，请重试。',
@@ -61,17 +62,16 @@ const communityRolesCopy = <String, (String, String, String)>{
   'audit': ('数据与日志', '資料與紀錄', 'Data & logs'),
   'fleet.profile.edit': ('编辑组织资料', '編輯組織資料', 'Edit organization profile'),
   'announcements.manage': ('维护组织公告', '維護組織公告', 'Manage announcements'),
-  'broadcasts.publish': ('发送舰队广播', '傳送艦隊廣播', 'Send fleet broadcasts'),
+  'fleet.banner.edit': (
+    '可编辑横幅和背景',
+    '可編輯橫幅和背景',
+    'Can edit banners and backgrounds',
+  ),
   'fleet.avatar.edit': ('更换组织标志', '更換組織標誌', 'Change organization logo'),
   'members.review': ('审核加入申请', '審核加入申請', 'Review applications'),
   'members.remove': ('移除成员', '移除成員', 'Remove members'),
   'audit.view': ('查看组织完整日志', '查看組織完整紀錄', 'View organization logs'),
   'audit.delete': ('删除日志记录', '刪除紀錄', 'Delete log entries'),
-  'broadcastUnavailable': (
-    '广播暂未开放，保留现有权限设置。',
-    '廣播暫未開放，保留現有權限設定。',
-    'Broadcasts are unavailable. Existing permission settings are preserved.',
-  ),
   'rolesReload': (
     '重新读取会替换当前草稿。上次提交可能已经保存，请先核对最新结果。',
     '重新讀取會取代目前草稿。上次提交可能已儲存，請先核對最新結果。',

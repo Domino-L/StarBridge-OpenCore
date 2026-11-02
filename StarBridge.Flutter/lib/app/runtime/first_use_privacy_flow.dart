@@ -1,6 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
 import '../../features/account/account_models.dart';
 import '../../features/account/account_module.dart';
@@ -52,7 +57,7 @@ final class FirstUsePrivacyFlow {
   int? _generation;
   int _readToken = 0;
   Timer? _retry;
-  DialogRoute<bool>? _route;
+  StarBridgeDialogRoute<bool>? _route;
   bool _adjusting = false;
   int? _dialogEpoch;
 
@@ -148,7 +153,8 @@ final class FirstUsePrivacyFlow {
     wake();
   }
 
-  Future<void> _show() async {
+  Future<void>
+  _show() => runStarBridgeActivation<void>(InteractionSource.programmatic, () async {
     final navigator = queue.navigator;
     if (navigator == null) return;
     _showing = true;
@@ -162,9 +168,14 @@ final class FirstUsePrivacyFlow {
         privacy.scopeEpoch == epoch;
     final initial = (privacy.draft ?? LocalPrivacySettings.editorDefaults);
     final hadSavedChoices = privacy.hasSaved;
-    final route = DialogRoute<bool>(
-      context: navigator.context,
-      barrierDismissible: false,
+    final route = StarBridgeDialogRoute<bool>(
+      data:
+          InteractionScope.maybeOf(navigator.context) ??
+          resolveStarBridgeInteraction(navigator.context),
+      link: InteractionScope.linkOf(navigator.context),
+      barrierLabel: MaterialLocalizations.of(navigator.context)
+          .modalBarrierDismissLabel,
+      dismissible: false,
       builder: (_) => FirstUsePrivacyDialog(
         organizationsPending: !hadSavedChoices,
         initial: hadSavedChoices
@@ -216,7 +227,7 @@ final class FirstUsePrivacyFlow {
       _showing = false;
       wake();
     }
-  }
+  });
 
   void _dismiss() {
     final route = _route;

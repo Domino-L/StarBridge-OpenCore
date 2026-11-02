@@ -4,8 +4,9 @@ abstract interface class CommunityHangarSharingPort {
   Future<CommunityHangarSharing> readHangarSharing();
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> selectedRefs,
-  );
+    List<String> selectedRefs, {
+    bool includeImages = false,
+  });
 }
 
 final class CommunityHangarSharingOutcome {

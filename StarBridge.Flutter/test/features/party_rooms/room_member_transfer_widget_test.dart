@@ -31,9 +31,14 @@ void main() {
               builder: (context) => RoomMembersPanel(
                 room: module.selectedRoom!,
                 serverTime: module.directory!.serverTime,
-                onRemove: (_) {},
+                onRemove: (_, _) {},
                 onTransfer: module.canTransferHost
-                    ? (member) => transferRoomHost(context, module, member)
+                    ? (member, source) => transferRoomHost(
+                        context,
+                        module,
+                        member,
+                        source: source,
+                      )
                     : null,
               ),
             ),

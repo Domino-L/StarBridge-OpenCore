@@ -24,6 +24,65 @@ public static class DesktopNotificationEnvironment
     public static string SuppressionReason() => ReadSuppressionReason(false);
     public static string SocialSoundSuppressionReason() => ReadSuppressionReason(true);
     internal static string PlayerActivitySuppressionReason() => ReadSuppressionReason(false, true);
+    // Hangar reminders explicitly use compact cards and sound in game/DND.
+    // Ordinary social reminders retain their existing OS policy.
+    public static string ExecHangarSuppressionReason(string gameState)
+    {
+        try {
+            if (SHQueryUserNotificationState(out var state) != 0) return "shell-state-unavailable";
+            return EvaluateExecHangarSuppression(state, gameState, ReadDesktopReason,
+                ReadNotificationModeReason, ReadForegroundVisualReason);
+        } catch { return "system-state-unavailable"; }
+    }
+    // Trade alerts follow only the app's own switches (user, 10-29: "除非应用内不让弹才不弹"):
+    // Windows DND and quiet time do not block them. A locked / screen-saver / switched-user
+    // desktop (1), presentation mode (4), an inactive desktop or an unknown shell state still do.
+    public static string TradeSuppressionReason()
+    {
+        try {
+            if (SHQueryUserNotificationState(out var state) != 0) return "shell-state-unavailable";
+            return EvaluateTradeSuppression(state, ReadDesktopReason);
+        } catch { return "system-state-unavailable"; }
+    }
+    internal static string EvaluateTradeSuppression(int state, Func<string> desktopReason)
+    {
+        if (state is not (2 or 3 or 5 or 6 or 7)) return "shell-suppressed-" + state;
+        return desktopReason();
+    }
+    // Same rule; while the game itself is foreground the alert uses the click-through card.
+    public static string CompactTradeSuppressionReason(string gameState)
+    {
+        if (gameState != "running") return "game-not-running";
+        try {
+            return StarCitizenProcessProbe.IsForeground() ? TradeSuppressionReason() : "game-not-foreground";
+        } catch { return "system-state-unavailable"; }
+    }
+    internal static bool CompactExecHangar(string gameState, string notificationModeReason) =>
+        gameState == "running" || notificationModeReason == "do-not-disturb";
+    internal static string EvaluateExecHangarSuppression(int state, string gameState,
+        Func<string> desktopReason, Func<string> notificationModeReason, Func<string> foregroundReason)
+    {
+        if (state is not (2 or 3 or 5 or 6 or 7)) return "shell-suppressed-" + state;
+        var inactive = desktopReason();
+        if (inactive.Length != 0) return inactive;
+        if (gameState is not ("running" or "notRunning")) return "game-active-or-unknown";
+        var mode = notificationModeReason();
+        if (mode is not ("" or "do-not-disturb")) return mode;
+        var foreground = foregroundReason();
+        if (foreground != "" && foreground != "foreground-fullscreen") return foreground;
+        if (CompactExecHangar(gameState, mode)) return "";
+        return state is 2 or 5 ? foreground : "shell-suppressed-" + state;
+    }
+    // Achievements are an explicit, separate product celebration. DND and
+    // fullscreen/quiet mode do not suppress them; lock/presentation/unknown do.
+    internal static bool CanPresentAchievement()
+    {
+        try { return SHQueryUserNotificationState(out var state) == 0 &&
+            AchievementDesktopAllowed(state, ReadDesktopReason); }
+        catch { return false; }
+    }
+    internal static bool AchievementDesktopAllowed(int state, Func<string> desktopReason) =>
+        state is 2 or 3 or 5 or 6 or 7 && desktopReason().Length == 0;
     internal static string EvaluateActivitySuppression(int state, bool gameForeground,
         Func<string> desktopReason, Func<string> notificationModeReason, Func<string> foregroundReason)
     {

@@ -1,5 +1,15 @@
+import '../../design_system/interaction/faded_name_tip.dart';
 import 'dart:async';
+import 'dart:io';
+
+import '../diagnostics/loading_diagnostics.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+import '../../shared/diagnostics/loading_content_probe.dart';
 import '../../design_system/scrolling/starbridge_scroll_behavior.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_caption_action.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../menu_overlay/menu_read_source_argument.dart';
 
 import '../../design_system/icons/window_control_icon.dart';
 import '../../design_system/styles/window_caption_palette.dart';
@@ -14,8 +24,11 @@ import '../social_windows/window_presentation.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 void runFriendsWindow() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const FriendsWindowApp());
+  LoadingDiagnostics.runAuxiliary(
+    Platform.environment,
+    LoadingAuxiliarySurface.friends,
+    () => runApp(const FriendsWindowApp()),
+  );
 }
 
 /// Presentation only: no bootstrap, credentials, Host or message polling.
@@ -29,9 +42,12 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
   static const _channel = MethodChannel('starbridge/friends-surface');
   WindowPresentation _presentation = const WindowPresentation();
   StarBridgeTokens get _clientTokens => _presentation.tokens;
+  AppStrings get _strings => AppStrings.resolve(_presentation.locale);
   MenuFriendsView _view = const MenuFriendsView('loading');
   int _opening = 0, _revision = -1;
   bool _pending = false, _failed = false;
+  // A current snapshot supersedes only startup failure, not action failures.
+  bool _hasSnapshot = false;
   bool _maximized = false;
 
   @override
@@ -50,9 +66,9 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
     try {
       _accept(await _channel.invokeMethod<Object?>('ready'));
     } on PlatformException {
-      if (mounted) setState(() => _failed = true);
+      if (mounted && !_hasSnapshot) setState(() => _failed = true);
     } on MissingPluginException {
-      if (mounted) setState(() => _failed = true);
+      if (mounted && !_hasSnapshot) setState(() => _failed = true);
     }
   }
 
@@ -65,11 +81,20 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
         (opening == _opening && revision < _revision)) {
       return;
     }
+    if (opening > _opening && opening > 0) {
+      LoadingMetrics.current?.route('/friends');
+      LoadingMetrics.current?.auxiliaryOpening(
+        LoadingAuxiliarySurface.friends,
+        LoadingAuxiliaryPhase.snapshot,
+        opening,
+      );
+    }
     setState(() {
       _opening = opening;
       _revision = revision;
       _view = MenuFriendsView.parse(payload['view']);
       _presentation = WindowPresentation.decode(payload['presentation']);
+      _hasSnapshot = true;
       _failed = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,8 +128,8 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
       SizedBox(
         width: 44,
         height: 34,
-        child: IconButton(
-          tooltip: label,
+        child: StarBridgeCaptionAction(
+          label: label,
           padding: EdgeInsets.zero,
           style: IconButton.styleFrom(
             shape: const RoundedRectangleBorder(),
@@ -114,7 +139,7 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
                 : _clientTokens.surfaces.selected.fill,
           ).copyWith(side: const WidgetStatePropertyAll(BorderSide.none)),
           iconSize: 15,
-          onPressed: () => unawaited(_windowControl(command)),
+          onActivate: (_) => unawaited(_windowControl(command)),
           icon: WindowControlIcon(icon),
         ),
       );
@@ -124,14 +149,17 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
     final opening = _opening;
     setState(() => _pending = true);
     try {
-      final accepted = await _channel.invokeMethod<bool>('action', {
-        'opening': opening,
-        'revision': _revision,
-        'scope': _view.scope,
-        'action': action,
-        'key': key,
-        'value': value,
-      });
+      final accepted = await _channel.invokeMethod<bool>(
+        'action',
+        menuReadSourceArgument('friendsAction', {
+          'opening': opening,
+          'revision': _revision,
+          'scope': _view.scope,
+          'action': action,
+          'key': key,
+          'value': value,
+        }),
+      );
       if (mounted && opening == _opening) {
         setState(() => _failed = accepted != true);
       }
@@ -152,6 +180,11 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    builder: (context, child) => FadedNameTip(child: StarBridgeInteractionConfiguration(
+      suite: _presentation.interactionSuite,
+      reduceMotion: _presentation.reduceMotion,
+      child: child!,
+    )),
     scrollBehavior: const StarBridgeScrollBehavior(),
     debugShowCheckedModeBanner: false,
     locale: _presentation.locale,
@@ -188,7 +221,7 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
                     child: Padding(
                       padding: EdgeInsets.only(left: 14),
                       child: Text(
-                        '好友',
+                        _strings.text('navigation.friends'),
                         style: TextStyle(
                           fontSize: 12,
                           color: _clientTokens.colors.textSecondary,
@@ -197,44 +230,78 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
                       ),
                     ),
                   ),
-                  _captionButton('最小化', WindowGlyph.minimize, 'minimize'),
                   _captionButton(
-                    _maximized ? '还原' : '最大化',
+                    _strings.text('window.minimize'),
+                    WindowGlyph.minimize,
+                    'minimize',
+                  ),
+                  _captionButton(
+                    _strings.text(
+                      _maximized ? 'window.restore' : 'window.maximize',
+                    ),
                     _maximized ? WindowGlyph.restore : WindowGlyph.maximize,
                     'toggleMaximize',
                   ),
-                  _captionButton('关闭好友窗口', WindowGlyph.close, 'close'),
+                  _captionButton(
+                    _strings
+                        .text('window.closeNamed')
+                        .replaceAll(
+                          '{title}',
+                          _strings.text('navigation.friends'),
+                        ),
+                    WindowGlyph.close,
+                    'close',
+                  ),
                 ],
               ),
             ),
             if (_failed)
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('操作未确认，请刷新列表核对后再试。'),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(_strings.text('socialWindow.actionUnconfirmed')),
               ),
             Expanded(
               child: AbsorbPointer(
                 absorbing: _pending,
-                child: MenuFriendsPanel(
-                  key: ValueKey('$_opening:${_view.scope}'),
-                  embedded: true,
-                  view: _view,
-                  onClose: () => unawaited(_windowControl('close')),
-                  onAction: (a, k, v) => unawaited(_action(a, k, v)),
-                  onChat: (key) => unawaited(_action('chat', key, '')),
-                  onProfile: (key) => unawaited(_action('profile', key, '')),
+                child: LoadingContentProbe(
+                  route: '/friends',
+                  status: switch (_view.state) {
+                    'idle' || 'loading' => LoadingContentStatus.waiting,
+                    'ready' =>
+                      _view.rows.isEmpty && _view.requests.isEmpty
+                          ? LoadingContentStatus.empty
+                          : LoadingContentStatus.data,
+                    _ => LoadingContentStatus.unavailable,
+                  },
+                  items: _view.rows.length + _view.requests.length,
+                  child: MenuFriendsPanel(
+                    key: ValueKey('$_opening:${_view.scope}'),
+                    embedded: true,
+                    view: _view,
+                    onClose: () => unawaited(_windowControl('close')),
+                    onAction: (a, k, v) => unawaited(_action(a, k, v)),
+                    onChat: (key) => unawaited(_action('chat', key, '')),
+                    onProfile: (key) => unawaited(_action('profile', key, '')),
+                  ),
                 ),
               ),
             ),
             const Divider(height: 1),
             SizedBox(
               width: double.infinity,
-              child: TextButton.icon(
-                onPressed: _pending
+              child: StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate: _pending
                     ? null
-                    : () => unawaited(_action('messages', '', '')),
-                icon: const WindowControlIcon(WindowGlyph.chat, size: 18),
-                label: const Text('打开最近聊天'),
+                    : (_) => unawaited(_action('messages', '', '')),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const WindowControlIcon(WindowGlyph.chat, size: 18),
+                    const SizedBox(width: 8),
+                    Text(_strings.text('friendsWindow.openRecentChat')),
+                  ],
+                ),
               ),
             ),
           ],

@@ -13,7 +13,7 @@ namespace StarBridge.HostRuntime.Communities;
 internal sealed partial class CommunityClient
 {
     private sealed record ShipReportResult(string Status, string? Error = null);
-    private sealed record ShipReportAttempt(string Fingerprint, ShipReportResult Result, DateTimeOffset CreatedAt);
+    private sealed record ShipReportAttempt(string Fingerprint, ShipReportResult Result, DateTimeOffset CreatedAt, OfficialShipReportContext? Official = null);
     private readonly ConcurrentDictionary<string, ShipReportAttempt> _shipReportAttempts = new();
 
     internal async Task<object> ReportShipImageAsync(string bearer, JsonElement body, string scope,

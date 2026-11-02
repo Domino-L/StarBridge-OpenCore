@@ -148,7 +148,7 @@ void main() {
         find.byKey(const Key('overlay-import-removed-bindings')),
       );
       await tester.pumpAndSettle();
-      expect(find.text('已移除组织绑定，可在预设设置中重新选择。'), findsOneWidget);
+      expect(find.text('已移除组织绑定，可在方案设置中重新选择。'), findsOneWidget);
       expect(find.text('当前房间'), findsOneWidget);
       expect(find.textContaining('private-'), findsNothing);
       expect(tester.takeException(), isNull);

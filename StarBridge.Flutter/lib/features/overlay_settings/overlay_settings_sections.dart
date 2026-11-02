@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/product_features.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -27,6 +30,7 @@ class OverlaySettingsSections extends StatefulWidget {
 class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
   bool _menu = false;
   bool _menuVisited = false;
+  InteractionSource _menuOpeningSource = InteractionSource.programmatic;
 
   @override
   Widget build(BuildContext context) {
@@ -43,16 +47,18 @@ class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
             runSpacing: tokens.space.sm,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              ChoiceChip(
+              StarBridgeChoiceChip(
                 selected: !_menu,
-                label: Text(strings.text('overlay.sections.info')),
+                controlKey: const Key('overlay-info-settings'),
+                label: strings.text('overlay.sections.info'),
                 onSelected: (_) => setState(() => _menu = false),
               ),
-              ChoiceChip(
-                key: const Key('overlay-menu-settings'),
+              StarBridgeChoiceChip(
+                controlKey: const Key('overlay-menu-settings'),
                 selected: _menu,
-                label: Text(strings.text('overlay.sections.menu')),
+                label: strings.text('overlay.sections.menu'),
                 onSelected: (_) => setState(() {
+                  _menuOpeningSource = currentStarBridgeActivationSource;
                   _menu = true;
                   _menuVisited = true;
                 }),
@@ -68,9 +74,13 @@ class _OverlaySettingsSectionsState extends State<OverlaySettingsSections> {
               if (_menuVisited)
                 TickerMode(
                   enabled: _menu,
-                  child: MenuOverlaySettings(
-                    preview: widget.menuPreview,
-                    draft: widget.menuDraft,
+                  child: starBridgeInitialReadViewport(
+                    context,
+                    source: _menuOpeningSource,
+                    child: MenuOverlaySettings(
+                      preview: widget.menuPreview,
+                      draft: widget.menuDraft,
+                    ),
                   ),
                 )
               else

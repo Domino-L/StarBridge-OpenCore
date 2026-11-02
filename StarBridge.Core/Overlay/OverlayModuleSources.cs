@@ -42,14 +42,14 @@ public sealed class OverlayPresetSources
         IReadOnlyList<OverlaySourceBinding>? chatSources = null)
     {
         ArgumentNullException.ThrowIfNull(binding);
-        if (binding.Mode == OverlaySourceMode.Local || binding.Mode == OverlaySourceMode.Fleet ||
-            autoSwitch && binding.Mode is not (OverlaySourceMode.Room or OverlaySourceMode.Community))
+        if (binding.Mode == OverlaySourceMode.Local ||
+            autoSwitch && binding.Mode is not (OverlaySourceMode.Room or OverlaySourceMode.Community or OverlaySourceMode.Fleet))
             throw new ArgumentException("Invalid preset source policy.");
         var copy = new Dictionary<OverlaySourceModule, OverlaySourceBinding>();
         foreach (var (module, source) in modules ?? new Dictionary<OverlaySourceModule, OverlaySourceBinding>())
         {
             if (!Enum.IsDefined(module) || source is null ||
-                source.Mode is OverlaySourceMode.Local or OverlaySourceMode.Fleet)
+                source.Mode is OverlaySourceMode.Local)
                 throw new ArgumentException("Invalid module source policy.");
             copy.Add(module, source);
         }
@@ -58,7 +58,7 @@ public sealed class OverlayPresetSources
         Modules = new ReadOnlyDictionary<OverlaySourceModule, OverlaySourceBinding>(copy);
         var chat = (chatSources ?? []).ToArray();
         if (chat.Length > OverlayModuleSourceResolver.MaximumSources ||
-            chat.Any(s => s is null || s.Mode is not (OverlaySourceMode.Room or OverlaySourceMode.Community)) ||
+            chat.Any(s => s is null || s.Mode is not (OverlaySourceMode.Room or OverlaySourceMode.Community or OverlaySourceMode.Fleet)) ||
             chat.Distinct().Count() != chat.Length)
             throw new ArgumentException("Invalid chat source selection.");
         ChatSources = Array.AsReadOnly(chat.OrderBy(s => s.Mode).ThenBy(s => s.CommunityCode, StringComparer.Ordinal)
@@ -73,14 +73,18 @@ public sealed record OverlaySourceLease(OverlaySourceMode Mode, string Id, strin
     long Generation, DateTimeOffset ValidUntil)
 {
     public bool IsValidFor(string owner, long generation, DateTimeOffset now) =>
-        Mode is OverlaySourceMode.Room or OverlaySourceMode.Community &&
+        Mode is OverlaySourceMode.Room or OverlaySourceMode.Community or OverlaySourceMode.Fleet &&
         OverlaySourceBinding.ValidKey(Id) && OwnerKey == owner && Generation == generation && now < ValidUntil;
 }
 
 public sealed record OverlaySourceResolutionContext(
     string OwnerKey, long Generation, DateTimeOffset Now,
     OverlaySourceBinding AccountChoice, OverlaySourceLease? CurrentRoom,
-    string? FocusedCommunityCode, IReadOnlyDictionary<string, OverlaySourceLease> Communities);
+    string? FocusedCommunityCode, IReadOnlyDictionary<string, OverlaySourceLease> Communities)
+{
+    public OverlaySourceLease? Fleet { get; init; }
+    public bool FocusedFleet { get; init; }
+}
 
 public sealed record OverlayResolvedSource(OverlaySourceMode Mode, string? Id, bool Available,
     string? UnavailableReason = null)
@@ -122,8 +126,8 @@ public static class OverlayModuleSourceResolver
         ArgumentNullException.ThrowIfNull(context);
         if (!OverlaySourceBinding.ValidKey(context.OwnerKey) || context.Generation < 0 ||
             activeModules?.Any(module => !Enum.IsDefined(module)) == true ||
-            context.AccountChoice.Mode is OverlaySourceMode.None or OverlaySourceMode.Fleet ||
-            temporaryChoice?.Mode is OverlaySourceMode.None or OverlaySourceMode.Fleet)
+            context.AccountChoice.Mode is OverlaySourceMode.None ||
+            temporaryChoice?.Mode is OverlaySourceMode.None)
             throw new ArgumentException("Invalid source resolution context.");
 
         var choice = temporaryChoice ?? (preset.Binding.Mode == OverlaySourceMode.None
@@ -187,7 +191,7 @@ public static class OverlayModuleSourceResolver
         {
             if (binding.Mode == OverlaySourceMode.Community && binding.OwnerKey == context.OwnerKey)
                 codes.Add(binding.CommunityCode!);
-            else if (binding.Mode == OverlaySourceMode.Auto && !Valid(context.CurrentRoom, OverlaySourceMode.Room, context) &&
+            else if (binding.Mode == OverlaySourceMode.Auto && !context.FocusedFleet && !Valid(context.CurrentRoom, OverlaySourceMode.Room, context) &&
                 context.FocusedCommunityCode is { } focused) codes.Add(focused);
         }
         foreach (var module in activeModules)
@@ -208,6 +212,21 @@ public static class OverlayModuleSourceResolver
         return Array.AsReadOnly(codes.Order(StringComparer.Ordinal).ToArray());
     }
 
+    /// <summary>Fleet read intent survives a missing/expired lease, but never joins unfocused auto discovery.</summary>
+    public static bool RequestsFleetRefresh(OverlayPresetSources preset, OverlaySourceResolutionContext context,
+        IReadOnlyCollection<OverlaySourceModule> activeModules, OverlaySourceBinding? temporaryChoice = null)
+    {
+        var plan = Resolve(preset, context, temporaryChoice, activeModules);
+        var inherited = plan.PresetBindingUnavailable ? OverlaySourceBinding.Automatic :
+            temporaryChoice ?? (preset.Binding.Mode == OverlaySourceMode.None ? context.AccountChoice : preset.Binding);
+        bool Fleet(OverlaySourceBinding binding) => binding.Mode == OverlaySourceMode.Fleet ||
+            binding.Mode == OverlaySourceMode.Auto && context.FocusedFleet && !Valid(context.CurrentRoom, OverlaySourceMode.Room, context);
+        return activeModules.Any(module => module == OverlaySourceModule.Chat && preset.ChatSources.Count > 0
+            ? preset.ChatSources.Any(Fleet)
+            : Fleet(preset.Modules.GetValueOrDefault(module, OverlaySourceBinding.Follow).Mode == OverlaySourceMode.None
+                ? inherited : preset.Modules[module]));
+    }
+
     private static OverlayResolvedSource ResolveOne(OverlaySourceBinding choice, OverlaySourceResolutionContext context) =>
         choice.Mode switch
         {
@@ -216,6 +235,9 @@ public static class OverlayModuleSourceResolver
             OverlaySourceMode.Room => Valid(context.CurrentRoom, OverlaySourceMode.Room, context)
                 ? new(OverlaySourceMode.Room, context.CurrentRoom!.Id, true)
                 : new(OverlaySourceMode.Room, null, false, "room_unavailable"),
+            OverlaySourceMode.Fleet => Valid(context.Fleet, OverlaySourceMode.Fleet, context)
+                ? new(OverlaySourceMode.Fleet, context.Fleet!.Id, true)
+                : new(OverlaySourceMode.Fleet, null, false, "fleet_unavailable"),
             OverlaySourceMode.Community => choice.OwnerKey == context.OwnerKey &&
                 context.Communities.TryGetValue(choice.CommunityCode!, out var lease) &&
                 lease.Id == choice.CommunityCode && Valid(lease, OverlaySourceMode.Community, context)
@@ -231,6 +253,7 @@ public static class OverlayModuleSourceResolver
     {
         if (Valid(context.CurrentRoom, OverlaySourceMode.Room, context))
             return new(OverlaySourceMode.Room, context.CurrentRoom!.Id, true);
+        if (context.FocusedFleet) return ResolveOne(new(OverlaySourceMode.Fleet), context);
         if (context.FocusedCommunityCode is { } code && context.Communities.TryGetValue(code, out var lease) &&
             lease.Id == code && Valid(lease, OverlaySourceMode.Community, context))
             return new(OverlaySourceMode.Community, code, true);

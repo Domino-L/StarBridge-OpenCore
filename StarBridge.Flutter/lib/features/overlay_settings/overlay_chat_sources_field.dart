@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import 'overlay_preset_sources.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_source_binding_field.dart';
@@ -27,6 +31,11 @@ class OverlayChatSourcesField extends StatelessWidget {
     final copy = AppStrings.of(context).text;
     if (source.mode == OverlaySourceMode.room) {
       return copy('overlay.source.room');
+    }
+    if (source.mode == OverlaySourceMode.fleet) {
+      return state.offersFleet
+          ? state.fleetLabel(copy)
+          : copy('overlay.source.missing');
     }
     final target = source.ownerKey == state.sourceOwnerKey
         ? state.targets.where((t) => t.code == source.communityCode).firstOrNull
@@ -75,31 +84,37 @@ class OverlayChatSourcesField extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 8),
-        OutlinedButton(
+        StarBridgeActionButton(
           key: const Key('overlay-chat-select-sources'),
-          onPressed: onChanged == null ? null : () => _select(context, state),
+          onActivate: onChanged == null
+              ? null
+              : (source) => _select(context, state, source),
           child: Text(copy('overlay.source.selectChat')),
         ),
         if (value.chatSources.isNotEmpty)
-          TextButton(
-            onPressed: onChanged == null ? null : () => onChanged!([]),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: onChanged == null ? null : (_) => onChanged!([]),
             child: Text(copy('overlay.source.singleChat')),
           ),
       ],
     );
   }
 
-  Future<void> _select(BuildContext context, OverlaySceneState initial) async {
+  Future<void> _select(
+    BuildContext context,
+    OverlaySceneState initial,
+    InteractionSource source,
+  ) async {
     final copy = AppStrings.of(context).text;
     final selected = value.chatSources.toSet();
     final previous = value.forModule(OverlaySourceModule.chat);
-    if (selected.isEmpty &&
-        (previous.mode == OverlaySourceMode.room ||
-            previous.mode == OverlaySourceMode.community)) {
+    if (selected.isEmpty && previous.isConcrete) {
       selected.add(previous);
     }
-    final result = await showDialog<List<OverlaySourceBinding>>(
-      context: context,
+    final result = await showStarBridgeDialog<List<OverlaySourceBinding>>(
+      context,
+      source: source,
       builder: (context) {
         Widget dialog(OverlaySceneState state) => StatefulBuilder(
           builder: (context, update) {
@@ -108,6 +123,7 @@ class OverlayChatSourcesField extends StatelessWidget {
                 state.contextGeneration == initial.contextGeneration;
             final available = <OverlaySourceBinding>{
               const OverlaySourceBinding.room(),
+              if (state.offersFleet) const OverlaySourceBinding.fleet(),
               if (state.available &&
                   !state.failure &&
                   state.sourceOwnerKey != null)
@@ -141,12 +157,10 @@ class OverlayChatSourcesField extends StatelessWidget {
                             .replaceAll('{count}', '${selected.length}'),
                       ),
                       for (final source in options)
-                        CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.leading,
+                        StarBridgeCheckboxTile(
+                          key: ValueKey(source),
                           value: selected.contains(source),
-                          title: Text(_name(context, source, state)),
+                          label: _name(context, source, state),
                           onChanged:
                               !selected.contains(source) &&
                                   (selected.length >= 8 ||
@@ -163,14 +177,24 @@ class OverlayChatSourcesField extends StatelessWidget {
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  onActivate: (source) =>
+                      dismissStarBridgeDialog<List<OverlaySourceBinding>>(
+                        context,
+                        source: source,
+                      ),
                   child: Text(copy('overlay.source.cancelChat')),
                 ),
-                FilledButton(
-                  onPressed: !current || selected.isEmpty
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.primary,
+                  onActivate: !current || selected.isEmpty
                       ? null
-                      : () => Navigator.pop(context, selected.toList()),
+                      : (source) => dismissStarBridgeDialog(
+                          context,
+                          source: source,
+                          result: selected.toList(),
+                        ),
                   child: Text(copy('overlay.source.applyChat')),
                 ),
               ],

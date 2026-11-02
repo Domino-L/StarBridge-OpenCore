@@ -1,28 +1,39 @@
 import '../../design_system/styles/home_scene_palette.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
-import '../../app/shell/chrome/presence_color.dart';
+import '../../app/presence/manual_presence.dart';
+import '../../app/presence/manual_presence_widgets.dart';
 import '../../app/shell/chrome/presence_label.dart';
 import '../../app/shell/chrome/shell_chrome_port.dart';
 import '../../app/shell/chrome/shell_chrome_projection.dart';
+import '../../design_system/appearance/appearance_scope.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../party_rooms/party_rooms_module.dart';
 import 'home_scene_video.dart';
+import 'home_scene.dart';
+import '../../shared/guide/guide_checklist.dart';
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({
     required this.chrome,
     required this.rooms,
     this.scene,
+    this.backdrop,
     this.now,
+    this.presence,
     super.key,
   });
 
   final ShellChromePort chrome;
   final PartyRoomsModule rooms;
   final Widget? scene;
+  final HomeScene? backdrop;
   final DateTime? now;
+  final ManualPresenceController? presence;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -32,9 +43,11 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return ValueListenableBuilder<ShellChromeProjection>(
-      valueListenable: widget.chrome.projection,
-      builder: (context, chrome, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([widget.chrome.projection, widget.presence]),
+      builder: (context, _) {
+        final chrome = widget.chrome.projection.value;
+        final backdrop = widget.backdrop ?? HomeScenes.forLaunch;
         final now = widget.now ?? DateTime.now();
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -47,7 +60,7 @@ class _HomePageState extends State<HomePage> {
               250.0,
               double.infinity,
             );
-            return SingleChildScrollView(
+            final content = SingleChildScrollView(
               key: const Key('home-page-scroll'),
               child: Column(
                 children: [
@@ -56,8 +69,15 @@ class _HomePageState extends State<HomePage> {
                     height: heroHeight,
                     child: _Hero(
                       chrome: chrome,
+                      presence: widget.presence,
                       now: now,
-                      scene: widget.scene ?? const HomeSceneVideo(),
+                      scene:
+                          widget.scene ??
+                          HomeSceneVideo(
+                            key: ValueKey(backdrop.id),
+                            scene: backdrop,
+                          ),
+                      sceneLocationKey: backdrop.locationKey,
                     ),
                   ),
                   Padding(
@@ -67,21 +87,31 @@ class _HomePageState extends State<HomePage> {
                       tokens.density.pagePadding,
                       tokens.density.pagePadding,
                     ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 160,
-                      child: Center(
-                        child: Text(
-                          AppStrings.of(context).text('home.moreInDevelopment'),
-                          key: const Key('home-more-in-development'),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(color: tokens.colors.textSecondary),
+                    child: guideChecklist(
+                      context,
+                      fallback: SizedBox(
+                        width: double.infinity,
+                        height: 160,
+                        child: Center(
+                          child: Text(
+                            AppStrings.of(context)
+                                .text('home.moreInDevelopment'),
+                            key: const Key('home-more-in-development'),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(color: tokens.colors.textSecondary),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ],
               ),
+            );
+            return LoadingContentProbe(
+              route: '/',
+              status: LoadingContentStatus.data,
+              items: 1,
+              child: content,
             );
           },
         );
@@ -91,11 +121,19 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _Hero extends StatelessWidget {
-  const _Hero({required this.chrome, required this.now, required this.scene});
+  const _Hero({
+    required this.chrome,
+    required this.now,
+    required this.scene,
+    required this.sceneLocationKey,
+    required this.presence,
+  });
 
   final ShellChromeProjection chrome;
   final DateTime now;
   final Widget scene;
+  final String sceneLocationKey;
+  final ManualPresenceController? presence;
 
   @override
   Widget build(BuildContext context) {
@@ -104,9 +142,26 @@ class _Hero extends StatelessWidget {
     final account = chrome.accountSignedIn ? chrome.accountLabel.trim() : '';
     final greeting = strings.text(_greetingKey(now.hour));
     final title = strings.text(_titleKey(account, now));
-    final presenceKey = chrome.displayPresenceKey;
-    final presence = displayPresenceLabel(strings, chrome);
-    final statusColor = presenceColor(tokens.colors, presenceKey);
+    final layers = AppearanceScope.of(context);
+    final blessing = layers.holidayActive
+        ? strings.text(layers.holiday!.blessingKey)
+        : null;
+    final english = Localizations.localeOf(context).languageCode == 'en';
+    final opening = english
+        ? '$greeting, ${account.isEmpty ? title : '$account · $title'}'
+        : '$greeting，${account.isEmpty ? title : '$account $title'}';
+    // 和顶栏账号菜单同一个来源、同一条判断。
+    final manual = chrome.accountSignedIn || (presence?.isOffline ?? false)
+        ? presence
+        : null;
+    final presenceKey = manual?.selfKey ?? chrome.displayPresenceKey;
+    final presenceText =
+        manual == null ||
+            (presenceKey == 'presence.inGame' &&
+                chrome.gamePresence == GamePresenceState.running)
+        ? displayPresenceLabel(strings, chrome)
+        : manualPresenceText(context, presenceKey);
+    final statusColor = manualPresenceColor(tokens.colors, presenceKey);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -116,7 +171,11 @@ class _Hero extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
-              colors: [HomeScenePalette.scrimStrong, HomeScenePalette.scrimSoft, HomeScenePalette.scrimClear],
+              colors: [
+                HomeScenePalette.scrimStrong,
+                HomeScenePalette.scrimSoft,
+                HomeScenePalette.scrimClear,
+              ],
               stops: [0, .46, .78],
             ),
           ),
@@ -145,9 +204,11 @@ class _Hero extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                Localizations.localeOf(context).languageCode == 'en'
-                    ? '$greeting, ${account.isEmpty ? title : '$account · $title'}'
-                    : '$greeting，${account.isEmpty ? title : '$account $title'}',
+                blessing == null
+                    ? opening
+                    : english
+                    ? '$opening. $blessing'
+                    : '$opening，$blessing',
                 key: const Key('home-greeting'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -156,6 +217,15 @@ class _Hero extends StatelessWidget {
                   fontSize: tokens.typography.display,
                   fontWeight: tokens.typography.displayWeight,
                   letterSpacing: tokens.typography.displayTracking,
+                  // 系统回退会先碰到 Segoe UI Symbol，它的南瓜和圣诞树是单色的。
+                  fontFamilyFallback: blessing == null
+                      ? null
+                      : [
+                          'Segoe UI Emoji',
+                          ...?DefaultTextStyle.of(
+                            context,
+                          ).style.fontFamilyFallback,
+                        ],
                   shadows: const [
                     Shadow(color: HomeScenePalette.textShadow, blurRadius: 16),
                   ],
@@ -167,25 +237,28 @@ class _Hero extends StatelessWidget {
                 runSpacing: tokens.space.xs,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  _HeroMeta(
-                    child: Container(
-                      width: tokens.icons.statusDot,
-                      height: tokens.icons.statusDot,
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: statusColor.withValues(alpha: .32),
-                            blurRadius: 8,
-                          ),
-                        ],
+                  // 状态没确认时不写状态，只留地点。
+                  if (presenceKey != 'presence.unknown') ...[
+                    _HeroMeta(
+                      child: Container(
+                        width: tokens.icons.statusDot,
+                        height: tokens.icons.statusDot,
+                        decoration: BoxDecoration(
+                          color: statusColor,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: statusColor.withValues(alpha: .32),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  _HeroMeta(text: presence),
-                  const _HeroDivider(),
-                  _HeroMeta(text: strings.text('home.scene.location')),
+                    _HeroMeta(text: presenceText),
+                    const _HeroDivider(),
+                  ],
+                  _HeroMeta(text: strings.text(sceneLocationKey)),
                 ],
               ),
             ],
@@ -206,7 +279,9 @@ class _HeroMeta extends StatelessWidget {
       color: Colors.white.withValues(alpha: .84),
       fontSize: context.tokens.typography.body,
       fontWeight: context.tokens.typography.bodyWeight,
-      shadows: const [Shadow(color: HomeScenePalette.textShadow, blurRadius: 8)],
+      shadows: const [
+        Shadow(color: HomeScenePalette.textShadow, blurRadius: 8),
+      ],
     ),
     child: child ?? Text(text!),
   );
@@ -223,6 +298,8 @@ class _HeroDivider extends StatelessWidget {
 }
 
 String _greetingKey(int hour) {
+  // 凌晨还算晚上。
+  if (hour < 5) return 'home.greeting.evening';
   if (hour < 11) return 'home.greeting.morning';
   if (hour < 14) return 'home.greeting.noon';
   if (hour < 18) return 'home.greeting.afternoon';

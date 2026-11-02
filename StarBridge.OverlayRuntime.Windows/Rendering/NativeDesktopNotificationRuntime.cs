@@ -2,6 +2,7 @@ namespace StarBridge.Desktop;
 
 using StarBridge.HostRuntime.Notifications;
 using StarBridge.HostRuntime.Presence;
+using StarBridge.HostRuntime.Achievements;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -22,10 +23,12 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     private DispatcherTimer? _timer;
     private volatile bool _disposed;
     private string? _lastSuppression;
+    private readonly AchievementCelebrationActivity _celebration = AchievementCelebrationActivity.Shared;
+    private bool _celebrationPaused, _serialAfterCelebration;
     private sealed class Entry(DesktopNotification notice, Window window) {
         internal readonly DesktopNotification Notice = notice;
         internal readonly Window Window = window;
-        internal TimeSpan Remaining = TimeSpan.FromSeconds(notice.Activity is null ? 8 : 4.5);
+        internal TimeSpan Remaining = TimeSpan.FromSeconds(notice.GameStartupHint != null ? 9 : IsPassive(notice) ? 4.5 : 8);
         internal long LastTick = Stopwatch.GetTimestamp();
         internal System.Drawing.Rectangle Area;
         internal bool Exiting;
@@ -34,6 +37,7 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     public NativeDesktopNotificationRuntime(int parentId)
     {
         _parentId = parentId;
+        _celebration.Changed += CelebrationChanged;
         _thread = new Thread(Run) { IsBackground = true, Name = "StarBridge.DesktopReminders" };
         _thread.SetApartmentState(ApartmentState.STA); _thread.Start();
         _started.Wait(TimeSpan.FromSeconds(3));
@@ -49,8 +53,28 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         return await dispatcher.InvokeAsync(() => {
             token.ThrowIfCancellationRequested();
             if (_disposed || !notice.IsCurrent()) return new DesktopNotificationResult(false, "expired");
+            notice = PrepareTrade(PrepareHangar(notice));
             if (!Allowed(notice)) return new DesktopNotificationResult(false, DesktopNotificationEnvironment.UserReason(_lastSuppression));
             if (_visible.Any(e => e.Notice.Id == notice.Id) || _pending.Any(e => e.Id == notice.Id)) return new(true, "submitted");
+            if (_celebration.IsActive || _serialAfterCelebration) return QueueDuringCelebration(notice);
+            if (notice.GameStartupHint != null) {
+                if (_visible.Count >= 3) return new(false, "queueFull");
+                var shown = Show(notice);
+                return new(shown, shown ? "submitted" : "unavailable");
+            }
+            if (notice.ExecHangar is { Compact: true }) {
+                // Only one ephemeral hangar card; do not accumulate stale timers
+                // or queue a compact card behind unrelated business reminders.
+                foreach (var previous in _visible.Where(e => e.Notice.ExecHangar != null).ToArray()) Remove(previous);
+                var kept = _pending.Where(n => n.ExecHangar == null).ToArray();
+                foreach (var previous in _pending.Where(n => n.ExecHangar != null)) previous.ReportDiagnostic("superseded");
+                _pending.Clear(); foreach (var other in kept) _pending.Enqueue(other);
+                if (_visible.Count >= 3) return new(false, "queueFull");
+                var shown = Show(notice);
+                return new(shown, shown ? "submitted" : DesktopNotificationEnvironment.UserReason(_lastSuppression)) {
+                    DiagnosticOutcome = shown ? "windowShown" : null
+                };
+            }
             if (notice.Activity is {} activity) {
                 foreach (var previous in _visible.Where(e => e.Notice.Activity is {} old &&
                     activity.MemberKey != null && old.MemberKey == activity.MemberKey).ToArray()) Remove(previous);
@@ -73,9 +97,40 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         }, DispatcherPriority.Send, token).Task.WaitAsync(token).ConfigureAwait(false);
     }
 
+    private DesktopNotificationResult QueueDuringCelebration(DesktopNotification notice)
+    {
+        if (!DesktopCelebrationDeferral.Enqueue(_pending, notice, DateTimeOffset.UtcNow)) return new(false, "queueFull");
+        _serialAfterCelebration = true;
+        return new(true, "submitted") { DiagnosticOutcome = "queued" };
+    }
+    private void CelebrationChanged(bool active)
+    {
+        var dispatcher = _dispatcher;
+        if (_disposed || dispatcher is null || dispatcher.HasShutdownStarted) return;
+        // Complete hiding before Playback can show its first frame.
+        if (active) dispatcher.Invoke(PauseForCelebration, DispatcherPriority.Send);
+    }
+    private void PauseForCelebration()
+    {
+        if (_celebrationPaused) return;
+        _celebrationPaused = _serialAfterCelebration = true;
+        foreach (var entry in _visible) entry.Window.Hide();
+    }
+
     private bool Allowed(DesktopNotification notice)
     {
-        var reason = notice.Activity is not null
+        if (notice.GameStartupHint is {} hint) {
+            var game = GetForegroundWindow();
+            return notice.IsCurrent() && DesktopNotificationEnvironment.CanPresentAchievement() && game != IntPtr.Zero &&
+                GetWindowThreadProcessId(game, out var pid) != 0 && pid == hint.ProcessId;
+        }
+        var reason = notice.ExecHangar is not null
+            ? DesktopNotificationEnvironment.ExecHangarSuppressionReason(_game.ReadCurrentState())
+            : notice.Trade is { Compact: true }
+            ? DesktopNotificationEnvironment.CompactTradeSuppressionReason(_game.ReadCurrentState())
+            : notice.Trade is not null
+            ? DesktopNotificationEnvironment.TradeSuppressionReason()
+            : notice.Activity is not null
             ? DesktopNotificationEnvironment.PlayerActivitySuppressionReason()
             : DesktopNotificationEnvironment.SuppressionReason();
         if (reason.Length == 0) {
@@ -92,20 +147,47 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         return reason.Length == 0;
     }
 
+    private static bool IsPassive(DesktopNotification notice) =>
+        notice.Activity != null || notice.ExecHangar is { Compact: true } || notice.Trade is { Compact: true } ||
+        notice.GameStartupHint != null;
+    private DesktopNotification PrepareTrade(DesktopNotification notice) => notice.Trade is null ? notice
+        : WithTradePresentation(notice, DesktopNotificationEnvironment.CompactTradeSuppressionReason(_game.ReadCurrentState()).Length == 0);
+    internal static DesktopNotification WithTradePresentation(DesktopNotification notice, bool compact) =>
+        notice.Trade is {} trade ? notice with { Trade = trade with { Compact = compact } } : notice;
+    private DesktopNotification PrepareHangar(DesktopNotification notice) => notice.ExecHangar is {} hangar
+        ? notice with { ExecHangar = hangar with { Compact = DesktopNotificationEnvironment.CompactExecHangar(
+            _game.ReadCurrentState(), DesktopNotificationEnvironment.ReadNotificationModeReason()) } }
+        : notice;
+
     private bool Show(DesktopNotification notice)
     {
+        if (_celebration.IsActive) { QueueDuringCelebration(notice); return false; }
+        if (notice.PresentUntil is {} until && DateTimeOffset.UtcNow > until) { notice.ReportDiagnostic("expired"); return false; }
         if (!notice.IsCurrent()) { notice.ReportDiagnostic("expired"); return false; }
-        var passive = notice.Activity != null;
-        var window = new Window { Width = passive ? 368 : 380, Height = passive ? 88 : 170, WindowStyle = WindowStyle.None,
+        notice = PrepareTrade(PrepareHangar(notice));
+        var passive = IsPassive(notice);
+        var window = new Window { Width = passive ? 368 : 380, Height = passive ? 88 : DesktopNotificationCard.PresentationHeight(notice), WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, ShowActivated = false,
             AllowsTransparency = true, Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, Left = -32000, Top = -32000, Title = "StarBridge notification" };
         var entry = new Entry(notice, window);
         window.ContentRendered += (_, _) => notice.ReportDiagnostic("contentRendered");
-        window.Content = passive ? new PlayerActivityNotificationCard(notice) : new DesktopNotificationCard(notice, () => Open(entry), () => Dismiss(entry));
+        window.Content = notice.GameStartupHint != null ? new GameStartupHintCard(notice)
+            : notice.ExecHangar is { Compact: true } ? new CompactExecHangarNotificationCard(notice)
+            : notice.Activity != null ? new PlayerActivityNotificationCard(notice)
+            : notice.Trade is { Compact: true } ? new CompactTradeNotificationCard(notice)
+            : notice.Trade is not null ? new TradeNotificationCard(notice, () => Open(entry), () => Dismiss(entry))
+            : new DesktopNotificationCard(notice, () => Open(entry), () => Dismiss(entry));
         var animate = DesktopNotificationMotion.Enabled(notice.ReduceMotion);
         window.Opacity = !passive && animate ? 0 : 1;
-        if (passive && window.Content is PlayerActivityNotificationCard card) {
+        if (window.Content is GameStartupHintCard startup) {
+            window.Width = startup.Width; window.Height = startup.Height;
+            startup.Loaded += (_, _) => {
+                if (_visible.Contains(entry) && notice.IsCurrent())
+                    startup.BeginPresentation(animate, () => Remove(entry));
+            };
+        }
+        else if (passive && window.Content is FrameworkElement card) {
             card.Margin = new(12, 0, 12, 0);
             card.Opacity = animate ? 0 : 1;
             card.Loaded += (_, _) => DesktopNotificationMotion.EnterActivity(card, notice.Position.EndsWith("Right"), animate);
@@ -123,15 +205,15 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
             _visible.Add(entry);
             var foreground = GetForegroundWindow();
             var screen = System.Windows.Forms.Screen.FromHandle(foreground);
-            entry.Area = screen.WorkingArea;
+            entry.Area = notice.GameStartupHint != null ? GameArea(foreground, screen.Bounds) : screen.WorkingArea;
             new WindowInteropHelper(window).EnsureHandle();
-            Place(entry, screen.WorkingArea, _visible.Count - 1);
+            Place(entry, entry.Area, _visible.Count - 1);
             if (!notice.IsCurrent()) { notice.ReportDiagnostic("expired"); Remove(entry); return false; }
             if (!Allowed(notice)) { notice.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression)); Remove(entry); return false; }
             window.Show();
             entry.LastTick = Stopwatch.GetTimestamp();
             notice.ReportDiagnostic("windowShown");
-            Place(entry, screen.WorkingArea, _visible.Count - 1);
+            Place(entry, entry.Area, _visible.Count - 1);
             if (!passive) DesktopNotificationMotion.Fade(window, 1, 180, animate);
             return true;
         } catch { notice.ReportDiagnostic("showFailed"); Remove(entry); return false; }
@@ -141,6 +223,12 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     {
         var handle = new WindowInteropHelper(entry.Window).Handle;
         var scale = Math.Max(96, GetDpiForWindow(handle)) / 96d;
+        if (entry.Window.Content is GameStartupHintCard startup) {
+            var placement = GameStartupHintCard.Placement(area, GetDpiForWindow(handle), startup.VisibleWidth);
+            if (!SetWindowPos(handle, new IntPtr(-1), placement.X, placement.Y, placement.Width, placement.Height, 0x10))
+                entry.Notice.ReportDiagnostic("placementFailed");
+            return;
+        }
         var width = (int)Math.Ceiling(entry.Window.Width * scale); var height = (int)Math.Ceiling(entry.Window.Height * scale);
         var gap = (int)Math.Ceiling(12 * scale);
         var offset = _visible.Take(index).Where(other => other.Area == area && other.Notice.Position == entry.Notice.Position)
@@ -153,7 +241,7 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
 
     private void Open(Entry entry)
     {
-        if (entry.Notice.Activity != null) return;
+        if (IsPassive(entry.Notice)) return;
         if (!entry.Notice.IsCurrent() || !Allowed(entry.Notice)) { Remove(entry); return; }
         try {
             using var parent = Process.GetProcessById(_parentId);
@@ -179,7 +267,8 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         entry.Exiting = true;
         entry.Window.IsHitTestVisible = false;
         var animate = DesktopNotificationMotion.Enabled(entry.Notice.ReduceMotion);
-        if (entry.Notice.Activity != null && entry.Window.Content is UIElement card)
+        if (entry.Window.Content is GameStartupHintCard) Remove(entry);
+        else if (IsPassive(entry.Notice) && entry.Window.Content is UIElement card)
             DesktopNotificationMotion.ExitActivity(card, entry.Notice.Position.EndsWith("Right"), animate, () => Remove(entry));
         else
             DesktopNotificationMotion.Fade(entry.Window, 0, 120, animate, () => Remove(entry));
@@ -189,6 +278,7 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
         if (!_visible.Contains(entry)) return;
         entry.Notice.ReportDiagnostic("removed");
         DesktopNotificationMotion.Cancel(entry.Window);
+        if (entry.Window.Content is GameStartupHintCard startup) startup.Stop();
         if (entry.Window.Content is UIElement card) {
             DesktopNotificationMotion.Cancel(card);
             if (card.RenderTransform is System.Windows.Media.TranslateTransform translation)
@@ -223,22 +313,58 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     private void Tick()
     {
         var now = Stopwatch.GetTimestamp();
+        if (_celebration.IsActive) PauseForCelebration();
+        if (_celebrationPaused)
+        {
+            foreach (var entry in _visible.ToArray())
+            {
+                entry.LastTick = now;
+                if (!DesktopCelebrationDeferral.Current(entry.Notice, DateTimeOffset.UtcNow) || !Allowed(entry.Notice)) Remove(entry);
+            }
+            DesktopCelebrationDeferral.Prune(_pending, DateTimeOffset.UtcNow);
+            if (_celebration.IsActive) return;
+            _celebrationPaused = false;
+        }
         foreach (var e in _visible.ToArray()) {
+            // Restore one retained card at a time, preserving its remaining visible dwell.
+            if (!e.Window.IsVisible) {
+                e.LastTick = now;
+                if (_visible.Any(other => other != e && other.Window.IsVisible)) continue;
+                if (DesktopCelebrationDeferral.Current(e.Notice, DateTimeOffset.UtcNow) && Allowed(e.Notice)) e.Window.Show();
+                else Remove(e);
+                continue;
+            }
             // Each card owns its display interval. Dispatcher time spent before
             // a new card was shown must not consume its visible lifetime.
             var elapsed = Stopwatch.GetElapsedTime(e.LastTick, now);
             e.LastTick = now;
-            if (e.Notice.Activity != null || !e.Window.IsMouseOver) e.Remaining -= elapsed;
+            if (IsPassive(e.Notice) || !e.Window.IsMouseOver) e.Remaining -= elapsed;
             // Privacy revocation and system suppression bypass animation: never retain stale text for a fade.
             if (!e.Notice.IsCurrent()) { e.Notice.ReportDiagnostic("expired"); Remove(e); }
             else if (!Allowed(e.Notice)) { e.Notice.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression)); Remove(e); }
             else if (e.Remaining <= TimeSpan.Zero) { e.Notice.ReportDiagnostic("elapsed"); Dismiss(e); }
+            else if (e.Notice.GameStartupHint != null) {
+                var foreground = GetForegroundWindow();
+                e.Area = GameArea(foreground, System.Windows.Forms.Screen.FromHandle(foreground).Bounds);
+                Place(e, e.Area, 0);
+            }
+            else if (!e.Exiting && (e.Notice.ExecHangar is { Compact: false } && PrepareHangar(e.Notice).ExecHangar is { Compact: true } ||
+                e.Notice.Trade is { Compact: false } && PrepareTrade(e.Notice).Trade is { Compact: true })) {
+                // Entering a game/DND while the full card is visible also shrinks
+                // it, without replaying sound or restarting its display lifetime.
+                var remaining = e.Remaining; var trade = e.Notice.Trade is not null; Remove(e);
+                // A trade alert keeps its own remaining lifetime; the hangar card keeps the shorter one.
+                if (Show(e.Notice) && _visible.LastOrDefault() is {} replacement)
+                    replacement.Remaining = trade || remaining < replacement.Remaining ? remaining : replacement.Remaining;
+            }
         }
-        while (_visible.Count < 3 && _pending.TryDequeue(out var next)) {
+        while (DesktopCelebrationDeferral.CanDrain(_celebration, _visible.Count, _serialAfterCelebration) && _pending.TryDequeue(out var queued)) {
+            var next = PrepareTrade(queued);
             if (!next.IsCurrent()) next.ReportDiagnostic("expired");
             else if (!Allowed(next)) next.ReportDiagnostic(DesktopNotificationEnvironment.UserReason(_lastSuppression));
             else Show(next);
         }
+        if (_visible.Count == 0 && _pending.Count == 0) _serialAfterCelebration = false;
     }
     private void Run()
     {
@@ -254,12 +380,22 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
+        _celebration.Changed -= CelebrationChanged;
         var dispatcher = _dispatcher;
         if (dispatcher != null && !dispatcher.HasShutdownStarted)
             dispatcher.BeginInvoke(() => { ClearOnThread(); dispatcher.BeginInvokeShutdown(DispatcherPriority.Send); }, DispatcherPriority.Send);
         if (Thread.CurrentThread != _thread) _thread.Join(TimeSpan.FromSeconds(2));
     }
 
+    private static System.Drawing.Rectangle GameArea(IntPtr game, System.Drawing.Rectangle fallback) {
+        var origin = new PointI();
+        return game != IntPtr.Zero && GetClientRect(game, out var rect) && rect.Right > rect.Left && rect.Bottom > rect.Top && ClientToScreen(game, ref origin)
+            ? new(origin.X, origin.Y, rect.Right - rect.Left, rect.Bottom - rect.Top) : fallback;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct RectI { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct PointI { public int X, Y; }
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd, out RectI rect);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd, ref PointI point);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint id);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
@@ -273,4 +409,30 @@ public sealed class NativeDesktopNotificationRuntime : IDesktopNotificationSink
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowCallback callback, IntPtr parameter);
     [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder name, int size);
+}
+
+// Shared by native admission/drain and the headless notification regression.
+internal static class DesktopCelebrationDeferral
+{
+    internal const int MaximumPending = 12;
+    internal static bool CanDrain(AchievementCelebrationActivity activity, int visible, bool serial) =>
+        !activity.IsActive && visible < (serial ? 1 : 3);
+    internal static bool Current(DesktopNotification notice, DateTimeOffset now) =>
+        notice.IsCurrent() && (notice.PresentUntil is null || now <= notice.PresentUntil);
+    internal static void Prune(Queue<DesktopNotification> pending, DateTimeOffset now)
+    {
+        var count = pending.Count;
+        for (var i = 0; i < count; i++)
+        {
+            var notice = pending.Dequeue();
+            if (Current(notice, now)) pending.Enqueue(notice); else notice.ReportDiagnostic("expired");
+        }
+    }
+    internal static bool Enqueue(Queue<DesktopNotification> pending, DesktopNotification notice, DateTimeOffset now)
+    {
+        Prune(pending, now);
+        if (!Current(notice, now)) { notice.ReportDiagnostic("expired"); return false; }
+        if (pending.Count >= MaximumPending) return false;
+        pending.Enqueue(notice); notice.ReportDiagnostic("queued"); return true;
+    }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/style_registry.dart';
 import '../../design_system/theme/theme_builder.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../preferences/app_preferences.dart';
@@ -12,6 +13,7 @@ Map<String, Object?> encodeWindowPresentation(AppPreferences preferences) => {
   'designStyleId': preferences.designStyleId,
   'locale': preferences.locale.toLanguageTag(),
   'reduceMotion': preferences.motionPreference == MotionPreference.reduce,
+  'interactionStyle': preferences.interactionStyle.name,
 };
 
 class WindowPresentation {
@@ -19,6 +21,12 @@ class WindowPresentation {
   factory WindowPresentation.decode(Object? value) =>
       WindowPresentation(value is Map ? value : const {});
   final Map values;
+  bool get reduceMotion => values['reduceMotion'] == true;
+  InteractionSuite get interactionSuite => interactionSuiteFromName(
+    values['interactionStyle'] is String
+        ? values['interactionStyle'] as String
+        : null,
+  );
   Locale get locale => switch (values['locale']) {
     'en-US' || 'en' => const Locale('en', 'US'),
     'zh-TW' => const Locale('zh', 'TW'),
@@ -34,6 +42,7 @@ class WindowPresentation {
             : AppearanceMode.dark,
       )
       .tokens
-      .withReducedMotion(values['reduceMotion'] == true);
-  ThemeData get theme => buildStarBridgeTheme(tokens, locale);
+      .withReducedMotion(reduceMotion);
+  ThemeData get theme =>
+      buildStarBridgeTheme(tokens, locale, interactionSuite: interactionSuite);
 }

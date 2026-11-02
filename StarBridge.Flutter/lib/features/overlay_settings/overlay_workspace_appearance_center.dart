@@ -1,5 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+
 import '../../design_system/components/coming_soon.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -11,8 +18,13 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/window/overlay_editor_window_port.dart';
 import 'overlay_workspace_controls.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_preset_name.dart';
 import 'overlay_workspace_module.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_appearance_configuration_panel.dart';
+import 'overlay_appearance_collection_panel.dart';
+import 'overlay_appearance_preview_page.dart';
+import 'overlay_appearance_qualification.dart';
 
 class OverlayWorkspaceAppearanceCenter extends StatefulWidget {
   const OverlayWorkspaceAppearanceCenter({
@@ -41,7 +53,16 @@ class _OverlayWorkspaceAppearanceCenterState
       .appearances
       .where(
         (appearance) =>
-            const {'Default', 'NightShadow', 'Verdict'}.contains(appearance.id),
+            const {
+              'Default',
+              'NightShadow',
+              'Verdict',
+            }.contains(appearance.id) ||
+            appearance.isReleased ||
+            appearance.isPreviewAvailable ||
+            widget.projection.snapshot!.appearanceConfigurations.any(
+              (configuration) => configuration.appearanceId == appearance.id,
+            ),
       )
       .toList(growable: false);
 
@@ -83,7 +104,7 @@ class _OverlayWorkspaceAppearanceCenterState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _AppearanceHeader(
-            presetName: activePreset.name,
+            presetName: activePreset.shownName(AppStrings.of(context)),
             onBack: widget.onBack,
           ),
           SizedBox(height: tokens.space.lg),
@@ -92,6 +113,11 @@ class _OverlayWorkspaceAppearanceCenterState
               final catalog = _AppearanceCatalog(
                 editorWindow: widget.module.editorWindow,
                 appearances: _publishedAppearances,
+                nativePosters: {
+                  for (final config in snapshot.appearanceConfigurations)
+                    if (config.preview != null)
+                      config.appearanceId: config.preview!.bytes,
+                },
                 currentId: widget.projection.settings!['skin'] as String,
                 selectedId: _selectedAppearance?.id,
                 onSelected: (id) => setState(() => _selectedId = id),
@@ -106,11 +132,77 @@ class _OverlayWorkspaceAppearanceCenterState
                 },
                 settings: OverlayWorkspaceSettingsGroup(
                   group: 'appearance',
+                  editOwner: (widget.module, snapshot),
+                  currentEditOwner: () =>
+                      (widget.module, widget.module.projection.value.snapshot),
                   fields: appearanceFields,
                   settings: widget.projection.settings!,
                   appearances: _publishedAppearances,
                   onChanged: widget.module.updateSetting,
                 ),
+                configuration: _selectedAppearance == null
+                    ? null
+                    : Column(
+                        children: [
+                          if (snapshot.appearanceProgressIds.contains(
+                                _selectedAppearance!.id,
+                              ) &&
+                              widget.module.appearanceProgressPort != null)
+                            Padding(
+                              padding: EdgeInsets.only(top: tokens.space.md),
+                              child: OverlayAppearanceCollectionPanel(
+                                key: ValueKey(
+                                  'appearance-collection-panel-${_selectedAppearance!.id}',
+                                ),
+                                appearanceId: _selectedAppearance!.id,
+                                port: widget.module.appearanceProgressPort!,
+                              ),
+                            ),
+                          if (_selectedAppearance!.isPreviewAvailable &&
+                              widget.module.appearanceLivePort != null)
+                            Padding(
+                              padding: EdgeInsets.only(top: tokens.space.md),
+                              child: StarBridgeActionButton(
+                                key: Key(
+                                  'overlay-appearance-live-preview-${_selectedAppearance!.id}',
+                                ),
+                                onActivate: widget.projection.busy
+                                    ? null
+                                    : (_) => showOverlayAppearancePreviewPage(
+                                        context,
+                                        module: widget.module,
+                                        port: widget.module.appearanceLivePort!,
+                                        appearanceId: _selectedAppearance!.id,
+                                      ),
+                                child: Text(
+                                  AppStrings.of(context).text(
+                                    'overlay.workspace.appearance.openLivePreview',
+                                  ),
+                                ),
+                              ),
+                            ),
+                          for (final config
+                              in snapshot.appearanceConfigurations.where(
+                                (c) =>
+                                    c.appearanceId == _selectedAppearance!.id,
+                              ))
+                            Padding(
+                              padding: EdgeInsets.only(top: tokens.space.md),
+                              child: OverlayAppearanceConfigurationPanel(
+                                configuration: config,
+                                collectionTryOn: snapshot.appearanceProgressIds
+                                    .contains(config.appearanceId),
+                                options: widget.projection.appearanceOptions,
+                                enabled:
+                                    !widget.projection.busy &&
+                                    snapshot.appearanceOptionsEnabled &&
+                                    activePreset.storageState != 'corrupt',
+                                onChanged:
+                                    widget.module.updateAppearanceOptions,
+                              ),
+                            ),
+                        ],
+                      ),
               );
               if (constraints.maxWidth < 1120) {
                 return Column(
@@ -150,10 +242,10 @@ class _AppearanceHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        IconButton(
-          key: const Key('overlay-appearance-center-back'),
-          onPressed: onBack,
-          tooltip: _copy(context, 'overlay.workspace.appearance.back'),
+        StarBridgeIconAction(
+          controlKey: const Key('overlay-appearance-center-back'),
+          onActivate: (_) => onBack(),
+          label: _copy(context, 'overlay.workspace.appearance.back'),
           icon: const StarBridgeIcon(
             StarBridgeIconSemantic.forward,
             textDirection: TextDirection.rtl,
@@ -208,12 +300,14 @@ class _AppearanceCatalog extends StatelessWidget {
   const _AppearanceCatalog({
     required this.editorWindow,
     required this.appearances,
+    required this.nativePosters,
     required this.currentId,
     required this.selectedId,
     required this.onSelected,
   });
 
   final List<OverlayWorkspaceAppearance> appearances;
+  final Map<String, Uint8List> nativePosters;
   final OverlayEditorWindowPort editorWindow;
   final String currentId;
   final String? selectedId;
@@ -254,6 +348,7 @@ class _AppearanceCatalog extends StatelessWidget {
                         child: _AppearanceCard(
                           editorWindow: editorWindow,
                           appearance: appearance,
+                          nativePoster: nativePosters[appearance.id],
                           previewableIds: appearances
                               .where((item) => item.isPreviewAvailable)
                               .map((item) => item.id)
@@ -282,10 +377,12 @@ class _AppearanceCard extends StatelessWidget {
     required this.selected,
     required this.current,
     required this.onPressed,
+    this.nativePoster,
   });
 
   final OverlayWorkspaceAppearance appearance;
   final Set<String> previewableIds;
+  final Uint8List? nativePoster;
   final OverlayEditorWindowPort editorWindow;
   final bool selected;
   final bool current;
@@ -310,9 +407,10 @@ class _AppearanceCard extends StatelessWidget {
         borderRadius: tokens.shape.medium,
       ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: Key('overlay-appearance-card-${appearance.id}'),
-        onTap: onPressed,
+      child: StarBridgeActionRow(
+        controlKey: Key('overlay-appearance-card-${appearance.id}'),
+        semanticSelected: selected,
+        onActivate: (_, _) => onPressed(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -324,6 +422,7 @@ class _AppearanceCard extends StatelessWidget {
                 key: Key('overlay-appearance-specimen-${appearance.id}'),
                 appearanceId: appearance.id,
                 previewableIds: previewableIds,
+                nativePoster: nativePoster,
               ),
             Padding(
               padding: EdgeInsets.all(tokens.space.md),
@@ -422,12 +521,17 @@ class _AvailabilityBadge extends StatelessWidget {
       return const ComingSoonBadge();
     }
     final tokens = context.tokens;
+    final qualificationUnknown = OverlayAppearanceQualification.unknownOf(
+      context,
+    );
     final color = current
         ? tokens.colors.accent
         : !released
         ? tokens.colors.textSecondary
         : available
         ? tokens.colors.success
+        : qualificationUnknown
+        ? tokens.colors.textSecondary
         : tokens.colors.warning;
     final text = current
         ? _copy(context, 'overlay.workspace.appearance.inUse')
@@ -440,6 +544,8 @@ class _AvailabilityBadge extends StatelessWidget {
           )
         : available
         ? _copy(context, 'overlay.workspace.appearance.available')
+        : qualificationUnknown
+        ? _copy(context, 'overlay.workspace.appearance.offlineUnavailable')
         : _copy(context, 'overlay.workspace.appearance.requiresQualification');
     return Container(
       padding: EdgeInsets.symmetric(
@@ -465,6 +571,7 @@ class _AppearanceDetails extends StatelessWidget {
     required this.busy,
     required this.onApply,
     required this.settings,
+    this.configuration,
   });
 
   final OverlayWorkspaceAppearance? appearance;
@@ -472,6 +579,7 @@ class _AppearanceDetails extends StatelessWidget {
   final bool busy;
   final ValueChanged<OverlayWorkspaceAppearance> onApply;
   final Widget settings;
+  final Widget? configuration;
 
   @override
   Widget build(BuildContext context) {
@@ -527,15 +635,16 @@ class _AppearanceDetails extends StatelessWidget {
                 ),
               ),
               SizedBox(height: tokens.space.md),
-              FilledButton(
+              StarBridgeActionButton(
                 key: Key('overlay-appearance-apply-${selected.id}'),
-                onPressed:
+                kind: StarBridgeActionKind.primary,
+                onActivate:
                     busy ||
                         current ||
                         !selected.isReleased ||
                         !selected.isAvailable
                     ? null
-                    : () => onApply(selected),
+                    : (_) => onApply(selected),
                 child: Text(
                   current
                       ? _copy(context, 'overlay.workspace.appearance.inUse')
@@ -546,6 +655,11 @@ class _AppearanceDetails extends StatelessWidget {
                         )
                       : selected.isAvailable
                       ? _copy(context, 'overlay.workspace.appearance.apply')
+                      : OverlayAppearanceQualification.unknownOf(context)
+                      ? _copy(
+                          context,
+                          'overlay.workspace.appearance.offlineUnavailable',
+                        )
                       : _copy(
                           context,
                           'overlay.workspace.appearance.normalAccountLocked',
@@ -556,6 +670,7 @@ class _AppearanceDetails extends StatelessWidget {
           ),
         ),
         if (current) ...[SizedBox(height: tokens.space.md), settings],
+        ?configuration,
       ],
     );
   }

@@ -8,13 +8,14 @@ namespace StarBridge.HostRuntime;
 public sealed partial class AccountBridgeRuntime
 {
     private sealed record CommunityModuleRequest(BridgeAccountContext Owner, long Generation,
-        IReadOnlyList<string> Codes, IReadOnlyList<string> CommunicationCodes, object Identity);
+        IReadOnlyList<string> Codes, IReadOnlyList<string> CommunicationCodes, object Identity, bool FleetConfirmation = false);
 
     private CommunityModuleRequest? CaptureModuleCommunityRequest()
     {
         var sink = _liveOverlaySink;
         var owner = GameplayOwner();
-        if (_disposed || owner.Context is null || sink?.HasDisplayDemand != true || sink.ModuleDemand is not { Sources: { } preset } demand ||
+        if (_disposed || owner.Context is null || sink is null || !(sink.HasDisplayDemand || sink.HasStandbyDemand) ||
+            sink.ModuleDemand is not { Sources: { } preset } demand ||
             demand.ActiveModules.Count == 0 || _overlayCommunities is null) return null;
         var evidence = _moduleSourceBudget.EvidenceVersion;
         var room = (_host as ScmAccountBridgeHost)?.CurrentRoomOverlaySource;
@@ -25,6 +26,7 @@ public sealed partial class AccountBridgeRuntime
         try
         {
             if (!_moduleSourceBudget.TryResolve(preset, context, evidence, temporary, demand.ActiveModules)) return null;
+            _overlayCommunities.SetFleetDemand(OverlayModuleSourceResolver.RequestsFleetRefresh(preset, context, demand.ActiveModules, temporary));
             var codes = OverlayModuleSourceResolver.RequestedCommunities(preset, context, demand.ActiveModules, temporary);
             var communication = OverlayModuleSourceResolver.RequestedCommunities(preset, context,
                 demand.ActiveModules.Where(m => m is OverlaySourceModule.Notice or OverlaySourceModule.Chat).ToArray(), temporary);
@@ -34,8 +36,9 @@ public sealed partial class AccountBridgeRuntime
         {
             // Retain only a low-frequency complete membership check while the
             // stable limit is latched. No content read and no expiry-based unlock.
-            return _moduleSourceBudget.RequiresCommunityConfirmation(context.OwnerKey, owner.Generation)
-                ? new(owner.Context, owner.Generation, [], [], Identity("limit-confirmation")) : null;
+            var fleet = _moduleSourceBudget.RequiresFleetConfirmation(context.OwnerKey, owner.Generation);
+            return fleet || _moduleSourceBudget.RequiresCommunityConfirmation(context.OwnerKey, owner.Generation)
+                ? new(owner.Context, owner.Generation, [], [], Identity("limit-confirmation"), fleet) : null;
         }
     }
 }

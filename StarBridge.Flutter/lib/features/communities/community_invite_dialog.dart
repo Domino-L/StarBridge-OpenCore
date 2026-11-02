@@ -1,14 +1,26 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 import '../settings/local_privacy_port.dart';
 import 'community_admission_controller.dart';
 import 'community_invite_port.dart';
 import 'community_invite_copy.dart';
+import '../common/social_read_activity.dart';
 
 class CommunityInviteDialog extends StatefulWidget {
   const CommunityInviteDialog({
@@ -30,6 +42,7 @@ class CommunityInviteDialog extends StatefulWidget {
 
 class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
   late final model = CommunityAdmissionController(widget.port, widget.privacy);
+  late final SocialReadActivityBinding _activity;
   final code = TextEditingController();
   Timer? timer;
   String t(String key) => inviteText(context, key);
@@ -37,6 +50,11 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
   @override
   void initState() {
     super.initState();
+    _activity = SocialReadActivityBinding(
+      model,
+      () => model.busy,
+      initialRead: widget.initialCode != null,
+    );
     model.addListener(changed);
     final initial = widget.initialCode;
     if (initial != null) {
@@ -62,13 +80,23 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
   }
 
   void close() {
-    if (!model.busy) Navigator.pop(context, model.outcome);
+    if (!model.busy) {
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: model.outcome,
+      );
+    }
   }
 
   Future<void> join() async {
     await model.join();
     if (mounted && !model.invalidated && model.outcome?.status == 'accepted') {
-      Navigator.pop(context, model.outcome);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: model.outcome,
+      );
     }
   }
 
@@ -85,10 +113,10 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
     bool value,
     ValueChanged<bool>? change, {
     Key? key,
-  }) => SwitchListTile(
-    key: key,
-    contentPadding: EdgeInsets.zero,
-    title: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+  }) => StarBridgeSwitch.tile(
+    controlKey: key ?? ValueKey('community-admission-toggle-$label'),
+    label: label,
+    titleWidget: Text(label, style: Theme.of(context).textTheme.bodyMedium),
     value: value,
     onChanged: model.busy || model.outcome != null ? null : change,
   );
@@ -138,9 +166,10 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      tooltip: t('close'),
-                      onPressed: model.busy ? null : close,
+                    StarBridgeIconAction(
+                      controlKey: const Key('community-admission-close-icon'),
+                      label: t('close'),
+                      onActivate: model.busy ? null : (_) => close(),
                       icon: const StandardIcon(StandardIconSemantic.close),
                     ),
                   ],
@@ -161,24 +190,45 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                               ),
                             ),
                           ),
-                        TextField(
-                          controller: code,
-                          maxLength: 128,
+                        StarBridgeFieldFrame(
                           enabled: !model.busy && !unknown,
-                          decoration: InputDecoration(labelText: t('code')),
-                          onChanged: (_) => model.clearPreview(),
-                          onSubmitted: (_) => model.verify(code.text),
+                          builder: (_, focus) => TextField(
+                            focusNode: focus,
+                            key: const Key('community-admission-code'),
+                            controller: code,
+                            maxLength: 128,
+                            enabled: !model.busy && !unknown,
+                            decoration: InputDecoration(labelText: t('code')),
+                            onChanged: (_) => model.clearPreview(),
+                            onSubmitted: (_) => unawaited(
+                              runStarBridgeActivation<void>(
+                                InteractionSource.keyboard,
+                                () => model.verify(code.text),
+                              ),
+                            ),
+                          ),
                         ),
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: OutlinedButton(
-                            onPressed: model.busy || unknown
+                          child: StarBridgeActionButton(
+                            controlKey: const Key('community-admission-verify'),
+                            onActivate: model.busy || unknown
                                 ? null
-                                : () => model.verify(code.text),
+                                : (_) => model.verify(code.text),
                             child: Text(t('verify')),
                           ),
                         ),
-                        if (model.busy) const LinearProgressIndicator(),
+                        if (model.busy)
+                          KeyedSubtree(
+                            key: ValueKey(_activity.revision),
+                            child: SocialReadActivity(
+                              key: const ValueKey('admission-activity'),
+                              source: _activity.source,
+                              opening: _activity.opening,
+                              label: t('working'),
+                              height: 4,
+                            ),
+                          ),
                         if (error != null)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -197,10 +247,14 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                         if (model.error == 'privacySaveFailed')
                           Align(
                             alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: model.busy
+                            child: StarBridgeActionButton(
+                              kind: StarBridgeActionKind.quiet,
+                              controlKey: const Key(
+                                'community-admission-reload-privacy',
+                              ),
+                              onActivate: model.busy
                                   ? null
-                                  : model.reviewSharing,
+                                  : (_) => model.reviewSharing(),
                               child: Text(t('reloadPrivacy')),
                             ),
                           ),
@@ -212,7 +266,9 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                               children: [
                                 Row(
                                   children: [
-                                    const StandardIcon(StandardIconSemantic.groups),
+                                    const StandardIcon(
+                                      StandardIconSemantic.groups,
+                                    ),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Text(
@@ -346,10 +402,16 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                               ],
                             ),
                           ),
-                          CheckboxListTile(
+                          StarBridgeCheckboxTile(
+                            controlKey: const Key(
+                              'community-admission-acknowledge',
+                            ),
+                            label: t('acknowledge'),
+                            dense: false,
+                            trailingControl: true,
                             contentPadding: EdgeInsets.zero,
                             value: model.acknowledged,
-                            title: Text(
+                            titleWidget: Text(
                               t('acknowledge'),
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
@@ -370,8 +432,10 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                   runSpacing: 8,
                   children: [
                     if (model.busy) Text(t('working')),
-                    TextButton(
-                      onPressed: model.busy ? null : close,
+                    StarBridgeActionButton(
+                      kind: StarBridgeActionKind.quiet,
+                      controlKey: const Key('community-admission-close'),
+                      onActivate: model.busy ? null : (_) => close(),
                       child: Text(t(unknown ? 'close' : 'cancel')),
                     ),
                     if (preview != null &&
@@ -379,12 +443,16 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
                         !preview.membershipConflict &&
                         !unknown &&
                         model.outcome == null)
-                      FilledButton(
-                        onPressed: model.sharing
-                            ? (model.canJoin ? join : null)
+                      StarBridgeActionButton(
+                        kind: StarBridgeActionKind.primary,
+                        controlKey: const Key(
+                          'community-admission-join-review',
+                        ),
+                        onActivate: model.sharing
+                            ? (model.canJoin ? (_) => join() : null)
                             : model.busy || model.expired
                             ? null
-                            : model.reviewSharing,
+                            : (_) => model.reviewSharing(),
                         child: Text(t(model.sharing ? 'join' : 'review')),
                       ),
                   ],
@@ -401,6 +469,7 @@ class _CommunityInviteDialogState extends State<CommunityInviteDialog> {
   void dispose() {
     timer?.cancel();
     code.dispose();
+    _activity.dispose();
     model.removeListener(changed);
     model.dispose();
     super.dispose();

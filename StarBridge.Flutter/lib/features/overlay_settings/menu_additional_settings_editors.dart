@@ -1,35 +1,61 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 
 import '../../app/localization/app_strings.dart';
 import 'menu_additional_settings_draft.dart';
 import 'menu_settings_draft.dart';
 import 'overlay_settings_help.dart';
+import 'overlay_settings_command_feedback.dart';
 import 'overlay_workspace_hotkey_card.dart';
 import 'overlay_workspace_models.dart';
 
 Future<bool> confirmMenuSettingsSave(
   BuildContext context,
-  MenuSettingsDraft draft,
-) async {
+  MenuSettingsDraft draft, {
+  bool Function()? canSave,
+}) async {
+  if (canSave?.call() == false) return false;
   if (!draft.clearsBrowserMemory) return draft.save();
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(_copy(context, 'clearTitle')),
-      content: Text(_copy(context, 'clearBody')),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(_copy(context, 'cancel')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(_copy(context, 'clearSave')),
-        ),
-      ],
+  final completion = captureStarBridgeActivationCompletion();
+  final confirmed = await showStarBridgeDialog<bool>(
+    context,
+    source: currentStarBridgeActivationSource,
+    builder: (context) => StarBridgeInteractionConfiguration(
+      suite: InteractionScope.of(context).suite,
+      reduceMotion: InteractionScope.of(context).reduceMotion,
+      child: AlertDialog(
+        title: Text(_copy(context, 'clearTitle')),
+        content: Text(_copy(context, 'clearBody')),
+        actions: [
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: const Key('menu-clear-memory-cancel'),
+            onActivate: (source) =>
+                dismissStarBridgeDialog(context, source: source, result: false),
+            child: Text(_copy(context, 'cancel')),
+          ),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: const Key('menu-clear-memory-confirm'),
+            onActivate: (source) {
+              completion(source);
+              dismissStarBridgeDialog(context, source: source, result: true);
+            },
+            child: Text(_copy(context, 'clearSave')),
+          ),
+        ],
+      ),
     ),
   );
-  if (confirmed != true || !context.mounted) return false;
+  if (confirmed != true || !context.mounted || canSave?.call() == false) {
+    return false;
+  }
   return draft.save(clearBrowserMemoryConfirmed: true);
 }
 
@@ -72,57 +98,65 @@ class MenuAdditionalShortcutEditor extends StatelessWidget {
   final MenuAdditionalSettingsDraft draft;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: draft,
-    builder: (context, _) {
-      String t(String key) => AppStrings.of(context).text('menu.shortcut.$key');
-      final value = draft.shortcut;
-      return Material(
-        type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            OverlaySettingsHelp(t('hint')),
-            const SizedBox(height: 12),
-            if (value != null) ...[
-              AbsorbPointer(
-                absorbing: draft.busy,
-                child: ExcludeFocus(
-                  excluding: draft.busy,
-                  child: OverlayWorkspaceHotkeyCard(
-                    embedded: true,
-                    hotkey: OverlayWorkspaceHotkey(
-                      binding: value.binding,
-                      enabled: value.enabled,
-                      runtimeState: draft.shortcutDirty
-                          ? 'pending'
-                          : value.state,
+  Widget build(BuildContext context) => OverlaySettingsCommandFeedback(
+    owner: draft,
+    builder: (context, run, source) => ListenableBuilder(
+      listenable: draft,
+      builder: (context, _) {
+        String t(String key) =>
+            AppStrings.of(context).text('menu.shortcut.$key');
+        final value = draft.shortcut;
+        return Material(
+          type: MaterialType.transparency,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              OverlaySettingsHelp(t('hint')),
+              const SizedBox(height: 12),
+              if (value != null) ...[
+                AbsorbPointer(
+                  absorbing: draft.busy,
+                  child: ExcludeFocus(
+                    excluding: draft.busy,
+                    child: OverlayWorkspaceHotkeyCard(
+                      embedded: true,
+                      hotkey: OverlayWorkspaceHotkey(
+                        binding: value.binding,
+                        enabled: value.enabled,
+                        runtimeState: draft.shortcutDirty
+                            ? 'pending'
+                            : value.state,
+                      ),
+                      defaultBinding: 'Alt+M',
+                      enabledLabel: t('enabled'),
+                      onBindingChanged: (binding) =>
+                          draft.changeShortcut(binding: binding),
+                      onEnabledChanged: (enabled) =>
+                          draft.changeShortcut(enabled: enabled),
                     ),
-                    defaultBinding: 'Alt+M',
-                    enabledLabel: t('enabled'),
-                    onBindingChanged: (binding) =>
-                        draft.changeShortcut(binding: binding),
-                    onEnabledChanged: (enabled) =>
-                        draft.changeShortcut(enabled: enabled),
                   ),
                 ),
-              ),
-              SwitchListTile(
-                key: const Key('menu-shortcut-close'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(t('close')),
-                value: value.closeWithHotkey,
-                onChanged: draft.busy
-                    ? null
-                    : (close) => draft.changeShortcut(closeWithHotkey: close),
-              ),
-              if (draft.shortcutDirty) OverlaySettingsHelp(t('dirty')),
-            ] else
-              _AdditionalLoading(draft: draft),
-          ],
-        ),
-      );
-    },
+                StarBridgeSwitch.tile(
+                  controlKey: const Key('menu-shortcut-close'),
+                  label: t('close'),
+                  value: value.closeWithHotkey,
+                  onChanged: draft.busy
+                      ? null
+                      : (close) => draft.changeShortcut(closeWithHotkey: close),
+                ),
+                if (draft.shortcutDirty) OverlaySettingsHelp(t('dirty')),
+              ] else
+                _AdditionalLoading(
+                  draft: draft,
+                  run: run,
+                  source: source,
+                  kind: 'shortcut',
+                ),
+            ],
+          ),
+        );
+      },
+    ),
   );
 }
 
@@ -131,41 +165,48 @@ class MenuAdditionalResumeEditor extends StatelessWidget {
   final MenuAdditionalSettingsDraft draft;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: draft,
-    builder: (context, _) {
-      String t(String key) =>
-          AppStrings.of(context).text('menu.browser.resume.$key');
-      final value = draft.resume;
-      return Material(
-        type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(t('title'), style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            OverlaySettingsHelp(t('privacy')),
-            if (value != null) ...[
-              SwitchListTile(
-                key: const Key('menu-browser-resume-toggle'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(t('enabled')),
-                value: value.enabled,
-                onChanged: draft.busy ? null : draft.changeResume,
-              ),
-              OverlaySettingsHelp(t('hint')),
-              if (draft.resumeDirty) ...[
-                const SizedBox(height: 8),
-                OverlaySettingsHelp(
-                  AppStrings.of(context).text('menu.shortcut.dirty'),
+  Widget build(BuildContext context) => OverlaySettingsCommandFeedback(
+    owner: draft,
+    builder: (context, run, source) => ListenableBuilder(
+      listenable: draft,
+      builder: (context, _) {
+        String t(String key) =>
+            AppStrings.of(context).text('menu.browser.resume.$key');
+        final value = draft.resume;
+        return Material(
+          type: MaterialType.transparency,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(t('title'), style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              OverlaySettingsHelp(t('privacy')),
+              if (value != null) ...[
+                StarBridgeSwitch.tile(
+                  controlKey: const Key('menu-browser-resume-toggle'),
+                  label: t('enabled'),
+                  value: value.enabled,
+                  onChanged: draft.busy ? null : draft.changeResume,
                 ),
-              ],
-            ] else
-              _AdditionalLoading(draft: draft),
-          ],
-        ),
-      );
-    },
+                OverlaySettingsHelp(t('hint')),
+                if (draft.resumeDirty) ...[
+                  const SizedBox(height: 8),
+                  OverlaySettingsHelp(
+                    AppStrings.of(context).text('menu.shortcut.dirty'),
+                  ),
+                ],
+              ] else
+                _AdditionalLoading(
+                  draft: draft,
+                  run: run,
+                  source: source,
+                  kind: 'resume',
+                ),
+            ],
+          ),
+        );
+      },
+    ),
   );
 }
 
@@ -174,97 +215,125 @@ class MenuAdditionalDirectoryEditor extends StatelessWidget {
   final MenuAdditionalSettingsDraft draft;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: draft,
-    builder: (context, _) {
-      String t(String key) =>
-          AppStrings.of(context).text('menu.screenshot.directory.$key');
-      final value = draft.directory;
-      return Material(
-        type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(t('title'), style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            OverlaySettingsHelp(t('hint')),
-            const SizedBox(height: 12),
-            if (value != null) ...[
-              Text(
-                draft.resetPending
-                    ? _copy(context, 'resetPending')
-                    : t(value.isDefault ? 'default' : 'custom'),
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-              if (!draft.resetPending)
-                SelectableText(
-                  value.directory,
-                  key: const Key('menu-screenshot-directory-path'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+  Widget build(BuildContext context) => OverlaySettingsCommandFeedback(
+    owner: draft,
+    builder: (context, run, source) => ListenableBuilder(
+      listenable: draft,
+      builder: (context, _) {
+        String t(String key) =>
+            AppStrings.of(context).text('menu.screenshot.directory.$key');
+        final value = draft.directory;
+        return Material(
+          type: MaterialType.transparency,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(t('title'), style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              OverlaySettingsHelp(t('hint')),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton(
-                    key: const Key('menu-screenshot-directory-choose'),
-                    onPressed: draft.busy || !draft.canChooseDirectory
-                        ? null
-                        : draft.chooseDirectory,
-                    child: Text(t('choose')),
+              if (value != null) ...[
+                Text(
+                  draft.resetPending
+                      ? _copy(context, 'resetPending')
+                      : t(value.isDefault ? 'default' : 'custom'),
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                if (!draft.resetPending)
+                  SelectableText(
+                    value.directory,
+                    key: const Key('menu-screenshot-directory-path'),
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  TextButton(
-                    key: const Key('menu-screenshot-directory-reset'),
-                    onPressed:
-                        draft.busy || value.isDefault || draft.resetPending
-                        ? null
-                        : draft.resetDirectory,
-                    child: Text(t('reset')),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    StarBridgeActionButton(
+                      controlKey: const Key('menu-screenshot-directory-choose'),
+                      onActivate: draft.busy || !draft.canChooseDirectory
+                          ? null
+                          : (origin) => run(origin, draft.chooseDirectory),
+                      child: Text(t('choose')),
+                    ),
+                    StarBridgeActionButton(
+                      kind: StarBridgeActionKind.quiet,
+                      controlKey: const Key('menu-screenshot-directory-reset'),
+                      onActivate:
+                          draft.busy || value.isDefault || draft.resetPending
+                          ? null
+                          : (_) => draft.resetDirectory(),
+                      child: Text(t('reset')),
+                    ),
+                    StarBridgeActionButton(
+                      controlKey: const Key('menu-screenshot-directory-open'),
+                      onActivate: draft.busy || draft.directoryDirty
+                          ? null
+                          : (origin) => run(origin, draft.openDirectory),
+                      child: Text(t('open')),
+                    ),
+                  ],
+                ),
+                if (draft.busy)
+                  OverlaySettingsCommandWait(
+                    label: AppStrings.of(context).text('menu.shortcut.busy'),
+                    source: source(),
                   ),
-                  OutlinedButton(
-                    key: const Key('menu-screenshot-directory-open'),
-                    onPressed: draft.busy || draft.directoryDirty
-                        ? null
-                        : draft.openDirectory,
-                    child: Text(t('open')),
+                if (draft.directoryDirty) ...[
+                  const SizedBox(height: 8),
+                  OverlaySettingsHelp(
+                    AppStrings.of(context).text('menu.shortcut.dirty'),
                   ),
                 ],
-              ),
-              if (draft.directoryDirty) ...[
-                const SizedBox(height: 8),
-                OverlaySettingsHelp(
-                  AppStrings.of(context).text('menu.shortcut.dirty'),
+              ] else
+                _AdditionalLoading(
+                  draft: draft,
+                  run: run,
+                  source: source,
+                  kind: 'directory',
                 ),
-              ],
-            ] else
-              _AdditionalLoading(draft: draft),
-            const SizedBox(height: 8),
-            OverlaySettingsHelp(t('privacy')),
-          ],
-        ),
-      );
-    },
+              const SizedBox(height: 8),
+              OverlaySettingsHelp(t('privacy')),
+            ],
+          ),
+        );
+      },
+    ),
   );
 }
 
 class _AdditionalLoading extends StatelessWidget {
-  const _AdditionalLoading({required this.draft});
+  const _AdditionalLoading({
+    required this.draft,
+    required this.run,
+    required this.source,
+    required this.kind,
+  });
   final MenuAdditionalSettingsDraft draft;
+  final OverlaySettingsCommandRunner run;
+  final ValueGetter<InteractionSource> source;
+  final String kind;
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const SizedBox(height: 8),
-      OverlaySettingsHelp(
-        draft.busy
-            ? AppStrings.of(context).text('menu.shortcut.busy')
-            : _copy(context, 'readFailed'),
-      ),
+      if (draft.busy)
+        OverlaySettingsCommandWait(
+          label: AppStrings.of(context).text('menu.shortcut.busy'),
+          source: source(),
+        )
+      else
+        OverlaySettingsHelp(_copy(context, 'readFailed')),
       if (!draft.busy)
-        TextButton(
-          onPressed: draft.dirty ? null : draft.reload,
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: Key('menu-additional-$kind-reload'),
+          onActivate: draft.dirty
+              ? null
+              : (origin) => run(origin, draft.reload),
           child: Text(AppStrings.of(context).text('menu.shortcut.reload')),
         ),
     ],

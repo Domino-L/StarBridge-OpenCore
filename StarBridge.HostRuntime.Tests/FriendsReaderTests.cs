@@ -70,7 +70,7 @@ internal static class FriendsReaderTests
         await reader.ReadAsync("test-token", "a&b", default);
         Check(calls == 2, "No session creation or extra writes.");
         foreach (var pair in new[] { (HttpStatusCode.Unauthorized, "friends.identity_unavailable"), (HttpStatusCode.Forbidden, "friends.forbidden"),
-            (HttpStatusCode.ServiceUnavailable, "friends.read_unavailable"), (HttpStatusCode.Redirect, "friends.read_unavailable") })
+            (HttpStatusCode.ServiceUnavailable, "friends.read_transient"), (HttpStatusCode.Redirect, "friends.read_unavailable") })
         {
             using var failed = new FriendsReader(new Uri("https://relay.example.test/"), new Handler((_, _) => Task.FromResult(new HttpResponseMessage(pair.Item1))));
             try { await failed.ReadAsync("test-token", null, default); throw new Exception("Failure accepted."); }

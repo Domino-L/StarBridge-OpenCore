@@ -8,9 +8,9 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_banner.dart';
-import 'package:starbridge_flutter/features/communities/community_dispatch_composition.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_row_surface.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_vehicle_icon.dart';
+import 'package:starbridge_flutter/features/communities/community_ships_panel.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_port.dart';
 import 'package:starbridge_flutter/features/communities/example_communities.dart';
 import 'package:starbridge_flutter/shared/ships/catalog_vehicle_icon.dart';
@@ -47,6 +47,11 @@ void main() {
             await tester.pumpAndSettle();
             await tester.tap(
               find.byKey(const ValueKey('community-section-ships')),
+            );
+            await tester.pumpAndSettle();
+            // These checks cover the list view; cards have their own tests.
+            await tester.tap(
+              find.byKey(const ValueKey('community-ships-view-list')),
             );
             await tester.pumpAndSettle();
             final filters = find.byKey(
@@ -100,22 +105,27 @@ void main() {
               await tester.pumpAndSettle();
               expect(positions(), before);
               expect(tester.widget<ChoiceChip>(chip).selected, isTrue);
-              expect(tester.widget<ChoiceChip>(chip).showCheckmark, isFalse);
+              expect(
+                tester.widget<ChoiceChip>(chip).showCheckmark ??
+                    ChipTheme.of(tester.element(chip)).showCheckmark,
+                isFalse,
+              );
             }
-            final summary = find.byKey(
-              const ValueKey('community-fleet-summary'),
+            // One summary strip; the side column only on wide windows; no
+            // "待确认" anywhere (user rules 2026-10-22 and 2026-10-29).
+            expect(
+              find.byKey(const ValueKey('community-ship-statistics')),
+              findsOneWidget,
             );
-            final dispatch = find.byKey(
-              const ValueKey('community-dispatch-summary'),
+            expect(
+              find.byKey(const ValueKey('community-ships-side')),
+              width >= CommunityShipsPanel.sideColumnMinimumWidth
+                  ? findsOneWidget
+                  : findsNothing,
             );
-            expect(summary, findsOneWidget);
-            expect(dispatch, findsOneWidget);
-            final summaryRect = tester.getRect(summary),
-                dispatchRect = tester.getRect(dispatch);
-            if (width > 760) {
-              expect(summaryRect.top, dispatchRect.top);
-              expect(summaryRect.right, lessThan(dispatchRect.left));
-              expect(summaryRect.width / dispatchRect.width, closeTo(1.5, .01));
+            expect(find.text('待确认'), findsNothing);
+            expect(find.textContaining('已确认可调度'), findsNothing);
+            if (width == 1200) {
               expect(find.byType(CommunityShipColumnHeader), findsOneWidget);
               final banner = tester.widget<CommunityShipBanner>(
                 find.byType(CommunityShipBanner).first,
@@ -145,65 +155,24 @@ void main() {
               await mouse.moveTo(Offset.zero);
               await tester.pump();
               expect(tester.getRect(row), beforeHover);
-            } else {
-              expect(summaryRect.bottom, lessThan(dispatchRect.top));
             }
-            for (final isDispatch in [false, true]) {
-              final action = find.byKey(
-                ValueKey(
-                  isDispatch
-                      ? 'community-dispatch-details'
-                      : 'community-ship-statistics-expand',
-                ),
-              );
-              await tester.ensureVisible(action);
-              await tester.tap(action);
-              await tester.pumpAndSettle();
-              final dialog = find.byKey(
-                ValueKey(
-                  isDispatch
-                      ? 'community-dispatch-dialog'
-                      : 'community-statistics-dialog',
-                ),
-              );
-              expect(dialog, findsOneWidget);
-              if (isDispatch) {
-                expect(
-                  find.descendant(
-                    of: dialog,
-                    matching: find.byType(CommunityDispatchComposition),
-                  ),
-                  findsOneWidget,
-                );
-              } else {
-                expect(
-                  find.byKey(const ValueKey('ship-distribution-table-toggle')),
-                  findsOneWidget,
-                );
-              }
-              if (isDispatch) {
-                final owner = find
-                    .descendant(
-                      of: dialog,
-                      matching: find.byType(ExpansionTile),
-                    )
-                    .first;
-                await tester.ensureVisible(owner);
-                await tester.tap(owner);
-                await tester.pumpAndSettle();
-                expect(
-                  find.descendant(of: dialog, matching: find.byType(ListTile)),
-                  findsWidgets,
-                );
-              }
-              await tester.tap(
-                find
-                    .descendant(of: dialog, matching: find.byType(TextButton))
-                    .last,
-              );
-              await tester.pumpAndSettle();
-              expect(tester.takeException(), isNull);
-            }
+            final expand = find.byKey(
+              const ValueKey('community-ship-statistics-expand'),
+            );
+            await tester.ensureVisible(expand);
+            await tester.tap(expand);
+            await tester.pumpAndSettle();
+            final dialog = find.byKey(
+              const ValueKey('community-statistics-dialog'),
+            );
+            expect(dialog, findsOneWidget);
+            await tester.tap(
+              find
+                  .descendant(of: dialog, matching: find.byType(TextButton))
+                  .last,
+            );
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
             if (width == 1200 && locale.countryCode == 'CN' && !reduced) {
               final boundary = tester.renderObject<RenderRepaintBoundary>(
                 find.byKey(const ValueKey('workspace-capture')),
@@ -218,14 +187,12 @@ void main() {
                 image.dispose();
               });
             }
-            await tester.tap(
-              find.byKey(const ValueKey('community-dispatch-details')),
-            );
+            await tester.tap(expand);
             await tester.pumpAndSettle();
             port.close();
             await tester.pumpAndSettle();
             expect(
-              find.byKey(const ValueKey('community-dispatch-dialog')),
+              find.byKey(const ValueKey('community-statistics-dialog')),
               findsNothing,
             );
             expect(tester.takeException(), isNull);

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_field.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
 import '../../app/localization/app_strings.dart';
 import 'overlay_settings_help.dart';
 import '../../platform/window/menu_screenshot_preferences.dart';
@@ -9,10 +13,12 @@ class MenuScreenshotEditor extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
     this.showTitle = true,
   });
   final MenuScreenshotPreferences value;
   final bool showTitle;
+  final bool enabled;
   final ValueChanged<MenuScreenshotPreferences> onChanged;
   @override
   Widget build(BuildContext context) {
@@ -26,58 +32,76 @@ class MenuScreenshotEditor extends StatelessWidget {
           if (showTitle)
             Text(text('title'), style: Theme.of(context).textTheme.titleLarge),
           OverlaySettingsHelp(text('hint')),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-screenshot-hide-menu'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('hideMenu')),
-            subtitle: OverlaySettingsHelp(text('hideMenuHint')),
+            label: text('hideMenu'),
+            subtitle: text('hideMenuHint'),
+            subtitleWidget: OverlaySettingsHelp(text('hideMenuHint')),
             value: value.hideMenu,
-            onChanged: (v) => onChanged(value.change('hideMenu', v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change('hideMenu', v)),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: ValueKey('menu-screenshot-format-${value.format}'),
-            initialValue: value.format,
-            isExpanded: true,
+          StarBridgeSelectField<String>(
+            key: ValueKey('menu-screenshot-format'),
+            identity: 'menu-screenshot-format',
+            value: value.format,
             decoration: InputDecoration(labelText: text('format')),
-            items: [
+            options: [
               for (final format in const ['png', 'jpeg'])
-                DropdownMenuItem(value: format, child: Text(text(format))),
+                StarBridgeSelectOption(value: format, label: text(format)),
             ],
-            onChanged: (v) {
-              if (v != null) onChanged(value.change('format', v));
-            },
+            onSelected: !enabled
+                ? null
+                : (v, _) {
+                    onChanged(value.change('format', v));
+                  },
           ),
           OverlaySettingsHelp(text('formatHint')),
           if (value.format == 'jpeg') ...[
             const SizedBox(height: 12),
             Text('${text('quality')} ${value.jpegQuality}%'),
-            Slider(
-              key: const Key('menu-screenshot-quality'),
-              value: value.jpegQuality.toDouble(),
-              min: 50,
-              max: 100,
-              divisions: 50,
-              label: '${value.jpegQuality}%',
-              onChanged: (v) =>
-                  onChanged(value.change('jpegQuality', v.round())),
+            StarBridgeFieldFrame(
+              enabled: enabled,
+              cursor: SystemMouseCursors.click,
+              builder: (_, focus) => KeyedSubtree(
+                key: ValueKey(('menu-screenshot-slider', enabled)),
+                child: Slider(
+                  focusNode: focus,
+                  key: const Key('menu-screenshot-quality'),
+                  value: value.jpegQuality.toDouble(),
+                  min: 50,
+                  max: 100,
+                  divisions: 50,
+                  label: '${value.jpegQuality}%',
+                  onChanged: !enabled
+                      ? null
+                      : (v) =>
+                            onChanged(value.change('jpegQuality', v.round())),
+                ),
+              ),
             ),
           ],
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-screenshot-copy'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('copy')),
-            subtitle: OverlaySettingsHelp(text('copyHint')),
+            label: text('copy'),
+            subtitle: text('copyHint'),
+            subtitleWidget: OverlaySettingsHelp(text('copyHint')),
             value: value.copyAfterSave,
-            onChanged: (v) => onChanged(value.change('copyAfterSave', v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change('copyAfterSave', v)),
           ),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const Key('menu-screenshot-confirmation'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('confirmation')),
-            subtitle: OverlaySettingsHelp(text('confirmationHint')),
+            label: text('confirmation'),
+            subtitle: text('confirmationHint'),
+            subtitleWidget: OverlaySettingsHelp(text('confirmationHint')),
             value: value.showConfirmation,
-            onChanged: (v) => onChanged(value.change('showConfirmation', v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.change('showConfirmation', v)),
           ),
           OverlaySettingsHelp(text('privacy')),
         ],

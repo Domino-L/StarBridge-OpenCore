@@ -219,6 +219,7 @@ class CommunityHarness {
     this.holdRead = false,
     this.holdNames = const {},
     this.responses = const {},
+    this.errors = const {},
     List<String> capabilities = const [
       'communities.read',
       'communities.commands',
@@ -248,6 +249,9 @@ class CommunityHarness {
   final bool holdRead;
   final Set<String> holdNames;
   final Map<String, Map<String, Object?>> responses;
+
+  /// Per-request error codes, for commands that fail while others succeed.
+  final Map<String, String> errors;
   late final BridgeConnection connection;
   late final BridgeClientSession session;
   late final BridgeCommunities adapter;
@@ -256,7 +260,8 @@ class CommunityHarness {
   final readArrived = Completer<void>();
   Future<void> reply(BridgeEnvelope request) {
     final account = request.name == 'account.getCurrent';
-    final failed = !account && error != null;
+    final code = errors[request.name] ?? error;
+    final failed = !account && code != null;
     return connection.send(
       BridgeEnvelope(
         protocolVersion: 1,
@@ -272,7 +277,7 @@ class CommunityHarness {
         status: failed ? 'error' : 'ok',
         error: failed
             ? BridgeErrorBody(
-                code: error!,
+                code: code,
                 message: 'private upstream detail',
                 retryable: false,
               )

@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'community_visible_refresh.dart';
@@ -6,14 +7,21 @@ import 'community_visible_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../common/user_avatar_menu.dart';
+import '../common/social_read_activity.dart';
 import '../party_rooms/room_display.dart' show roomDate;
 import 'community_admissions_port.dart';
 import 'community_management_controller.dart';
 import 'community_management_copy.dart';
 import 'community_workspace_image.dart';
 import 'community_editor_surface.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class CommunityManagementDialog extends StatefulWidget {
   const CommunityManagementDialog({
@@ -21,12 +29,16 @@ class CommunityManagementDialog extends StatefulWidget {
     required this.targetRef,
     required this.name,
     this.initialSection = 'applications',
+    this.sections = const ['applications', 'invites'],
     this.embedded = false,
     this.onMembersChanged,
     super.key,
   });
   final CommunityAdmissionsPort port;
   final String targetRef, name, initialSection;
+
+  /// The pages offered; an invite-only member gets only the invite page.
+  final List<String> sections;
   final bool embedded;
   final VoidCallback? onMembersChanged;
   @override
@@ -46,16 +58,28 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
     widget.targetRef,
     section: widget.initialSection,
   );
-  final confirmations = <Route<bool>>[];
+  final confirmations = <StarBridgeDialogRoute<bool>>[];
   int days = 7, uses = 1;
   bool confirming = false;
   String? copyStatus;
+  Timer? _copiedTimer;
   Timer? _clock;
+  late final SocialReadActivityBinding _reading, _sending;
   String t(String key) => managementText(context, key);
   bool get locked => model.locked || confirming;
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.busy && !model.invalidated,
+      initialRead: true,
+    );
+    _sending = SocialReadActivityBinding(
+      model,
+      () => model.submitting && !model.invalidated,
+      initialRead: false,
+    );
     model.addListener(changed);
     unawaited(model.load());
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -67,11 +91,15 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
     if (!mounted) return;
     if (model.invalidated) {
       for (final route in confirmations.toList().reversed) {
-        if (route.isActive) route.navigator?.removeRoute(route);
+        retireStarBridgeDialog(route);
       }
       if (!widget.embedded) {
         final route = ModalRoute.of(context);
-        if (route?.isActive == true) route!.navigator?.removeRoute(route);
+        if (route is StarBridgeDialogRoute) {
+          retireStarBridgeDialog(route);
+        } else if (route?.isActive == true) {
+          route!.navigator?.removeRoute(route);
+        }
       } else {
         setState(() {});
       }
@@ -82,7 +110,13 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
 
   @override
   void dispose() {
+    _copiedTimer?.cancel();
+    _reading.dispose();
+    _sending.dispose();
     _clock?.cancel();
+    for (final route in confirmations.toList()) {
+      retireStarBridgeDialog(route);
+    }
     model.removeListener(changed);
     model.dispose();
     super.dispose();
@@ -98,11 +132,13 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
     final danger =
         action == CommunityAdmissionAction.decline ||
         action == CommunityAdmissionAction.revokeInvite;
-    final route = DialogRoute<bool>(
-      context: context,
+    StarBridgeDialogRoute<bool>? route;
+    final approved = await showStarBridgeDialog<bool>(
+      context,
+      useRootNavigator: false,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: Text(t(action.name)),
+        title: Text(managementText(dialogContext, action.name)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,37 +150,46 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                     as String,
               ),
             const SizedBox(height: 12),
-            Text(t('${action.name}Confirm')),
+            Text(managementText(dialogContext, '${action.name}Confirm')),
             if (retry)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
-                  t('retryWarning'),
-                  style: TextStyle(color: context.tokens.colors.warning),
+                  managementText(dialogContext, 'retryWarning'),
+                  style: TextStyle(color: dialogContext.tokens.colors.warning),
                 ),
               ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(t('cancel')),
+          StarBridgeActionButton(
+            controlKey: const Key('management-confirm-cancel'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: false,
+            ),
+            child: Text(managementText(dialogContext, 'cancel')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: danger
-                ? FilledButton.styleFrom(
-                    backgroundColor: context.tokens.colors.danger,
-                    foregroundColor: context.tokens.colors.onAccent,
-                  )
-                : null,
-            child: Text(t(action.name)),
+          StarBridgeActionButton(
+            controlKey: const Key('management-confirm-accept'),
+            kind: StarBridgeActionKind.primary,
+            tone: danger ? ActionTone.danger : null,
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: true,
+            ),
+            child: Text(managementText(dialogContext, action.name)),
           ),
         ],
       ),
+      onRouteCreated: (opened) {
+        route = opened;
+        confirmations.add(opened);
+      },
     );
-    confirmations.add(route);
-    final approved = await Navigator.of(context).push(route);
     confirmations.remove(route);
     if (!mounted || model.invalidated) return;
     setState(() => confirming = false);
@@ -171,6 +216,13 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
       await Clipboard.setData(ClipboardData(text: row['code'] as String));
       if (mounted && !model.invalidated && identical(page, model.page)) {
         setState(() => copyStatus = 'copied');
+        // QualityPass ②: the confirmation clears itself; a failure stays.
+        _copiedTimer?.cancel();
+        _copiedTimer = Timer(starBridgeTransientDuration, () {
+          if (mounted && copyStatus == 'copied') {
+            setState(() => copyStatus = null);
+          }
+        });
       }
     } catch (_) {
       if (mounted && !model.invalidated && identical(page, model.page)) {
@@ -252,22 +304,20 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
             spacing: 8,
             runSpacing: 8,
             children: [
-              OutlinedButton(
-                onPressed: allowed
-                    ? () => act(CommunityAdmissionAction.approve, row: row)
+              StarBridgeActionButton(
+                controlKey: ValueKey('management-approve-${row['entryRef']}'),
+                tone: ActionTone.success,
+                onActivate: allowed
+                    ? (_) => act(CommunityAdmissionAction.approve, row: row)
                     : null,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.tokens.colors.success,
-                ),
                 child: Text(t('approve')),
               ),
-              OutlinedButton(
-                onPressed: allowed
-                    ? () => act(CommunityAdmissionAction.decline, row: row)
+              StarBridgeActionButton(
+                controlKey: ValueKey('management-decline-${row['entryRef']}'),
+                tone: ActionTone.danger,
+                onActivate: allowed
+                    ? (_) => act(CommunityAdmissionAction.decline, row: row)
                     : null,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.tokens.colors.danger,
-                ),
                 child: Text(t('decline')),
               ),
             ],
@@ -338,18 +388,25 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
             spacing: 8,
             runSpacing: 8,
             children: [
-              OutlinedButton.icon(
-                onPressed: !locked && active ? () => copy(row) : null,
-                icon: const StandardIcon(StandardIconSemantic.copy),
-                label: Text(t('copy')),
-              ),
-              OutlinedButton(
-                onPressed: !locked && active && row['canRevoke'] == true
-                    ? () => act(CommunityAdmissionAction.revokeInvite, row: row)
-                    : null,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.tokens.colors.danger,
+              StarBridgeActionButton(
+                controlKey: ValueKey('management-copy-${row['entryRef']}'),
+                onActivate: !locked && active ? (_) => copy(row) : null,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const StandardIcon(StandardIconSemantic.copy),
+                    const SizedBox(width: 8),
+                    Text(t('copy')),
+                  ],
                 ),
+              ),
+              StarBridgeActionButton(
+                controlKey: ValueKey('management-revoke-${row['entryRef']}'),
+                tone: ActionTone.danger,
+                onActivate: !locked && active && row['canRevoke'] == true
+                    ? (_) =>
+                          act(CommunityAdmissionAction.revokeInvite, row: row)
+                    : null,
                 child: Text(t('revokeInvite')),
               ),
             ],
@@ -383,9 +440,10 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final section in const ['applications', 'invites'])
-                      ChoiceChip(
-                        label: Text(t(section)),
+                    for (final section in widget.sections)
+                      StarBridgeChoiceChip(
+                        controlKey: ValueKey('management-section-$section'),
+                        label: t(section),
                         selected: model.section == section,
                         onSelected: locked
                             ? null
@@ -394,15 +452,23 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                                 model.load(section: section);
                               },
                       ),
-                    TextButton.icon(
-                      onPressed: locked
+                    StarBridgeActionButton(
+                      controlKey: const Key('management-refresh'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: locked
                           ? null
-                          : () {
+                          : (_) {
                               copyStatus = null;
                               model.load();
                             },
-                      icon: const StandardIcon(StandardIconSemantic.refresh),
-                      label: Text(t('refresh')),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const StandardIcon(StandardIconSemantic.refresh),
+                          const SizedBox(width: 8),
+                          Text(t('refresh')),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -431,8 +497,26 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                   ),
                 const SizedBox(height: 8),
                 Expanded(
-                  child: model.busy
-                      ? const Center(child: CircularProgressIndicator())
+                  child: model.invalidated
+                      ? Center(child: Text(t('identityUnavailable')))
+                      : model.busy
+                      ? Center(
+                          child: KeyedSubtree(
+                            key: ValueKey(_reading.revision),
+                            child: SocialReadActivity(
+                              key: const ValueKey('management-read-activity'),
+                              source: _reading.source,
+                              opening: _reading.opening,
+                              label: t(
+                                model.section == 'applications'
+                                    ? 'activityApplications'
+                                    : 'activityInvites',
+                              ),
+                              height: 4,
+                              circularStandard: true,
+                            ),
+                          ),
+                        )
                       : ListView(
                           children: [
                             if (page != null && page.section == 'invites') ...[
@@ -473,7 +557,12 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                                   children: [
                                     SizedBox(
                                       width: 150,
-                                      child: DropdownButtonFormField<int>(
+                                      child: StarBridgeSelectFormField<int>(
+                                        identity: 'community-invite-days',
+                                        isExpanded: true,
+                                        controlKey: const ValueKey(
+                                          'community-invite-days-control',
+                                        ),
                                         initialValue: days,
                                         decoration: InputDecoration(
                                           labelText: t('days'),
@@ -493,7 +582,12 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                                     ),
                                     SizedBox(
                                       width: 150,
-                                      child: DropdownButtonFormField<int>(
+                                      child: StarBridgeSelectFormField<int>(
+                                        identity: 'community-invite-uses',
+                                        isExpanded: true,
+                                        controlKey: const ValueKey(
+                                          'community-invite-uses-control',
+                                        ),
                                         initialValue: uses,
                                         decoration: InputDecoration(
                                           labelText: t('uses'),
@@ -515,15 +609,27 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                                                   setState(() => uses = value!),
                                       ),
                                     ),
-                                    FilledButton.icon(
-                                      onPressed: locked
+                                    StarBridgeActionButton(
+                                      controlKey: const Key(
+                                        'management-generate',
+                                      ),
+                                      kind: StarBridgeActionKind.primary,
+                                      onActivate: locked
                                           ? null
-                                          : () => act(
+                                          : (_) => act(
                                               CommunityAdmissionAction
                                                   .generateInvite,
                                             ),
-                                      icon: const StandardIcon(StandardIconSemantic.add),
-                                      label: Text(t('generateInvite')),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const StandardIcon(
+                                            StandardIconSemantic.add,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(t('generateInvite')),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -577,32 +683,55 @@ class CommunityManagementDialogState extends State<CommunityManagementDialog>
                       Text(
                         '${page.offset + (page.items.isEmpty ? 0 : 1)}–${page.offset + page.items.length} / ${page.totalCount}',
                       ),
-                      TextButton(
-                        onPressed: locked || page.offset == 0
+                      StarBridgeActionButton(
+                        controlKey: const Key('management-previous'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: locked || page.offset == 0
                             ? null
-                            : () => model.load(
+                            : (_) => model.load(
                                 offset: (page.offset - 20).clamp(0, 1000000),
                               ),
                         child: Text(t('previous')),
                       ),
-                      TextButton(
-                        onPressed: locked || page.next == null
+                      StarBridgeActionButton(
+                        controlKey: const Key('management-next'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: locked || page.next == null
                             ? null
-                            : () => model.load(offset: page.next!),
+                            : (_) => model.load(offset: page.next!),
                         child: Text(t('next')),
                       ),
                     ],
-                    if (model.submitting)
-                      const SizedBox(
+                    if (model.submitting && !model.invalidated)
+                      SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: Center(
+                          child: KeyedSubtree(
+                            key: ValueKey(_sending.revision),
+                            child: SocialReadActivity(
+                              key: const ValueKey('management-write-activity'),
+                              source: _sending.source,
+                              opening: false,
+                              label: t('activitySending'),
+                              height: 4,
+                              circularStandard: true,
+                              circularSize: 20,
+                              circularStrokeWidth: 2,
+                            ),
+                          ),
+                        ),
                       ),
                     if (!widget.embedded)
-                      TextButton(
-                        onPressed: model.submitting || confirming
+                      StarBridgeActionButton(
+                        controlKey: const Key('management-close'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: model.submitting || confirming
                             ? null
-                            : () => Navigator.pop(context),
+                            : (source) => dismissStarBridgeDialog(
+                                context,
+                                source: source,
+                              ),
                         child: Text(t('close')),
                       ),
                   ],

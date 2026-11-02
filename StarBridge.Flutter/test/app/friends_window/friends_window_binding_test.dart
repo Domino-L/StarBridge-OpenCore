@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/friends_window/friends_window_binding.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_friends_session.dart';
@@ -73,6 +74,52 @@ Future<Object?> fromNative(String method, Object args) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('late account display refresh reaches auxiliary snapshot without rereading friends', (tester) async {
+    final calls = <MethodCall>[];
+    final port = Port();
+    final identity = ValueNotifier<String?>('Old call sign');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return call.method == 'show' ? true : null;
+    });
+    final binding = FriendsWindowBinding(
+      create: (publish) => MenuFriendsSession(port, publish,
+        identityChanges: identity,
+        identity: () => identity.value == null ? null :
+          (name: identity.value!, handle: 'FixedHandle', avatar: null)),
+      openChat: (_, _) async {}, openMessages: (_) async {}, openProfile: (_) async {},
+    );
+    addTearDown(() {
+      binding.dispose(); identity.dispose();
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+    expect(await binding.open(), isTrue);
+    await tester.pump();
+    Map snapshot() => calls.lastWhere((call) => call.method == 'snapshot').arguments as Map;
+    Map view() => jsonDecode(snapshot()['view'] as String) as Map;
+    expect((view()['identity'] as Map)['name'], 'Old call sign');
+    final scope = view()['scope'], opening = snapshot()['opening'];
+    final revision = snapshot()['revision'] as int;
+    final reads = port.reads;
+    identity.value = 'Confirmed new call sign';
+    await tester.pump();
+    expect((view()['identity'] as Map)['name'], 'Confirmed new call sign');
+    expect((view()['identity'] as Map)['handle'], 'FixedHandle');
+    expect(view()['scope'], scope);
+    expect(snapshot()['opening'], opening);
+    expect(snapshot()['revision'], greaterThan(revision));
+    expect(port.reads, reads);
+    identity.value = null;
+    await tester.pump();
+    expect(view().containsKey('identity'), isFalse);
+    binding.dispose();
+    await tester.pump();
+    final count = calls.length;
+    identity.value = 'Late result after disposal';
+    await tester.pump();
+    expect(calls.length, count);
+  });
   for (final chatReference in ['d' * 32, null]) {
     testWidgets(
       'native friend-window profile separates read and command references: $chatReference',

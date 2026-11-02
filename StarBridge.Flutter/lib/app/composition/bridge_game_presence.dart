@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import '../../shared/diagnostics/loading_read_scope.dart';
 
 import '../../platform/bridge/bridge_client_session.dart';
 import '../shell/chrome/shell_chrome_projection.dart';
@@ -12,7 +13,7 @@ final class BridgeGamePresence extends ValueNotifier<GamePresenceState> {
     this.pollInterval = const Duration(seconds: 5),
   }) : super(GamePresenceState.unknown) {
     if (_session.hostCapabilities.contains('host.gamePresence')) {
-      unawaited(_read());
+      unawaited(backgroundLoadingRead(_read));
     }
   }
 
@@ -49,7 +50,10 @@ final class BridgeGamePresence extends ValueNotifier<GamePresenceState> {
         value = GamePresenceState.unknown;
       }
     } finally {
-      if (!_disposed) _timer = Timer(pollInterval, () => unawaited(_read()));
+      if (!_disposed) {
+        _timer = Timer(pollInterval,
+            () => unawaited(backgroundLoadingRead(_read)));
+      }
     }
   }
 

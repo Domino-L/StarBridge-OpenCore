@@ -131,7 +131,6 @@ final class CommunityLogPage {
     final total = number(value, 'totalCount', 0, 100000);
     final matched = number(value, 'matchedCount', 0, total);
     final offset = number(value, 'offset', 0, matched);
-    if (!value.containsKey('next')) throw const FormatException();
     final next = value['next'] == null
         ? null
         : number(value, 'next', 0, matched);

@@ -2,9 +2,24 @@ namespace StarBridge.Desktop;
 
 using StarBridge.Core.Presence;
 using StarBridge.HostRuntime.Presence;
+using StarBridge.HostRuntime.Overlay;
 
 public sealed partial class NativeInformationOverlayRuntime
 {
+    internal static (OverlaySceneSnapshot Scene, OverlayCommandState Command, OverlayChatMessage[] Chat)
+        ProjectLocalOwned(InformationOverlayLocalObservation value, string language)
+    {
+        var context = OverlaySceneContext.Local(StarBridge.Core.Overlay.OverlayScenePreference.Fleet);
+        var command = BuildCommandState(language) with { NoticeTitle = "", NoticeText = "" };
+        if (value.State is not ("ready" or "notRunning") || string.IsNullOrWhiteSpace(value.Handle))
+            return (new([], false, context), command, []);
+        // This is the confirmed local profile, never an inserted remote member.
+        // It has no account ID, member actions, room, chat or social-event grant.
+        var row = new PlayerRow(value.Handle, "Online", "", "", "", IsSelf: true,
+            ShowMemberActions: false, SharedEventTypes: 0);
+        var presence = value.State == "ready" ? PlayerPresenceKind.InGame : PlayerPresenceKind.AppOnline;
+        return (ProjectLocalSelf(new([row], true, context), value.Session, presence, language), command, []);
+    }
     internal static OverlaySceneSnapshot ProjectLocalSelf(OverlaySceneSnapshot scene,
         GameLogSessionSnapshot? session, PlayerPresenceKind? presence, string language)
     {
@@ -21,8 +36,10 @@ public sealed partial class NativeInformationOverlayRuntime
             : null;
         location = string.IsNullOrWhiteSpace(location) ? zh ? "等待位置确认" : "Location pending" : location;
         ship = string.IsNullOrWhiteSpace(ship) ? zh ? "等待舰船确认" : "Ship pending" : ship;
-        if (running && session.Location.State is "likely" or "possible")
-            location = (zh ? "可能在：" : "Possibly at: ") + location;
+        // "likely"/"possible" mostly mean the same place with older evidence: the
+        // score decays between log lines and recovers on the next one. A trust
+        // prefix would flip the row and fire two location events while the
+        // player stays put, so the overlay shows the place name only.
         var wire = PlayerPresence.ToWireValue(presence.Value);
         return scene with { Players = scene.Players.Select(row => !row.IsSelf ? row : row with
         {
@@ -46,6 +63,11 @@ public sealed partial class NativeInformationOverlayRuntime
 
     private PlayerPresenceKind? ReadLocalDisplayPresence()
     {
+        if (ReadLocalSource() is { } frame)
+        {
+            _confirmedLocalPresence = null;
+            return frame.Read().State switch { "ready" => PlayerPresenceKind.InGame, "notRunning" => PlayerPresenceKind.AppOnline, _ => null };
+        }
         if (_localPresenceProvider is null)
             return StarCitizenProcessProbe.IsRunning() ? PlayerPresenceKind.InGame : PlayerPresenceKind.AppOnline;
         try

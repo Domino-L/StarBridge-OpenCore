@@ -1,8 +1,13 @@
+import 'menu_overlay_locale.dart';
+
 import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 
 import 'menu_local_tools.dart' show MenuLocalToolsController;
 import 'menu_workspace_controller.dart';
@@ -18,6 +23,17 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
   bool get imageReady;
   bool get cropping;
   bool capturingFrame = false, preparingPin = false, prepareQueued = false;
+  InteractionSource pinFeedbackSource = InteractionSource.programmatic;
+  int pinOperationEpoch = 0;
+  void retirePinWork() {
+    pinOperationEpoch++;
+    preparingPin = capturingFrame = prepareQueued = prepareAgain = false;
+    pinPreparationFailed = false;
+    preparedSerial = -1;
+    preparedRect = null;
+    pinFeedbackSource = InteractionSource.programmatic;
+  }
+
   bool autoPinQueued = false,
       prepareAgain = false,
       pinPreparationFailed = false;
@@ -35,7 +51,11 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
       return;
     }
     prepareQueued = true;
+    final owner = tools, epoch = pinOperationEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(tools, owner) || epoch != pinOperationEpoch) {
+        return;
+      }
       prepareQueued = false;
       if (mounted && !tools.closed) _reportPaintBounds();
       if (!mounted ||
@@ -135,15 +155,20 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
       return;
     }
     if (!imageReady) {
-      setState(() => tools.notice = '图片仍在加载，请稍后固定。');
+      setState(
+        () => tools.notice = menuText(context, 'menu.overlay.image.loading'),
+      );
       return;
     }
     final owner = tools;
     final revision = owner.revision;
     final editSerial = tools.referenceEditSerial;
+    final operation = ++pinOperationEpoch;
+    prepareQueued = false;
     if (prepare) {
       preparingPin = true;
     } else {
+      pinFeedbackSource = captureStarBridgeActivationSource()();
       setState(() => capturingFrame = true);
     }
     ui.Image? image;
@@ -154,6 +179,7 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted ||
           !identical(tools, owner) ||
+          operation != pinOperationEpoch ||
           owner.closed ||
           owner.revision != revision) {
         return;
@@ -172,6 +198,7 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (!mounted ||
           !identical(tools, owner) ||
+          operation != pinOperationEpoch ||
           owner.closed ||
           owner.revision != revision ||
           data == null) {
@@ -191,7 +218,11 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
         }
         final result = await owner.call('imagePreparePin', frame);
         if (result != true) throw StateError('pin preparation failed');
-        if (mounted && pinPreparationFailed) {
+        if (mounted &&
+            identical(tools, owner) &&
+            !owner.closed &&
+            operation == pinOperationEpoch &&
+            pinPreparationFailed) {
           setState(() {
             pinPreparationFailed = false;
             tools.notice = '';
@@ -201,24 +232,31 @@ mixin MenuImagePinLifecycle<T extends StatefulWidget> on State<T> {
         await owner.pin(frame, editSerial: editSerial);
       }
     } on Object {
-      if (mounted && identical(tools, owner) && !owner.closed) {
+      if (mounted &&
+          identical(tools, owner) &&
+          !owner.closed &&
+          operation == pinOperationEpoch) {
         if (prepare) pinPreparationFailed = true;
         setState(
           () => tools.notice = prepare
-              ? '自动固定尚未准备好，请缩小图片窗口，或双击恢复工具后手动固定。'
-              : '固定未完成，请缩小图片窗口后重试。',
+              ? menuText(context, 'menu.overlay.image.autoPinFailed')
+              : menuText(context, 'menu.overlay.image.pinFailed'),
         );
       }
     } finally {
       image?.dispose();
-      preparingPin = false;
-      if (mounted && !prepare) setState(() => capturingFrame = false);
       if (mounted &&
-          prepare &&
-          (prepareAgain || editSerial != owner.referenceEditSerial)) {
-        prepareAgain = false;
-        queuePreparedReferencePin();
-        WidgetsBinding.instance.scheduleFrame();
+          identical(tools, owner) &&
+          !owner.closed &&
+          operation == pinOperationEpoch) {
+        preparingPin = false;
+        if (!prepare) setState(() => capturingFrame = false);
+        if (prepare &&
+            (prepareAgain || editSerial != owner.referenceEditSerial)) {
+          prepareAgain = false;
+          queuePreparedReferencePin();
+          WidgetsBinding.instance.scheduleFrame();
+        }
       }
     }
   }

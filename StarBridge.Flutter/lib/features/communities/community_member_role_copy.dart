@@ -4,6 +4,12 @@ import '../../app/localization/app_strings.dart';
 import 'community_roles_copy.dart';
 
 const communityMemberRoleCopy = <String, (String, String, String)>{
+  'activityLoading': ('正在读取成员身份…', '正在讀取成員身分…', 'Loading member role…'),
+  'activitySending': (
+    '正在提交并核对成员身份…',
+    '正在提交並核對成員身分…',
+    'Submitting and checking member role…',
+  ),
   'notAllowed': (
     '当前无法更改此成员身份，请关闭后重新打开。',
     '目前無法變更此成員身分，請關閉後重新開啟。',

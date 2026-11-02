@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+
 import 'overlay_settings_help.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -7,6 +11,7 @@ import '../../platform/window/menu_browser_resume.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import 'menu_browser_resume_controller.dart';
+import 'overlay_settings_command_feedback.dart';
 
 class MenuBrowserResumeCard extends StatefulWidget {
   const MenuBrowserResumeCard({super.key, required this.port, this.controller});
@@ -45,57 +50,75 @@ class _MenuBrowserResumeCardState extends State<MenuBrowserResumeCard> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
-    builder: (context, _) {
-      String t(String key) =>
-          AppStrings.of(context).text('menu.browser.resume.$key');
-      final value = controller.saved;
-      return StarBridgeSurface(
-        role: SurfaceRole.panel,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(t('title'), style: Theme.of(context).textTheme.titleMedium),
-            OverlaySettingsHelp(t('privacy')),
-            if (value != null)
-              Material(
-                type: MaterialType.transparency,
-                child: SwitchListTile(
-                  key: const Key('menu-browser-resume-toggle'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(t('enabled')),
-                  subtitle: OverlaySettingsHelp(t('hint')),
-                  value: value.enabled,
-                  onChanged: controller.busy ? null : controller.setEnabled,
+  Widget build(BuildContext context) => OverlaySettingsCommandFeedback(
+    owner: controller,
+    builder: (context, run, source) => ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        String t(String key) =>
+            AppStrings.of(context).text('menu.browser.resume.$key');
+        final value = controller.saved;
+        return StarBridgeSurface(
+          role: SurfaceRole.panel,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(t('title'), style: Theme.of(context).textTheme.titleMedium),
+              OverlaySettingsHelp(t('privacy')),
+              if (value != null)
+                Material(
+                  type: MaterialType.transparency,
+                  child: StarBridgeSwitch.tile(
+                    controlKey: const Key('menu-browser-resume-toggle'),
+                    label: t('enabled'),
+                    subtitle: t('hint'),
+                    subtitleWidget: OverlaySettingsHelp(t('hint')),
+                    value: value.enabled,
+                    onChanged: controller.busy
+                        ? null
+                        : (value) => run(
+                            currentStarBridgeActivationSource,
+                            () => controller.setEnabled(value),
+                          ),
+                  ),
                 ),
-              ),
-            Text(
-              t(
-                controller.busy
-                    ? 'busy'
-                    : controller.failed
-                    ? 'failed'
-                    : value == null
-                    ? 'unavailable'
-                    : value.enabled
-                    ? 'on'
-                    : 'off',
-              ),
-              key: const Key('menu-browser-resume-state'),
-            ),
-            if (controller.failed || value == null && !controller.busy)
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton(
-                  key: const Key('menu-browser-resume-reload'),
-                  onPressed: controller.busy ? null : controller.load,
-                  child: Text(t('reload')),
+              if (controller.busy)
+                OverlaySettingsCommandWait(
+                  key: const Key('menu-browser-resume-state'),
+                  label: t('busy'),
+                  source: source(),
+                )
+              else
+                Text(
+                  t(
+                    controller.busy
+                        ? 'busy'
+                        : controller.failed
+                        ? 'failed'
+                        : value == null
+                        ? 'unavailable'
+                        : value.enabled
+                        ? 'on'
+                        : 'off',
+                  ),
+                  key: const Key('menu-browser-resume-state'),
                 ),
-              ),
-          ],
-        ),
-      );
-    },
+              if (controller.failed || value == null && !controller.busy)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('menu-browser-resume-reload'),
+                    onActivate: controller.busy
+                        ? null
+                        : (origin) => run(origin, controller.load),
+                    child: Text(t('reload')),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ),
   );
 }

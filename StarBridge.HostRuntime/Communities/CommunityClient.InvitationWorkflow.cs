@@ -17,11 +17,12 @@ internal sealed partial class CommunityClient
     internal async Task<string> RebindInvitationSourceAsync(string bearer, InvitationOutboxItem item, string scope,
         Action current, CancellationToken token)
     {
+        var imageEpoch = ImageReadEpoch;
         if (item.Origin != _origin.GetLeftPart(UriPartial.Authority)) throw Invalid();
         current();
         var root = await WorkspaceJson(bearer, "/api/fleets/directory?view=mine&q=&code=" + Uri.EscapeDataString(item.SourceCode), token);
         current();
-        var page = Project(root, new("mine", "", null, null), scope, item.SourceCode);
+        var page = Project(root, new("mine", "", null, null), scope, item.SourceCode, imageEpoch);
         var source = page.Items.SingleOrDefault();
         if (source is null || source.Relationship is not ("member" or "owner")) throw Invalid();
         return source.TargetRef;

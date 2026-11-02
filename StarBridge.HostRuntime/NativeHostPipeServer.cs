@@ -13,7 +13,15 @@ public sealed class NativeHostPipeServer(
     string pipeName,
     IBridgeRequestDispatcher dispatcher) : IAsyncDisposable
 {
-    private const int RequestWorkerCount = 4;
+    // Workers are async tasks, not threads. An SCM session runs account requests
+    // one at a time, and a request waiting at that gate still holds its worker.
+    // With four workers a startup burst parked three of them there, so local reads
+    // waited seconds and the account gate could order only what it had been
+    // handed (DL-137 device traces 2026-10-21). Domains keep their own gates.
+    internal const int RequestWorkerCount = 16;
+    private const int ActivityWaitWorkerCount = 3;
+    private const int ActivityWaitQueuedCapacity = 2;
+    internal const int ActivityWaitCapacity = ActivityWaitWorkerCount + ActivityWaitQueuedCapacity;
 
     private readonly NamedPipeBridgeListener _listener = new(pipeName);
     private readonly IBridgeRequestDispatcher _dispatcher = dispatcher ??
@@ -57,8 +65,10 @@ public sealed class NativeHostPipeServer(
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(dispatcher);
+        using var outgoing = new BridgeConnectionWriter(connection);
 
         using var connectionLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        await using var readCancellation = new Lifecycle.BridgeReadCancellation(connectionLifetime.Token);
         var events = Channel.CreateBounded<BridgeEnvelope>(new BoundedChannelOptions(
             BridgeProtocol.DefaultQueueCapacity)
         {
@@ -81,6 +91,22 @@ public sealed class NativeHostPipeServer(
             SingleReader = true,
             SingleWriter = true
         });
+        // This audited endpoint performs bounded local IO only. A full set of
+        // ordinary workers waiting for private HTTP must not delay local paint.
+        var displayReads = Channel.CreateBounded<BridgeEnvelope>(new BoundedChannelOptions(8)
+        {
+            FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true
+        });
+        // Menu interaction is bounded local IO (see BridgeRequestPolicy.IsMenuInteraction).
+        // One serial worker keeps its order and keeps it out of the ordinary pool.
+        var menuRequests = Channel.CreateBounded<BridgeEnvelope>(new BoundedChannelOptions(8)
+        {
+            FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true
+        });
+        // Social, community and official-fleet each fit concurrently: three
+        // active workers plus two removable queued slots. Excess is rejected;
+        // ordinary requests and control keep their separate workers.
+        var activityWaits = new Lifecycle.BridgeActivityWaitQueue(ActivityWaitWorkerCount, ActivityWaitQueuedCapacity);
 
         void QueueEvent(BridgeEnvelope envelope)
         {
@@ -92,22 +118,27 @@ public sealed class NativeHostPipeServer(
 
         dispatcher.EventReady += QueueEvent;
         var eventPump = PumpEventsAsync(
-            connection,
+            outgoing,
             events.Reader,
             connectionLifetime);
         var requestPumps = Enumerable
             .Range(0, RequestWorkerCount)
             .Select(_ => PumpRequestsAsync(
-                connection,
+                outgoing,
                 dispatcher,
                 requests.Reader,
-                connectionLifetime))
+                connectionLifetime, readCancellation))
             .ToArray();
         var controlPump = PumpRequestsAsync(
-            connection,
+            outgoing,
             dispatcher,
             controls.Reader,
-            connectionLifetime);
+            connectionLifetime, readCancellation);
+        var displayPump = PumpRequestsAsync(outgoing, dispatcher, displayReads.Reader, connectionLifetime, readCancellation);
+        var menuPump = PumpRequestsAsync(outgoing, dispatcher, menuRequests.Reader, connectionLifetime, readCancellation);
+        var activityPumps = Enumerable.Range(0, ActivityWaitWorkerCount)
+            .Select(_ => PumpRequestsAsync(outgoing, dispatcher, activityWaits, connectionLifetime, readCancellation))
+            .ToArray();
         try
         {
             await foreach (var request in connection
@@ -115,6 +146,16 @@ public sealed class NativeHostPipeServer(
                 .WithCancellation(connectionLifetime.Token)
                 .ConfigureAwait(false))
             {
+                if (readCancellation.Cancel(request))
+                {
+                    foreach (var cancelled in activityWaits.RemoveCancelled(readCancellation.TokenFor))
+                    {
+                        await readCancellation.CompleteAsync(cancelled).ConfigureAwait(false);
+                        await outgoing.SendAsync(BridgeEnvelope.CancelledResponse(cancelled), connectionLifetime.Token).ConfigureAwait(false);
+                    }
+                    await outgoing.SendAsync(BridgeEnvelope.Response(request, new { cancelled = true }), connectionLifetime.Token).ConfigureAwait(false);
+                    continue;
+                }
                 if (BridgeRequestPolicy.IsOutOfBandControl(request.Name))
                 {
                     if (!controls.Writer.TryWrite(request))
@@ -125,9 +166,18 @@ public sealed class NativeHostPipeServer(
                     continue;
                 }
 
-                if (!requests.Writer.TryWrite(request))
+                var queue = request.Name == Account.AccountBridgeRequestNames.ReadProfileDisplayCache ? displayReads
+                    : BridgeRequestPolicy.IsMenuInteraction(request.Name) ? menuRequests : requests;
+                if (!readCancellation.Register(request))
                 {
-                    await connection.SendAsync(
+                    await outgoing.SendAsync(BridgeEnvelope.ErrorResponse(request,
+                        new BridgeError(BridgeErrorCodes.Backpressure, "Native read capacity is exhausted.", true)), connectionLifetime.Token).ConfigureAwait(false);
+                    continue;
+                }
+                if (!(BridgeRequestPolicy.IsActivityWait(request.Name) ? activityWaits.TryWrite(request) : queue.Writer.TryWrite(request)))
+                {
+                    await readCancellation.CompleteAsync(request).ConfigureAwait(false);
+                    await outgoing.SendAsync(
                         BridgeEnvelope.ErrorResponse(
                             request,
                             new BridgeError(
@@ -144,10 +194,13 @@ public sealed class NativeHostPipeServer(
             events.Writer.TryComplete();
             requests.Writer.TryComplete();
             controls.Writer.TryComplete();
+            activityWaits.Complete();
+            displayReads.Writer.TryComplete();
+            menuRequests.Writer.TryComplete();
             connectionLifetime.Cancel();
             try
             {
-                await Task.WhenAll(requestPumps.Append(controlPump).Append(eventPump))
+                await Task.WhenAll(requestPumps.Concat(activityPumps).Append(displayPump).Append(menuPump).Append(controlPump).Append(eventPump))
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -158,10 +211,11 @@ public sealed class NativeHostPipeServer(
     }
 
     private static async Task PumpRequestsAsync(
-        IBridgeConnection connection,
+        BridgeConnectionWriter outgoing,
         IBridgeRequestDispatcher dispatcher,
         ChannelReader<BridgeEnvelope> requests,
-        CancellationTokenSource connectionLifetime)
+        CancellationTokenSource connectionLifetime,
+        Lifecycle.BridgeReadCancellation readCancellation)
     {
         try
         {
@@ -169,17 +223,33 @@ public sealed class NativeHostPipeServer(
                 .ReadAllAsync(connectionLifetime.Token)
                 .ConfigureAwait(false))
             {
-                var batch = await dispatcher
-                    .DispatchAsync(request, connectionLifetime.Token)
-                    .ConfigureAwait(false);
-                await connection
-                    .SendAsync(batch.Response, connectionLifetime.Token)
-                    .ConfigureAwait(false);
-                foreach (var envelope in batch.Events)
+                try
                 {
-                    await connection
-                        .SendAsync(envelope, connectionLifetime.Token)
+                    var token = readCancellation.TokenFor(request);
+                    BridgeDispatchBatch batch;
+                    try {
+                        batch = token.IsCancellationRequested
+                            ? new(BridgeEnvelope.CancelledResponse(request), [])
+                            : await dispatcher.DispatchAsync(request, token).ConfigureAwait(false);
+                    } catch (OperationCanceledException) when (token.IsCancellationRequested && !connectionLifetime.IsCancellationRequested) {
+                        batch = new(BridgeEnvelope.CancelledResponse(request), []);
+                    } catch (Exception exception) when (!connectionLifetime.IsCancellationRequested && exception is not BridgeProtocolException) {
+                        // One request's unexpected failure answers that request alone. It must not
+                        // end the pipe session: that restarts the Host and drops the signed-in state.
+                        batch = new(UnexpectedFailure(request, exception), []);
+                    }
+                    if (token.IsCancellationRequested)
+                        batch = new(BridgeEnvelope.CancelledResponse(request), batch.Events);
+                    await outgoing
+                        .SendAsync(batch.Response, connectionLifetime.Token)
                         .ConfigureAwait(false);
+                    foreach (var envelope in batch.Events)
+                        await outgoing.SendAsync(envelope, connectionLifetime.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await readCancellation.CompleteAsync(request).ConfigureAwait(false);
+                    if (requests is Lifecycle.BridgeActivityWaitQueue activityLane) activityLane.CompleteRequest();
                 }
             }
         }
@@ -190,8 +260,38 @@ public sealed class NativeHostPipeServer(
         }
     }
 
+    private static readonly HashSet<string> DiagnosticAreas = new(StringComparer.Ordinal)
+    {
+        "account", "accountSafety", "bridge", "communities", "diagnostics", "eventSharing", "friends", "gameIdentity", "hangar",
+        "host", "marketplace", "menuHotkey", "notificationAudio", "notificationInbox", "notificationPolicies", "notificationSettings",
+        "officialFleet", "overlayRoster", "overlayScenes", "partyRooms", "personalProfile", "presence", "privacy", "profile",
+        "scmAchievements", "social", "tradeProfile", "users"
+    };
+
+    /// <summary>A batch whose response decoration failed still delivers its events: a real account
+    /// transition has already happened and the client must hear about it.</summary>
+    internal static async ValueTask<BridgeDispatchBatch> KeepEventsOnFailureAsync(BridgeEnvelope request,
+        BridgeDispatchBatch batch, Func<ValueTask<BridgeDispatchBatch>> decorate)
+    {
+        try { return await decorate().ConfigureAwait(false); }
+        catch (Exception failure) when (failure is not (OperationCanceledException or BridgeProtocolException))
+        { return batch with { Response = UnexpectedFailure(request, failure) }; }
+    }
+
+    internal static BridgeEnvelope UnexpectedFailure(BridgeEnvelope request, Exception exception)
+    {
+        // A fixed area and the type only: request names are not trusted for logs, and
+        // exception text can carry server content or private values.
+        var separator = request.Name.IndexOf('.');
+        var area = separator > 0 && DiagnosticAreas.Contains(request.Name[..separator]) ? request.Name[..separator] : "other";
+        Auth.ScmAuthDiagnostics.Write("bridge", "bridge-dispatch", "failed",
+            $"area={area} exceptionType={exception.GetType().Name}");
+        return BridgeEnvelope.ErrorResponse(request,
+            new BridgeError(BridgeErrorCodes.HostError, "The Native Host could not complete this request.", false));
+    }
+
     private static async Task PumpEventsAsync(
-        IBridgeConnection connection,
+        BridgeConnectionWriter outgoing,
         ChannelReader<BridgeEnvelope> events,
         CancellationTokenSource connectionLifetime)
     {
@@ -201,7 +301,7 @@ public sealed class NativeHostPipeServer(
                 .ReadAllAsync(connectionLifetime.Token)
                 .ConfigureAwait(false))
             {
-                await connection
+                await outgoing
                     .SendAsync(envelope, connectionLifetime.Token)
                     .ConfigureAwait(false);
             }

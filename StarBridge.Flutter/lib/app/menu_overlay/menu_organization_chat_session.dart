@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:async';
 
 import '../../features/communities/communities_module.dart';
@@ -39,7 +41,7 @@ final class MenuOrganizationChatSession {
   final views = <String, Map<String, Object?>>{};
   final portraits = MenuOrganizationChatPortraits();
   late final ownPhoto = MenuAccountAvatar(() {
-    if (session.visible && !session.disposed) session.emit(session.currentView);
+    if (session.visible && !session.disposed) session.emit(session.templateView);
   });
 
   final _chats = <String, CommunityChatController>{};
@@ -66,7 +68,7 @@ final class MenuOrganizationChatSession {
     if (retry == null
         ? !chat.canSubmit || _deliveries[chat]!.shown.length >= 20
         : !chat.canRetry(retry)) {
-      session.emit({...session.currentView, 'rejectedAction': key});
+      session.emit({...session.templateView, 'rejectedAction': key});
       return;
     }
     final delivery = _deliveries[chat]!;
@@ -81,14 +83,14 @@ final class MenuOrganizationChatSession {
       // Validation can fail synchronously before a local record is created.
       // The menu editor remains the owner in that case and must keep its text.
       if (retry == null) chat.updateDraft('');
-      session.emit({...session.currentView, 'rejectedAction': key});
+      session.emit({...session.templateView, 'rejectedAction': key});
       await work;
       return;
     }
     delivery.acceptedAction = key;
     delivery.timedOut = false;
     // Local ownership is acknowledged before waiting for the remote result.
-    session.emit(session.currentView);
+    session.emit(session.templateView);
     await work;
     if (!session.currentAccount(account) || !identical(active, chat)) return;
     if (chat.invalidated) {
@@ -140,7 +142,7 @@ final class MenuOrganizationChatSession {
               'retry': (() {
                 late Map<String, Object?> action;
                 action = session.button(
-                  '重试消息',
+                  MenuOverlayText('menu.overlay.comms.retryMessage'),
                   (_) => _sendLocal(
                     chat,
                     action['key'] as String,
@@ -153,22 +155,26 @@ final class MenuOrganizationChatSession {
             if (chat.canRestore(local))
               'restore': (() {
                 late Map<String, Object?> action;
-                action = session.button('放回输入框编辑', (_) async {
-                  final key = action['key'] as String;
-                  if (!chat.canRestore(local)) {
-                    session.emit({
-                      ...session.currentView,
-                      'rejectedAction': key,
-                    });
-                    return;
-                  }
-                  chat.restoreLocalDraft(local);
-                  // The renderer already holds a guarded copy. Confirm that
-                  // the failed record has been retired before unlocking it.
-                  chat.updateDraft('');
-                  delivery.acceptedAction = key;
-                  session.emit(session.currentView);
-                });
+                action = session.button(
+                  MenuOverlayText('menu.overlay.comms.editMessage'),
+                  (_) async {
+                    final key = action['key'] as String;
+                    if (!chat.canRestore(local)) {
+                      session.emit({
+                        ...session.templateView,
+                        'rejectedAction': key,
+                      });
+                      return;
+                    }
+                    chat.restoreLocalDraft(local);
+                    // The renderer already holds a guarded copy. Confirm that
+                    // the failed record has been retired before unlocking it.
+                    chat.updateDraft('');
+                    delivery.acceptedAction = key;
+                    session.emit(session.templateView);
+                  },
+                  role: 'editMessage',
+                );
                 return action['key'];
               })(),
           },
@@ -181,15 +187,15 @@ final class MenuOrganizationChatSession {
     if (chat == null ||
         chat.invalidated ||
         !chat.hasLocalDelivery ||
-        session.currentView['chat'] is! Map) {
+        session.templateView['chat'] is! Map) {
       return null;
     }
     _deliveries[chat]!.timedOut = true;
     return {
-      ...session.currentView,
+      ...session.templateView,
       'busy': false,
       'refreshing': false,
-      'notice': '尚未确认发送结果，消息已保留，请核对后再继续。',
+      'notice': MenuOverlayText('menu.overlay.comms.sendRetained'),
     };
   }
 
@@ -200,7 +206,7 @@ final class MenuOrganizationChatSession {
     // history, directory, profiles and receipts wait for a fresh authorized read.
     return {
       'state': 'ready',
-      'title': '组织聊天',
+      'title': MenuOverlayText('menu.overlay.organizations.chat'),
       'busy': true,
       'rows': <Map<String, Object?>>[],
       'buttons': <Map<String, Object?>>[],
@@ -263,14 +269,14 @@ final class MenuOrganizationChatSession {
       List<Map<String, Object?>> messages,
       Map<String, String> profiles,
       Map<String, String> receipts,
-      String notice,
+      Object notice,
     })
   >
   read(String target, int epoch) async {
     final rows = <Map<String, Object?>>[], actions = <Map<String, Object?>>[];
     final messagePresentation = <Map<String, Object?>>[];
     final messageProfiles = <String, String>{}, receipts = <String, String>{};
-    var notice = '';
+    Object notice = '';
     if (!_chats.containsKey(target) && _chats.length >= 12) {
       final clean = _chats.entries
           .where((e) => !e.value.hasLocalDelivery)
@@ -290,13 +296,20 @@ final class MenuOrganizationChatSession {
     }
     if (chat.error != null) throw CommunityFailure(chat.error!);
     observed(target, chat.messages, chat.unreadCount);
-    if (chat.localHistoryUnavailable) notice = '消息已读取，但本机记录保存失败；重启后可能需要重新读取。';
+    if (chat.localHistoryUnavailable) {
+      notice = MenuOverlayText('menu.overlay.comms.cacheFailed');
+    }
     if (archive != null) {
       actions.add(
-        session.button('清除本机记录', (_) async {
-          await archive!.clear('organization', target);
-          views.remove(target);
-        }, confirm: '清除此会话的本机缓存？在线消息不会删除，后续读取可再次缓存。'),
+        session.button(
+          MenuOverlayText('menu.overlay.comms.clearLocal'),
+          (_) async {
+            await archive!.clear('organization', target);
+            views.remove(target);
+          },
+          confirm: MenuOverlayText('menu.overlay.comms.clearConfirm'),
+          role: 'clearLocalHistory',
+        ),
       );
     }
     if (sendStatus == 'unknown' &&
@@ -315,8 +328,11 @@ final class MenuOrganizationChatSession {
     for (final (index, message) in chat.messages.indexed) {
       rows.add({
         'title': message.callsign.isEmpty ? message.gameId : message.callsign,
-        'detail':
-            '${message.text}${message.hasAttachment ? "\n[附件请在客户端查看]" : ""}',
+        'detail': MenuOverlayJoin([
+          message.text,
+          if (message.hasAttachment)
+            const MenuOverlayText('menu.overlay.comms.attachmentClient'),
+        ]),
       });
       {
         final key =
@@ -346,15 +362,23 @@ final class MenuOrganizationChatSession {
             message.sequence > chat.confirmedReadThrough &&
             chat.receiptError == null) {
           receipts['$index'] =
-              session.button('读取消息', (_) async {
-                    failedVisibleMessageRef = message.messageRef;
-                    chat.setReadingContext(visible: true, foreground: true);
-                    try {
-                      await chat.acknowledgeVisible(message.messageRef);
-                    } finally {
-                      chat.setReadingContext(visible: false, foreground: false);
-                    }
-                  }, silent: true)['key']
+              session.button(
+                    MenuOverlayText('menu.overlay.comms.readMessages'),
+                    (_) async {
+                      failedVisibleMessageRef = message.messageRef;
+                      chat.setReadingContext(visible: true, foreground: true);
+                      try {
+                        await chat.acknowledgeVisible(message.messageRef);
+                      } finally {
+                        chat.setReadingContext(
+                          visible: false,
+                          foreground: false,
+                        );
+                      }
+                    },
+                    silent: true,
+                    role: 'readMessages',
+                  )['key']
                   as String;
         }
       }
@@ -362,34 +386,37 @@ final class MenuOrganizationChatSession {
     if (chat.canSubmit && _deliveries[chat]!.shown.length < 20) {
       late Map<String, Object?> sendAction;
       sendAction = session.button(
-        '发送消息',
+        MenuOverlayText('menu.overlay.comms.sendMessage'),
         (text) async {
           await _sendLocal(chat, sendAction['key'] as String, text);
         },
-        input: '输入消息',
+        input: MenuOverlayText('menu.overlay.comms.input'),
         limit: 1000,
+        role: 'sendMessage',
       );
       actions.add(sendAction);
     }
     if (chat.sendUncertain) {
-      notice = '发送结果未确认，请刷新聊天记录核对。';
+      notice = MenuOverlayText('menu.overlay.comms.checkHistory');
     } else if (chat.sendError != null) {
-      notice = '消息未发送，可重新编辑后提交。';
+      notice = MenuOverlayText('menu.overlay.comms.editRejected');
     } else if (_deliveries[chat]!.shown.length >= 20) {
-      notice = '有较多消息尚未核对，请先刷新消息。新草稿会保留。';
+      notice = MenuOverlayText('menu.overlay.comms.pendingLimit');
     }
     if (chat.hasOlder) {
       actions.add(
-        session.button('较早消息', (_) async {
+        session.button(MenuOverlayText('menu.overlay.comms.older'), (_) async {
           await chat.loadOlder();
-        }),
+        }, role: 'olderMessages'),
       );
     }
     if (!session.silentRead &&
         chat.receiptError != null &&
         failedVisibleMessageRef != null) {
       actions.add(
-        session.button('重试已读同步', (_) async {
+        session.button(MenuOverlayText('menu.overlay.comms.retryReadSync'), (
+          _,
+        ) async {
           chat.setReadingContext(visible: true, foreground: true);
           try {
             await chat.acknowledgeVisible(
@@ -399,7 +426,7 @@ final class MenuOrganizationChatSession {
           } finally {
             chat.setReadingContext(visible: false, foreground: false);
           }
-        }),
+        }, role: 'retryReadReceipt'),
       );
     }
 
@@ -499,7 +526,7 @@ final class MenuOrganizationChatSession {
       () => session.currentAccount(account),
       () {
         if (session.visible && selected() == target && chatSelected()) {
-          session.emit(session.currentView);
+          session.emit(session.templateView);
         }
       },
     );

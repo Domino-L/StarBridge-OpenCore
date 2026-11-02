@@ -3,10 +3,12 @@ import 'profile_module_strings.dart';
 
 const simplifiedLocalProfileStrings = <String, String>{
   'profile.visitor.notVisible': '对方尚未公开个人页面，或当前可见范围不包含你。',
+  'profile.visitor.identityUnavailable': '暂时无法确认此成员对应的个人主页。请返回成员列表，刷新后重试。',
   'profile.visitor.refreshMembers': '成员资料已更新。请返回并刷新列表后重试。',
   'profile.visitor.refreshSource': '这个入口已更新。请返回列表，刷新后重新打开。',
   'profile.visitor.accountRequired': '当前账号无法完成读取，请在“账号与识别”中确认登录后重试。',
   'profile.visitor.readTimeout': '读取个人页面超时，请检查连接后重新读取。',
+  'profile.visitor.rateLimited': '查看太频繁了，请稍后再试。',
   'profile.visibility.related': '舰队、组织与好友可见',
   'profile.visibility.title': '个人页面可见度',
   'profile.visibility.scopeNote':
@@ -46,6 +48,13 @@ const simplifiedLocalProfileStrings = <String, String>{
   'profile.local.label': '本机个人页面',
   'profile.local.description': '修改保存在本机。兼容期旧账号的背景会同步到在线页面，沿用原可见范围；其他本机内容不会上传。',
   'profile.local.backgroundPending': '修改已保存到本机，但背景同步尚未确认。请刷新页面后重试保存。',
+  'profile.callsign.localPending': '呼号已同步到账号，但本机展示资料未确认保存。请刷新后检查并重试。',
+  'profile.callsign.hint': 'StarBridge 展示呼号需联网授权后同步，不改变 SCM 用户名或 RSI Handle。',
+  'profile.local.accountDescription': '呼号保存时同步到账号，本页其他展示设置保存在本机。头像上传单独保存。',
+  'profile.callsign.unconfirmed': '呼号同步尚未确认。请刷新页面检查当前呼号后再保存。',
+  'profile.callsign.unavailable': '暂时无法同步呼号，本次修改未保存。请稍后重试。',
+  'profile.callsign.forbidden': '尚未获得呼号修改授权，本次修改未保存。请授权后重试。',
+  'profile.callsign.cancelled': '呼号修改已取消。请刷新页面检查当前呼号。',
   'profile.local.remoteUnavailable': '在线资料暂时无法读取，你仍可编辑并保存本机页面。',
   'profile.local.create': '创建个人页面',
   'profile.local.noCallSign': '未设置呼号',
@@ -66,10 +75,12 @@ const simplifiedLocalProfileStrings = <String, String>{
 };
 const traditionalLocalProfileStrings = <String, String>{
   'profile.visitor.notVisible': '對方尚未公開個人頁面，或目前可見範圍不包含你。',
+  'profile.visitor.identityUnavailable': '暫時無法確認此成員對應的個人主頁。請返回成員清單，重新整理後再試。',
   'profile.visitor.refreshMembers': '成員資料已更新。請返回並重新整理清單後重試。',
   'profile.visitor.refreshSource': '這個入口已更新。請返回清單，重新整理後再次開啟。',
   'profile.visitor.accountRequired': '目前帳號無法完成讀取，請在「帳號與識別」中確認登入後重試。',
   'profile.visitor.readTimeout': '讀取個人頁面逾時，請檢查連線後重新讀取。',
+  'profile.visitor.rateLimited': '查看太頻繁了，請稍後再試。',
   'profile.visibility.related': '艦隊、組織與好友可見',
   'profile.visibility.title': '個人頁面可見度',
   'profile.visibility.scopeNote':
@@ -109,6 +120,13 @@ const traditionalLocalProfileStrings = <String, String>{
   'profile.local.label': '本機個人頁面',
   'profile.local.description': '修改儲存在本機。相容期舊帳號的背景會同步至線上頁面，沿用原可見範圍；其他本機內容不會上傳。',
   'profile.local.backgroundPending': '修改已儲存至本機，但背景同步尚未確認。請重新整理頁面後重試儲存。',
+  'profile.callsign.localPending': '呼號已同步至帳號，但本機展示資料尚未確認儲存。請重新整理後檢查並重試。',
+  'profile.callsign.hint': 'StarBridge 展示呼號需連線授權後同步，不改變 SCM 使用者名稱或 RSI Handle。',
+  'profile.local.accountDescription': '儲存呼號時同步至帳號，本頁其他展示設定儲存在本機。頭像上傳另行儲存。',
+  'profile.callsign.unconfirmed': '呼號同步尚未確認。請重新整理頁面檢查目前呼號後再儲存。',
+  'profile.callsign.unavailable': '暫時無法同步呼號，本次修改未儲存。請稍後重試。',
+  'profile.callsign.forbidden': '尚未取得呼號修改授權，本次修改未儲存。請授權後重試。',
+  'profile.callsign.cancelled': '呼號修改已取消。請重新整理頁面檢查目前呼號。',
   'profile.local.remoteUnavailable': '線上資料暫時無法讀取，你仍可編輯並儲存本機頁面。',
   'profile.local.create': '建立個人頁面',
   'profile.local.noCallSign': '尚未設定呼號',
@@ -130,10 +148,13 @@ const traditionalLocalProfileStrings = <String, String>{
 const englishLocalProfileStrings = <String, String>{
   'profile.visitor.notVisible':
       'This profile is not published or is not shared with you.',
+  'profile.visitor.identityUnavailable':
+      'We could not match this member to a profile. Go back, refresh the member list, and try again.',
   'profile.visitor.refreshMembers':
       'Member details have changed. Go back, refresh the list, and try again.',
   'profile.visitor.refreshSource': 'This entry has changed. Go back, refresh the list, and reopen the profile.',
   'profile.visitor.accountRequired': 'Your account cannot complete this read. Check your sign-in in Account & identity, then try again.',
+  'profile.visitor.rateLimited': 'Too many profile views. Please try again later.',
   'profile.visitor.readTimeout':
       'The profile read timed out. Check your connection and retry.',
   'profile.visibility.related': 'Fleet, organizations and friends',
@@ -174,6 +195,13 @@ const englishLocalProfileStrings = <String, String>{
   'profile.local.label': 'Local personal page',
   'profile.local.description': 'Changes are saved on this device. Legacy accounts also sync the background to their online page without changing its audience. Other local content is not uploaded.',
   'profile.local.backgroundPending': 'Changes were saved on this device, but background sync is unconfirmed. Refresh the page, then try saving again.',
+  'profile.callsign.localPending': 'Your callsign was synced to your account, but local presentation changes are unconfirmed. Refresh, check and retry.',
+  'profile.callsign.hint': 'Syncing your StarBridge callsign requires online authorization. Your SCM username and RSI Handle stay unchanged.',
+  'profile.local.accountDescription': 'Saving syncs your callsign to your account. Other presentation settings stay on this device. Avatar uploads are saved separately.',
+  'profile.callsign.unconfirmed': 'Callsign sync is unconfirmed. Refresh and check the current callsign before saving again.',
+  'profile.callsign.unavailable': 'Callsign sync is unavailable. These changes were not saved. Try again later.',
+  'profile.callsign.forbidden': 'Callsign write permission was not granted. These changes were not saved. Authorize and retry.',
+  'profile.callsign.cancelled': 'Callsign editing was cancelled. Refresh to check your current callsign.',
   'profile.local.remoteUnavailable': 'Online details are unavailable. You can still edit and save your local page.',
   'profile.local.create': 'Create personal page',
   'profile.local.noCallSign': 'No call sign yet',

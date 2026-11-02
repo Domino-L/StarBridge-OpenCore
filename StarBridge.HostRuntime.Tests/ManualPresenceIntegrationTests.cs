@@ -59,7 +59,7 @@ internal static class ManualPresenceIntegrationTests
             Check(sent.Count==count,"no invisible periodic publishing");
             Check((await Set("inGame")).Payload.GetProperty("state").GetString()=="ready" && sent[^1].GetProperty("liveStatus").GetString()=="InGame" && sent[^1].GetProperty("ship").GetString()=="Unknown", "resume previous consent with forced status but no fabricated game facts");
             fail=true;
-            Check((await Set("invisible")).Payload.GetProperty("state").GetString()=="unconfirmed" && bridge.PublicationMode==PlayerPresenceVisibilityMode.Invisible,"failed clear stays unconfirmed and blocks publication");
+            Check((await Set("invisible")).Payload.GetProperty("state").GetString()=="ready" && bridge.PublicationMode==PlayerPresenceVisibilityMode.Invisible && publication.ClearPending,"confirmed invisible and pending clear are separate; positive publication stays blocked");
             fail=false;
             Check((await Set("invisible")).Payload.GetProperty("state").GetString()=="ready","explicit retry confirms failed clear");
             await publication.StopAsync(default,explicitRequest:true);
@@ -82,6 +82,7 @@ internal static class ManualPresenceIntegrationTests
             Check(sent.Count==count,"account change removes old publication consent");
             File.WriteAllText(Path.Combine(root,"sync-privacy.settings.json"),"{\"PresenceVisibilityMode\":1,\"PresenceVisibilityMode\":0}");
             Check(bridge.PublicationMode==PlayerPresenceVisibilityMode.Invisible,"corrupt duplicate settings fail closed");
+            Check(bridge.ReadPublicationSnapshot().SuspensionError == "privacy_local.read_failed", "corrupt visibility is not a manual pause or a network claim");
             Console.WriteLine($"PASS {passed}/{passed}");
         }
         finally { Directory.Delete(root,true); }
@@ -97,9 +98,10 @@ internal static class ManualPresenceIntegrationTests
             var owner = new BridgeAccountContext("test", "scm", "first");
             long generation = 1;
             var authorityCalls = 0;
+            int? realtimeStatus = 1;
             PresenceVisibilityBridge Create() => new(store, () => (owner, generation),
                 async (_, _, change, token) => { await change(token); return true; },
-                (_, _, mode, _) => { authorityCalls++; return Task.FromResult(mode); }, () => true);
+                (_, _, mode, _) => { authorityCalls++; return Task.FromResult(mode); }, () => true, () => realtimeStatus);
             using var bridge = Create();
             async Task<string?> Read(PresenceVisibilityBridge target) => (await target.DispatchAsync(
                 BridgeEnvelope.Request("presence.read", Guid.NewGuid().ToString("N"), generation, new { schemaVersion = 1 }, owner)))
@@ -109,9 +111,112 @@ internal static class ManualPresenceIntegrationTests
             void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
             Check(await Read(bridge) == "unconfirmed" && authorityCalls == 0 && bridge.PublicationMode == PlayerPresenceVisibilityMode.Invisible,
                 "SCM initial read is not a remote confirmation and never implicitly writes");
+            using (var applying = Create())
+            {
+                var policies = new LocalPrivacyStore(root);
+                var policy = new LocalPrivacySettings(true,
+                    new(PlayerSharedStateFields.Presence, false, true, []),
+                    new(PlayerSharedStateFields.None, false));
+                var saved = policies.Save(owner, 0, Guid.NewGuid().ToString("N"), policy, () => true);
+                var sentOnline = false;
+                var rejectClear = false;
+                var clearClock = new SharingTestClock();
+                using var publication = new PrivacyPublication(policies,
+                    () => new(owner, generation, "Pilot", true, null, GameLogSessionSnapshot.Empty),
+                    (_, payload, _) => {
+                        sentOnline = payload.GetProperty("online").GetBoolean();
+                        if (rejectClear && !sentOnline) throw new HttpRequestException();
+                        return Task.CompletedTask;
+                    },
+                    startTimer: false, visibility: () => applying.PublicationMode, timeProvider: clearClock,
+                    visibilitySnapshot: () => applying.ReadPublicationSnapshot(),
+                    confirmExplicitSharing: applying.ConfirmObservedModeForExplicitSharing);
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(publication.Status.State == "applied" && sentOnline && authorityCalls == 0,
+                    "Explicit sharing with current SCM online acknowledgement must not silently withdraw or issue a presence write.");
+                var states = new List<string>();
+                publication.StatusChanged += () => states.Add(publication.Status.State);
+                foreach (var disconnected in new int?[] { null, 0 })
+                {
+                    states.Clear();
+                    realtimeStatus = disconnected;
+                    rejectClear = true;
+                    await publication.TickAsync();
+                    Check(!sentOnline && publication.Status.State == "reconnecting" &&
+                        publication.Status.ErrorCode == "privacy_publication.network_unavailable" && policies.HasPublicationConsent(owner),
+                        "SCM observation loss and failed withdrawal must preserve automatic recovery.");
+                    rejectClear = false;
+                    clearClock.Advance(60);
+                    await publication.TickAsync();
+                    await publication.TickAsync();
+                    Check(!sentOnline && publication.Status.State == "reconnecting" && !states.Contains("withdrawn"),
+                        "Disconnected SCM must stay fail-closed without a manual-pause event.");
+                    realtimeStatus = 1;
+                    await publication.TickAsync();
+                    Check(sentOnline && publication.Status.State == "applied" && authorityCalls == 0,
+                        "SCM observation recovery resumes existing sharing without a UI action or presence PUT.");
+                }
+                realtimeStatus = null;
+                states.Clear();
+                Check(await publication.ChangeVisibilityAsync(owner, generation, _ => Task.CompletedTask, default) &&
+                    publication.Status.State == "reconnecting" && !sentOnline && !states.Contains("withdrawn"),
+                    "An online visibility confirmation during connection loss must not become a manual pause.");
+                realtimeStatus = 1;
+                await publication.TickAsync();
+                Check(sentOnline && publication.Status.State == "applied", "Visibility confirmation resumes after current connection evidence returns.");
+                realtimeStatus = null;
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(!sentOnline && publication.Status.State == "reconnecting" && policies.HasPublicationConsent(owner),
+                    "Disconnected observation must retain consent and reconnect without enabling sharing.");
+                realtimeStatus = 3;
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(!sentOnline && publication.Status.State == "withdrawn", "SCM invisibility cannot be bypassed by reapply.");
+                realtimeStatus = 1;
+                store.Save(PlayerPresenceVisibilityMode.Invisible, store.Read().Revision, () => { });
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(!sentOnline && publication.Status.State == "withdrawn", "Local invisibility cannot be bypassed by an online SCM observation.");
+                realtimeStatus = null;
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(!sentOnline && publication.Status.State == "withdrawn", "Local manual invisibility still wins while disconnected.");
+                realtimeStatus = 1;
+                store.Save(PlayerPresenceVisibilityMode.Online, store.Read().Revision, () => { });
+                applying.ConfirmObservedModeForExplicitSharing(owner, generation - 1);
+                Check(applying.PublicationMode == PlayerPresenceVisibilityMode.Invisible, "Stale generation cannot confirm the new mode revision.");
+                await publication.ApplyAsync(owner, generation, saved.Revision, default);
+                Check(sentOnline && publication.Status.State == "applied" && authorityCalls == 0, "Fresh explicit sharing recovers without a remote presence write.");
+            }
+            using (var restoredVisibility = Create())
+            {
+                var policies = new LocalPrivacyStore(root);
+                var sends = new List<bool>();
+                realtimeStatus = null;
+                using var restoredPublication = new PrivacyPublication(policies,
+                    () => new(owner, generation, "Pilot", true, null, GameLogSessionSnapshot.Empty),
+                    (_, payload, _) => { sends.Add(payload.GetProperty("online").GetBoolean()); return Task.CompletedTask; },
+                    startTimer: false, visibility: () => restoredVisibility.PublicationMode,
+                    visibilitySnapshot: () => restoredVisibility.ReadPublicationSnapshot(),
+                    confirmExplicitSharing: restoredVisibility.ConfirmObservedModeForExplicitSharing);
+                await restoredPublication.TickAsync();
+                Check(!sends.Contains(true) && restoredPublication.Status.State == "reconnecting",
+                    "Startup without current SCM confirmation waits for the connection without publishing or pausing.");
+                realtimeStatus = 1;
+                await restoredPublication.TickAsync();
+                Check(restoredPublication.Status.State == "applied" && sends[^1] && authorityCalls == 0,
+                    "Remembered sharing must resume after current SCM acknowledgement without manual apply or authority writes.");
+                await restoredPublication.StopAsync(default, explicitRequest: true);
+                await restoredPublication.TickAsync();
+                Check(!sends[^1] && !policies.HasPublicationConsent(owner), "Manual stop must not be undone by online acknowledgement.");
+            }
             await Set();
             Check(await Read(bridge) == "ready" && authorityCalls == 1 && bridge.PublicationMode == PlayerPresenceVisibilityMode.Online,
                 "explicit authority write confirms only its current generation and revision");
+            realtimeStatus = 3;
+            Check(bridge.PublicationMode == PlayerPresenceVisibilityMode.Invisible,
+                "remote invisibility overrides an older confirmed online preference");
+            realtimeStatus = null;
+            Check(bridge.PublicationMode == PlayerPresenceVisibilityMode.Invisible,
+                "disconnection cannot publish using an older confirmation");
+            realtimeStatus = 1;
             using (var restarted = Create())
                 Check(await Read(restarted) == "unconfirmed" && restarted.PublicationMode == PlayerPresenceVisibilityMode.Invisible,
                     "process restart does not promote a stored device mode to SCM confirmation");

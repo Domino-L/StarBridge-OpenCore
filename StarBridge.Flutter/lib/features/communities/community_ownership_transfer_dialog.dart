@@ -1,10 +1,15 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../common/social_read_activity.dart';
+
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import 'community_ownership_transfer_port.dart';
 import 'community_ownership_transfer_controller.dart';
 import 'community_ownership_transfer_copy.dart';
@@ -34,10 +39,21 @@ class _CommunityOwnershipTransferDialogState
     widget.memberRef,
   );
   StreamSubscription<void>? _contextSubscription;
+  late final SocialReadActivityBinding _reading, _sending;
   String t(String key) => ownershipTransferText(context, key);
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _sending = SocialReadActivityBinding(
+      model,
+      () => model.submitting,
+      initialRead: false,
+    );
     model.addListener(_changed);
     _contextSubscription = widget.contextInvalidations?.listen(
       (_) => model.invalidate(),
@@ -51,6 +67,8 @@ class _CommunityOwnershipTransferDialogState
 
   @override
   void dispose() {
+    _reading.dispose();
+    _sending.dispose();
     unawaited(_contextSubscription?.cancel());
     model.removeListener(_changed);
     model.dispose();
@@ -59,11 +77,15 @@ class _CommunityOwnershipTransferDialogState
 
   @override
   Widget build(BuildContext context) {
+    final activity = model.loading ? _reading : _sending;
     final member = model.snapshot;
     return PopScope(
       canPop: !model.submitting,
       child: AlertDialog(
-        icon: StandardIcon(StandardIconSemantic.swapHoriz, color: context.tokens.colors.danger),
+        icon: StandardIcon(
+          StandardIconSemantic.swapHoriz,
+          color: context.tokens.colors.danger,
+        ),
         title: Text(t('transfer')),
         content: SizedBox(
           width: 460,
@@ -73,7 +95,18 @@ class _CommunityOwnershipTransferDialogState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (model.loading || model.submitting)
-                  const LinearProgressIndicator(),
+                  KeyedSubtree(
+                    key: ValueKey((model.loading, activity.revision)),
+                    child: SocialReadActivity(
+                      key: const ValueKey('transfer-activity'),
+                      source: activity.source,
+                      opening: activity.opening,
+                      label: t(
+                        model.loading ? 'activityLoading' : 'activitySending',
+                      ),
+                      height: 4,
+                    ),
+                  ),
                 if (member != null) ...[
                   Text(
                     member.displayName,
@@ -115,32 +148,44 @@ class _CommunityOwnershipTransferDialogState
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: model.submitting
+          StarBridgeActionButton(
+            controlKey: const Key('member-transfer-cancel'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: model.submitting
                 ? null
-                : () => Navigator.pop(context, false),
+                : (source) => dismissStarBridgeDialog(
+                    context,
+                    source: source,
+                    result: false,
+                  ),
             child: Text(t(model.invalidated ? 'close' : 'cancel')),
           ),
           if (!model.invalidated &&
               (model.error != null || model.requiresRetryConfirmation))
-            TextButton(
-              onPressed: model.loading || model.submitting ? null : model.load,
+            StarBridgeActionButton(
+              controlKey: const Key('member-transfer-reload'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: model.loading || model.submitting
+                  ? null
+                  : (_) => model.load(),
               child: Text(t('reload')),
             ),
-          FilledButton(
-            style: semanticActionStyle(
-              context,
-              ActionTone.danger,
-              emphasis: ActionEmphasis.filled,
-            ),
-            onPressed: !model.canTransfer
+          StarBridgeActionButton(
+            controlKey: const Key('member-transfer-confirm'),
+            kind: StarBridgeActionKind.primary,
+            tone: ActionTone.danger,
+            onActivate: !model.canTransfer
                 ? null
-                : () async {
+                : (source) async {
                     await model.transfer(
                       confirmUncertainRetry: model.requiresRetryConfirmation,
                     );
                     if (mounted && model.transferred) {
-                      Navigator.pop(this.context, true);
+                      dismissStarBridgeDialog(
+                        this.context,
+                        source: source,
+                        result: true,
+                      );
                     }
                   },
             child: Text(

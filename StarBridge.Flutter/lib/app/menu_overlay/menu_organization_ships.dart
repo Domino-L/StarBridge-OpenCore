@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:async';
 
 import '../../features/communities/community_ships_port.dart';
@@ -10,6 +12,8 @@ import 'menu_organization_presentation.dart';
 
 /// Owns only organization ship read/projection; account authority stays in session.
 final class MenuOrganizationShips {
+  MenuOrganizationShips({this.language});
+  final String Function()? language;
   bool statisticsOpen = false;
   String? _target, _revision;
   Map<String, Object?>? _statistics;
@@ -25,7 +29,7 @@ final class MenuOrganizationShips {
       List<Map<String, Object?>> rows,
       List<Map<String, Object?>> presentation,
       Map<String, Object?>? statistics,
-      String notice,
+      Object notice,
     })
   >
   read(
@@ -67,14 +71,14 @@ final class MenuOrganizationShips {
       owners.map((owner) => avatars.read(media, target, owner)),
     );
     checkCurrent();
-    var notice = '';
+    Object notice = '';
     if (statisticsOpen && (_statistics == null || _revision != page.revision)) {
       _statistics = null;
       try {
         final stats = await readCommunityShipStatistics(
           port,
           target,
-          'zh-CN',
+          language?.call() ?? 'zh-CN',
           checkCurrent: checkCurrent,
           firstPage: page,
         );
@@ -94,7 +98,7 @@ final class MenuOrganizationShips {
           rethrow;
         }
         statisticsOpen = false;
-        notice = '暂时无法读取完整舰队统计，请重试。';
+        notice = MenuOverlayText('menu.overlay.organizations.statisticsFailed');
       }
     }
     return (

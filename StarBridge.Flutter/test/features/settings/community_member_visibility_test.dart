@@ -20,6 +20,8 @@ void main() {
   setUpAll(() async {
     for (final entry in const {
       'Source Sans 3': 'SourceSans3VF-Upright.ttf',
+      'Saira': 'Saira-VF.ttf',
+      'Rajdhani': 'Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(

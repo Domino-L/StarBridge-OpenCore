@@ -113,6 +113,59 @@ void main() {
     expect(session.complete, isTrue);
   });
 
+  test('a queued background refresh after a confirmed sign-in keeps startup ready', () {
+    final session = StartupSession()..markPresented();
+    addTearDown(session.dispose);
+    final signedIn = _signedOut.copyWith(
+      sessionState: AccountSessionState.signedIn,
+    );
+    session.resolveAccount(signedIn);
+    expect(session.value, StartupPhase.ready);
+    // The coalesced refresh starts immediately after the confirming read.
+    session.resolveAccount(
+      signedIn.copyWith(operation: AccountOperation.refreshing),
+    );
+    expect(session.value, StartupPhase.ready);
+    expect(session.accountStatus, StartupAccountStatus.signedIn);
+    // A refresh that then reports a real failure still blocks entry.
+    session.resolveAccount(
+      signedIn.copyWith(
+        sessionState: AccountSessionState.credentialTemporarilyUnavailable,
+      ),
+    );
+    expect(session.value, StartupPhase.accountUnavailable);
+  });
+
+  test('a refresh in a different account generation still waits', () {
+    final session = StartupSession()..markPresented();
+    addTearDown(session.dispose);
+    final signedIn = _signedOut.copyWith(
+      sessionState: AccountSessionState.signedIn,
+    );
+    session.resolveAccount(signedIn);
+    expect(session.value, StartupPhase.ready);
+    session.resolveAccount(
+      signedIn.copyWith(
+        generation: signedIn.generation + 1,
+        operation: AccountOperation.refreshing,
+      ),
+    );
+    expect(session.value, StartupPhase.account);
+  });
+
+  test('signing in or out is never treated as a background refresh', () {
+    final session = StartupSession()..markPresented();
+    addTearDown(session.dispose);
+    final signedIn = _signedOut.copyWith(
+      sessionState: AccountSessionState.signedIn,
+    );
+    session.resolveAccount(signedIn);
+    session.resolveAccount(
+      signedIn.copyWith(operation: AccountOperation.signingOut),
+    );
+    expect(session.value, StartupPhase.account);
+  });
+
   test('legacy account with unavailable Relay credentials is not shown as signed in', () {
     final session = StartupSession()..markPresented();
     addTearDown(session.dispose);

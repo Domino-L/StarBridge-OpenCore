@@ -2,11 +2,12 @@ import 'community_workspace_controller.dart';
 import 'community_workspace_port.dart';
 import 'community_workspace_reads.dart';
 import 'community_chat_attention.dart';
+import '../../shared/downloadable_image_cache.dart';
 
 /// Recent account-scoped workspaces, independent of the lifetime of their pages.
 /// Not a permissions cache: commands still use the Host's current authorization.
 /// Least-recently-used eviction bounds retained lists and media across organizations.
-final class CommunityWorkspaceSession {
+final class CommunityWorkspaceSession implements DownloadableImageCache {
   CommunityWorkspaceSession({
     DateTime Function()? now,
     this.capacity = 4,
@@ -28,6 +29,29 @@ final class CommunityWorkspaceSession {
   CommunityWorkspaceController? _current;
   String? _organizationKey;
   final _attemptedRoots = <(String, String)>{};
+  bool _imagesPaused = false;
+
+  Iterable<CommunityWorkspaceController> get _imageOwners => {
+    ..._recent.values,
+    ..._deliveryOwners.values,
+    ?_current,
+  };
+
+  @override
+  void beginImageMaintenance() {
+    _imagesPaused = true;
+    for (final owner in _imageOwners) {
+      owner.setImageMaintenancePaused(true);
+    }
+  }
+
+  @override
+  void endImageMaintenance() {
+    _imagesPaused = false;
+    for (final owner in _imageOwners) {
+      owner.setImageMaintenancePaused(false);
+    }
+  }
 
   CommunityWorkspaceController? _prepareController(
     CommunityWorkspacePort port,
@@ -43,14 +67,14 @@ final class CommunityWorkspaceSession {
       return existing.targetRef == targetRef ? existing : null;
     }
     if (_recent.length >= capacity) return null;
-    return _recent[organizationKey] = CommunityWorkspaceController(
+    return _recent[organizationKey] = (CommunityWorkspaceController(
       port,
       targetRef,
       attention: attention,
       now: _now,
       readWorkspace: (target, query, offset, reuse) =>
           reads.read(port, target, query, offset, reuseFresh: reuse),
-    );
+    )..setImageMaintenancePaused(_imagesPaused));
   }
 
   Future<void> prefetch(
@@ -67,12 +91,15 @@ final class CommunityWorkspaceSession {
 
   /// Returns after one existing controller batch; no page must be mounted.
   /// A full cache stops speculation instead of churning through memberships.
+  /// [includeMedia] false prepares the root and sections only; remaining
+  /// portraits/ship media are then loaded when the workspace is opened.
   Future<bool> prepareNext(
     CommunityWorkspacePort port,
     String targetRef,
     String organizationKey,
-    String culture,
-  ) async {
+    String culture, {
+    bool includeMedia = true,
+  }) async {
     final model = _prepareController(port, targetRef, organizationKey);
     if (model == null) return false;
     if (model.busy || model.renewingReference) return true;
@@ -87,7 +114,7 @@ final class CommunityWorkspaceSession {
       await model.prepareNextSection(culture);
       return true;
     }
-    if (model.needsMediaPreparation) {
+    if (includeMedia && model.needsMediaPreparation) {
       await model.prepareRemainingMedia();
       return true;
     }
@@ -123,6 +150,7 @@ final class CommunityWorkspaceSession {
               reads.read(port, target, query, offset, reuseFresh: reuse),
         );
     _current = result;
+    result.setImageMaintenancePaused(_imagesPaused);
     if (organizationKey != null) {
       _recent[organizationKey] = result;
       while (_recent.length > capacity) {

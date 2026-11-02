@@ -225,7 +225,16 @@ void main() {
                 .color;
         expect(dot('online'), colors.info);
         expect(dot('invisible'), colors.offline);
-        expect(find.byType(MenuItemButton), findsNWidgets(2));
+        expect(dot('offline'), colors.danger);
+        expect(find.byType(MenuItemButton), findsNWidgets(3));
+        expect(
+          tester
+              .widget<MenuItemButton>(
+                find.byKey(const Key('manual-presence-offline')),
+              )
+              .onPressed,
+          isNull,
+        );
         expect(find.byKey(const Key('manual-presence-inGame')), findsNothing);
         expect(
           tester

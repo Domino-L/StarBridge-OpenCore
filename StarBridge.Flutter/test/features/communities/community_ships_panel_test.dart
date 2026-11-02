@@ -5,7 +5,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/shared/ships/ship_classification_tag.dart';
+import 'package:starbridge_flutter/features/communities/community_ship_vehicle_icon.dart';
 import 'package:starbridge_flutter/features/common/user_avatar_menu.dart';
+import 'package:starbridge_flutter/features/communities/community_catalog_ship_image.dart';
+import 'package:starbridge_flutter/features/communities/community_ship_banner.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_panel.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_port.dart';
 
@@ -15,6 +19,7 @@ import 'community_workspace_view_test.dart' show host;
 import '../friends/social_layout_test.dart' show loadFonts;
 
 class _Port extends WorkspaceTestPort implements CommunityShipsPort {
+  int total = 25;
   Completer<void>? gate;
   final requests =
       <({int offset, String? revision, CommunityShipQuery query})>[];
@@ -29,15 +34,16 @@ class _Port extends WorkspaceTestPort implements CommunityShipsPort {
   }) async {
     requests.add((offset: offset, revision: revision, query: query!));
     await gate?.future;
+    final total = this.total;
     final count = query.text == 'missing' ? 0 : 25;
     return CommunityShipsPage.parse({
       'schemaVersion': 1,
       'queryVersion': 2,
       'query': query.toPayload(),
       'targetRef': targetRef,
-      'revision': 'b' * 64,
+      'revision': (query.filter == 'all' ? 'b' : 'c') * 64,
       'offset': offset,
-      'totalCount': 25,
+      'totalCount': total,
       'matchedCount': count,
       'next': count > 20 && offset == 0 ? 20 : null,
       'ships': List.generate(
@@ -55,7 +61,12 @@ class _Port extends WorkspaceTestPort implements CommunityShipsPort {
   }
 }
 
-Future<void> _openShips(WidgetTester tester, _Port port, Locale locale) async {
+Future<void> _openShips(
+  WidgetTester tester,
+  _Port port,
+  Locale locale, {
+  bool list = true,
+}) async {
   await tester.pumpWidget(host(port, locale));
   await tester.pumpAndSettle();
   final entry = find.byKey(const ValueKey('community-section-ships'));
@@ -63,10 +74,84 @@ Future<void> _openShips(WidgetTester tester, _Port port, Locale locale) async {
   await tester.tap(entry);
   await tester.pumpAndSettle();
   expect(find.byType(CommunityShipsPanel), findsOneWidget);
+  // These checks cover the list view; cards have their own tests.
+  if (!list) return;
+  await tester.tap(find.byKey(const ValueKey('community-ships-view-list')));
+  await tester.pumpAndSettle();
 }
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets('cards are the default and keep every field and action', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final port = _Port();
+    addTearDown(port.changes.close);
+    await _openShips(tester, port, const Locale('en'), list: false);
+    String ref(int i) => i.toRadixString(16).padLeft(32, '0');
+    expect(find.byType(CommunityShipColumnHeader), findsNothing);
+    final first = find.byKey(ValueKey('community-ship-card-image-${ref(0)}'));
+    final second = find.byKey(ValueKey('community-ship-card-image-${ref(1)}'));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+    // Side by side in one grid row.
+    // The selected first card's frame may shift it by half a pixel.
+    expect(
+      tester.getRect(second).top,
+      moreOrLessEquals(tester.getRect(first).top, epsilon: 1),
+    );
+    expect(
+      tester.getRect(second).left,
+      greaterThan(tester.getRect(first).right),
+    );
+    // The card art fills its frame, as the approved preview.
+    final image = tester.widget<CommunityCatalogShipImage>(
+      find.descendant(
+        of: first,
+        matching: find.byType(CommunityCatalogShipImage),
+      ),
+    );
+    expect(image.compact, isTrue);
+    // The preview card (user 2026-10-29): name over the art, three tags, the
+    // owner, the price and the details action; no labelled cells, no glyph.
+    final card = find.byKey(ValueKey('community-ship-card-${ref(0)}'));
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.byType(CommunityShipBanner)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.byType(CommunityShipVehicleIcon),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: card, matching: find.byType(ShipClassificationTag)),
+      findsNWidgets(3),
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('Shared ship 1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('community-ship-details-${ref(0)}')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('community-ships-view-list')));
+    await tester.pumpAndSettle();
+    expect(first, findsNothing);
+    expect(find.byType(CommunityShipColumnHeader), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('community-ships-view-cards')));
+    await tester.pumpAndSettle();
+    expect(first, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('background ship polling does not show a loading bar', (
     tester,
   ) async {
@@ -83,6 +168,47 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('a filter reads its list once; statistics stay and do not reread', (
+    tester,
+  ) async {
+    final port = _Port();
+    addTearDown(port.changes.close);
+    await _openShips(tester, port, const Locale('zh', 'CN'));
+    final reads = port.requests.length;
+    await tester.tap(find.byKey(const ValueKey('community-ship-filter-large')));
+    await tester.pump();
+    expect(find.text('正在读取全库统计…'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('正在读取全库统计…'), findsNothing);
+    expect(port.requests.length, reads + 1, reason: 'Only the list.');
+    expect(port.requests.last.query.filter, 'large');
+    expect(port.requests.last.offset, 0);
+    await tester.tap(find.byKey(const ValueKey('community-ship-filter-all')));
+    await tester.pumpAndSettle();
+    expect(port.requests.length, reads + 2, reason: 'Back again, the same.');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('statistics reread when the inventory really changed', (
+    tester,
+  ) async {
+    final port = _Port();
+    addTearDown(port.changes.close);
+    await _openShips(tester, port, const Locale('zh', 'CN'));
+    final reads = port.requests.length;
+    port.total = 26;
+    await tester.tap(find.byKey(const ValueKey('community-ship-filter-large')));
+    await tester.pumpAndSettle();
+    final later = port.requests.skip(reads).toList();
+    expect(later.first.query.filter, 'large');
+    expect(
+      later.skip(1).where((read) => read.query.filter == 'all'),
+      isNotEmpty,
+      reason: 'The count moved, whatever the filter shows.',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('returning to ships preserves its page without refetching', (
     tester,
   ) async {
@@ -178,11 +304,20 @@ void main() {
       final port = _Port();
       addTearDown(port.changes.close);
       await _openShips(tester, port, const Locale('en'));
-      await tester.ensureVisible(find.text('Next'));
-      await tester.tap(find.text('Next'));
+      // Pages accumulate and load by themselves: page 1 stays.
+      expect(find.byKey(const Key('community-ships-next')), findsNothing);
       await tester.pumpAndSettle();
       expect(port.requests.last.offset, 20);
       expect(port.requests.last.revision, 'b' * 64);
+      expect(find.text('Shared ship 1'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Shared ship 21'),
+        300,
+        scrollable: find.descendant(
+          of: find.byKey(const Key('community-ships-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
       expect(find.text('Shared ship 21'), findsOneWidget);
       await tester.ensureVisible(find.byType(TextField));
       await tester.enterText(find.byType(TextField), 'missing');
@@ -195,8 +330,11 @@ void main() {
       await tester.tap(find.text('Clear filters'));
       await tester.pumpAndSettle();
       expect(port.requests.last.query.text, isEmpty);
-      await tester.ensureVisible(find.byType(DropdownButton<String>).last);
-      await tester.tap(find.byType(DropdownButton<String>).last);
+      final sortControl = find.byKey(
+        const ValueKey('community-ships-sort-control'),
+      );
+      await tester.ensureVisible(sortControl);
+      await tester.tap(sortControl);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Ship name').last);
       await tester.pumpAndSettle();

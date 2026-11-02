@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 
+import 'dart:async';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_menu_anchor.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../platform/window/native_viewport_visibility.dart';
 import 'personal_profile_layout.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_favorite_modules.dart';
@@ -42,77 +50,121 @@ class PersonalProfileModuleControls extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (onEditPositions != null)
-          IconButton(
-            key: const Key('profile-positions-edit'),
-            onPressed: onEditPositions,
-            tooltip: strings.text('profile.position.title'),
-            visualDensity: VisualDensity.compact,
-            icon: StarBridgeIcon(
-              StarBridgeIconSemantic.edit,
-              size: tokens.icons.small,
+          SizedBox.square(
+            dimension: tokens.density.controlHeight * .8,
+            child: StarBridgeIconAction(
+              controlKey: const Key('profile-positions-edit'),
+              constraints: BoxConstraints.tightFor(
+                width: tokens.density.compactControlHeight,
+                height: tokens.density.compactControlHeight,
+              ),
+              padding: EdgeInsets.all(tokens.space.xs),
+              onActivate: (_) => onEditPositions!(),
+              label: strings.text('profile.position.title'),
+              icon: StarBridgeIcon(
+                StarBridgeIconSemantic.edit,
+                size: tokens.icons.small,
+              ),
             ),
           ),
         if (onEditShips != null)
-          IconButton(
-            key: Key('profile-module-edit-${item.moduleId}'),
-            onPressed: onEditShips,
-            tooltip: strings.text('profile.favorites.edit'),
-            visualDensity: VisualDensity.compact,
-            icon: StarBridgeIcon(
-              StarBridgeIconSemantic.edit,
-              size: tokens.icons.small,
+          SizedBox.square(
+            dimension: tokens.density.controlHeight * .8,
+            child: StarBridgeIconAction(
+              controlKey: Key('profile-module-edit-${item.moduleId}'),
+              constraints: BoxConstraints.tightFor(
+                width: tokens.density.compactControlHeight,
+                height: tokens.density.compactControlHeight,
+              ),
+              padding: EdgeInsets.all(tokens.space.xs),
+              onActivate: (_) => onEditShips!(),
+              label: strings.text('profile.favorites.edit'),
+              icon: StarBridgeIcon(
+                StarBridgeIconSemantic.edit,
+                size: tokens.icons.small,
+              ),
             ),
           ),
         if (allowedSizes.length > 1) ...[
-          PopupMenuButton<PersonalProfileModuleSize>(
-            key: Key('profile-module-size-${item.moduleId}'),
-            tooltip: strings.text('profile.layout.size'),
-            onSelected: onSizeSelected,
-            itemBuilder: (context) => [
-              for (final size in allowedSizes)
-                PopupMenuItem(
-                  value: size,
-                  enabled: size != item.size,
-                  child: Text(strings.text('profile.layout.size.${size.name}')),
-                ),
-            ],
-            child: Container(
-              height: tokens.density.compactControlHeight,
-              padding: EdgeInsets.symmetric(horizontal: tokens.space.sm),
-              decoration: BoxDecoration(
-                color: tokens.surfaces.status.fill,
-                borderRadius: tokens.shape.small,
-                border: Border.all(
-                  color: tokens.surfaces.status.border,
-                  width: tokens.stroke.hairline,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  StarBridgeIcon(
-                    StarBridgeIconSemantic.resize,
-                    size: tokens.icons.small,
-                    color: tokens.colors.textSecondary,
+          NativeViewportMenu(
+            builder: (onOpen, onClose) => StarBridgeMenuAnchor(
+              semanticLabel: strings.text('profile.layout.size'),
+              onOpen: onOpen,
+              onClose: onClose,
+              entries: [
+                for (final size in allowedSizes)
+                  StarBridgeMenuEntry(
+                    id: ('profile-module-size-${item.moduleId}', size),
+                    label: strings.text('profile.layout.size.${size.name}'),
+                    selected: size == item.size,
+                    onActivate: size == item.size
+                        ? null
+                        : (source) => unawaited(
+                            runStarBridgeActivation<void>(
+                              source,
+                              () => onSizeSelected(size),
+                            ),
+                          ),
+                    child: Text(
+                      strings.text('profile.layout.size.${size.name}'),
+                    ),
                   ),
-                  SizedBox(width: tokens.space.xs),
-                  Text(
-                    strings.text('profile.layout.size.${item.size.name}'),
-                    style: Theme.of(context).textTheme.labelMedium,
+              ],
+              builder: (_, _, focus, toggle) => StarBridgeTooltip(
+                message: strings.text('profile.layout.size'),
+                child: StarBridgeActionRow(
+                  controlKey: Key('profile-module-size-${item.moduleId}'),
+                  focusNode: focus,
+                  onActivate: (_, source) => toggle(source),
+                  child: Container(
+                    height: tokens.density.compactControlHeight,
+                    padding: EdgeInsets.symmetric(horizontal: tokens.space.sm),
+                    decoration: BoxDecoration(
+                      color: tokens.surfaces.status.fill,
+                      borderRadius: tokens.shape.small,
+                      border: Border.all(
+                        color: tokens.surfaces.status.border,
+                        width: tokens.stroke.hairline,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        StarBridgeIcon(
+                          StarBridgeIconSemantic.resize,
+                          size: tokens.icons.small,
+                          color: tokens.colors.textSecondary,
+                        ),
+                        SizedBox(width: tokens.space.xs),
+                        Text(
+                          strings.text('profile.layout.size.${item.size.name}'),
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
         ],
         SizedBox(width: tokens.space.xs),
-        IconButton(
-          key: Key('profile-module-remove-${item.moduleId}'),
-          onPressed: onRemove,
-          tooltip: strings.text('profile.layout.remove'),
-          visualDensity: VisualDensity.compact,
-          iconSize: tokens.icons.small,
-          icon: StarBridgeIcon(StarBridgeIconSemantic.remove),
+        SizedBox.square(
+          dimension: tokens.density.controlHeight * .8,
+          child: StarBridgeIconAction(
+            controlKey: Key('profile-module-remove-${item.moduleId}'),
+            constraints: BoxConstraints.tightFor(
+              width: tokens.density.compactControlHeight,
+              height: tokens.density.compactControlHeight,
+            ),
+            padding: EdgeInsets.all(tokens.space.xs),
+            onActivate: (_) => onRemove(),
+            label: strings.text('profile.layout.remove'),
+            icon: StarBridgeIcon(
+              StarBridgeIconSemantic.remove,
+              size: tokens.icons.small,
+            ),
+          ),
         ),
       ],
     );
@@ -136,52 +188,74 @@ class PersonalProfileAddModuleButton extends StatelessWidget {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
     final entries = ProfileFavoriteModules.addMenuItems(hiddenModuleIds);
-    return PopupMenuButton<String>(
-      enabled: hiddenModuleIds.isNotEmpty,
-      tooltip: strings.text('profile.layout.addModule'),
-      onSelected: onSelected,
-      itemBuilder: (context) => [
-        for (final moduleId in entries)
-          PopupMenuItem(
-            value: moduleId,
-            child: Text(strings.text(personalProfileModuleTitleKey(moduleId))),
-          ),
-      ],
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? tokens.space.sm : tokens.space.md,
-          vertical: tokens.space.sm,
-        ),
-        decoration: BoxDecoration(
-          color: tokens.surfaces.status.fill,
-          borderRadius: tokens.shape.small,
-          border: Border.all(
-            color: tokens.surfaces.status.border,
-            width: tokens.stroke.hairline,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            StarBridgeIcon(
-              StarBridgeIconSemantic.add,
-              size: tokens.icons.small,
-              color: hiddenModuleIds.isEmpty
-                  ? tokens.colors.textDisabled
-                  : tokens.colors.accent,
-            ),
-            if (!compact) ...[
-              SizedBox(width: tokens.space.xs),
-              Text(
-                strings.text('profile.layout.addModule'),
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: hiddenModuleIds.isEmpty
-                      ? tokens.colors.textDisabled
-                      : null,
+    final enabled = hiddenModuleIds.isNotEmpty;
+    return NativeViewportMenu(
+      builder: (onOpen, onClose) => StarBridgeMenuAnchor(
+        enabled: enabled,
+        retainExitContent: enabled,
+        semanticLabel: strings.text('profile.layout.addModule'),
+        onOpen: onOpen,
+        onClose: onClose,
+        entries: [
+          for (final moduleId in entries)
+            StarBridgeMenuEntry(
+              id: ('profile-add-module', moduleId),
+              label: strings.text(personalProfileModuleTitleKey(moduleId)),
+              onActivate: (source) => unawaited(
+                runStarBridgeActivation<void>(
+                  source,
+                  () => onSelected(moduleId),
                 ),
               ),
-            ],
-          ],
+              child: Text(
+                strings.text(personalProfileModuleTitleKey(moduleId)),
+              ),
+            ),
+        ],
+        builder: (_, _, focus, toggle) => StarBridgeTooltip(
+          message: strings.text('profile.layout.addModule'),
+          child: StarBridgeActionRow(
+            controlKey: const Key('profile-add-module-anchor'),
+            focusNode: focus,
+            onActivate: enabled ? (_, source) => toggle(source) : null,
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? tokens.space.sm : tokens.space.md,
+                vertical: tokens.space.sm,
+              ),
+              decoration: BoxDecoration(
+                color: tokens.surfaces.status.fill,
+                borderRadius: tokens.shape.small,
+                border: Border.all(
+                  color: tokens.surfaces.status.border,
+                  width: tokens.stroke.hairline,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  StarBridgeIcon(
+                    StarBridgeIconSemantic.add,
+                    size: tokens.icons.small,
+                    color: hiddenModuleIds.isEmpty
+                        ? tokens.colors.textDisabled
+                        : tokens.colors.accent,
+                  ),
+                  if (!compact) ...[
+                    SizedBox(width: tokens.space.xs),
+                    Text(
+                      strings.text('profile.layout.addModule'),
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: hiddenModuleIds.isEmpty
+                            ? tokens.colors.textDisabled
+                            : null,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

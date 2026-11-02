@@ -1,3 +1,4 @@
+import 'menu_resolved_copy_test_support.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
@@ -9,7 +10,7 @@ import 'package:starbridge_flutter/features/communities/communities_module.dart'
 import 'package:starbridge_flutter/features/communities/community_chat_port.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_port.dart';
 import 'package:starbridge_flutter/features/communities/community_announcements_port.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_row.dart';
 
 import '../../features/friends/social_layout_test.dart'
     show app, size, loadFonts, capture;
@@ -132,7 +133,7 @@ void main() {
       expect(find.text('组织列表'), findsNothing);
       expect(
         find.descendant(
-          of: find.byType(CommunityMemberHeader),
+          of: find.byType(OrganizationMemberHeader),
           matching: find.text('成员'),
         ),
         findsNothing,
@@ -197,7 +198,7 @@ void main() {
         find.byKey(const ValueKey('community-section-chat')),
       );
       expect(chip.onSelected, isNull);
-      expect(find.byTooltip('此功能尚未接入当前客户端。'), findsNothing);
+      expect(find.byTooltip('暂不可用'), findsNothing);
       expect(actions, isEmpty);
       expect(tester.takeException(), isNull);
     },
@@ -230,7 +231,7 @@ void main() {
   });
   test('menu sections use the same connected feature flags as client', () {
     final port = DisconnectedSections();
-    expect(organizationSections(port), {'members': '成员'});
+    expect(resolvedMenuCopy(organizationSections(port)), {'members': '成员'});
   });
   testWidgets('sidebar breakpoints and large text preserve access', (
     tester,

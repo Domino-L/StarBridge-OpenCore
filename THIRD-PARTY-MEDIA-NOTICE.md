@@ -6,6 +6,10 @@
 StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情图和星系地图原图。
 这些图片即使出现在 StarBridge 的内部工作区或官方客户端中，也不会因此自动采用 Apache-2.0。
 
+## 0.7.2 官方安装包
+
+0.7.2 官方安装包带有舰船图片、星系地图和首页视频。这是维护者为非商业测试版自行作出的决定，不代表已获权利人授权：舰船图片和星系地图的来源待核实（计划在 0.7.3 核实），首页视频是维护者在游戏内录制，没有书面许可。这些素材不在公开源码中，也不采用 Apache-2.0。下面是历史版本的记录。
+
 ## 0.6.6.1 公开载荷
 
 0.6.6.1 的公开安装包和更新包不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
@@ -19,9 +23,9 @@ StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情
 - 受管媒体字节数为零；
 - 载荷中不存在媒体登记文件或受管媒体目录。
 
-## 未来媒体的准入条件
+## 经媒体审计的打包路径
 
-官方客户端只有在同时满足以下条件时，才可以恢复第三方媒体：
+这一节只适用于运行媒体审计的旧版 WPF 安装和更新脚本。0.7.2 的 Flutter 官方安装包不走这条路径，见上面“0.7.2 官方安装包”。在这条路径上，只有同时满足以下条件，才可以恢复第三方媒体：
 
 - 图片列入 `third-party-media-manifest.json`，且文件路径、大小和 SHA-256 完全一致；
 - `third-party-media-sources.json` 中记录可追溯的来源、权利人、许可或书面授权；
@@ -33,7 +37,7 @@ StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情
 - 已记录审核人和审核日期。
 
 来源或再分发权仍为待确认状态的图片，可以保留在私有工作区中继续整理和替换；
-正式发布流程会主动阻止它们进入公开安装包。媒体审计报告是正式载荷和发布证据的必需材料，
+这条路径会主动阻止它们进入安装包。媒体审计报告是这条路径的载荷和发布证据的必需材料，
 不能以人工确认或仅提供清单代替。
 
 图片原权利人的权利不受 StarBridge 开放源码许可影响。清单中的哈希和路径仅用于核验官方客户端内容，
@@ -53,14 +57,15 @@ Every official 0.6.6 payload must include a passing
 release gate also rejects media registration files and managed media
 directories from the payload.
 
-Future media may enter an official binary only when it is declared in the
-exact-hash manifest and has a reviewed source record that explicitly permits
+The audited packaging path, used by the WPF-era installer and update scripts,
+admits media only when it is declared in the exact-hash manifest and has a reviewed source record that explicitly permits
 `official-binary` redistribution. Repository audits verify the private
 evidence file, its SHA-256, and every path component; expired permissions are
 rejected. Payload audits validate the same registration fields without
 requiring private evidence to be distributed.
 
-Media with unknown provenance may remain in the private working collection for
-review or replacement, but it must not pass the official release gate. The
-copyright and other rights in third-party media remain with their respective
+Media with unknown provenance does not pass that audited path. The 0.7.2 Flutter
+official binary does not run it: that binary ships ship images, system maps and
+home scene videos by the maintainer's own decision, which is not a grant of
+rights. The copyright and other rights in third-party media remain with their respective
 owners.

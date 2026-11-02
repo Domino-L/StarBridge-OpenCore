@@ -117,6 +117,7 @@ void main() {
     port.pending!.complete(const DirectReadReceipt(59, 0));
     await mark;
     expect(module.rows.first.unread, 2);
-    expect(module.selected, isNull);
+    expect(module.selected?.ref, module.rows.first.ref);
+    expect(module.messages, isNotEmpty);
   });
 }

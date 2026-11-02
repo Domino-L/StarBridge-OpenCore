@@ -1,8 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../features/account/account_models.dart';
+import '../../features/common/social_read_activity.dart';
 import '../composition/handle_mismatch_module.dart';
 import '../../features/account/handle_mismatch_port.dart';
 import '../localization/app_strings.dart';
@@ -33,7 +39,7 @@ final class HandleMismatchFlow with WidgetsBindingObserver {
   final _backgroundAttempted = <HandleMismatchKey>{};
   final _backgroundInFlight = <HandleMismatchKey>{};
   int? _generation;
-  DialogRoute<bool>? _route;
+  StarBridgeDialogRoute<bool>? _route;
   HandleMismatchKey? _openKey;
   bool _disposed = false;
   bool get _foreground => switch (WidgetsBinding.instance.lifecycleState) {
@@ -71,7 +77,7 @@ final class HandleMismatchFlow with WidgetsBindingObserver {
           !_backgroundInFlight.any((key) => key.$1 == notice.generation) &&
           _foreground &&
           _route == null,
-      show: open,
+      show: () => _open(automatic: true),
     );
   }
 
@@ -85,7 +91,9 @@ final class HandleMismatchFlow with WidgetsBindingObserver {
     wake();
   }
 
-  Future<void> open() async {
+  Future<void> open() => _open();
+
+  Future<void> _open({bool automatic = false}) async {
     final notice = module.notice, navigator = queue.navigator;
     if (_disposed ||
         notice == null ||
@@ -97,9 +105,18 @@ final class HandleMismatchFlow with WidgetsBindingObserver {
     queue.cancel(_promptKey);
     _seen.add(notice.key);
     _openKey = notice.key;
-    final route = DialogRoute<bool>(
-      context: navigator.context,
-      barrierDismissible: false,
+    final source = captureStarBridgeActivationSource()();
+    final route = StarBridgeDialogRoute<bool>(
+      data:
+          InteractionScope.maybeOf(navigator.context) ??
+          resolveStarBridgeInteraction(navigator.context),
+      link: InteractionScope.linkOf(navigator.context),
+      barrierLabel: MaterialLocalizations.of(navigator.context)
+          .modalBarrierDismissLabel,
+      // Legacy/manual delegates do not always publish their input source.
+      // Unknown is static; the queue's automatic opening is a separate fact.
+      instant: !automatic && source != InteractionSource.pointer,
+      dismissible: false,
       builder: (_) => _HandleMismatchDialog(module: module, notice: notice),
     );
     _route = route;
@@ -136,10 +153,48 @@ final class HandleMismatchFlow with WidgetsBindingObserver {
   }
 }
 
-class _HandleMismatchDialog extends StatelessWidget {
+class _HandleMismatchDialog extends StatefulWidget {
   const _HandleMismatchDialog({required this.module, required this.notice});
   final HandleMismatchModule module;
   final HandleMismatchNotice notice;
+
+  @override
+  State<_HandleMismatchDialog> createState() => _HandleMismatchDialogState();
+}
+
+class _HandleMismatchDialogState extends State<_HandleMismatchDialog> {
+  HandleMismatchModule get module => widget.module;
+  HandleMismatchNotice get notice => widget.notice;
+  late SocialReadActivityBinding _activity;
+
+  @override
+  void initState() {
+    super.initState();
+    _bindActivity();
+  }
+
+  void _bindActivity() {
+    _activity = SocialReadActivityBinding(
+      module,
+      () => module.busy,
+      initialRead: false,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _HandleMismatchDialog oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.module, module)) {
+      _activity.dispose();
+      _bindActivity();
+    }
+  }
+
+  @override
+  void dispose() {
+    _activity.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -160,67 +215,101 @@ class _HandleMismatchDialog extends StatelessWidget {
           title: Text(strings.text('identity.notice.title')),
           content: SizedBox(
             width: 480,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Text(handleMismatchPair(strings, notice)),
-                const SizedBox(height: 16),
-                Text(strings.text('identity.notice.body')),
-                const SizedBox(height: 12),
-                Text(strings.text('identity.notice.${state.name}')),
-                const SizedBox(height: 12),
-                Text(
-                  strings.text(
-                    state == HandleCheckState.ready ||
-                            state == HandleCheckState.outcomeUnknown
-                        ? 'identity.notice.consequence'
-                        : 'identity.notice.readOnly',
-                  ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(handleMismatchPair(strings, notice)),
+                    const SizedBox(height: 16),
+                    Text(strings.text('identity.notice.body')),
+                    const SizedBox(height: 12),
+                    Text(strings.text('identity.notice.${state.name}')),
+                    const SizedBox(height: 12),
+                    Text(
+                      strings.text(
+                        state == HandleCheckState.ready ||
+                                state == HandleCheckState.outcomeUnknown
+                            ? 'identity.notice.consequence'
+                            : 'identity.notice.readOnly',
+                      ),
+                    ),
+                    if (module.failed)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(strings.text('identity.notice.failed')),
+                      ),
+                    const SizedBox(height: 8),
+                    StarBridgeActionButton(
+                      controlKey: const ValueKey('handle-mismatch-recheck'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: current && !module.busy
+                          ? (_) => unawaited(module.recheck())
+                          : null,
+                      child: Text(
+                        strings.text(
+                          module.busy
+                              ? 'identity.notice.busy'
+                              : 'identity.notice.retry',
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                if (module.failed)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(strings.text('identity.notice.failed')),
-                  ),
-                const SizedBox(height: 8),
-                TextButton(
-                  key: const ValueKey('handle-mismatch-recheck'),
-                  onPressed: current && !module.busy
-                      ? () => unawaited(module.recheck())
-                      : null,
-                  child: Text(
-                    strings.text(
-                      module.busy
-                          ? 'identity.notice.busy'
-                          : 'identity.notice.retry',
+                if (module.busy)
+                  Positioned(
+                    top: -8,
+                    left: 0,
+                    right: 0,
+                    child: ExcludeSemantics(
+                      child: SocialReadActivity(
+                        key: ValueKey((
+                          'handle-mismatch-activity',
+                          _activity.revision,
+                        )),
+                        source: _activity.source,
+                        opening: false,
+                        label: strings.text('identity.notice.busy'),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
           actions: [
-            TextButton(
-              key: const ValueKey('handle-mismatch-later'),
-              onPressed: module.busy
+            StarBridgeActionButton(
+              controlKey: const ValueKey('handle-mismatch-later'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: module.busy
                   ? null
-                  : () => Navigator.of(context).pop(false),
+                  : (source) => dismissStarBridgeDialog(
+                      context,
+                      source: source,
+                      result: false,
+                    ),
               child: Text(strings.text('identity.notice.later')),
             ),
             if (state == HandleCheckState.ready ||
                 state == HandleCheckState.outcomeUnknown)
-              FilledButton(
-                key: const ValueKey('handle-mismatch-confirm'),
-                onPressed: current && module.canConfirm
-                    ? () => unawaited(module.confirm())
+              StarBridgeActionButton(
+                controlKey: const ValueKey('handle-mismatch-confirm'),
+                kind: StarBridgeActionKind.primary,
+                onActivate: current && module.canConfirm
+                    ? (_) => unawaited(module.confirm())
                     : null,
                 child: Text(strings.text('identity.notice.confirm')),
               ),
-            FilledButton(
-              key: const ValueKey('handle-mismatch-account'),
-              onPressed: current && !module.busy
-                  ? () => Navigator.of(context).pop(true)
+            StarBridgeActionButton(
+              controlKey: const ValueKey('handle-mismatch-account'),
+              kind: StarBridgeActionKind.primary,
+              onActivate: current && !module.busy
+                  ? (source) => dismissStarBridgeDialog(
+                      context,
+                      source: source,
+                      result: true,
+                    )
                   : null,
               child: Text(strings.text('identity.notice.open')),
             ),

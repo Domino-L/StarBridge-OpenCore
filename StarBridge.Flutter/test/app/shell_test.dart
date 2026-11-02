@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:starbridge_flutter/features/common/user_interaction.dart';
 import 'package:starbridge_flutter/features/common/user_profile_page.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_page.dart';
+import 'package:starbridge_flutter/features/marketplace/marketplace_page.dart';
 
 import '../features/communities/community_visitor_profile_test.dart'
     show VisitorPort;
@@ -22,11 +23,21 @@ import 'package:starbridge_flutter/app/routing/open_destination_intent.dart';
 import 'package:starbridge_flutter/features/settings/settings_page.dart';
 import 'package:starbridge_flutter/features/settings/settings_models.dart';
 import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_caption_action.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 import 'package:starbridge_flutter/features/account/account_models.dart';
 import 'package:starbridge_flutter/features/account/account_port.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
 import 'package:starbridge_flutter/features/friends/friends_page.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
+import 'package:starbridge_flutter/features/tools/tools_page.dart';
+import 'package:starbridge_flutter/features/tools/exec_hangar_page.dart';
+
+Finder shellHint(String message) => find.byWidgetPredicate(
+  (widget) =>
+      widget is Tooltip && widget.message == message ||
+      widget is StarBridgeTooltip && widget.message == message,
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,10 +49,10 @@ void main() {
         initial: InMemoryShellChrome.connectedProjection.copyWith(
           overlay: const OverlaySceneProjection(
             options: [
-              OverlaySceneOption(id: 'fleet', labelKey: '', label: source),
+              OverlaySceneOption(id: 'preset', labelKey: '', label: source),
             ],
-            preferredSceneId: 'fleet',
-            actualSceneId: 'fleet',
+            preferredSceneId: 'preset',
+            actualSceneId: 'preset',
             canChange: true,
           ),
         ),
@@ -105,11 +116,11 @@ void main() {
         }
       });
       await _pumpShell(tester);
-      await tester.tap(find.byTooltip('好友'));
+      await tester.tap(shellHint('好友'));
       await tester.pumpAndSettle();
       expect(find.byType(FriendsPage), findsNothing);
       expect(calls.where((c) => c.method == 'show').length, 1);
-      await tester.tap(find.byTooltip('好友'));
+      await tester.tap(shellHint('好友'));
       await tester.pumpAndSettle();
       final shows = calls.where((c) => c.method == 'show').toList();
       expect(shows.length, 2);
@@ -117,11 +128,11 @@ void main() {
         (shows[0].arguments as Map)['opening'],
         (shows[1].arguments as Map)['opening'],
       );
-      await tester.tap(find.byTooltip('消息'));
+      await tester.tap(shellHint('消息'));
       await tester.pumpAndSettle();
       expect(find.byType(FriendsPage), findsNothing);
       expect(socialCalls, ['messages']);
-      await tester.tap(find.byTooltip('通知'));
+      await tester.tap(shellHint('通知'));
       await tester.pumpAndSettle();
       expect(socialCalls, ['messages', 'notifications']);
       await tester.pumpWidget(const SizedBox());
@@ -172,7 +183,7 @@ void main() {
       );
       expect(background.contains(toolbar.topLeft), isTrue);
       expect(background.contains(toolbar.bottomRight), isTrue);
-      expect(find.byType(BackButton), findsOneWidget);
+      expect(find.byKey(const Key('visitor-profile-back')), findsOneWidget);
       // The wallpaper starts directly under shell chrome, not after two extra rows.
       expect(page, tester.getRect(find.byType(Navigator).last));
       expect((page.width / page.height - 16 / 9).abs(), lessThan(0.06));
@@ -181,7 +192,7 @@ void main() {
       await tester.tap(find.byKey(const Key('visitor-profile-refresh')));
       await tester.pumpAndSettle();
       expect(port.reads, greaterThan(before));
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.byKey(const Key('visitor-profile-back')));
       await tester.pumpAndSettle();
       expect(find.byType(PersonalProfilePage), findsNothing);
       expect(tester.takeException(), isNull);
@@ -223,7 +234,7 @@ void main() {
       final leave = UserPageLeaveScope.maybeOf(visitorContext)!;
       var allowLeave = false;
       leave.confirm = () async => allowLeave;
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.byKey(const Key('user-page-back')));
       await tester.pumpAndSettle();
       expect(find.text('Visitor full page'), findsOneWidget);
       requests.value = const OpenDestinationIntent('/settings/privacy');
@@ -231,7 +242,7 @@ void main() {
       expect(find.text('Visitor full page'), findsOneWidget);
       requests.value = null;
       allowLeave = true;
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.byKey(const Key('user-page-back')));
       await tester.pumpAndSettle();
       expect(
         identical(tester.state(find.byType(FriendsPage)), original),
@@ -287,9 +298,13 @@ void main() {
     final windowChrome = InMemoryWindowChrome();
     await _pumpShell(tester, windowChrome: windowChrome);
 
-    await tester.tap(find.byTooltip('最小化'));
-    await tester.tap(find.byTooltip('最大化'));
-    await tester.tap(find.byTooltip('关闭'));
+    for (final label in ['最小化', '最大化', '关闭']) {
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) => w is StarBridgeCaptionAction && w.label == label,
+        ),
+      );
+    }
     await tester.pump();
 
     expect(windowChrome.commands, ['minimize', 'toggleMaximize', 'close']);
@@ -304,11 +319,21 @@ void main() {
     await tester.tap(find.byKey(const Key('window-maximize-control')));
     await tester.pump();
 
-    expect(find.byTooltip('还原'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is StarBridgeCaptionAction && w.label == '还原',
+      ),
+      findsOneWidget,
+    );
 
     windowChrome.setMaximizedForTest(false);
     await tester.pump();
-    expect(find.byTooltip('最大化'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is StarBridgeCaptionAction && w.label == '最大化',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('registry navigation opens the upcoming operations destination', (
@@ -340,7 +365,7 @@ void main() {
     expect(find.text('网络 等待主机'), findsNothing);
     expect(find.text('未登录'), findsOneWidget);
     expect(find.byKey(const Key('connection-status-notice')), findsOneWidget);
-    expect(find.byTooltip('Native Host 未连接，暂时无法更改'), findsOneWidget);
+    expect(shellHint('Native Host 未连接，暂时无法更改'), findsOneWidget);
   });
 
   testWidgets('healthy and expected idle state omits the status notice', (
@@ -529,7 +554,7 @@ void main() {
   testWidgets('top actions remain real route destinations', (tester) async {
     await _pumpShell(tester);
 
-    await tester.tap(find.byTooltip('好友'));
+    await tester.tap(shellHint('好友'));
     await tester.pumpAndSettle();
 
     expect(find.byType(FriendsPage), findsOneWidget);
@@ -544,36 +569,35 @@ void main() {
     expect(find.byKey(const Key('friends-nav-friends')), findsNothing);
   });
 
-  testWidgets('deferred navigation entries are truthful destinations', (
+  testWidgets('available marketplace and tools have truthful destinations', (
     tester,
   ) async {
     await _pumpShell(tester);
 
     await tester.tap(find.text('交易大厅'));
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('marketplace-deferred-destination')),
-        matching: find.text('即将推出'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.byType(MarketplacePage), findsOneWidget);
     expect(
       find.byKey(const Key('marketplace-deferred-destination')),
-      findsOneWidget,
+      findsNothing,
     );
 
     await tester.tap(find.text('工具'));
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('tools-deferred-destination')),
-        matching: find.text('即将推出'),
-      ),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('tools-deferred-destination')), findsOneWidget);
-    expect(find.byType(FilledButton), findsNothing);
+    expect(find.byKey(const Key('tools-deferred-destination')), findsNothing);
+    expect(find.byType(ToolsPage), findsOneWidget);
+    expect(find.byKey(const Key('tool-exec-hangar')), findsOneWidget);
+    expect(find.text('行政机库'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tool-exec-hangar')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ExecHangarPage), findsOneWidget);
+    expect(find.byType(ToolsPage), findsNothing);
+    expect(find.byKey(const Key('exec-refresh')), findsOneWidget);
+    expect(find.text('返回工具'), findsOneWidget);
+    await tester.tap(find.text('返回工具'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ToolsPage), findsOneWidget);
+    expect(find.byKey(const Key('tool-exec-hangar')), findsOneWidget);
   });
 }
 
@@ -598,6 +622,8 @@ Future<void> _pumpShell(
     StarBridgeApp(
       composition: composition,
       onRetryConnection: onRetryConnection,
+      // 这里看的是平时的外壳；固定一个不在节日里的日期，哪天跑结果都一样。
+      now: () => DateTime(2026, 7, 1),
     ),
   );
   if (settle) {

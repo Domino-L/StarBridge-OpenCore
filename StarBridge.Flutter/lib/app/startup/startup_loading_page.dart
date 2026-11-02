@@ -211,13 +211,23 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
         phase == StartupPhase.preferences ||
         phase == StartupPhase.preferencesUnavailable ||
         phase == StartupPhase.account ||
+        phase == StartupPhase.content ||
         phase == StartupPhase.accountUnavailable ||
         phase == StartupPhase.ready;
     final settingsReady =
         phase == StartupPhase.account ||
+        phase == StartupPhase.content ||
         phase == StartupPhase.accountUnavailable ||
         phase == StartupPhase.ready;
-    final title = strings.text('startup.${phase.name}');
+    final pendingRecovery =
+        phase == StartupPhase.accountUnavailable &&
+        widget.session.accountStatus ==
+            StartupAccountStatus.onlineRecoveryRequired;
+    final title = strings.text(
+      pendingRecovery
+          ? 'connection.account.restorePending.title'
+          : 'startup.${phase.name}',
+    );
     return Scaffold(
       key: const Key('startup-loading-page'),
       body: Column(
@@ -313,7 +323,9 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
                                   const SizedBox(height: 8),
                                   Text(
                                     strings.text(
-                                      phase.failed
+                                      pendingRecovery
+                                          ? 'startup.onlineRecovery.detail'
+                                          : phase.failed
                                           ? 'startup.failure'
                                           : 'startup.wait',
                                     ),
@@ -360,7 +372,8 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
                                     runSpacing: 12,
                                     alignment: WrapAlignment.center,
                                     children: [
-                                      if (phase.failed || _retrying)
+                                      if (phase.failed && !pendingRecovery ||
+                                          _retrying)
                                         FilledButton.icon(
                                           key: const Key('startup-retry'),
                                           onPressed: _retrying ? null : _retry,
@@ -429,8 +442,11 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
     final colors = context.tokens.colors;
     final color = switch (state) {
       'done' || 'signedIn' => colors.success,
-      'failed' || 'reauthorizationRequired' => colors.warning,
-      'loading' => colors.accent,
+      'offline' => colors.danger,
+      'failed' ||
+      'reauthorizationRequired' ||
+      'onlineRecoveryRequired' => colors.warning,
+      'loading' => colors.stateAccent,
       _ => colors.textSecondary,
     };
     return Row(
@@ -438,7 +454,11 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
         StarBridgeIcon(
           state == 'done' || state == 'signedIn' || state == 'signedOut'
               ? StarBridgeIconSemantic.connected
-              : state == 'failed' || state == 'reauthorizationRequired'
+              : state == 'offline' || state == 'local'
+              ? StarBridgeIconSemantic.privacy
+              : state == 'failed' ||
+                    state == 'reauthorizationRequired' ||
+                    state == 'onlineRecoveryRequired'
               ? StarBridgeIconSemantic.warning
               : StarBridgeIconSemantic.pending,
           size: 16,
@@ -450,7 +470,9 @@ class _StartupLoadingPageState extends State<StartupLoadingPage>
         Flexible(
           fit: FlexFit.tight,
           child: Text(
-            strings.text('startup.$state'),
+            strings.text(
+              state == 'offline' ? 'presence.offline' : 'startup.$state',
+            ),
             textAlign: TextAlign.end,
             style: TextStyle(color: color),
           ),

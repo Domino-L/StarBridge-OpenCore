@@ -60,6 +60,14 @@ void main() {
       snapshots.last['scene'],
       AppStrings.resolve(const Locale('en')).text('overlay.scene.default'),
     );
+    preferences.value = AppPreferencesProjection(
+      effective: preferences.value.effective.copyWith(interactionStyle: InteractionStyle.rail),
+      confirmed: null, revision: null, phase: AppPreferencesPhase.ready,
+      operation: AppPreferencesOperation.idle, source: null, failure: null,
+    );
+    await tester.pump();
+    expect(snapshots.last['interactionStyle'], 'rail');
+    expect(snapshots.last['scope'], firstScope);
     chrome.replace(InMemoryShellChrome.hostConnectedProjection);
     await tester.pump();
     expect(

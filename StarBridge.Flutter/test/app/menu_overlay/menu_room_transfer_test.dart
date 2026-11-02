@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,7 +17,7 @@ class TransferPort extends RoomPort {
   String outcome = 'hostTransferred';
   @override
   Future<RoomReadResult> read() async {
-    final original = (await super.read()).directory!;
+    final original = (resolvedMenuCopy(await super.read())).directory!;
     return RoomReadResult(
       RoomReadState.ready,
       directory: RoomDirectory(
@@ -106,7 +108,9 @@ void main() {
       await tester.pump();
       final view = MenuFeatureView.parse(views.last);
       expect(view.room!.memberTransferActions.keys, [2]);
-      final action = view.rows[2].buttons.singleWhere((a) => a.label == '转移房主');
+      final action = view.rows[2].buttons.singleWhere(
+        (a) => a.role == 'transferOwner',
+      );
       expect(action.confirm, contains('待处理邀请将失效'));
       expect(jsonEncode(views.last), isNot(contains('private-removal-token')));
       expect(jsonEncode(views.last), isNot(contains('private-room')));

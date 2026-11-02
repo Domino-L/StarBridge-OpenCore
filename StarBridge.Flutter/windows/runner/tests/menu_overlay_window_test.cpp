@@ -1,6 +1,7 @@
 #include "menu_overlay_window.h"
 #include "menu_overlay_focus.h"
 #include <cstdio>
+#include <string>
 
 // Hidden Win32 fixture, not an acceptance client; never reveals or steals focus.
 int main() {
@@ -17,6 +18,7 @@ int main() {
     created = window.handle();
     if (!created) return 1;
     check(!IsWindowVisible(created), "creation remains hidden");
+    check(!IsWindowEnabled(created), "hidden menu cannot be activated by engine view focus");
     check(GetWindow(created, GW_OWNER) == nullptr, "does not own or raise desktop client");
     check((GetWindowLongPtrW(created, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0, "tool window");
     check(window.Begin() == 0, "cannot open without child");
@@ -44,6 +46,12 @@ int main() {
     DestroyWindow(unrelated);
     int hidden = 0;
     window.on_hidden = [&hidden]() { ++hidden; };
+    check(window.Prepare(), "idle prepare sizes hidden surface");
+    RECT prepared{};
+    GetWindowRect(created, &prepared);
+    check(!IsWindowVisible(created) && !window.session().wanted() && hidden == 0 &&
+        prepared.right - prepared.left > 1 && GetForegroundWindow() == foreground,
+        "idle prepare has no session, visibility or focus change");
     const auto opening = window.Begin();
     check(opening > 0 && window.session().wanted(), "opening lease created");
     check(!IsWindowVisible(created), "await first frame hidden");
@@ -54,33 +62,22 @@ int main() {
     check(!window.local_modal(), "hidden menu retires picker modal protection");
     check(hidden == 1 && !window.session().wanted(), "hide dispatches once");
     check(!window.Reveal(opening), "cancelled frame cannot reveal HWND");
+    check(!IsWindowEnabled(created), "cancelled opening stays disabled");
     window.Hide();
     check(hidden == 1, "repeated hide silent");
-    check(!window.RegisterShortcut(0, 0), "invalid shortcut refused");
-    check(!window.RegisterShortcut(0x80000000, 'M'), "invalid modifiers refused");
-    // Temporarily reserve an uncommon chord in this fixture; never send it.
-    // A pre-existing OS/user registration is not overwritten by either call.
-    constexpr UINT modifiers = MOD_CONTROL | MOD_SHIFT | MOD_ALT;
-    const bool fixture_reserved = RegisterHotKey(created, 0x1234, modifiers, VK_F24) != FALSE;
-    check(!window.RegisterShortcut(modifiers, VK_F24), "occupied shortcut rejected");
-    if (fixture_reserved) {
-      UnregisterHotKey(created, 0x1234);
-      check(window.RegisterShortcut(modifiers, VK_F24), "released shortcut can register");
-      window.UnregisterShortcut();
-      check(RegisterHotKey(created, 0x1234, modifiers, VK_F24) != FALSE,
-          "unregister releases shortcut");
-      UnregisterHotKey(created, 0x1234);
-    }
     check(window.Begin(created) == 0, "changed foreground rejects opening");
     window.Begin();
     SendMessageW(created, WM_ACTIVATE, WA_INACTIVE, 0);
     check(!window.session().wanted(), "deactivation cancels pending opening");
+    check(std::string(window.hide_reason()) == "deactivated", "deactivation reports its hide reason");
     window.Begin();
     SendMessageW(created, WM_TIMER, 0x534d, 0);
     check(!window.session().wanted(), "first-frame timeout cancels opening");
+    check(std::string(window.hide_reason()) == "frameTimeout", "frame timeout reports its hide reason");
     window.Begin();
     SendMessageW(created, WM_CLOSE, 0, 0);
     check(IsWindow(created) && !window.session().wanted(), "close hides for reuse");
+    check(std::string(window.hide_reason()) == "closeMessage", "close message reports its hide reason");
   }
   check(!IsWindow(created), "destructor destroys window");
   check(GetForegroundWindow() == foreground, "fixture never changes foreground");

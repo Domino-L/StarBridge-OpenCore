@@ -1,12 +1,16 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 import 'community_invitation_send_controller.dart';
 import 'community_invitation_send_copy.dart';
 import 'community_invitation_send_port.dart';
+import '../common/social_read_activity.dart';
 
 class CommunityInvitationOutboxDialog extends StatefulWidget {
   const CommunityInvitationOutboxDialog({required this.port, super.key});
@@ -17,28 +21,35 @@ class CommunityInvitationOutboxDialog extends StatefulWidget {
 
 class _OutboxState extends State<CommunityInvitationOutboxDialog> {
   late final CommunityInvitationSendController model;
-  DialogRoute<bool>? _retryRoute;
+  late final SocialReadActivityBinding _activity;
+  StarBridgeDialogRoute<bool>? _retryRoute;
   String t(String key) => invitationSendText(context, key);
 
   @override
   void initState() {
     super.initState();
     model = CommunityInvitationSendController(widget.port);
+    _activity = SocialReadActivityBinding(
+      model,
+      () => model.busy,
+      initialRead: true,
+    );
     unawaited(model.load());
   }
 
   @override
   void dispose() {
-    final route = _retryRoute;
-    if (route?.isActive == true) route!.navigator?.removeRoute(route);
+    retireStarBridgeDialog(_retryRoute);
+    _activity.dispose();
     model.dispose();
     super.dispose();
   }
 
   Future<void> _retry(CommunityInvitationOperation row) async {
     if (model.locked || _retryRoute != null) return;
-    final route = DialogRoute<bool>(
-      context: context,
+    final confirmed = await showStarBridgeDialog<bool>(
+      context,
+      useRootNavigator: false,
       builder: (_) => AnimatedBuilder(
         animation: model,
         builder: (context, _) => AlertDialog(
@@ -47,22 +58,33 @@ class _OutboxState extends State<CommunityInvitationOutboxDialog> {
             t(model.invalidated ? 'identityUnavailable' : 'retryBody'),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: const Key('community-outbox-retry-cancel'),
+              onActivate: (source) => dismissStarBridgeDialog(
+                context,
+                source: source,
+                result: false,
+              ),
               child: Text(t('cancel')),
             ),
-            FilledButton(
-              onPressed: model.invalidated
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.primary,
+              controlKey: const Key('community-outbox-retry-confirm'),
+              onActivate: model.invalidated
                   ? null
-                  : () => Navigator.pop(context, true),
+                  : (source) => dismissStarBridgeDialog(
+                      context,
+                      source: source,
+                      result: true,
+                    ),
               child: Text(t('retry')),
             ),
           ],
         ),
       ),
+      onRouteCreated: (route) => _retryRoute = route,
     );
-    _retryRoute = route;
-    final confirmed = await Navigator.of(context).push(route);
     _retryRoute = null;
     if (!mounted || confirmed != true || model.locked) return;
     await model.recover(
@@ -85,7 +107,17 @@ class _OutboxState extends State<CommunityInvitationOutboxDialog> {
           children: [
             Text(t('intro')),
             const SizedBox(height: 12),
-            if (model.busy) const LinearProgressIndicator(),
+            if (model.busy)
+              KeyedSubtree(
+                key: ValueKey(_activity.revision),
+                child: SocialReadActivity(
+                  key: const ValueKey('outbox-activity'),
+                  source: _activity.source,
+                  opening: _activity.opening,
+                  label: t(_activity.opening ? 'loadingRecords' : 'working'),
+                  height: 4,
+                ),
+              ),
             if (model.invalidated)
               Text(
                 t('identityUnavailable'),
@@ -131,12 +163,17 @@ class _OutboxState extends State<CommunityInvitationOutboxDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: model.locked ? null : model.load,
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('community-outbox-refresh'),
+          onActivate: model.locked ? null : (_) => model.load(),
           child: Text(t('refresh')),
         ),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('community-outbox-close'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(t('close')),
         ),
       ],
@@ -201,22 +238,32 @@ class _OutboxState extends State<CommunityInvitationOutboxDialog> {
               spacing: 8,
               runSpacing: 4,
               children: [
-                TextButton(
-                  onPressed: model.locked
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: ValueKey(
+                    'community-outbox-check-${row.operationId}',
+                  ),
+                  onActivate: model.locked
                       ? null
-                      : () => model.recover(row.operationId),
+                      : (_) => model.recover(row.operationId),
                   child: Text(t('check')),
                 ),
                 if (row.phase == 'sending')
-                  OutlinedButton(
-                    onPressed: model.locked ? null : () => _retry(row),
+                  StarBridgeActionButton(
+                    controlKey: ValueKey(
+                      'community-outbox-retry-${row.operationId}',
+                    ),
+                    onActivate: model.locked ? null : (_) => _retry(row),
                     child: Text(t('retry')),
                   )
                 else
-                  OutlinedButton(
-                    onPressed: model.locked
+                  StarBridgeActionButton(
+                    controlKey: ValueKey(
+                      'community-outbox-continue-${row.operationId}',
+                    ),
+                    onActivate: model.locked
                         ? null
-                        : () => model.recover(
+                        : (_) => model.recover(
                             row.operationId,
                             action: InvitationRecoveryAction.continueSending,
                           ),

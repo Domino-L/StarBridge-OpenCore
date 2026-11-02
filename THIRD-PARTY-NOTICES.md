@@ -46,6 +46,12 @@ binary. These generated files are named
 `Microsoft.NET.Runtime-ThirdPartyNotices.txt` in the installed `licenses/`
 directory.
 
+The official StarBridge Flutter client may include short home-screen videos
+recorded in Star Citizen. All rights remain with Cloud Imperium Rights LLC, Cloud
+Imperium Rights Ltd., and their related companies. They are not part of the
+Apache-2.0 open core, and this notice grants no downstream redistribution or
+sublicensing rights.
+
 Star Citizen, Squadron 42, Roberts Space Industries, Cloud Imperium, and related
 names and marks belong to their respective owners. Game data and localization
 boundaries are documented separately in `DATA_RIGHTS.md`; media boundaries are

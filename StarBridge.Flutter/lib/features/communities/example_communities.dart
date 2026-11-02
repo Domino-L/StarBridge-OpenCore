@@ -85,8 +85,9 @@ final class ExampleCommunities
   @override
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> selectedRefs,
-  ) async {
+    List<String> selectedRefs, {
+    bool includeImages = false,
+  }) async {
     if (_disbandClosed ||
         editRef != _hangarEdit ||
         selectedRefs.length > 64 ||

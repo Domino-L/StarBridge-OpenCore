@@ -148,6 +148,32 @@ void main() {
     expect(model.imageLoading('logo'), false);
   });
 
+  test('idle preparation without media stops before remaining portraits', () async {
+    Future<List<String>> prepare({required bool includeMedia}) async {
+      final port = PortraitPort()..memberCount = 20;
+      final module = CommunitiesModule(port);
+      addTearDown(module.dispose);
+      for (var i = 0; i < 20; i++) {
+        if (!await module.workspaceSession.prepareNext(
+          port,
+          card.targetRef,
+          card.key,
+          'en-US',
+          includeMedia: includeMedia,
+        )) {
+          break;
+        }
+      }
+      return port.reads;
+    }
+
+    final withMedia = await prepare(includeMedia: true);
+    final withoutMedia = await prepare(includeMedia: false);
+    expect(withoutMedia.length, lessThan(withMedia.length),
+        reason: 'Non-selected organizations must not prepare remaining media.');
+    expect(withoutMedia, isNot(contains('banner')));
+  });
+
   test(
     'warmup is bounded and does not read banners or additional member pages',
     () async {

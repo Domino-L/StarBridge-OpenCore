@@ -1,4 +1,10 @@
+import 'package:flutter/widgets.dart';
+
+import 'menu_overlay_locale.dart';
+import 'menu_member_field_keys.dart';
 import '../../shared/ships/ship_catalog_display.dart';
+import '../../features/communities/community_workspace_port.dart'
+    show communityMemberPublicPresence;
 import 'menu_fleet_summary.dart';
 import 'menu_announcement_details_view.dart';
 
@@ -36,6 +42,38 @@ final class MenuOrganizationView {
   final bool bodyError;
   final MenuOrganizationOverview? overview;
   final MenuFleetSummary? fleetStatistics;
+
+  MenuOrganizationView withoutDownloadedImages() => MenuOrganizationView(
+    tab: tab,
+    code: code,
+    description: description,
+    query: query,
+    total: total,
+    matched: matched,
+    offset: offset,
+    rows: tab == 'directory'
+        ? [for (final row in rows) row.withoutLogo()]
+        : rows,
+    activeTime: activeTime,
+    navigation: [
+      for (final item in navigation)
+        MenuOrganizationNavigationItem(
+          item.name,
+          item.summary,
+          item.time,
+          null,
+          item.key,
+          item.unread,
+          item.selected,
+        ),
+    ],
+    sections: sections,
+    identity: identity,
+    bodyLoading: bodyLoading,
+    bodyError: bodyError,
+    overview: overview,
+    fleetStatistics: fleetStatistics,
+  );
 
   static MenuOrganizationView parse(
     Object? raw,
@@ -207,6 +245,12 @@ final class MenuOrganizationRow {
     this.tags = '',
     this.language = '',
     this.activeTime = '',
+    this.serverTextKey = '',
+    this.shipTextKey = '',
+    this.locationTextKey = '',
+    this.serverKind = 'placeholder',
+    this.shipKind = 'placeholder',
+    this.locationKind = 'placeholder',
   });
   final String handle,
       role,
@@ -226,8 +270,44 @@ final class MenuOrganizationRow {
   final int? memberCount;
   final String relationship, tags, language, activeTime;
   final String importedAt, iconKey, announcementState, announcementTime;
+  final String serverKind, shipKind, locationKind;
+  final String serverTextKey, shipTextKey, locationTextKey;
   final bool currentAnnouncement;
   final MenuAnnouncementDetailsView? announcement;
+  MenuOrganizationRow withoutLogo() => MenuOrganizationRow(
+    handle: handle,
+    role: role,
+    roleColor: roleColor,
+    presence: presence,
+    ship: ship,
+    location: location,
+    server: server,
+    owner: owner,
+    price: price,
+    spec: spec,
+    status: status,
+    image: image,
+    isSelf: isSelf,
+    avatar: avatar,
+    profileKey: profileKey,
+    memberCount: memberCount,
+    importedAt: importedAt,
+    iconKey: iconKey,
+    announcementState: announcementState,
+    announcementTime: announcementTime,
+    currentAnnouncement: currentAnnouncement,
+    announcement: announcement,
+    relationship: relationship,
+    tags: tags,
+    language: language,
+    activeTime: activeTime,
+    serverTextKey: serverTextKey,
+    shipTextKey: shipTextKey,
+    locationTextKey: locationTextKey,
+    serverKind: serverKind,
+    shipKind: shipKind,
+    locationKind: locationKind,
+  );
   static MenuOrganizationRow parse(Object? value) {
     if (value is! Map) throw const FormatException();
     final presence = _text(value, 'presence', 24);
@@ -285,8 +365,22 @@ final class MenuOrganizationRow {
       tags: _text(value, 'tags', 2048),
       language: _text(value, 'language', 128),
       activeTime: _text(value, 'activeTime', 1024),
+      serverTextKey: menuMemberFieldKey(value, 'serverTextKey'),
+      shipTextKey: menuMemberFieldKey(value, 'shipTextKey'),
+      locationTextKey: menuMemberFieldKey(value, 'locationTextKey'),
+      serverKind: _runtimeKind(value, 'serverKind'),
+      shipKind: _runtimeKind(value, 'shipKind'),
+      locationKind: _runtimeKind(value, 'locationKind'),
     );
   }
+}
+
+String _runtimeKind(Map value, String key) {
+  final kind = value[key] ?? 'placeholder';
+  if (kind is! String || !const {'value', 'placeholder'}.contains(kind)) {
+    throw const FormatException();
+  }
+  return kind;
 }
 
 String? _inline(Map value, String key) {
@@ -303,17 +397,13 @@ String _text(Map value, String key, int max) {
 }
 
 String organizationPresence(bool online, String status) =>
-    switch (status.toLowerCase()) {
-      'ingame' => online ? 'inGame' : 'offline',
-      'away' => online ? 'away' : 'offline',
-      'apponline' || 'online' || 'offline' => online ? 'online' : 'offline',
-      _ => 'unknown',
-    };
+    communityMemberPublicPresence(online, status);
 
-String organizationPresenceText(String value) => switch (value) {
-  'online' => '应用在线',
-  'inGame' => '游戏中',
-  'away' => '暂离',
-  'offline' => '离线',
-  _ => '状态未共享',
-};
+String organizationPresenceText(String value, [BuildContext? context]) =>
+    switch (value) {
+      'online' => menuText(context, 'presence.online'),
+      'inGame' => menuText(context, 'presence.inGame'),
+      'away' => menuText(context, 'presence.away'),
+      'offline' => menuText(context, 'presence.offline'),
+      _ => menuText(context, 'menu.overlay.organizations.presencePrivate'),
+    };

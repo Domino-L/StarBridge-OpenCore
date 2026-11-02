@@ -4,6 +4,9 @@ import '../../app/localization/app_strings.dart';
 import '../../app/preferences/app_preferences.dart';
 import '../../app/routing/exit_application_intent.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_segmented_control.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 
 class GeneralSettingsBehavior extends StatelessWidget {
   const GeneralSettingsBehavior({
@@ -31,8 +34,9 @@ class GeneralSettingsBehavior extends StatelessWidget {
           description: strings.text(
             'settings.general.behavior.launch.description',
           ),
-          control: Switch(
-            key: const Key('general-launch-at-startup'),
+          control: StarBridgeSwitch(
+            controlKey: const Key('general-launch-at-startup'),
+            label: strings.text('settings.general.behavior.launch.title'),
             value: normalized.launchAtStartup,
             onChanged: enabled
                 ? (selected) => onChanged(
@@ -55,28 +59,23 @@ class GeneralSettingsBehavior extends StatelessWidget {
           description: strings.text(
             'settings.general.behavior.close.description',
           ),
-          control: SegmentedButton<bool>(
-            key: const Key('general-close-behavior'),
-            showSelectedIcon: false,
+          control: StarBridgeSegmentedControl<bool>(
+            controlKey: const Key('general-close-behavior'),
             segments: [
-              ButtonSegment(
+              StarBridgeSegment(
                 value: true,
-                label: Text(
-                  strings.text('settings.general.behavior.close.tray'),
-                ),
+                label: strings.text('settings.general.behavior.close.tray'),
               ),
-              ButtonSegment(
+              StarBridgeSegment(
                 value: false,
-                label: Text(
-                  strings.text('settings.general.behavior.close.exit'),
-                ),
+                label: strings.text('settings.general.behavior.close.exit'),
               ),
             ],
-            selected: {normalized.keepRunningInBackground},
-            onSelectionChanged: enabled
+            value: normalized.keepRunningInBackground,
+            onChanged: enabled
                 ? (selection) => onChanged(
                     normalized.copyWith(
-                      keepRunningInBackground: selection.single,
+                      keepRunningInBackground: selection,
                       closeBehaviorChoiceMade: true,
                     ),
                   )
@@ -89,28 +88,25 @@ class GeneralSettingsBehavior extends StatelessWidget {
           description: strings.text(
             'settings.general.behavior.startup.description',
           ),
-          control: SegmentedButton<bool>(
-            key: const Key('general-startup-behavior'),
-            showSelectedIcon: false,
+          control: StarBridgeSegmentedControl<bool>(
+            controlKey: const Key('general-startup-behavior'),
             segments: [
-              ButtonSegment(
+              StarBridgeSegment(
                 value: false,
-                label: Text(
-                  strings.text('settings.general.behavior.startup.window'),
-                ),
+                label: strings.text('settings.general.behavior.startup.window'),
               ),
-              ButtonSegment(
+              StarBridgeSegment(
                 value: true,
-                label: Text(
-                  strings.text('settings.general.behavior.startup.background'),
+                label: strings.text(
+                  'settings.general.behavior.startup.background',
                 ),
               ),
             ],
-            selected: {normalized.startMinimized},
-            onSelectionChanged: enabled && normalized.launchAtStartup
+            value: normalized.startMinimized,
+            onChanged: enabled && normalized.launchAtStartup
                 ? (selection) => onChanged(
                     normalized.copyWith(
-                      startMinimized: selection.single,
+                      startMinimized: selection,
                       startupChoiceMade: true,
                     ),
                   )
@@ -120,11 +116,15 @@ class GeneralSettingsBehavior extends StatelessWidget {
         SizedBox(height: tokens.space.sm),
         Align(
           alignment: AlignmentDirectional.centerEnd,
-          child: OutlinedButton(
-            key: const Key('general-exit-application'),
-            onPressed: Actions.maybeFind<ExitApplicationIntent>(context) == null
+          child: StarBridgeActionButton(
+            controlKey: const Key('general-exit-application'),
+            onActivate:
+                Actions.maybeFind<ExitApplicationIntent>(context) == null
                 ? null
-                : () => Actions.invoke(context, const ExitApplicationIntent()),
+                : (source) => Actions.invoke(
+                    context,
+                    ExitApplicationIntent(source: source),
+                  ),
             child: Text(strings.text('settings.general.behavior.close.exit')),
           ),
         ),

@@ -45,14 +45,14 @@ internal static class OverlayModuleFrameTests
         using var source = new OverlayCommunitySource(() => (Owner, 1), new Reader(), false, () => now);
         source.ObserveWorkspace(Owner, 1, 1, Start, new("A", "Fixture", [
             new("Peer", "Peer", "Member", "InGame", "Ship", "Location", "US", false)
-                { ArrivalPendingConfirmation = true, ArrivalTargetCode = "target" }]));
+                { ArrivalPendingConfirmation = true, ArrivalTargetCode = "target", ServerShard = "pub_use1b_12326004_040" }]));
         var frame = InformationOverlayModuleFrame.Capture(new(Org("A")), Context(),
             _ => source.ReadModuleSource(Owner, 1, "A"), () => true, s => source.IsModuleSourceCurrent(Owner, 1, s));
         Check(frame.ReadModules(now)[OverlaySourceModule.Members].Snapshot?.Community?.Members.Single().Presence == "InGame",
             "Fresh authorized member state remains visible.");
         now = Start.AddSeconds(30);
         var stale = frame.ReadModules(now)[OverlaySourceModule.Members];
-        Check(stale.Source.Available && stale.Snapshot?.Community?.Members.Single() is { Presence: "Unknown", Ship: "", Location: "", ServerRegion: "", ArrivalPendingConfirmation: false, ArrivalTargetCode: null },
+        Check(stale.Source.Available && stale.Snapshot?.Community?.Members.Single() is { Presence: "Unknown", Ship: "", Location: "", ServerRegion: "", ServerShard: null, ArrivalPendingConfirmation: false, ArrivalTargetCode: null },
             "After 30 seconds retain membership but redact all realtime state, without claiming offline or extending authorization.");
         now = Start.AddSeconds(40);
         Check(frame.ReadModules(now)[OverlaySourceModule.Members].Snapshot is null, "Membership authorization still expires at 40 seconds.");

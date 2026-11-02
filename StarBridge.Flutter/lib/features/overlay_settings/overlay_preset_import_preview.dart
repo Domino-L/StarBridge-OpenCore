@@ -1,9 +1,16 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_expansion_tile.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/color_choice_icon.dart';
+import '../../design_system/icons/native_dropdown_indicator_icon.dart';
 import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_schema.dart';
@@ -18,6 +25,7 @@ class OverlayPresetImportPreview extends StatelessWidget {
     required this.currentSettings,
     this.sources,
     this.removedOrganizationBindings = false,
+    this.onConfirmSource,
     super.key,
   });
 
@@ -27,6 +35,7 @@ class OverlayPresetImportPreview extends StatelessWidget {
   final OverlayWorkspaceSettings? currentSettings;
   final OverlayPresetSources? sources;
   final bool removedOrganizationBindings;
+  final ValueChanged<InteractionSource>? onConfirmSource;
 
   static const _modules = {
     'notice': 'showNotice',
@@ -66,6 +75,7 @@ class OverlayPresetImportPreview extends StatelessWidget {
                 : copy('follow'),
           OverlaySourceMode.auto => strings.text('overlay.source.auto'),
           OverlaySourceMode.room => copy('room'),
+          OverlaySourceMode.fleet => strings.text('overlay.source.fleet'),
           OverlaySourceMode.community => throw StateError(
             'Unsanitized transfer source.',
           ),
@@ -81,6 +91,42 @@ class OverlayPresetImportPreview extends StatelessWidget {
         ],
       ),
     );
+    Widget disclosureHeader(String title, double open) {
+      final theme = Theme.of(context);
+      final expansionTheme = ExpansionTileTheme.of(context);
+      final colors = theme.colorScheme;
+      final progress = Curves.easeIn.transform(open);
+      // Mirror ExpansionTile's SDK defaults, not the surrounding pressable's
+      // foreground. The shared expander remains the only input owner.
+      return ListTileTheme.merge(
+        textColor: Color.lerp(
+          expansionTheme.collapsedTextColor ??
+              (theme.useMaterial3
+                  ? colors.onSurface
+                  : theme.textTheme.titleMedium!.color),
+          expansionTheme.textColor ??
+              (theme.useMaterial3 ? colors.onSurface : colors.primary),
+          progress,
+        ),
+        iconColor: Color.lerp(
+          expansionTheme.collapsedIconColor ??
+              (theme.useMaterial3
+                  ? colors.onSurfaceVariant
+                  : theme.unselectedWidgetColor),
+          expansionTheme.iconColor ?? colors.primary,
+          progress,
+        ),
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(title),
+          trailing: Transform.rotate(
+            angle: math.pi * open,
+            child: const NativeDropdownIndicatorIcon.expandMore(),
+          ),
+        ),
+      );
+    }
+
     return AlertDialog(
       insetPadding: const EdgeInsets.all(16),
       title: Text(copy('title')),
@@ -190,76 +236,98 @@ class OverlayPresetImportPreview extends StatelessWidget {
               ),
               if (changes != null) row(copy('changes'), changes.toString()),
               const Divider(height: 24),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(copy('details')),
-                children: [
-                  for (final field in fields)
-                    row(
-                      strings.text('overlay.workspace.field.${field.field}'),
-                      _value(context, field),
-                    ),
-                ],
+              Padding(
+                // ExpansionTile's original transparent top/bottom borders
+                // each occupied 1px, including when its body was collapsed.
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: StarBridgeExpansionTile(
+                  headerPadding: EdgeInsets.zero,
+                  title: copy('details'),
+                  headerBuilder: (context, _, open) =>
+                      disclosureHeader(copy('details'), open),
+                  children: [
+                    for (final field in fields)
+                      row(
+                        strings.text('overlay.workspace.field.${field.field}'),
+                        _value(context, field),
+                      ),
+                  ],
+                ),
               ),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(copy('geometry')),
-                children: [
-                  for (final item in layout)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          strings.text('overlay.workspace.module.${item.key}'),
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        row(
-                          copy('position'),
-                          '${_percent(item.x)} / ${_percent(item.y)}',
-                        ),
-                        row(
-                          copy('size'),
-                          '${_percent(item.width)} × ${_percent(item.height)}',
-                        ),
-                        row(
-                          strings.text(
-                            'overlay.workspace.layout.lockPositionSize',
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: StarBridgeExpansionTile(
+                  headerPadding: EdgeInsets.zero,
+                  title: copy('geometry'),
+                  headerBuilder: (context, _, open) =>
+                      disclosureHeader(copy('geometry'), open),
+                  children: [
+                    for (final item in layout)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            strings.text(
+                              'overlay.workspace.module.${item.key}',
+                            ),
+                            style: Theme.of(context).textTheme.titleSmall,
                           ),
-                          copy(item.isLocked ? 'on' : 'off'),
-                        ),
-                        row(
-                          strings.text('overlay.workspace.layout.textOpacity'),
-                          _percent(item.textOpacity),
-                        ),
-                        row(
-                          strings.text(
-                            'overlay.workspace.layout.backgroundOpacity',
+                          row(
+                            copy('position'),
+                            '${_percent(item.x)} / ${_percent(item.y)}',
                           ),
-                          _percent(item.backgroundOpacity),
-                        ),
-                        row(
-                          strings.text(
-                            'overlay.workspace.layout.decorationOpacity',
+                          row(
+                            copy('size'),
+                            '${_percent(item.width)} × ${_percent(item.height)}',
                           ),
-                          _percent(item.decorationOpacity),
-                        ),
-                        const Divider(),
-                      ],
-                    ),
-                ],
+                          row(
+                            strings.text(
+                              'overlay.workspace.layout.lockPositionSize',
+                            ),
+                            copy(item.isLocked ? 'on' : 'off'),
+                          ),
+                          row(
+                            strings.text(
+                              'overlay.workspace.layout.textOpacity',
+                            ),
+                            _percent(item.textOpacity),
+                          ),
+                          row(
+                            strings.text(
+                              'overlay.workspace.layout.backgroundOpacity',
+                            ),
+                            _percent(item.backgroundOpacity),
+                          ),
+                          row(
+                            strings.text(
+                              'overlay.workspace.layout.decorationOpacity',
+                            ),
+                            _percent(item.decorationOpacity),
+                          ),
+                          const Divider(),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: false),
           child: Text(strings.text('overlay.workspace.cancel')),
         ),
-        FilledButton(
-          key: const Key('overlay-import-confirm'),
-          onPressed: () => Navigator.pop(context, true),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('overlay-import-confirm'),
+          onActivate: (source) {
+            onConfirmSource?.call(source);
+            dismissStarBridgeDialog(context, source: source, result: true);
+          },
           child: Text(copy('confirm')),
         ),
       ],

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -223,12 +225,17 @@ class _HangarInventoryPageState extends State<HangarInventoryPage> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _search,
-                    onChanged: (v) => setState(() => _query = v),
-                    decoration: InputDecoration(
-                      labelText: c.search,
-                      isDense: true,
+                  child: StarBridgeFieldFrame(
+                    enabled: true,
+                    builder: (_, focus) => TextField(
+                      key: const Key('hangar-inventory-search'),
+                      focusNode: focus,
+                      controller: _search,
+                      onChanged: (v) => setState(() => _query = v),
+                      decoration: InputDecoration(
+                        labelText: c.search,
+                        isDense: true,
+                      ),
                     ),
                   ),
                 ),
@@ -298,13 +305,15 @@ class _HangarInventoryPageState extends State<HangarInventoryPage> {
                               _name(ship),
                               style: Theme.of(context).textTheme.bodyMedium,
                               maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              overflow: TextOverflow.fade,
+                              softWrap: false,
                             ),
                             subtitle: Text(
                               ship.original,
                               style: Theme.of(context).textTheme.bodySmall,
                               maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              overflow: TextOverflow.fade,
+                              softWrap: false,
                             ),
                             trailing: Text(
                               c.size(ship.size ?? 'unknown'),

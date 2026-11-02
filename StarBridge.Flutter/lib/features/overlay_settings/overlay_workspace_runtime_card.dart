@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -40,7 +43,7 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
         ? tokens.colors.warning
         : isOpen
         ? tokens.colors.success
-        : tokens.colors.accent;
+        : tokens.colors.stateAccent;
     final titleKey = projection.runtimeBusy
         ? switch (projection.runtimeOperation) {
             OverlayRuntimeOperation.opening => 'overlay.runtime.opening',
@@ -86,10 +89,11 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
               enabled: hotkey.enabled,
               state: runtime.hotkeyState,
             ),
-          Tooltip(
+          StarBridgeTooltip(
             message:
                 '${_copy(context, descriptionKey)}\n${_copy(context, 'overlay.runtime.hotkey.${runtime.hotkeyState}')}\n${_copy(context, 'overlay.runtime.follow.${runtime.followGameState}')}'
                 '${runtime.usedFallbackSkin ? '\n${_copy(context, 'overlay.runtime.skinFallback')}' : ''}',
+            consumeEscape: false,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -109,9 +113,10 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
               ],
             ),
           ),
-          FilledButton(
+          StarBridgeActionButton(
             key: const Key('overlay-runtime-action'),
-            onPressed: projection.busy ? null : onAction,
+            kind: StarBridgeActionKind.primary,
+            onActivate: projection.busy ? null : (_) => onAction(),
             child: Text(_copy(context, actionKey)),
           ),
         ],
@@ -137,8 +142,9 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
                       borderRadius: tokens.shape.small,
                     ),
                     child:
-                        projection.runtimeBusy ||
-                            runtime.windowState == 'opening'
+                        (projection.runtimeBusy ||
+                                runtime.windowState == 'opening') &&
+                            !resolveStarBridgeInteraction(context).reduceMotion
                         ? SizedBox.square(
                             dimension: 18,
                             child: CircularProgressIndicator(
@@ -202,9 +208,10 @@ class OverlayWorkspaceRuntimeCard extends StatelessWidget {
               ],
             ],
           );
-          final action = FilledButton(
+          final action = StarBridgeActionButton(
             key: const Key('overlay-runtime-action'),
-            onPressed: projection.busy ? null : onAction,
+            kind: StarBridgeActionKind.primary,
+            onActivate: projection.busy ? null : (_) => onAction(),
             child: Text(_copy(context, actionKey)),
           );
           if (showPreview) {

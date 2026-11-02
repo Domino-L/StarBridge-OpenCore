@@ -3,9 +3,16 @@ import 'dart:convert';
 
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
+import 'personal_profile_affiliation_wire.dart';
 import 'personal_profile_models.dart';
+import 'personal_profile_presentation.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_role_catalog.dart';
 import 'personal_profile_port.dart';
+import 'profile_read_failure.dart';
+import 'profile_read_scope.dart';
+import 'profile_edit_lease.dart';
+import 'profile_gameplay_observation.dart';
 import '../hangar/local_hangar_port.dart';
 import '../hangar/legacy_profile_hangar.dart';
 import '../../shared/ships/ship_catalog_display.dart';
@@ -14,24 +21,45 @@ import 'personal_profile_local_projection.dart'
 
 /// Reads and writes the StarBridge personal-profile contract through the Native
 /// Host. The adapter never receives the SCM bearer or backend identity keys.
-final class BridgePersonalProfileAdapter implements PersonalProfilePort {
+final class BridgePersonalProfileAdapter
+    implements
+        PersonalProfilePort,
+        PersonalProfilePresentationWriter,
+        PersonalProfileContentChanges,
+        ProfileReadScopeOwner,
+        ProfileReadGenerationOwner,
+        ProfileReadAccountAdvanceOwner {
   BridgePersonalProfileAdapter(this._session) {
+    _invalidationGeneration = _session.activeGeneration;
     _eventSubscription = _session.events.listen(_onBridgeEvent);
   }
 
   final BridgeClientSession _session;
+  @override
+  int get activeReadGeneration => _session.activeGeneration;
   // Profile reads share the Host account queue and may include session restore.
   static const _readTimeout = Duration(seconds: 60);
   final StreamController<void> _invalidations =
       StreamController<void>.broadcast();
+  final _changes = StreamController<void>.broadcast();
   late final StreamSubscription<BridgeEnvelope> _eventSubscription;
-  _ProfileEditLease? _editLease;
+  ProfileEditLease? _editLease;
+  late int _invalidationGeneration;
+  ProfileReadAccountAdvance? _readAccountAdvance;
+  @override
+  ProfileReadAccountAdvance? get readAccountAdvance => _readAccountAdvance;
+  ProfileReadScope? _readScope;
+  @override
+  ProfileReadScope? get readScope => _readScope;
 
   @override
   Stream<void> get invalidations => _invalidations.stream;
+  @override
+  Stream<void> get changes => _changes.stream;
 
   @override
   Future<PersonalProfileSnapshot> read() async {
+    _readScope = null;
     _editLease = null;
     try {
       final account = await _session.request(
@@ -39,8 +67,14 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
         payload: const {'schemaVersion': 1},
         timeout: _readTimeout,
       );
-      _requireSchema(account.payload);
+      ProfileReadScope.requireSchema(account.payload);
       final state = _requiredString(account.payload, 'state');
+      if (account.sessionGeneration != _session.activeGeneration) {
+        throw BridgeStaleGenerationException(
+          account.sessionGeneration,
+          _session.activeGeneration,
+        );
+      }
       if (state == 'signedOut' || state == 'reauthorizationRequired') {
         return const PersonalProfileSnapshot.signedOut();
       }
@@ -59,23 +93,28 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
       );
       final profile = _requiredMap(response.payload, 'profile');
       final snapshot = _parseSnapshot(response.payload);
-      if (_session.activeGeneration != account.sessionGeneration) {
-        throw BridgeStaleGenerationException(
-          account.sessionGeneration,
-          _session.activeGeneration,
-        );
-      }
+      final scope = ProfileReadScope.fromResponse(
+        account,
+        response,
+        _session.activeGeneration,
+      );
       if (state == 'signedIn' && snapshot.allowEditing) {
-        _editLease = _ProfileEditLease(
+        _editLease = ProfileEditLease(
           account.accountContext!,
           account.sessionGeneration,
           _nonNegativeInt(profile, 'revision'),
+          snapshot.presentation,
         );
       }
+      _readScope =
+          snapshot.availability == PersonalProfileAvailability.available
+          ? scope
+          : null;
       return snapshot;
     } on Object catch (error) {
       return PersonalProfileSnapshot.unavailable(
-        failureKey: _failureKey(error),
+        failureKey: profileReadFailureKey(error),
+        transientReadFailure: profileReadIsTransient(error),
       );
     }
   }
@@ -84,12 +123,15 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
   Future<PersonalProfileActionResult> save(PersonalProfileEdit edit) async {
     final lease = _editLease;
     if (lease == null) return _refreshBeforeSave;
+    // Versioned pages must use explicit groups. Never downgrade a new server
+    // lease to the legacy whole-page writer.
+    if (lease.presentation != null) return _refreshBeforeSave;
     try {
       final account = await _session.request(
         'account.getCurrent',
         payload: const {'schemaVersion': 1},
       );
-      _requireSchema(account.payload);
+      ProfileReadScope.requireSchema(account.payload);
       if (_requiredString(account.payload, 'state') != 'signedIn' ||
           account.accountContext == null) {
         return const PersonalProfileActionResult(
@@ -127,12 +169,12 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
         },
         accountContext: account.accountContext,
       );
-      _requireSchema(response.payload);
+      ProfileReadScope.requireSchema(response.payload);
       if (!identical(_editLease, lease) ||
           _session.activeGeneration != lease.generation) {
         return _refreshBeforeSave;
       }
-      _editLease = _ProfileEditLease(
+      _editLease = ProfileEditLease(
         lease.context,
         lease.generation,
         _nonNegativeInt(_requiredMap(response.payload, 'profile'), 'revision'),
@@ -141,19 +183,105 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
         PersonalProfileActionOutcome.completed,
       );
     } on Object catch (error) {
+      if (error is BridgeClientException &&
+          error.code == 'personal_profile.write_conflict' &&
+          identical(_editLease, lease)) {
+        _editLease = null;
+      }
       return PersonalProfileActionResult(
         PersonalProfileActionOutcome.failed,
-        failureKey: _saveFailureKey(error),
+        failureKey: profileSaveFailureKey(error),
+      );
+    }
+  }
+
+  @override
+  Future<PersonalProfileActionResult> savePresentation(
+    PersonalProfilePresentation expected,
+    Map<String, Map<String, Object?>> edits,
+  ) async {
+    final lease = _editLease;
+    var attempted = false;
+    if (lease == null ||
+        !identical(lease.presentation, expected) ||
+        !_session.hostCapabilities.contains(
+          'personalProfile.presentation.write.v1',
+        )) {
+      return _refreshBeforeSave;
+    }
+    try {
+      final payload = expected.editRequest(edits);
+      if (payload == null) {
+        return const PersonalProfileActionResult(
+          PersonalProfileActionOutcome.completed,
+        );
+      }
+      final account = await _session.request(
+        'account.getCurrent',
+        payload: const {'schemaVersion': 1},
+      );
+      ProfileReadScope.requireSchema(account.payload);
+      if (account.payload['state'] != 'signedIn' ||
+          !lease.matches(account) ||
+          !identical(_editLease, lease) ||
+          _session.activeGeneration != lease.generation ||
+          !_session.hostCapabilities.contains(
+            'personalProfile.presentation.write.v1',
+          )) {
+        _editLease = null;
+        return _refreshBeforeSave;
+      }
+      attempted = true;
+      final response = await _session.request(
+        'personalProfile.updatePresentation',
+        payload: payload,
+        accountContext: lease.context,
+        timeout: _readTimeout,
+      );
+      if (!identical(_editLease, lease) ||
+          !lease.matches(response) ||
+          _session.activeGeneration != lease.generation) {
+        _editLease = null;
+        return _refreshBeforeSave;
+      }
+      final saved = _parseSnapshot(response.payload).presentation;
+      if (saved == null ||
+          saved.revision != lease.revision + 1 ||
+          edits.keys.any((group) => saved.origins[group] != 'custom')) {
+        throw const FormatException('Page confirmation');
+      }
+      // Require a new displayed read before another edit, including uncertain
+      // writes. No rebase or automatic replay with a newer revision.
+      _editLease = null;
+      return const PersonalProfileActionResult(
+        PersonalProfileActionOutcome.completed,
+      );
+    } on Object catch (error) {
+      if (identical(_editLease, lease)) _editLease = null;
+      return PersonalProfileActionResult(
+        PersonalProfileActionOutcome.failed,
+        requiresReload: true,
+        failureKey: attempted
+            ? profilePageSaveFailureKey(error)
+            : profileSaveFailureKey(error),
       );
     }
   }
 
   void _onBridgeEvent(BridgeEnvelope event) {
     if (event.name == 'account.changed' ||
-        event.name == 'personalProfile.changed' ||
         event.name == 'bootstrap.invalidated') {
+      _readAccountAdvance = ProfileReadAccountAdvance.observe(
+        event,
+        _invalidationGeneration,
+        _session.activeGeneration,
+      );
+      _invalidationGeneration = _session.activeGeneration;
+      _readScope = null;
       _editLease = null;
       _invalidations.add(null);
+    } else if (event.name == 'personalProfile.changed') {
+      _changes.add(null);
     }
   }
 
@@ -161,39 +289,31 @@ final class BridgePersonalProfileAdapter implements PersonalProfilePort {
   Future<void> close() async {
     await _eventSubscription.cancel();
     await _invalidations.close();
+    await _changes.close();
   }
 }
 
 const _refreshBeforeSave = PersonalProfileActionResult(
   PersonalProfileActionOutcome.rejected,
+  requiresReload: true,
   failureKey: 'profile.error.refreshBeforeSave',
 );
-
-/// A revision belongs to one successfully read account session, never to the
-/// adapter globally. Reauthentication also invalidates the previous edit lease.
-final class _ProfileEditLease {
-  const _ProfileEditLease(this.context, this.generation, this.revision);
-
-  final BridgeAccountContext context;
-  final int generation;
-  final int revision;
-
-  bool matches(BridgeEnvelope account) =>
-      account.sessionGeneration == generation &&
-      account.accountContext?.environment == context.environment &&
-      account.accountContext?.authority == context.authority &&
-      account.accountContext?.subject == context.subject;
-}
 
 PersonalProfileSnapshot parsePersonalProfileSnapshot(
   Map<String, Object?> payload,
 ) => _parseSnapshot(payload);
 
 PersonalProfileSnapshot _parseSnapshot(Map<String, Object?> payload) {
-  _requireSchema(payload);
+  ProfileReadScope.requireSchema(payload);
   final editable = payload['editable'];
   if (editable is! bool) {
     throw const BridgeFormatException('editable must be a boolean.');
+  }
+  if (payload['restricted'] == true) {
+    if (editable) {
+      throw const BridgeFormatException('A restricted profile is read-only.');
+    }
+    return parseRestrictedProfile(payload, avatar: _validatedInlineImageData);
   }
   final profile = _requiredMap(payload, 'profile');
   final identity = _requiredMap(profile, 'identity');
@@ -208,17 +328,30 @@ PersonalProfileSnapshot _parseSnapshot(Map<String, Object?> payload) {
   final moduleLayout = _parseModules(content['modules']);
 
   return PersonalProfileSnapshot.available(
+    presentation: PersonalProfilePresentation.fromProfile(profile),
     callSign: _requiredString(identity, 'callSign'),
-    gameHandle: _requiredString(identity, 'gameHandle'),
+    // Authorized visitor responses may deliberately redact the Handle.
+    // Missing, malformed and editable-owner values retain strict validation.
+    gameHandle: !editable && identity['gameHandle'] == ''
+        ? ''
+        : _requiredString(identity, 'gameHandle'),
     about: _optionalString(content, 'introduction') ?? '',
     avatarStyle: _optionalInt(profile, 'avatarStyle') ?? 0,
+    avatarImageData: _validatedInlineImageData(
+      _optionalString(identity, 'avatarAssetId'),
+    ),
     wallpaperId: _optionalString(profile, 'wallpaperId') ?? 'none',
     visibility: _parseVisibility(profile),
     presenceIntent: _parsePresence(_optionalString(content, 'presenceIntent')),
     affiliations: _parseAffiliations(profile),
+    affiliationStatus: parseAffiliationStatus(
+      profile['fleetAffiliationStatus'],
+    ),
     availabilityWindows: _parseAvailability(content),
     timeZoneLabel: _optionalString(content, 'availabilityTimeZoneId') ?? '',
-    gameplayMinutes: _parseGameplayMinutes(profile),
+    gameplayMinutes: profileGameplayMinutes(
+      _optionalMap(profile, 'gameplayStatistics'),
+    ),
     activityRhythm: _parseActivityRhythm(
       _optionalString(content, 'activityRhythm'),
     ),
@@ -273,26 +406,21 @@ List<PersonalProfileAffiliationSummary> _parseAffiliations(
       positionLabelKey:
           _optionalString(affiliation, 'positionTitle') ??
           'profile.affiliation.position.fleetMember',
-      logoUrl: _validatedAffiliationLogoUrl(affiliation),
+      logoUrl: validatedAffiliationLogoUrl(
+        _optionalString(affiliation, 'logoUrl'),
+      ),
       logoImageData: _validatedAffiliationLogoData(affiliation),
     ),
   ];
 }
 
-String? _validatedAffiliationLogoUrl(Map<String, Object?> affiliation) {
-  final value = _optionalString(affiliation, 'logoUrl');
-  if (value == null || value.length > 2048) return null;
-  final uri = Uri.tryParse(value);
-  return uri != null &&
-          uri.scheme == 'https' &&
-          uri.host.isNotEmpty &&
-          uri.userInfo.isEmpty
-      ? value
-      : null;
+String? _validatedAffiliationLogoData(Map<String, Object?> affiliation) {
+  return _validatedInlineImageData(
+    _optionalString(affiliation, 'logoImageData'),
+  );
 }
 
-String? _validatedAffiliationLogoData(Map<String, Object?> affiliation) {
-  final value = _optionalString(affiliation, 'logoImageData');
+String? _validatedInlineImageData(String? value) {
   if (value == null || value.length > 699120) return null;
   const prefixes = <String>[
     'data:image/png;base64,',
@@ -519,13 +647,10 @@ PersonalProfileModuleLayoutItem _moduleFromMap(Map<String, Object?> value) {
     },
     isVisible: value['isVisible'] == true,
     position: (value['position'] as num?)?.toInt() ?? -1,
+    favoriteShipIds: value['favoriteShipIds'] == null
+        ? null
+        : List.unmodifiable(_stringList(value, 'favoriteShipIds')),
   );
-}
-
-int _parseGameplayMinutes(Map<String, Object?> profile) {
-  final statistics = _optionalMap(profile, 'gameplayStatistics');
-  final seconds = statistics?['playTimeSeconds'];
-  return seconds is num ? seconds.toInt() ~/ 60 : 0;
 }
 
 PersonalProfilePresenceIntent _parsePresence(String? value) => switch (value) {
@@ -553,44 +678,6 @@ String _formatDate(DateTime? value) {
   return '${local.year.toString().padLeft(4, '0')}-'
       '${local.month.toString().padLeft(2, '0')}-'
       '${local.day.toString().padLeft(2, '0')}';
-}
-
-String _failureKey(Object error) {
-  if (error is BridgeClientException) {
-    return switch (error.code) {
-      'bridge.disconnected' => 'profile.error.hostUnavailable',
-      'account.reauthorization_required' =>
-        'profile.error.reauthorizationRequired',
-      'account.compatibility_existing_link_mismatch' =>
-        'profile.error.compatibilityMismatch',
-      'bridge.invalid_envelope' ||
-      'bridge.protocol_incompatible' => 'profile.error.invalidResponse',
-      _ => 'profile.error.unavailable',
-    };
-  }
-  return error is BridgeFormatException
-      ? 'profile.error.invalidResponse'
-      : 'profile.error.unavailable';
-}
-
-String _saveFailureKey(Object error) {
-  if (error is BridgeClientException) {
-    return switch (error.code) {
-      'personal_profile.write_forbidden' =>
-        'profile.error.reauthorizationRequired',
-      'personal_profile.write_conflict' => 'profile.error.saveFailed',
-      _ => _failureKey(error),
-    };
-  }
-  return _failureKey(error);
-}
-
-void _requireSchema(Map<String, Object?> payload) {
-  if (payload['schemaVersion'] != 1) {
-    throw const BridgeFormatException(
-      'Personal profile payload schema is incompatible.',
-    );
-  }
 }
 
 Map<String, Object?> _requiredMap(Map<String, Object?> source, String key) {

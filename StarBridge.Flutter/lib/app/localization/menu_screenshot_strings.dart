@@ -13,7 +13,7 @@ const menuScreenshotZhCn = <String, String>{
   'menu.screenshot.copyHint': '会替换剪贴板中的内容；取消或保存失败时不复制。默认关闭。',
   'menu.screenshot.confirmation': '显示截图成功提示',
   'menu.screenshot.confirmationHint': '在截图工具中显示保存或复制成功；关闭后仍显示失败和取消结果。',
-  'menu.screenshot.privacy': '截图不会上传或进入预设。截图目录只在本机保存；不会改变你的共享设置。',
+  'menu.screenshot.privacy': '截图不会上传或进入方案。截图目录只在本机保存；不会改变你的共享设置。',
   'menu.screenshot.failed': '设置未保存，当前修改仍保留。请重新读取后重试。',
   'menu.screenshot.dirty': '有未保存的修改。',
   'menu.screenshot.saved': '已保存，下次截图或保存图片时生效。',
@@ -49,7 +49,7 @@ const menuScreenshotZhCn = <String, String>{
   'menu.screenshot.directory.openFailed': '目录未能打开。请检查目录或网络位置是否可用，然后重新读取并重试。',
   'menu.screenshot.directory.conflict': '截图目录已在其他位置改变。请重新读取后再操作。',
   'menu.screenshot.directory.privacy':
-      '目录只保存在这台电脑，不会上传或随预设分享。选择或恢复目录不会截屏、移动旧文件；打开目录时会创建尚不存在的目录。',
+      '目录只保存在这台电脑，不会上传或随方案分享。选择或恢复目录不会截屏、移动旧文件；打开目录时会创建尚不存在的目录。',
   'menu.screenshot.copyAction': '复制截图',
   'menu.screenshot.saveAction': '另存为',
   'menu.screenshot.clearPreview': '清除预览',
@@ -82,7 +82,7 @@ const menuScreenshotZhTw = <String, String>{
   'menu.screenshot.confirmationHint': '在截圖工具中顯示儲存或複製成功；關閉後仍顯示失敗及取消結果。',
   'menu.screenshot.hideMenu': '截圖時隱藏選單',
   'menu.screenshot.hideMenuHint': '預設開啟。關閉後，選單與開啟的工具可能出現在截圖中。',
-  'menu.screenshot.privacy': '截圖不會上傳或加入預設。截圖目錄只在本機儲存；不會變更你的分享設定。',
+  'menu.screenshot.privacy': '截圖不會上傳或加入方案。截圖目錄只在本機儲存；不會變更你的分享設定。',
   'menu.screenshot.failed': '設定未儲存，目前修改仍保留。請重新讀取後重試。',
   'menu.screenshot.dirty': '有未儲存的修改。',
   'menu.screenshot.saved': '已儲存，下次截圖或儲存圖片時生效。',
@@ -118,7 +118,7 @@ const menuScreenshotZhTw = <String, String>{
   'menu.screenshot.directory.openFailed': '目錄未能開啟。請檢查目錄或網路位置是否可用，再重新讀取並重試。',
   'menu.screenshot.directory.conflict': '截圖目錄已在其他位置變更。請重新讀取後再操作。',
   'menu.screenshot.directory.privacy':
-      '目錄只儲存在這台電腦，不會上傳或隨預設分享。選擇或還原目錄不會擷取畫面、移動舊檔案；開啟目錄時會建立尚不存在的目錄。',
+      '目錄只儲存在這台電腦，不會上傳或隨方案分享。選擇或還原目錄不會擷取畫面、移動舊檔案；開啟目錄時會建立尚不存在的目錄。',
   'menu.screenshot.copyAction': '複製截圖',
   'menu.screenshot.saveAction': '另存新檔',
   'menu.screenshot.clearPreview': '清除預覽',
@@ -150,7 +150,7 @@ const menuScreenshotEn = <String, String>{
   'menu.screenshot.confirmationHint': 'Shows save or copy confirmations in the screenshot tool. Errors and cancellation remain visible when off.',
   'menu.screenshot.hideMenu': 'Hide the menu when capturing',
   'menu.screenshot.hideMenuHint': 'On by default. When off, the menu and open tools may appear in screenshots.',
-  'menu.screenshot.privacy': 'Screenshots are not uploaded or included in presets. The screenshot folder is saved locally. Your sharing settings are unchanged.',
+  'menu.screenshot.privacy': 'Screenshots are not uploaded or included in profiles. The screenshot folder is saved locally. Your sharing settings are unchanged.',
   'menu.screenshot.failed':
       'Settings were not saved. Your changes are kept. Reload and try again.',
   'menu.screenshot.dirty': 'You have unsaved changes.',
@@ -192,7 +192,7 @@ const menuScreenshotEn = <String, String>{
   'menu.screenshot.directory.openFailed': 'The folder could not be opened. Check that the folder or network location is available, then reload and try again.',
   'menu.screenshot.directory.conflict':
       'The screenshot folder changed elsewhere. Reload before trying again.',
-  'menu.screenshot.directory.privacy': 'This folder is saved on this computer only, never uploaded or shared with presets. Choosing or restoring it does not capture images or move old files. Open folder creates the folder if it does not exist.',
+  'menu.screenshot.directory.privacy': 'This folder is saved on this computer only, never uploaded or shared with profiles. Choosing or restoring it does not capture images or move old files. Open folder creates the folder if it does not exist.',
   'menu.screenshot.copyAction': 'Copy screenshot',
   'menu.screenshot.saveAction': 'Save as',
   'menu.screenshot.clearPreview': 'Clear preview',

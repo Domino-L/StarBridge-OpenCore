@@ -15,7 +15,10 @@ class MenuImageSettingsCard extends StatelessWidget {
         section: 'image',
         read: (settings) => MenuImagePreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuImageEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuImageEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

@@ -26,7 +26,7 @@
       "attribution": "Pending rights review",
       "reviewedBy": null,
       "reviewedAt": null,
-      "notes": "251 square ship thumbnails. Do not approve this group until every file is covered by traceable rights evidence."
+      "notes": "251 square ship thumbnails. Do not approve this group until every file is covered by traceable rights evidence. The 0.7.2 Flutter official binary ships this group by the maintainer's own decision; its source remains unverified and this is not a claim of permission."
     },
     {
       "id": "ship-details-historical",
@@ -51,7 +51,7 @@
       "attribution": "Pending rights review",
       "reviewedBy": null,
       "reviewedAt": null,
-      "notes": "252 wide ship detail images. The Basher image was added in a later batch and may require a separate source entry after provenance is recovered."
+      "notes": "252 wide ship detail images. The Basher image was added in a later batch and may require a separate source entry after provenance is recovered. The 0.7.2 Flutter official binary ships this group by the maintainer's own decision; its source remains unverified and this is not a claim of permission."
     },
     {
       "id": "system-maps-historical",
@@ -76,7 +76,7 @@
       "attribution": "Pending rights review",
       "reviewedBy": null,
       "reviewedAt": null,
-      "notes": "Three system maps: Stanton, Pyro, and Nyx."
+      "notes": "Three system maps: Stanton, Pyro, and Nyx. The 0.7.2 Flutter official binary ships this group by the maintainer's own decision; its source remains unverified and this is not a claim of permission."
     }
   ]
 }

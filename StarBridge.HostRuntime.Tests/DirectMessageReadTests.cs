@@ -48,6 +48,7 @@ internal static class DirectMessageReadTests
         await OpenFriend();
         await InvitationCards();
         await RoomInvitationCards();
+        await RolledWindowPaging();
         var paths = new List<string>();
         using var reader = new FriendsReader(new Uri("https://relay.example.test"), new Handler(request => {
             Check(request.Method == HttpMethod.Get && request.Headers.Authorization?.Parameter == "token", "Only scoped reads");
@@ -74,6 +75,33 @@ internal static class DirectMessageReadTests
         var newer = (DirectHistoryView)await reader.ReadChatAsync("token", Payload(new { schemaVersion = 1, targetRef = reference, after = 60 }), default, "a:1");
         Check(newer.Messages.Length == 2 && paths.Count == 5, "After paging without read receipts");
     }
+    private static async Task RolledWindowPaging()
+    {
+        using var reader = new FriendsReader(new Uri("https://relay.invalid"), new Handler(request => {
+            var query = request.RequestUri!.Query;
+            if (request.RequestUri.AbsolutePath.EndsWith("conversations")) return Ok(Directory());
+            var parameters = System.Web.HttpUtility.ParseQueryString(query);
+            var before = long.Parse(parameters["before"]!);
+            var after = long.Parse(parameters["after"]!);
+            var first = before > 0 ? (int)before - 50 : after > 0 ? (int)after + 1 : 1;
+            var last = before > 0 ? (int)before - 1 : after > 0 ? Math.Min((int)after + 50, 1201) : 1;
+            return Ok(History(first, last, 1201));
+        }));
+        var directory = (ConversationsView)await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1 }), default, "scope");
+        var reference = directory.Conversations.Single().TargetRef;
+        await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1, targetRef = reference }), default, "scope");
+        for (var after = 1; after < 1201; after += 50)
+            await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1, targetRef = reference, after }), default, "scope");
+        // Flutter retained 202..1201, although the original Host cursor was 1.
+        foreach (var before in new[] { 202, 152 }) {
+            var page = (DirectHistoryView)await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1, targetRef = reference, before }), default, "scope");
+            Check(page.Messages.Select(m => m.Sequence).SequenceEqual(Enumerable.Range(before - 50, 50).Select(n => (long)n)), "Rolled window reads continuous older pages");
+        }
+        var resumed = (DirectHistoryView)await reader.ReadChatAsync("fixture", Payload(new { schemaVersion = 1, targetRef = reference, after = 1101 }), default, "scope");
+        Check(resumed.Messages.First().Sequence == 1102, "History window can resume towards live tail");
+        Console.WriteLine("PASS DM rolled 1000-message window reads two continuous older pages and resumes");
+    }
+
     internal static async Task NotificationMetadata()
     {
         foreach (var sender in new[] { "target-private", "viewer-private" }) {

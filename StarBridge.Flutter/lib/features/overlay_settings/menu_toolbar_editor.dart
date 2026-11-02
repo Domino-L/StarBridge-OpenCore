@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_select_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
+
 import '../../app/localization/app_strings.dart';
 import 'overlay_settings_help.dart';
 import '../../platform/window/menu_toolbar_preferences.dart';
@@ -12,10 +18,12 @@ class MenuToolbarEditor extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
     this.showTitle = true,
   });
   final MenuToolbarPreferences value;
   final bool showTitle;
+  final bool enabled;
   final ValueChanged<MenuToolbarPreferences> onChanged;
   @override
   Widget build(BuildContext context) {
@@ -25,17 +33,20 @@ class MenuToolbarEditor extends StatelessWidget {
       String selected,
       List<String> choices,
       ValueChanged<String> changed,
-    ) => DropdownButtonFormField<String>(
-      key: ValueKey('menu-toolbar-$key-$selected'),
-      initialValue: selected,
+    ) => StarBridgeSelectField<String>(
+      key: ValueKey('menu-toolbar-$key'),
+      identity: 'menu-toolbar-$key',
+      value: selected,
       decoration: InputDecoration(labelText: text(key)),
-      items: [
+      options: [
         for (final option in choices)
-          DropdownMenuItem(value: option, child: Text(text(option))),
+          StarBridgeSelectOption(value: option, label: text(option)),
       ],
-      onChanged: (v) {
-        if (v != null) changed(v);
-      },
+      onSelected: !enabled
+          ? null
+          : (v, _) {
+              changed(v);
+            },
     );
     return Material(
       type: MaterialType.transparency,
@@ -46,12 +57,13 @@ class MenuToolbarEditor extends StatelessWidget {
             Text(text('title'), style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           OverlaySettingsHelp(text('hint')),
-          SwitchListTile(
+          StarBridgeSwitch.tile(
             key: const ValueKey('menu-toolbar-unread'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(text('showUnreadBadges')),
+            label: text('showUnreadBadges'),
             value: value.showUnreadBadges,
-            onChanged: (v) => onChanged(value.copyWith(showUnreadBadges: v)),
+            onChanged: !enabled
+                ? null
+                : (v) => onChanged(value.copyWith(showUnreadBadges: v)),
           ),
           const SizedBox(height: 12),
           choice('density', value.density, const [
@@ -71,6 +83,7 @@ class MenuToolbarEditor extends StatelessWidget {
             buildDefaultDragHandles: false,
             itemCount: value.order.length,
             onReorderItem: (from, to) {
+              if (!enabled) return;
               final order = [...value.order];
               final id = order.removeAt(from);
               order.insert(to, id);
@@ -97,26 +110,29 @@ class MenuToolbarEditor extends StatelessWidget {
                           ),
                         ),
                       )
-                    : Switch(
+                    : StarBridgeSwitch(
+                        label: title,
                         key: ValueKey('menu-toolbar-visible-$id'),
                         value: !value.hidden.contains(id),
-                        onChanged: (visible) => onChanged(
-                          value.copyWith(
-                            hidden: visible
-                                ? value.hidden
-                                      .where((item) => item != id)
-                                      .toList()
-                                : [...value.hidden, id],
-                          ),
-                        ),
+                        onChanged: !enabled
+                            ? null
+                            : (visible) => onChanged(
+                                value.copyWith(
+                                  hidden: visible
+                                      ? value.hidden
+                                            .where((item) => item != id)
+                                            .toList()
+                                      : [...value.hidden, id],
+                                ),
+                              ),
                       ),
                 title: Text(title),
                 subtitle: id == 'hud' ? Text(text('alwaysVisible')) : null,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      tooltip: text('earlier'),
+                    StarBridgeIconAction(
+                      label: text('earlier'),
                       icon: const RotatedBox(
                         quarterTurns: 2,
                         child: StarBridgeIcon(
@@ -124,9 +140,9 @@ class MenuToolbarEditor extends StatelessWidget {
                           size: 18,
                         ),
                       ),
-                      onPressed: index == 0
+                      onActivate: !enabled || index == 0
                           ? null
-                          : () {
+                          : (_) {
                               final order = [...value.order];
                               order[index] = order[index - 1];
                               order[index - 1] = id;
@@ -135,7 +151,8 @@ class MenuToolbarEditor extends StatelessWidget {
                     ),
                     ReorderableDragStartListener(
                       index: index,
-                      child: Tooltip(
+                      enabled: enabled,
+                      child: StarBridgeTooltip(
                         message: text('move'),
                         child: const Padding(
                           padding: EdgeInsets.all(12),
@@ -150,8 +167,12 @@ class MenuToolbarEditor extends StatelessWidget {
               );
             },
           ),
-          TextButton(
-            onPressed: () => onChanged(const MenuToolbarPreferences()),
+          StarBridgeActionButton(
+            key: const Key('menu-toolbar-reset'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: !enabled
+                ? null
+                : (_) => onChanged(const MenuToolbarPreferences()),
             child: Text(text('reset')),
           ),
         ],

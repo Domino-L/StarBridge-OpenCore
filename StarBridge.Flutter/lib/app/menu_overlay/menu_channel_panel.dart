@@ -1,7 +1,14 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../features/common/social_read_activity.dart';
 import '../../features/communities/community_chat_composer.dart';
 import '../../features/communities/community_local_message_tile.dart';
 import 'menu_chat_widgets.dart';
@@ -43,6 +50,8 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
   final _draft = TextEditingController();
   final _scroll = ScrollController();
   int? _submittedAt;
+  int _submittedEpoch = 0;
+  InteractionSource _submittedSource = InteractionSource.programmatic;
   String? _submittedKey, _submittedText;
   String? _restoringKey, _restoringText;
   String _scope = '';
@@ -130,14 +139,16 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
     final busy = raw.busy || raw.state != 'ready';
     if (view.organization?.tab == 'directory') {
       if (widget.directoryAsPlaceholder) {
-        return const Center(child: Text('从左侧选择会话'));
+        return Center(
+          child: Text(menuText(context, 'menu.overlay.comms.selectLeft')),
+        );
       }
       return MenuOrganizationDirectory(view: view, onAction: widget.onAction);
     }
     if (chat == null) {
       return MenuFeaturePanel(view: view, onAction: widget.onAction);
     }
-    final send = view.buttons.where((a) => a.label == '发送消息').firstOrNull;
+    final send = view.buttons.where((a) => a.role == 'sendMessage').firstOrNull;
     final outbox = chat.outbox;
     final locals = outbox?.messages ?? const [];
     final canSend =
@@ -163,6 +174,8 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
       setState(() {
         if (outbox == null) {
           _submittedAt = chat.revision;
+          _submittedEpoch++;
+          _submittedSource = captureStarBridgeActivationSource()();
         } else {
           _submittedKey = send.key;
           _submittedText = _draft.text;
@@ -233,22 +246,27 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
           ChatSendShortcuts(
             controller: _draft,
             onSend: canSend ? submit : null,
-            child: TextField(
-              key: const ValueKey('menu-channel-draft'),
-              controller: _draft,
-              readOnly:
-                  _restoringKey != null ||
-                  outbox == null &&
-                      (busy ||
-                          _submittedAt != null ||
-                          chat.status == 'unknown'),
-              minLines: 2,
-              maxLines: 3,
-              inputFormatters: [
-                LengthLimitingTextInputFormatter(send?.limit ?? 1000),
-              ],
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(hintText: '输入消息'),
+            child: StarBridgeFieldFrame(
+              builder: (_, focus) => TextField(
+                focusNode: focus,
+                key: const ValueKey('menu-channel-draft'),
+                controller: _draft,
+                readOnly:
+                    _restoringKey != null ||
+                    outbox == null &&
+                        (busy ||
+                            _submittedAt != null ||
+                            chat.status == 'unknown'),
+                minLines: 2,
+                maxLines: 3,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(send?.limit ?? 1000),
+                ],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: menuText(context, 'menu.overlay.comms.input'),
+                ),
+              ),
             ),
           ),
           MenuChatSendBar(
@@ -263,8 +281,24 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
             chat.availability == 'denied' &&
             chat.status != 'unknown' &&
             !view.refreshing)
-          const Text('当前频道不可发送消息，请刷新确认权限。'),
-        if (_submittedAt != null) const Text('正在确认发送结果，请勿重复提交。'),
+          Text(menuText(context, 'menu.overlay.comms.channelCannotSend')),
+        if (_submittedAt != null) ...[
+          ExcludeSemantics(
+            key: const ValueKey('menu-channel-send-activity'),
+            child: SocialReadActivity(
+              // Freeze this admitted local handoff, never the read projection
+              // or an earlier send. Hidden panels retain their original guard
+              // and caption without running a decorative wait.
+              key: ValueKey((view.scope, _submittedEpoch, widget.active)),
+              source: widget.active
+                  ? _submittedSource
+                  : InteractionSource.programmatic,
+              opening: false,
+              label: menuText(context, 'menu.overlay.comms.confirmingSend'),
+            ),
+          ),
+          Text(menuText(context, 'menu.overlay.comms.confirmingSend')),
+        ],
       ],
     );
     return LayoutBuilder(
@@ -279,16 +313,23 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
               if (!widget.embeddedOrganization && !widget.embeddedRoom)
                 MenuChatHeader(
                   title: view.title,
-                  subtitle: widget.directoryAsPlaceholder ? '组织频道' : '',
+                  subtitle: widget.directoryAsPlaceholder
+                      ? menuText(
+                          context,
+                          'menu.overlay.comms.organizationChannel',
+                        )
+                      : '',
                   portrait: MenuInlineAvatar(
                     name: view.title,
                     source: view.organization?.logo,
                   ),
-                  trailing: TextButton(
-                    onPressed: busy
+                  trailing: StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const ValueKey('menu-channel-refresh'),
+                    onActivate: busy
                         ? null
-                        : () => widget.onAction('refresh', ''),
-                    child: const Text('刷新'),
+                        : (_) => widget.onAction('refresh', ''),
+                    child: Text(menuText(context, 'friends.refresh')),
                   ),
                 ),
               Wrap(
@@ -300,17 +341,23 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
                         (!(widget.embeddedOrganization ||
                                 widget.embeddedRoom) ||
                             const {
-                              '较早消息',
-                              '最新消息',
-                              '已核对当前结果',
-                              '清除本机记录',
-                              '重试已读同步',
-                            }.contains(a.label)) &&
+                              'olderMessages',
+                              'latestMessages',
+                              'acknowledgeResult',
+                              'clearLocalHistory',
+                              'retryReadReceipt',
+                            }.contains(a.role)) &&
                         (!widget.directoryAsPlaceholder ||
-                            !const {'更多组织会话', '组织会话首页'}.contains(a.label)),
+                            !const {
+                              'moreOrganizationChats',
+                              'organizationChatsHome',
+                            }.contains(a.role)),
                   ))
                     MenuFeatureAction(
-                      key: ValueKey('${view.scope}/${action.label}'),
+                      key: ValueKey(
+                        '${view.scope}/${action.role ?? action.label}',
+                      ),
+                      identity: view.scope,
                       action: action,
                       enabled: !busy,
                       onAction: widget.onAction,
@@ -322,14 +369,19 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
                   view.notice,
                   style: TextStyle(color: context.tokens.colors.warning),
                 ),
-              if (raw.state == 'loading' || raw.refreshing) const MenuLoading(),
+              if (raw.state == 'loading' || raw.refreshing)
+                MenuLoading(feedback: raw.readFeedback),
               Expanded(
                 child: MenuVisibleReceipts(
                   active: widget.active && !busy,
                   tokens: chat.receipts,
                   onRead: (key) => widget.onAction(key, ''),
                   builder: (anchors) => view.rows.isEmpty && locals.isEmpty
-                      ? const Center(child: Text('暂无消息'))
+                      ? Center(
+                          child: Text(
+                            menuText(context, 'menu.overlay.comms.noMessages'),
+                          ),
+                        )
                       : Align(
                           alignment: Alignment.topCenter,
                           child: MenuChatScroll(
@@ -402,9 +454,23 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
                                   key: anchors[index],
                                   child: MenuChatMessage(
                                     incoming: !meta.self,
-                                    sender: meta.self ? '我' : row.title,
+                                    sender: meta.self
+                                        ? menuText(
+                                            context,
+                                            'menu.overlay.comms.me',
+                                          )
+                                        : row.title,
                                     portrait: MenuAvatarActions(
-                                      name: meta.self ? '我' : row.title,
+                                      identity: (
+                                        view.scope,
+                                        chat.profiles[index],
+                                      ),
+                                      name: meta.self
+                                          ? menuText(
+                                              context,
+                                              'menu.overlay.comms.me',
+                                            )
+                                          : row.title,
                                       onProfile:
                                           widget.onProfile == null ||
                                               chat.profiles[index] == null
@@ -413,7 +479,12 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
                                               chat.profiles[index]!,
                                             ),
                                       child: MenuInlineAvatar(
-                                        name: meta.self ? '我' : row.title,
+                                        name: meta.self
+                                            ? menuText(
+                                                context,
+                                                'menu.overlay.comms.me',
+                                              )
+                                            : row.title,
                                         source: row.avatar,
                                       ),
                                     ),
@@ -449,13 +520,16 @@ class _MenuChannelPanelState extends State<MenuChannelPanel> {
               if (_newMessages)
                 Align(
                   alignment: Alignment.centerRight,
-                  child: TextButton(
-                    key: const ValueKey('menu-channel-new-messages'),
-                    onPressed: () {
+                  child: StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const ValueKey('menu-channel-new-messages'),
+                    onActivate: (_) {
                       if (_scroll.hasClients) _scroll.jumpTo(0);
                       setState(() => _newMessages = false);
                     },
-                    child: const Text('有新消息 · 回到底部'),
+                    child: Text(
+                      menuText(context, 'menu.overlay.comms.newMessages'),
+                    ),
                   ),
                 ),
               composer,

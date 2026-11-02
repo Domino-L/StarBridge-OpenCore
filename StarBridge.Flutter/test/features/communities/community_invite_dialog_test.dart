@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
@@ -98,8 +99,14 @@ Future<void> review(WidgetTester tester) async {
 }
 
 Future<void> acknowledge(WidgetTester tester) async {
-  await tester.ensureVisible(find.byType(CheckboxListTile));
-  await tester.tap(find.byType(CheckboxListTile));
+  final target = find.byWidgetPredicate(
+    (w) =>
+        w is StarBridgeCheckboxTile &&
+        w.controlKey == const Key('community-admission-acknowledge'),
+  );
+  await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
+  await tester.tap(target);
   await tester.pumpAndSettle();
 }
 
@@ -224,7 +231,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('组织 B / B'), findsNothing);
     expect(find.byType(FilledButton), findsNothing);
-    await tester.tap(find.byTooltip(text(tester, 'close')));
+    await tester.tap(find.byKey(const Key('community-admission-close-icon')));
     await tester.pumpAndSettle();
   });
   testWidgets('account invalidation removes dialog and private draft', (

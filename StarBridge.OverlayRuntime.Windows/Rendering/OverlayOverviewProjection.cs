@@ -31,16 +31,25 @@ internal sealed record OverlayOverviewProjectionResult(
     string LocationPlaceholderMetric,
     Brush StatusBrush,
     IReadOnlyList<OverlayOverviewLocationCount> TopLocations,
-    bool ShowsPlaceholder);
+    bool ShowsPlaceholder)
+{
+    // Organization sources only; rooms keep their sentence layout.
+    public OverlayOverviewFacts? Facts { get; init; }
+}
 
 /// <summary>
 /// Projects an already-authorized, closed player set into the overview copy used by
-/// every overlay renderer. The local presence argument is authoritative local state,
-/// not the self row's outbound privacy projection. It deliberately has no squad input:
+/// every overlay renderer. Local self state is authoritative unless the scene is
+/// a complete shared-fields-only privacy projection. It deliberately has no squad input:
 /// fleet and party-room overviews are derived from presence plus the active scene context.
 /// </summary>
 internal static class OverlayOverviewProjection
 {
+    // User-facing shard wording lives only in this file; a Desktop test holds the rest of the client to it.
+    internal static string ShardLabel(bool zh) => zh ? "分线" : "Shard";
+
+    internal static string OtherShardsLabel(bool zh) => zh ? "其他分线" : "Other shards";
+
     internal static OverlayOverviewProjectionResult Project(
         IReadOnlyCollection<PlayerRow> closedPlayers,
         OverlaySceneContext sceneContext,
@@ -72,7 +81,7 @@ internal static class OverlayOverviewProjection
         }
         if (sceneContext.Kind == OverlaySceneKind.Community)
         {
-            var organization = ProjectFleet(players, hasFleet, localPresence, localShard, language, zh);
+            var organization = ProjectFleet(players, hasFleet, localPresence, localShard, language, zh, sceneContext.SharedFieldsOnly, sceneContext.LocalOwnPlace);
             return organization with
             {
                 Title = zh ? "组织概况" : "ORGANIZATION OVERVIEW",
@@ -92,12 +101,14 @@ internal static class OverlayOverviewProjection
         PlayerPresenceKind localPresence,
         string? localShard,
         string? language,
-        bool zh)
+        bool zh,
+        bool sharedFieldsOnly = false,
+        string? localOwnPlace = null)
     {
         var online = players.Count(player =>
-            PlayerPresence.IsOnline(ResolveFleetPresence(player, localPresence)));
+            PlayerPresence.IsOnline(ResolveFleetPresence(player, localPresence, sharedFieldsOnly)));
         var inGame = players.Count(player =>
-            ResolveFleetPresence(player, localPresence) == PlayerPresenceKind.InGame);
+            ResolveFleetPresence(player, localPresence, sharedFieldsOnly) == PlayerPresenceKind.InGame);
         var hasComparableLocalServer =
             localPresence == PlayerPresenceKind.InGame &&
             FleetServerRelationship.IsRecognizedShard(localShard);
@@ -118,7 +129,8 @@ internal static class OverlayOverviewProjection
             localPresence,
             localShard,
             inGame,
-            zh);
+            zh,
+            sharedFieldsOnly);
         var topLocations = ProjectTopLocations(
             players,
             localPresence,
@@ -183,7 +195,72 @@ internal static class OverlayOverviewProjection
                 : "",
             ResolveStatusBrush(players, online),
             topLocations,
-            ShowsPlaceholder: false);
+            ShowsPlaceholder: false)
+        { Facts = ProjectFacts(players, localPresence, localShard, language, zh, sharedFieldsOnly, localOwnPlace) };
+    }
+
+    /// <summary>
+    /// The same closed, authorized rows as facts. Organization totals follow the same
+    /// rule as the rest of the overview: a shared-fields-only self row stays as shared.
+    /// The viewer's own shard and place always come from local evidence, because that
+    /// line and the "people on your shard" count only ever appear on their own screen.
+    /// </summary>
+    private static OverlayOverviewFacts ProjectFacts(
+        IReadOnlyCollection<PlayerRow> players,
+        PlayerPresenceKind localPresence,
+        string? localShard,
+        string? language,
+        bool zh,
+        bool sharedFieldsOnly,
+        string? localOwnPlace)
+    {
+        PlayerPresenceKind Presence(PlayerRow player) => ResolveFleetPresence(player, localPresence, sharedFieldsOnly);
+        string? Shard(PlayerRow player) => player.IsSelf && !sharedFieldsOnly ? localShard : player.ServerShard;
+        var self = players.FirstOrDefault(player => player.IsSelf);
+        var inGame = players.Where(player => Presence(player) == PlayerPresenceKind.InGame).ToArray();
+        var viewerInGame = localPresence == PlayerPresenceKind.InGame;
+        var localShardValid = PublicShardId.IsValid(localShard);
+        var ownShardId = !viewerInGame ? null
+            : localShardValid ? localShard
+            : self is not null && !sharedFieldsOnly ? Shard(self) : null;
+        // A self row hidden from the organization still counts on the viewer's own shard.
+        var selfCountedOnOwnShard = self is not null && inGame.Contains(self) &&
+            string.Equals(Shard(self)?.Trim(), ownShardId?.Trim(), StringComparison.OrdinalIgnoreCase);
+        // A stale shared self row must not count the viewer a second time on another shard.
+        var selfMovedAway = sharedFieldsOnly && viewerInGame && localShardValid && !selfCountedOnOwnShard;
+        var shardRows = inGame
+            .Where(player => !(player.IsSelf && selfMovedAway))
+            .Select(player => (Shard(player), player.IsSelf && !sharedFieldsOnly ? (string?)null : player.ServerRegion));
+        if (PublicShardId.IsValid(ownShardId) && !selfCountedOnOwnShard) shardRows = shardRows.Append((ownShardId, null));
+        var shards = OverlayShardPresentation.Group(shardRows, ownShardId, zh);
+        var ownPlace = !viewerInGame ? null
+            : localOwnPlace ?? (self is not null && !sharedFieldsOnly && inGame.Contains(self) ? FleetLocationProjection.Resolve(self, language)?.DisplayName : null);
+        var placeNames = inGame
+            .Where(player => !player.IsSelf || localOwnPlace is null)
+            .Select(player => FleetLocationProjection.Resolve(player, language))
+            .Where(location => location.HasValue)
+            .Select(location => location!.Value.DisplayName.Trim());
+        if (localOwnPlace is not null) placeNames = placeNames.Append(localOwnPlace.Trim());
+        var places = placeNames
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new OverlayOverviewPlace(group.Key, group.Count(),
+                ownPlace is not null && group.Key.Equals(ownPlace.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(place => place.IsOwn)
+            .ThenByDescending(place => place.Count)
+            .ThenBy(place => place.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return new OverlayOverviewFacts(
+            players.Count(player => PlayerPresence.IsOnline(Presence(player))),
+            players.Count,
+            inGame.Length,
+            players.Count(player => Presence(player) == PlayerPresenceKind.AppOnline),
+            players.Count(player => Presence(player) == PlayerPresenceKind.Away),
+            players.Count(player => !PlayerPresence.IsOnline(Presence(player))),
+            ownPlace,
+            shards.FirstOrDefault(shard => shard.IsOwn),
+            shards,
+            places,
+            viewerInGame);
     }
 
     private static OverlayOverviewProjectionResult ProjectPartyRoom(
@@ -316,11 +393,12 @@ internal static class OverlayOverviewProjection
         PlayerPresenceKind localPresence,
         string? localShard,
         int inGame,
-        bool zh)
+        bool zh,
+        bool sharedFieldsOnly = false)
     {
         var busiest = players
-            .Where(player => ResolveFleetPresence(player, localPresence) == PlayerPresenceKind.InGame)
-            .Select(player => ResolveServerRegionCode(player, localShard))
+            .Where(player => ResolveFleetPresence(player, localPresence, sharedFieldsOnly) == PlayerPresenceKind.InGame)
+            .Select(player => ResolveServerRegionCode(player, localShard, sharedFieldsOnly))
             .Where(region => !string.IsNullOrWhiteSpace(region))
             .Select(region => region!)
             .GroupBy(region => region, StringComparer.OrdinalIgnoreCase)
@@ -346,9 +424,9 @@ internal static class OverlayOverviewProjection
             : zh ? "暂无服务器区域" : "No server region data";
     }
 
-    private static string? ResolveServerRegionCode(PlayerRow player, string? localShard)
+    private static string? ResolveServerRegionCode(PlayerRow player, string? localShard, bool sharedFieldsOnly)
     {
-        if (player.IsSelf)
+        if (player.IsSelf && !sharedFieldsOnly)
         {
             return GameServerRegionPresentation.ResolvePreferredCode(localShard, player.ServerRegion);
         }
@@ -381,8 +459,9 @@ internal static class OverlayOverviewProjection
 
     private static PlayerPresenceKind ResolveFleetPresence(
         PlayerRow player,
-        PlayerPresenceKind localPresence) =>
-        player.IsSelf
+        PlayerPresenceKind localPresence,
+        bool sharedFieldsOnly = false) =>
+        player.IsSelf && !sharedFieldsOnly
             ? localPresence
             : player.SharedPresence;
 

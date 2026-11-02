@@ -1,4 +1,5 @@
 #include "tray_surface_bridge.h"
+#include "manual_status_commands.h"
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
@@ -158,10 +159,13 @@ class TraySurfaceBridge::Impl {
         }
         if (*command == "open") { Hide(); result->Success(); open_(); return; }
         if (*command == "exit") { Hide(); result->Success(); exit_(); return; }
-        if (*command != "overlaySettings" && *command != "toggleOverlay" && *command != "presence") {
+        if (!IsTrayPrimaryAction(*command)) {
           result->Error("tray.invalid_action", "Unknown tray action."); return;
         }
         busy_ = true;
+        // Restoration needs the primary engine's identity dialog now, not only
+        // after the command has finished. No authentication runs in this engine.
+        if (*command == "resumeOnline") { Hide(); open_(); }
         const auto life = alive_;
         const bool close_after = *command == "overlaySettings";
         auto pending = std::shared_ptr<Result>(std::move(result));

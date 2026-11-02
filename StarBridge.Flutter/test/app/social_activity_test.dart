@@ -13,6 +13,8 @@ void main() {
     const owner = BridgeAccountContext(environment: 'fixture', authority: 'starbridge-relay-test', subject: 'fixture');
     final waits = <BridgeEnvelope>[];
     var wakes = 0;
+    final directWakes = <List<String>?>[];
+    final directSubscription = directMessageActivityChanges(session).listen(directWakes.add);
     Future<void> respond(BridgeEnvelope request, Map<String, Object?> payload) => pair.host.send(BridgeEnvelope(
       protocolVersion: 1, messageType: 'response', name: request.name, correlationId: request.correlationId,
       sessionGeneration: request.sessionGeneration, accountContext: owner, status: 'ok', payload: payload,
@@ -25,7 +27,7 @@ void main() {
     final subscription = socialActivityChanges(session).listen((_) => wakes++);
     final source = SocialActivity(session);
     addTearDown(() async {
-      source.dispose(); await subscription.cancel(); await host.cancel(); await session.close(); await pair.host.close();
+      source.dispose(); await subscription.cancel(); await directSubscription.cancel(); await host.cancel(); await session.close(); await pair.host.close();
     });
     await tester.pump(const Duration(milliseconds: 1));
     await respond(waits.single, {'schemaVersion': 1, 'instance': 'invalid', 'version': 0});
@@ -43,12 +45,21 @@ void main() {
     expect(waits.last.sessionGeneration, 2);
     expect(waits.last.payload['instance'], '');
     expect(waits.last.payload['version'], -1);
-    await respond(old, {'schemaVersion': 1, 'instance': 'a' * 32, 'version': 5});
+    await respond(old, {'schemaVersion': 1, 'instance': 'a' * 32, 'version': 5,
+      'directMessagesOnly': true, 'directMessageTargets': ['old-account'], 'directMessagesPushHealthy': true});
     await tester.pump();
     expect(wakes, 0);
+    expect(directWakes, isEmpty);
+    expect(directMessagePushHealthy(session), isFalse);
     await respond(waits.last, {'schemaVersion': 1, 'instance': 'b' * 32, 'version': 0});
     await tester.pump();
     expect(wakes, 1);
+    await tester.pump(const Duration(milliseconds: 100));
+    await respond(waits.last, {'schemaVersion': 1, 'instance': 'b' * 32, 'version': 1,
+      'directMessagesOnly': true, 'directMessageTargets': ['current-ref'], 'directMessagesPushHealthy': true});
+    await tester.pump();
+    expect(directWakes, [null, ['current-ref']]);
+    expect(directMessagePushHealthy(session), isTrue);
     source.dispose();
     await tester.pump();
   });

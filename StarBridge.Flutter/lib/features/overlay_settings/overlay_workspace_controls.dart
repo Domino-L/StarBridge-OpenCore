@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_field.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_choice_chip.dart';
+import '../../design_system/interaction/starbridge_slider.dart';
+
 import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
@@ -10,6 +16,7 @@ import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_value_format.dart';
 import 'overlay_color_picker.dart';
 import 'overlay_settings_help.dart';
+import 'overlay_appearance_qualification.dart';
 
 export 'overlay_workspace_hotkey_card.dart';
 
@@ -20,9 +27,12 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
     required this.settings,
     required this.onChanged,
     this.appearances = const [],
+    this.appearanceRule,
     this.onExperiencePreset,
     this.footer,
     this.header,
+    this.editOwner,
+    this.currentEditOwner,
     super.key,
   });
 
@@ -31,13 +41,18 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
   final OverlayWorkspaceSettings settings;
   final void Function(String field, Object? value) onChanged;
   final List<OverlayWorkspaceAppearance> appearances;
+  // Preview supplies metadata without altering the normal saved skin enum.
+  final OverlayWorkspaceAppearanceRule? appearanceRule;
   final ValueChanged<String>? onExperiencePreset;
   final Widget? footer;
   final Widget? header;
+  final Object? editOwner;
+  final Object? Function()? currentEditOwner;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    final profile = appearanceRule ?? overlayWorkspaceAppearanceRule(settings);
     return StarBridgeSurface(
       role: SurfaceRole.panel,
       key: Key('overlay-group-$group'),
@@ -52,8 +67,7 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             if (header != null) ...[SizedBox(height: tokens.space.md), header!],
-            if (group == 'appearance' &&
-                overlayWorkspaceAppearanceRule(settings).locksTheme) ...[
+            if (group == 'appearance' && profile.locksTheme) ...[
               SizedBox(height: tokens.space.sm),
               OverlaySettingsHelp(
                 _copy(context, 'overlay.workspace.fixedPalette'),
@@ -80,7 +94,11 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                       .where(
                         (field) =>
                             field.userVisible &&
-                            overlayWorkspaceFieldVisible(field.field, settings),
+                            overlayWorkspaceFieldVisible(
+                              field.field,
+                              settings,
+                              appearanceRule: profile,
+                            ),
                       )
                       .map(
                         (field) => SizedBox(
@@ -94,18 +112,21 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                               : width,
                           child: _Field(
                             spec: field,
+                            editOwner: editOwner,
+                            currentEditOwner: currentEditOwner,
                             value: field.field == 'startupTransitionStyle'
-                                ? overlayWorkspaceAppearanceRule(settings)
-                                      .startupTransition
+                                ? profile.startupTransition
                                 : settings[field.field],
                             appearances: appearances,
                             enabled: overlayWorkspaceFieldEnabled(
                               field.field,
                               settings,
+                              appearanceRule: profile,
                             ),
                             disabledReason: overlayWorkspaceFieldDisabledReason(
                               field.field,
                               settings,
+                              appearanceRule: profile,
                             ),
                             onChanged: (value) => onChanged(field.field, value),
                           ),
@@ -169,11 +190,9 @@ class _ExperiencePresetPicker extends StatelessWidget {
           runSpacing: tokens.space.xs,
           children: const ['Smooth', 'Balanced', 'ReducedMotion']
               .map(
-                (preset) => ChoiceChip(
-                  key: Key('overlay-experience-$preset'),
-                  label: Text(
-                    _copy(context, 'overlay.workspace.experience.$preset'),
-                  ),
+                (preset) => StarBridgeChoiceChip(
+                  controlKey: Key('overlay-experience-$preset'),
+                  label: _copy(context, 'overlay.workspace.experience.$preset'),
                   selected: preset == selected,
                   onSelected: (_) => onSelected(preset),
                 ),
@@ -193,6 +212,8 @@ class _Field extends StatelessWidget {
     required this.onChanged,
     this.appearances = const [],
     this.disabledReason,
+    this.editOwner,
+    this.currentEditOwner,
   });
 
   final OverlayWorkspaceFieldSpec spec;
@@ -201,6 +222,8 @@ class _Field extends StatelessWidget {
   final ValueChanged<Object?> onChanged;
   final List<OverlayWorkspaceAppearance> appearances;
   final String? disabledReason;
+  final Object? editOwner;
+  final Object? Function()? currentEditOwner;
 
   @override
   Widget build(BuildContext context) {
@@ -218,38 +241,24 @@ class _Field extends StatelessWidget {
           enabled: enabled,
           onChanged: onChanged,
         ),
-      OverlayWorkspaceFieldKind.toggle => SwitchListTile(
+      OverlayWorkspaceFieldKind.toggle => StarBridgeSwitch.tile(
         key: Key('overlay-field-${spec.field}'),
-        contentPadding: EdgeInsets.zero,
-        title: Text(label),
-        subtitle: helper == null ? null : Text(helper),
+        label: label,
+        subtitle: helper,
         value: value == true,
         onChanged: enabled ? (next) => onChanged(next) : null,
       ),
-      OverlayWorkspaceFieldKind.choice => DropdownButtonFormField<String>(
+      OverlayWorkspaceFieldKind.choice => StarBridgeSelectField<String>(
         key: Key('overlay-field-${spec.field}'),
-        initialValue: spec.options.contains(value) ? value as String : null,
+        identity: 'overlay-field-${spec.field}',
+        value: spec.options.contains(value) ? value as String : null,
         decoration: InputDecoration(
           labelText: label,
           helperText: helper,
           helperMaxLines: 3,
         ),
-        items:
-            (spec.selectableOptions.isEmpty
-                    ? spec.options
-                    : spec.selectableOptions)
-                .map(
-                  (option) => DropdownMenuItem(
-                    value: option,
-                    child: Text(_optionName(context, option)),
-                  ),
-                )
-                .toList(growable: false),
-        onChanged: enabled
-            ? (next) {
-                if (next != null) onChanged(next);
-              }
-            : null,
+        options: _choiceOptions(context, spec, value),
+        onSelected: enabled ? (next, _) => onChanged(next) : null,
       ),
       OverlayWorkspaceFieldKind.readOnlyChoice => InputDecorator(
         key: Key('overlay-field-${spec.field}'),
@@ -259,9 +268,10 @@ class _Field extends StatelessWidget {
         ),
         child: Text(_optionName(context, value?.toString() ?? '')),
       ),
-      OverlayWorkspaceFieldKind.numberChoice => DropdownButtonFormField<num>(
+      OverlayWorkspaceFieldKind.numberChoice => StarBridgeSelectField<num>(
         key: Key('overlay-field-${spec.field}'),
-        initialValue: numberValue != null
+        identity: 'overlay-field-${spec.field}',
+        value: numberValue != null
             ? spec.numberOptions.cast<num?>().firstWhere(
                 (option) => option?.toDouble() == numberValue,
                 orElse: () => null,
@@ -272,19 +282,15 @@ class _Field extends StatelessWidget {
           helperText: helper,
           helperMaxLines: 3,
         ),
-        items: spec.numberOptions
+        options: spec.numberOptions
             .map(
-              (option) => DropdownMenuItem<num>(
+              (option) => StarBridgeSelectOption<num>(
                 value: option,
-                child: Text(_numberOptionName(context, spec, option)),
+                label: _numberOptionName(context, spec, option),
               ),
             )
             .toList(growable: false),
-        onChanged: enabled
-            ? (next) {
-                if (next != null) onChanged(next);
-              }
-            : null,
+        onSelected: enabled ? (next, _) => onChanged(next) : null,
       ),
       OverlayWorkspaceFieldKind.number => _NumberField(
         spec: spec,
@@ -297,6 +303,8 @@ class _Field extends StatelessWidget {
         value: value?.toString() ?? '#FFFFFF',
         label: label,
         helperText: helper,
+        editOwner: editOwner,
+        currentEditOwner: currentEditOwner,
         onChanged: enabled ? onChanged : null,
       ),
       OverlayWorkspaceFieldKind.eventTypes => InputDecorator(
@@ -309,6 +317,14 @@ class _Field extends StatelessWidget {
           value: value,
           onChanged: enabled ? onChanged : null,
         ),
+      ),
+      OverlayWorkspaceFieldKind.hotkey => InputDecorator(
+        key: ValueKey('overlay-field-${spec.field}'),
+        decoration: InputDecoration(labelText: label, helperText: helper),
+        child: Text(switch (value) {
+          String text when text.isNotEmpty => text,
+          _ => '—',
+        }),
       ),
       OverlayWorkspaceFieldKind.eventDurations => InputDecorator(
         decoration: InputDecoration(
@@ -323,6 +339,32 @@ class _Field extends StatelessWidget {
       ),
     };
   }
+}
+
+List<StarBridgeSelectOption<String>> _choiceOptions(
+  BuildContext context,
+  OverlayWorkspaceFieldSpec spec,
+  Object? current,
+) {
+  final selectable = spec.selectableOptions.isEmpty
+      ? spec.options
+      : spec.selectableOptions;
+  return [
+    // Legacy known values remain visible, without reopening retired choices.
+    if (current is String &&
+        spec.options.contains(current) &&
+        !selectable.contains(current))
+      StarBridgeSelectOption(
+        value: current,
+        label: _optionName(context, current),
+        enabled: false,
+      ),
+    for (final option in selectable)
+      StarBridgeSelectOption(
+        value: option,
+        label: _optionName(context, option),
+      ),
+  ];
 }
 
 class _AppearanceSelector extends StatelessWidget {
@@ -351,10 +393,13 @@ class _AppearanceSelector extends StatelessWidget {
         )
         ? value
         : appearances.firstWhere((appearance) => appearance.isAvailable).id;
-    return DropdownButtonFormField<String>(
+    final qualificationUnknown = OverlayAppearanceQualification.unknownOf(
+      context,
+    );
+    return StarBridgeSelectField<String>(
       key: const Key('overlay-field-skin'),
-      initialValue: selected,
-      isExpanded: true,
+      identity: 'overlay-field-skin',
+      value: selected,
       decoration: InputDecoration(
         labelText: _fieldName(
           context,
@@ -363,31 +408,30 @@ class _AppearanceSelector extends StatelessWidget {
           ),
         ),
       ),
-      items: appearances
+      options: appearances
           .map(
-            (appearance) => DropdownMenuItem<String>(
-              key: Key('overlay-appearance-option-${appearance.id}'),
+            (appearance) => StarBridgeSelectOption<String>(
               value: appearance.id,
               enabled: appearance.isAvailable,
-              child: Text(
-                '${english ? appearance.displayNameEn : appearance.displayNameZh}'
-                '${appearance.isAvailable
-                    ? ''
-                    : traditional
-                    ? '（未解鎖）'
-                    : english
-                    ? ' (locked)'
-                    : '（未解锁）'}',
-                overflow: TextOverflow.ellipsis,
-              ),
+              label:
+                  '${english ? appearance.displayNameEn : appearance.displayNameZh}'
+                  '${appearance.isAvailable
+                      ? ''
+                      : qualificationUnknown && appearance.isReleased
+                      ? traditional
+                            ? '（離線時暫不可切換）'
+                            : english
+                            ? ' (unavailable while offline)'
+                            : '（离线时暂不可切换）'
+                      : traditional
+                      ? '（未解鎖）'
+                      : english
+                      ? ' (locked)'
+                      : '（未解锁）'}',
             ),
           )
           .toList(growable: false),
-      onChanged: enabled
-          ? (next) {
-              if (next != null) onChanged(next);
-            }
-          : null,
+      onSelected: enabled ? (next, _) => onChanged(next) : null,
     );
   }
 }
@@ -433,15 +477,16 @@ class _NumberField extends StatelessWidget {
           // keep the value in the draft and preserve normal drag state.
           KeyedSubtree(
             key: ValueKey('slider-${spec.field}-${onChanged != null}'),
-            child: Slider(
-              key: Key('overlay-field-${spec.field}'),
+            child: StarBridgeSlider(
+              controlKey: Key('overlay-field-${spec.field}'),
+              semanticLabel: _fieldName(context, spec),
               value: clamped,
               min: spec.minimum,
               max: spec.maximum,
               divisions: spec.divisions,
-              label: overlayWorkspaceFormatValue(
+              valueLabel: (current) => overlayWorkspaceFormatValue(
                 spec,
-                clamped,
+                current,
                 AppStrings.of(context),
               ),
               onChanged: onChanged == null
@@ -470,10 +515,9 @@ class _EventTypeField extends StatelessWidget {
       children: overlayEventTypes
           .map((entry) {
             final enabled = selected & entry.$1 != 0;
-            return FilterChip(
-              label: Text(
-                _copy(context, 'overlay.workspace.event.${entry.$1}'),
-              ),
+            return StarBridgeChoiceChip.filter(
+              controlKey: Key('overlay-event-type-${entry.$1}'),
+              label: _copy(context, 'overlay.workspace.event.${entry.$1}'),
               selected: enabled,
               onSelected: onChanged == null
                   ? null
@@ -595,18 +639,22 @@ class _EventDurationEntryState extends State<_EventDurationEntry> {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: TextField(
-      key: Key('overlay-duration-${widget.field}-input'),
-      controller: _controller,
+    child: StarBridgeFieldFrame(
       focusNode: _focus,
       enabled: widget.enabled,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: widget.label,
-        hintText: _copy(context, 'overlay.workspace.durationDefault'),
-        suffixText: _copy(context, 'overlay.workspace.durationSecondsSuffix'),
+      builder: (_, focus) => TextField(
+        key: Key('overlay-duration-${widget.field}-input'),
+        controller: _controller,
+        focusNode: focus,
+        enabled: widget.enabled,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: widget.label,
+          hintText: _copy(context, 'overlay.workspace.durationDefault'),
+          suffixText: _copy(context, 'overlay.workspace.durationSecondsSuffix'),
+        ),
+        onSubmitted: (_) => _commit(),
       ),
-      onSubmitted: (_) => _commit(),
     ),
   );
 }

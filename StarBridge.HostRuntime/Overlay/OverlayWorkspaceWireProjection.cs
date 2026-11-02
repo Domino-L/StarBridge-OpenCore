@@ -39,6 +39,17 @@ internal static class OverlayWorkspaceWireProjection
         RequireExactFields(value, SettingFields);
         try
         {
+            // 归档外观的旧值迁移：在枚举反序列化之前替换，保留其余工作区字段。
+            var source = value;
+            var replacements = OverlayArchivedAppearanceMigration.Replacements(name =>
+                source.TryGetProperty(name, out var property) ? property.ToString() : null);
+            if (replacements.Count > 0)
+            {
+                var migrated = value.Deserialize<Dictionary<string, JsonElement>>()!;
+                foreach (var (field, replacement) in replacements) migrated[field] = JsonSerializer.SerializeToElement(replacement);
+                value = JsonSerializer.SerializeToElement(migrated);
+            }
+
             var parsed = value.Deserialize<OverlayDisplaySettings>(InputOptions) ??
                          throw new JsonException();
             return OverlayDisplaySettings.Parse(parsed.Serialize());

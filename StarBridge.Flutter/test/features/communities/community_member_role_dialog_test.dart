@@ -81,7 +81,7 @@ void main() {
         find.byKey(const ValueKey('assign-option-custom_navigation')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip(copy(tester, 'close')));
+      await tester.tap(find.byKey(const Key('member-role-close')));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, copy(tester, 'cancel')));
@@ -89,7 +89,12 @@ void main() {
       expect(
         tester
             .widget<ListTile>(
-              find.byKey(const ValueKey('assign-option-custom_navigation')),
+              find.descendant(
+                of: find.byKey(
+                  const ValueKey('assign-option-custom_navigation'),
+                ),
+                matching: find.byType(ListTile),
+              ),
             )
             .selected,
         isTrue,
@@ -188,7 +193,7 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).last,
       );
-      final action = find.byKey(ValueKey('assign-member-${'b' * 32}'));
+      final action = find.byKey(ValueKey<Object>('assign-member-${'b' * 32}'));
       await openMemberActions(tester, 'b' * 32);
       expect(action, access == 'owner' ? findsOneWidget : findsNothing);
       expect(
@@ -246,7 +251,7 @@ void main() {
     };
     await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
     await tester.pumpAndSettle();
-    final action = find.byKey(ValueKey('assign-member-${'b' * 32}'));
+    final action = find.byKey(ValueKey<Object>('assign-member-${'b' * 32}'));
     await openMemberActions(tester, 'b' * 32);
     await tester.scrollUntilVisible(
       action,

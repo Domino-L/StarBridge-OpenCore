@@ -17,7 +17,7 @@ import 'package:starbridge_flutter/features/common/user_avatar_menu.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_port.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_view.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_session.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_row.dart';
 
 import 'community_workspace_test.dart';
 import '../friends/social_layout_test.dart' show loadFonts;
@@ -106,17 +106,35 @@ void main() {
     };
     await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
     await settleCommunityImages(tester);
-    final banner = tester.widget<CommunityMemberBanner>(
-      find.byType(CommunityMemberBanner),
+    final banner = tester.widget<OrganizationMemberRow>(
+      find.byType(OrganizationMemberRow),
     );
     expect(
-      (banner.server, banner.ship, banner.location),
+      (banner.entry.server, banner.entry.ship, banner.entry.location),
+      ('未进入游戏', '未进入游戏', '未进入游戏'),
+    );
+    final state = tester.state<CommunityWorkspaceViewState>(
+      find.byType(CommunityWorkspaceView),
+    );
+    state.model.setMemberFilter('online');
+    await settleCommunityImages(tester);
+    expect(find.byType(OrganizationMemberRow), findsOneWidget);
+    expect(
+      find.byKey(const Key('community-member-filter-online')),
+      findsNothing,
+    );
+    final visible = tester.widget<OrganizationMemberRow>(
+      find.byType(OrganizationMemberRow),
+    );
+    expect(visible.entry.presence, OrganizationMemberPresence.offline);
+    expect(
+      (visible.entry.server, visible.entry.ship, visible.entry.location),
       ('未进入游戏', '未进入游戏', '未进入游戏'),
     );
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets(
-    'member columns match WPF and header retains required information',
+    'shared member columns restore community identity role runtime status order',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 1000);
       tester.view.devicePixelRatio = 1;
@@ -126,7 +144,7 @@ void main() {
       addTearDown(port.changes.close);
       await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
       await settleCommunityImages(tester);
-      final banner = find.byType(CommunityMemberBanner);
+      final banner = find.byType(OrganizationMemberRow);
       final fields = [
         '示例成员 · 你',
         '探索',

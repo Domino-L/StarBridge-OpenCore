@@ -9,14 +9,25 @@ public sealed record GameplayHistoryEligibility(string State, DateTimeOffset? Im
 public sealed partial class GameplayTimeRuntime
 {
     private readonly Func<string?> _verifiedHandle;
+    private readonly Func<string?> _boundLiveLog;
     private readonly Func<BridgeAccountContext, CancellationToken, Task<GameplayHistoryEligibility>>? _historyEligibility;
     private readonly SemaphoreSlim _historyGate = new(1, 1);
     private HistoryTicket? _historyTicket;
     private sealed record HistoryTicket(string Id, BridgeAccountContext Owner, long Generation,
         string Handle, DateTimeOffset ExpiresAt, GameplayHistoryPreview Preview);
 
-    public async Task<BridgeDispatchBatch> DispatchHistoryAsync(BridgeEnvelope request, CancellationToken cancellation = default)
+    public Task<BridgeDispatchBatch> DispatchHistoryAsync(BridgeEnvelope request, CancellationToken cancellation = default) =>
+        request.Name is "gameplayTime.historyScanStart" or "gameplayTime.historyScanRead" or "gameplayTime.historyScanCancel"
+            ? DispatchHistoryScanAsync(request, cancellation)
+            : RunHistoryAsync(request, cancellation);
+
+    private async Task<BridgeDispatchBatch> RunHistoryAsync(BridgeEnvelope request, CancellationToken cancellation = default,
+        Action<GameplayHistoryProgress>? progress = null)
     {
+        using var work = _work.Enter(default);
+        if (work is null) return HistoryResponse(request, "accountChanged");
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation, work.Token);
+        cancellation = lifetime.Token;
         var entered = false;
         try
         {
@@ -30,7 +41,7 @@ public sealed partial class GameplayTimeRuntime
             Profiles.LocalPersonalProfileStore.RejectDuplicates(body);
             var field = request.Name switch {
                 "gameplayTime.historyStatus" => "",
-                "gameplayTime.historyPreview" => "path",
+                "gameplayTime.historyPreview" => "",
                 "gameplayTime.historyConfirm" => "previewId",
                 _ => throw new GameplayTimeException("gameplay.invalid_request")
             };
@@ -45,7 +56,7 @@ public sealed partial class GameplayTimeRuntime
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             budget.CancelAfter(TimeSpan.FromSeconds(60));
             var token = budget.Token;
-            bool Current() => !_disposed && !token.IsCancellationRequested && _current() == owner;
+            bool Current() => OwnerIsCurrent(owner, token);
             Entry entry;
             lock (_sync)
             {
@@ -81,7 +92,7 @@ public sealed partial class GameplayTimeRuntime
                 if (eligibility.State != "available")
                     return HistoryResponse(request, entry.HistoryState = "unavailable");
                 entry.HistoryState = "available";
-                if (field.Length == 0) return HistoryResponse(request, "available");
+                if (request.Name == "gameplayTime.historyStatus") return HistoryResponse(request, "available");
                 if (entry.Desired != GameplayRecordingConsent.Allowed)
                     return HistoryResponse(request, "recordingRequired");
                 if (field == "previewId")
@@ -113,7 +124,18 @@ public sealed partial class GameplayTimeRuntime
                 cutoff = entry.FirstRecordedAt ?? _time.GetUtcNow();
                 _historyTicket = null;
             }
-            var preview = await Task.Run(() => GameplayHistoryScanner.Scan(argument!, handle, cutoff, token), token)
+            var boundPath = _boundLiveLog();
+            if (string.IsNullOrWhiteSpace(boundPath) || GameLogLocator.ChannelOf(boundPath) != "LIVE")
+                return HistoryResponse(request, "path");
+            // Network checks retain their deadline. Local archive scanning, like
+            // WPF, runs until complete or explicitly cancelled, not for 15/60s.
+            budget.CancelAfter(Timeout.InfiniteTimeSpan);
+            void Report(GameplayHistoryProgress value)
+            {
+                if (!Current()) throw new OperationCanceledException(token);
+                progress?.Invoke(value);
+            }
+            var preview = await Task.Run(() => GameplayHistoryScanner.Scan(boundPath, handle, cutoff, token, Report), token)
                 .ConfigureAwait(false);
             lock (_sync)
             {

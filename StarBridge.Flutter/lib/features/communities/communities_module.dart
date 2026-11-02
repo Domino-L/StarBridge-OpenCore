@@ -2,217 +2,213 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'communities_port.dart';
 import 'community_workspace_session.dart';
 import 'community_workspace_port.dart';
 import 'community_chat_attention.dart';
+import 'community_cached_presentation_port.dart';
+import 'community_directory_models.dart';
+import 'community_cached_page.dart';
+import 'community_directory_images.dart';
+import 'community_directory_read_owner.dart';
+import '../../shared/downloadable_image_cache.dart';
 
-final class CommunityCard {
-  const CommunityCard({
-    required this.targetRef,
-    required this.name,
-    this.description = '',
-    this.organizationRef,
-    this.tags = '',
-    this.recruiting = false,
-    this.recruitingTarget = '',
-    this.recruitingNote = '',
-    this.memberScale = '',
-    this.systems = const [],
-    this.language = '',
-    this.activeTime = '',
-    this.memberCount,
-    this.relationship = 'none',
-    this.joinMode = 'unavailable',
-    this.actions = const [],
-    this.logo,
-    this.logoDeferred = false,
-  });
-  final String targetRef,
-      name,
-      description,
-      language,
-      activeTime,
-      relationship,
-      joinMode;
-  final String? organizationRef;
-  String get key => organizationRef ?? targetRef;
-  final String tags, recruitingTarget, recruitingNote, memberScale;
-  final bool recruiting;
-  final List<String> systems;
-  final int? memberCount;
-  final List<String> actions;
-  final String? logo;
-  final bool logoDeferred;
+export 'community_directory_models.dart';
+export 'communities_port.dart';
 
-  CommunityCard _named(String value) => CommunityCard(
-    targetRef: targetRef,
-    organizationRef: organizationRef,
-    name: value,
-    description: description,
-    tags: tags,
-    recruiting: recruiting,
-    recruitingTarget: recruitingTarget,
-    recruitingNote: recruitingNote,
-    memberScale: memberScale,
-    systems: systems,
-    language: language,
-    activeTime: activeTime,
-    memberCount: memberCount,
-    relationship: relationship,
-    joinMode: joinMode,
-    actions: actions,
-    logo: logo,
-    logoDeferred: logoDeferred,
-  );
-}
-
-final class CommunityDirectory {
-  const CommunityDirectory(
-    this.view,
-    this.query,
-    this.items, {
-    this.next,
-    this.totalCount,
-  });
-  final String view, query;
-  final List<CommunityCard> items;
-  final String? next;
-  final int? totalCount;
-}
-
-final class CommunityFailure implements Exception {
-  const CommunityFailure(this.code);
-  final String code;
-}
-
-abstract interface class CommunitiesPort {
-  Stream<void> get invalidations;
-  Future<CommunityDirectory> read({
-    required String view,
-    required String query,
-    String? after,
-    String? filters,
-  });
-  Future<String> execute(String action, String targetRef);
-  Future<void> close();
-}
-
-final class UnavailableCommunities implements CommunitiesPort {
-  @override
-  Stream<void> get invalidations => const Stream.empty();
-  @override
-  Future<CommunityDirectory> read({
-    required String view,
-    required String query,
-    String? after,
-    String? filters,
-  }) async => throw const CommunityFailure('unavailable');
-  @override
-  Future<String> execute(String action, String targetRef) async => 'rejected';
-  @override
-  Future<void> close() async {}
-}
-
-final class CommunitiesModule extends ChangeNotifier {
+final class CommunitiesModule extends ChangeNotifier
+    implements DownloadableImageCache {
   CommunitiesModule(
     this.port, {
     DateTime Function()? now,
     this.onOrganizationRenamed,
     this.onWorkspaceFocused,
   }) : _now = now ?? DateTime.now {
-    _subscription = port.invalidations.listen((_) {
-      _epoch++;
-      _joinedEpoch++;
-      _joinedRead = null;
-      _lastOrganizationKey = null;
-      accountRevision++;
-      _nameChanges.clear();
-      _retiredActionRefs.clear();
-      _directoryReadAt = null;
-      workspaceSession.clear();
-      directory = null;
-      joined = const [];
-      joinedNext = null;
-      joinedLoaded = false;
-      joinedBusy = false;
-      joinedError = null;
-      _recoverDirectory = true;
-      filters = null;
-      selected = null;
-      view = 'mine';
-      query = '';
-      _pages.clear();
-      _after = null;
-      _reading = null;
-      writing = false;
-      _selectionRevision++;
-      message = null;
-      error = 'identityUnavailable';
-      notifyListeners();
-    });
+    _subscription = port.invalidations.listen((_) => _invalidateAccount());
+    if (port is CommunityCachedPresentationPort) {
+      _cachedSelection = (port as CommunityCachedPresentationPort)
+          .cachedSelectionChanges
+          .listen(_renewCachedSelection);
+      _cachedPresentation = (port as CommunityCachedPresentationPort)
+          .cachedLogoChanges
+          .listen((value) {
+            if (_closed) return;
+            _directoryReads.cachedLogo(value, joinedCacheVersion);
+          });
+    }
   }
   final CommunitiesPort port;
+  late final CommunityDirectoryReadOwner _directoryReads =
+      CommunityDirectoryReadOwner(port, _images, notifyListeners);
+  late final _images = CommunityDirectoryImages(
+    workspaceSession,
+    port,
+    () => _directoryReads.retireLogos(),
+  );
+  @override
+  void beginImageMaintenance() {
+    if (!_closed) _images.beginImageMaintenance();
+  }
+
+  @override
+  void endImageMaintenance() {
+    if (!_closed) _images.endImageMaintenance();
+  }
+
+  void _invalidateAccount() {
+    _directoryReads.retireAll();
+    _epoch++;
+    _joinedEpoch++;
+    _joinedRead = null;
+    _lastOrganizationKey = null;
+    accountRevision++;
+    _directoryReads.clearNames();
+    _retiredActionRefs.clear();
+    _directoryReadAt = null;
+    workspaceSession.clear();
+    directory = null;
+    joined = const [];
+    joinedNext = null;
+    joinedLoaded = false;
+    joinedBusy = false;
+    joinedError = null;
+    joinedCachedAtUtc = null;
+    joinedCacheComplete = true;
+    joinedCacheVersion = null;
+    _joinedReadAt = null;
+    _recoverDirectory = true;
+    filters = null;
+    selected = null;
+    view = 'mine';
+    query = '';
+    _pages.clear();
+    _after = null;
+    _reading = null;
+    writing = false;
+    _selectionRevision++;
+    message = null;
+    error = 'identityUnavailable';
+    notifyListeners();
+  }
+
+  void _renewCachedSelection(CommunityCachedSelectionChange change) {
+    if (_closed) return;
+    final prepareDirectory = _reading != null || directory != null;
+    if (change == CommunityCachedSelectionChange.replace) {
+      // A missing predecessor is the existing account boundary, including
+      // private workspace owners. Do not duplicate a partial invalidation.
+      _invalidateAccount();
+      unawaited(refreshJoined());
+      if (prepareDirectory) unawaited(refresh(silent: true, force: true));
+      return;
+    }
+    _epoch++;
+    _joinedEpoch++;
+    _joinedRead = null;
+    _reading = null;
+    joinedBusy = false;
+    // A display descriptor never restores commands or replays an uncertain
+    // write. Only already read-only cards survive this preparation boundary.
+    if (writing) message = 'outcomeUnknown';
+    writing = false;
+    selected = null;
+    joined = List.unmodifiable(joined.where((row) => row.displayOnly));
+    if (directory?.items.any((row) => !row.displayOnly) == true) {
+      directory = null;
+      joinedLoaded = false;
+      joinedCachedAtUtc = _joinedReadAt = null;
+      joinedCacheVersion = joinedNext = null;
+      _after = null;
+      _pages.clear();
+    }
+    joinedError = error = null;
+    _recoverDirectory = false;
+    if (prepareDirectory &&
+        view == 'mine' &&
+        query.isEmpty &&
+        filters == null) {
+      _silentRead = true;
+      _reading = (view: view, query: query, after: _after, filters: filters);
+      unawaited(_restoreCachedPage(_epoch, refreshJoined()));
+    } else {
+      unawaited(refreshJoined());
+      if (prepareDirectory) unawaited(refresh(silent: true, force: true));
+    }
+  }
+
+  Future<void> _restoreCachedPage(int epoch, Future<void> first) async {
+    final imageEpoch = _images.epoch;
+    final page = await prepareCachedCommunityPage(
+      after: _after,
+      firstPage: first,
+      current: () => !_closed && epoch == _epoch,
+      snapshot: () => !joinedLoaded || joinedError != null
+          ? null
+          : CommunityDirectory(
+              'mine',
+              '',
+              joined,
+              next: joinedNext,
+              cachedAtUtc: joinedCachedAtUtc,
+              cacheComplete: joinedCacheComplete,
+              displayVersion: joinedCacheVersion,
+            ),
+      advance: () => refreshJoined(next: true),
+    );
+    if (_closed || epoch != _epoch) return;
+    directory = _images.current(imageEpoch)
+        ? page?.directory
+        : page?.directory.withoutDownloadedLogos();
+    _after = page?.after;
+    _pages
+      ..clear()
+      ..addAll(page?.previous ?? const []);
+    error = page == null ? joinedError ?? 'offlineCacheUnavailable' : null;
+    _directoryReadAt = page == null ? null : _now();
+    _reading = null;
+    notifyListeners();
+  }
+
   final void Function(String code, String name)? onOrganizationRenamed;
   final void Function(String code)? onWorkspaceFocused;
-  final _nameChanges = <String, ({int revision, String name})>{};
-  int _nameRevision = 0;
 
   /// Apply only an authorized, confirmed name; never reset access or page state.
   void applyOrganizationName(String key, String code, String name) {
     if (_closed || name.isEmpty) return;
-    _nameChanges[key] = (revision: ++_nameRevision, name: name);
-    CommunityCard update(CommunityCard row) =>
-        row.key == key ? row._named(name) : row;
-    joined = List.unmodifiable(joined.map(update));
-    if (directory case final current?) {
-      directory = CommunityDirectory(
-        current.view,
-        current.query,
-        List.unmodifiable(current.items.map(update)),
-        next: current.next,
-        totalCount: current.totalCount,
-      );
-    }
-    if (selected case final current?) selected = update(current);
-    _namesChanged(code, name);
-  }
-
-  CommunityDirectory _mergeNames(CommunityDirectory value, int readRevision) =>
-      CommunityDirectory(
-        value.view,
-        value.query,
-        List.unmodifiable(
-          value.items.map((row) {
-            final changed = _nameChanges[row.key];
-            return changed != null && changed.revision > readRevision
-                ? row._named(changed.name)
-                : row;
-          }),
-        ),
-        next: value.next,
-        totalCount: value.totalCount,
-      );
-
-  void _namesChanged(String code, String name) {
+    _directoryReads.rename(key, name);
     notifyListeners();
     onOrganizationRenamed?.call(code, name);
   }
 
   late final chatAttention = CommunityChatAttention(port);
-  late final workspaceSession = CommunityWorkspaceSession(now: _now, attention: chatAttention);
+  late final workspaceSession = CommunityWorkspaceSession(
+    now: _now,
+    attention: chatAttention,
+  );
   bool get overviewAvailable => !_closed && !writing;
   final DateTime Function() _now;
   DateTime? _directoryReadAt;
-  List<CommunityCard> joined = const [];
+  List<CommunityCard> get joined => _directoryReads.joined;
+  set joined(List<CommunityCard> value) => _directoryReads.joined = value;
   String? joinedNext, filters;
   bool joinedLoaded = false, joinedBusy = false;
   String? joinedError;
+  DateTime? joinedCachedAtUtc;
+  DateTime? _joinedReadAt;
+  bool joinedCacheComplete = true;
+  String? joinedCacheVersion;
   bool _recoverDirectory = false;
   int _joinedEpoch = 0;
   Future<void>? _joinedRead;
   String? _lastOrganizationKey;
   Future<void> refreshJoined({bool next = false}) {
-    if (_closed) return Future.value();
+    if (_closed ||
+        const {
+          'onlinePaused',
+          'offlineCacheUnavailable',
+        }.contains(joinedError)) {
+      return Future.value();
+    }
     final pending = _joinedRead;
     if (pending != null) return pending;
     final reading = _readJoined(next: next);
@@ -227,35 +223,62 @@ final class CommunitiesModule extends ChangeNotifier {
 
   Future<void> _readJoined({bool next = false}) async {
     if (_closed || joinedBusy) return;
+    _directoryReads.retireJoined();
     final revision = accountRevision;
     final request = ++_joinedEpoch;
-    final nameRevision = _nameRevision;
+    final nameRevision = _directoryReads.nameRevision;
+    final imageEpoch = _images.epoch;
     joinedBusy = true;
     joinedError = null;
     notifyListeners();
     try {
-      var result = await port.read(
+      final read = await _directoryReads.read(
         view: 'mine',
         query: '',
         after: next ? joinedNext : null,
       );
       if (_closed || revision != accountRevision || request != _joinedEpoch) {
+        read.retireImages();
         return;
       }
-      result = _mergeNames(result, nameRevision);
+      final result = _directoryReads.joinedMetadata(
+        read,
+        nameRevision,
+        imageEpoch,
+      );
+      final items = _images.mergeJoined(
+        result,
+        joined,
+        joinedCacheVersion,
+        imageEpoch,
+      );
       joined = List.unmodifiable(
         next
             ? [
                 ...joined,
-                ...result.items.where(
-                  (r) => !joined.any((j) => j.key == r.key),
-                ),
+                ...items.where((r) => !joined.any((j) => j.key == r.key)),
               ]
-            : result.items,
+            : items,
       );
       joinedNext = result.next;
       joinedLoaded = true;
-      chatAttention.bind(joined.map((row) => row.targetRef));
+      joinedCachedAtUtc = result.cachedAtUtc;
+      joinedCacheComplete = result.cacheComplete;
+      joinedCacheVersion = result.displayVersion;
+      _joinedReadAt = result.cachedAtUtc ?? _now().toUtc();
+      _retiredActionRefs.removeWhere(
+        (reference) =>
+            items.any((row) => !row.displayOnly && row.targetRef == reference),
+      );
+      chatAttention.bind(
+        joined.where((row) => !row.displayOnly).map((row) => row.targetRef),
+      );
+      _directoryReads.watchJoined(
+        read,
+        imageEpoch,
+        () => revision == accountRevision && request == _joinedEpoch,
+      );
+      if (joinedCachedAtUtc != null) _recoverDirectory = false;
       if (_recoverDirectory && selected != null) _recoverDirectory = false;
       if (_recoverDirectory && !busy) {
         _recoverDirectory = false;
@@ -263,13 +286,9 @@ final class CommunitiesModule extends ChangeNotifier {
       }
     } catch (failure) {
       if (!_closed && revision == accountRevision && request == _joinedEpoch) {
-        chatAttention.clear();
-        joined = const [];
-        joinedNext = null;
-        joinedLoaded = false;
-        joinedError = failure is CommunityFailure
-            ? failure.code
-            : 'unavailable';
+        _joinedFailed(
+          failure is CommunityFailure ? failure.code : 'unavailable',
+        );
       }
     } finally {
       if (!_closed && revision == accountRevision && request == _joinedEpoch) {
@@ -279,12 +298,49 @@ final class CommunitiesModule extends ChangeNotifier {
     }
   }
 
+  void _joinedFailed(String code) {
+    chatAttention.clear();
+    joinedError = code;
+    _retireActions(joined.map((row) => row.targetRef));
+    if (code == 'readTransient' && joinedLoaded && _joinedReadAt != null) {
+      joinedCacheComplete = joinedCacheComplete && joinedNext == null;
+      joined = List.unmodifiable(joined.map((row) => row.asDisplayOnly()));
+      joinedCachedAtUtc = _joinedReadAt;
+    } else {
+      joined = const [];
+      joinedLoaded = false;
+      joinedCachedAtUtc = _joinedReadAt = null;
+      joinedCacheVersion = null;
+      joinedCacheComplete = true;
+    }
+    joinedNext = null;
+  }
+
   late final StreamSubscription<void> _subscription;
+  StreamSubscription<CommunityCachedLogo>? _cachedPresentation;
+  StreamSubscription<CommunityCachedSelectionChange>? _cachedSelection;
   int _epoch = 0, accountRevision = 0;
   bool _closed = false, writing = false;
+  bool _silentRead = false;
+  bool get showDirectoryProgress => _reading != null && !_silentRead;
+  // Existing epoch, exposed read-only for presentation. No request is started.
+  int? get directoryReadEpoch => _reading == null ? null : _epoch;
   final _retiredActionRefs = <String>{};
   bool canExecute(CommunityCard card) =>
-      !_closed && !writing && !_retiredActionRefs.contains(card.targetRef);
+      !_closed &&
+      !writing &&
+      !card.displayOnly &&
+      !_retiredActionRefs.contains(card.targetRef);
+
+  void _retireActions(Iterable<String> references) {
+    for (final reference in references.where((value) => value.isNotEmpty)) {
+      _retiredActionRefs.add(reference);
+      if (_retiredActionRefs.length > 256) {
+        _retiredActionRefs.remove(_retiredActionRefs.first);
+      }
+    }
+  }
+
   ({String view, String query, String? after, String? filters})? _reading;
   int _selectionRevision = 0;
   bool get busy => writing || _reading != null;
@@ -366,17 +422,25 @@ final class CommunitiesModule extends ChangeNotifier {
       ?selected,
       ...joined.where((row) => row.key != selected?.key),
     ];
+    // Idle media speculation is limited to the first eligible workspace (the
+    // selected one, else the first joined). Device traces showed ~260 media
+    // reads per 7 minutes when every joined organization prepared all media,
+    // competing with page reads for the Host's request workers.
+    var mediaCandidate = true;
     for (final row in candidates) {
       if (_closed || revision != accountRevision) return false;
       if (row.organizationRef == null ||
           !const {'owner', 'member'}.contains(row.relationship)) {
         continue;
       }
+      final includeMedia = mediaCandidate;
+      mediaCandidate = false;
       if (await workspaceSession.prepareNext(
         port as CommunityWorkspacePort,
         row.targetRef,
         row.organizationRef!,
         culture,
+        includeMedia: includeMedia,
       )) {
         return true;
       }
@@ -385,6 +449,7 @@ final class CommunitiesModule extends ChangeNotifier {
   }
 
   Future<void> openJoined(CommunityCard card) async {
+    if (card.displayOnly) return;
     if (selected?.key == card.key) return;
     final revision = accountRevision;
     if (!await confirmLeave() || _closed || revision != accountRevision) return;
@@ -428,8 +493,10 @@ final class CommunitiesModule extends ChangeNotifier {
 
   String? error, message, _after;
   final List<String?> _pages = [];
-  CommunityDirectory? directory;
-  CommunityCard? selected;
+  CommunityDirectory? get directory => _directoryReads.directory;
+  set directory(CommunityDirectory? value) => _directoryReads.directory = value;
+  CommunityCard? get selected => _directoryReads.selected;
+  set selected(CommunityCard? value) => _directoryReads.selected = value;
   bool get canPrevious => _pages.isNotEmpty;
   Future<void> refresh({
     String? newView,
@@ -453,6 +520,7 @@ final class CommunitiesModule extends ChangeNotifier {
         ? null
         : _now().difference(_directoryReadAt!);
     if (reuseFresh &&
+        !_images.referencesStale &&
         sameQuery &&
         directory != null &&
         error == null &&
@@ -461,7 +529,14 @@ final class CommunitiesModule extends ChangeNotifier {
         age < const Duration(seconds: 10)) {
       return;
     }
-    final retainDirectory = silent && sameQuery && directory != null;
+    final retainDirectory =
+        directory != null &&
+        request.view == view &&
+        request.query == query &&
+        request.filters == (view == 'discover' ? filters : null) &&
+        request.after == _after;
+    final previousReadAt = _directoryReadAt;
+    _directoryReads.retireDirectory();
     final selectedKey = preserveSelection ? selected?.key : null;
     final selectionRevision = _selectionRevision;
     if (newView != null || newQuery != null || newFilters != null) {
@@ -473,7 +548,10 @@ final class CommunitiesModule extends ChangeNotifier {
       _pages.clear();
     }
     final epoch = ++_epoch;
-    final nameRevision = _nameRevision;
+    final joinedEpoch = _joinedEpoch;
+    final nameRevision = _directoryReads.nameRevision;
+    final imageEpoch = _images.epoch;
+    _silentRead = silent;
     _reading = request;
     error = null;
     selected = null;
@@ -481,15 +559,23 @@ final class CommunitiesModule extends ChangeNotifier {
     if (!retainDirectory) directory = null;
     notifyListeners();
     try {
-      var result = await port.read(
+      final read = await _directoryReads.read(
         view: request.view,
         query: request.query,
         after: request.after,
         filters: request.filters,
       );
-      if (_closed || epoch != _epoch) return;
-      result = _mergeNames(result, nameRevision);
+      if (_closed || epoch != _epoch) {
+        read.retireImages();
+        return;
+      }
+      final result = _directoryReads.directoryMetadata(
+        read,
+        nameRevision,
+        imageEpoch,
+      );
       directory = result;
+      _images.acceptedRead(imageEpoch);
       // Only an authoritative fresh read can make an action usable again.
       // Example/local ports may reuse addresses; no write is automatically replayed.
       _retiredActionRefs.removeWhere(
@@ -501,24 +587,74 @@ final class CommunitiesModule extends ChangeNotifier {
           if (card.key == selectedKey) selected = card;
         }
       }
-      if (view == 'mine' && query.isEmpty && _after == null) {
+      if (view == 'mine' &&
+          query.isEmpty &&
+          _after == null &&
+          joinedEpoch == _joinedEpoch) {
         _joinedEpoch++;
         joinedBusy = false;
         joined = result.items;
         joinedNext = result.next;
         joinedLoaded = true;
+        joinedError = null;
+        _joinedRead = null;
+        _joinedReadAt = result.cachedAtUtc ?? _directoryReadAt?.toUtc();
+        joinedCachedAtUtc = result.cachedAtUtc;
+        joinedCacheComplete = result.cacheComplete;
+        joinedCacheVersion = result.displayVersion;
+        chatAttention.bind(
+          result.items
+              .where((row) => !row.displayOnly)
+              .map((row) => row.targetRef),
+        );
       }
+      final joinedImageOwner = _joinedEpoch;
+      final mirrorsJoined =
+          request.view == 'mine' &&
+          request.query.isEmpty &&
+          request.after == null;
+      _directoryReads.watchDirectory(
+        read,
+        imageEpoch,
+        () => epoch == _epoch,
+        mirrorJoined: () => mirrorsJoined && joinedImageOwner == _joinedEpoch,
+      );
     } on CommunityFailure catch (failure) {
       if (!_closed && epoch == _epoch) {
         error = failure.code;
-        if (failure.code != 'unavailable') directory = null;
+        final previous = directory;
+        _retireActions(previous?.items.map((row) => row.targetRef) ?? const []);
+        directory = failure.code == 'readTransient'
+            ? previous?.asDisplayOnly(previousReadAt)
+            : null;
+        if (request.view == 'mine' &&
+            request.query.isEmpty &&
+            request.after == null &&
+            joinedEpoch == _joinedEpoch) {
+          _joinedEpoch++;
+          joinedBusy = false;
+          _joinedRead = null;
+          _joinedFailed(failure.code);
+        }
         if (failure.code == 'refreshRequired') {
           _after = null;
           _pages.clear();
         }
       }
     } catch (_) {
-      if (!_closed && epoch == _epoch) error = 'unavailable';
+      if (!_closed && epoch == _epoch) {
+        error = 'unavailable';
+        directory = null;
+        if (request.view == 'mine' &&
+            request.query.isEmpty &&
+            request.after == null &&
+            joinedEpoch == _joinedEpoch) {
+          _joinedEpoch++;
+          joinedBusy = false;
+          _joinedRead = null;
+          _joinedFailed('unavailable');
+        }
+      }
     } finally {
       if (!_closed && epoch == _epoch) {
         _reading = null;
@@ -528,6 +664,7 @@ final class CommunitiesModule extends ChangeNotifier {
   }
 
   void open(CommunityCard? card) {
+    if (card?.displayOnly == true) return;
     if (!_closed && !writing) {
       if (card != null &&
           !const {'owner', 'member'}.contains(card.relationship)) {
@@ -570,10 +707,7 @@ final class CommunitiesModule extends ChangeNotifier {
     final epoch = ++_epoch;
     _reading = null;
     writing = true;
-    _retiredActionRefs.add(card.targetRef);
-    if (_retiredActionRefs.length > 256) {
-      _retiredActionRefs.remove(_retiredActionRefs.first);
-    }
+    _retireActions([card.targetRef]);
     // In-flight reads from before this write must not restore an old membership.
     _directoryReadAt = null;
     workspaceSession.clear();
@@ -622,12 +756,15 @@ final class CommunitiesModule extends ChangeNotifier {
   @override
   void dispose() {
     _closed = true;
+    _directoryReads.dispose();
     workspaceSession.clear();
     chatAttention.dispose();
     confirmWorkspaceLeave = null;
     primaryNavigationSelected.dispose();
     _epoch++;
     unawaited(_subscription.cancel());
+    unawaited(_cachedPresentation?.cancel());
+    unawaited(_cachedSelection?.cancel());
     unawaited(port.close());
     super.dispose();
   }

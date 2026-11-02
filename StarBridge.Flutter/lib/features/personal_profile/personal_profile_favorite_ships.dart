@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -12,6 +16,7 @@ import 'personal_profile_models.dart';
 import 'personal_profile_module_surface.dart';
 import 'personal_profile_ship_names.dart';
 import '../hangar/local_hangar_copy.dart';
+import '../../platform/window/native_viewport_visibility.dart';
 
 class PersonalProfileFavoriteShips extends StatelessWidget {
   const PersonalProfileFavoriteShips({
@@ -20,6 +25,7 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
     this.hangarAvailable = true,
     this.unresolvedCount = 0,
     this.headerTrailing,
+    this.onViewShipData,
     super.key,
   });
 
@@ -28,6 +34,16 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
   final bool hangarAvailable;
   final int unresolvedCount;
   final Widget? headerTrailing;
+
+  /// A stable parent may own the dialog when this view is rebuilt by responsive
+  /// grid reflow. It receives only the already-projected ship, not an ID lookup
+  /// or a write capability. Without it, the source card owns its own dialog.
+  final Future<void> Function(
+    BuildContext,
+    PersonalProfileShipSummary,
+    InteractionSource,
+  )?
+  onViewShipData;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +101,13 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (var index = 0; index < visibleCount; index++) ...[
-                      Expanded(child: _ShipCard(ship: ships[index])),
+                      Expanded(
+                        key: ValueKey(ships[index].identity.runtimeId),
+                        child: _ShipCard(
+                          ship: ships[index],
+                          onViewShipData: onViewShipData,
+                        ),
+                      ),
                       if (index != ships.length - 1 && index != span - 1)
                         SizedBox(
                           width: vertical ? 0 : tokens.space.sm,
@@ -100,10 +122,71 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
   }
 }
 
-class _ShipCard extends StatelessWidget {
-  const _ShipCard({required this.ship});
+class _ShipCard extends StatefulWidget {
+  const _ShipCard({required this.ship, this.onViewShipData});
 
   final PersonalProfileShipSummary ship;
+  final Future<void> Function(
+    BuildContext,
+    PersonalProfileShipSummary,
+    InteractionSource,
+  )?
+  onViewShipData;
+
+  @override
+  State<_ShipCard> createState() => _ShipCardState();
+}
+
+class _ShipCardState extends State<_ShipCard> {
+  StarBridgeDialogRoute<void>? _details;
+  PersonalProfileShipSummary get ship => widget.ship;
+
+  void _retireDetails() {
+    final route = _details;
+    _details = null;
+    retireStarBridgeDialog(route);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!NativeViewportScope.isActive(context)) _retireDetails();
+  }
+
+  @override
+  void didUpdateWidget(_ShipCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.ship, ship) ||
+        (oldWidget.onViewShipData == null) != (widget.onViewShipData == null)) {
+      _retireDetails();
+    }
+  }
+
+  @override
+  void dispose() {
+    _retireDetails();
+    super.dispose();
+  }
+
+  Future<void> _openDetails(
+    BuildContext context,
+    InteractionSource source,
+  ) async {
+    if (_details?.isActive == true || !NativeViewportScope.isActive(context)) {
+      return;
+    }
+    final parent = widget.onViewShipData;
+    if (parent != null) return parent(context, ship, source);
+    final selected = ship;
+    late StarBridgeDialogRoute<void> route;
+    await showProfileShipDataDialog(
+      context,
+      selected,
+      source: source,
+      onRouteCreated: (created) => _details = route = created,
+    );
+    if (identical(_details, route)) _details = null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -135,10 +218,14 @@ class _ShipCard extends StatelessWidget {
       ),
       child: Material(
         type: MaterialType.transparency,
-        child: InkWell(
-          key: Key('profile-favorite-ship-${ship.identity.runtimeId}'),
-          borderRadius: tokens.shape.small,
-          onTap: () => _showShipData(context, ship),
+        child: StarBridgeActionRow(
+          controlKey: Key('profile-favorite-ship-${ship.identity.runtimeId}'),
+          baseRadius: tokens.shape.radiusSmall,
+          semanticLabel:
+              '${strings.text('profile.shipData.title')} · $primaryName',
+          onActivate: NativeViewportScope.isActive(context)
+              ? _openDetails
+              : null,
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: tokens.space.sm,
@@ -178,14 +265,16 @@ class _ShipCard extends StatelessWidget {
                       Text(
                         primaryName,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       if (secondaryLabel.isNotEmpty)
                         Text(
                           secondaryLabel,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
                           style: Theme.of(context).textTheme.labelMedium
                               ?.copyWith(color: tokens.colors.textSecondary),
                         ),
@@ -196,7 +285,8 @@ class _ShipCard extends StatelessWidget {
                               child: Text(
                                 metadata.join(' · '),
                                 maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
                                 style: Theme.of(context).textTheme.labelMedium
                                     ?.copyWith(
                                       color: tokens.colors.textSecondary,
@@ -272,15 +362,19 @@ class _ShipImageFallback extends StatelessWidget {
   }
 }
 
-Future<void> _showShipData(
+/// Read-only facts from the caller's authorized projection. Lifecycle remains
+/// with the source card or its stable parent; no network/read/write is added.
+Future<void> showProfileShipDataDialog(
   BuildContext context,
-  PersonalProfileShipSummary ship,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (context) => _ShipDataDialog(ship: ship),
-  );
-}
+  PersonalProfileShipSummary ship, {
+  required InteractionSource source,
+  ValueChanged<StarBridgeDialogRoute<void>>? onRouteCreated,
+}) => showStarBridgeDialog<void>(
+  context,
+  source: source,
+  onRouteCreated: onRouteCreated,
+  builder: (_) => _ShipDataDialog(ship: ship),
+);
 
 class _ShipDataDialog extends StatelessWidget {
   const _ShipDataDialog({required this.ship});
@@ -339,10 +433,11 @@ class _ShipDataDialog extends StatelessWidget {
                         ],
                       ),
                     ),
-                    IconButton(
-                      key: const Key('profile-ship-data-close'),
-                      tooltip: strings.text('profile.shipData.close'),
-                      onPressed: () => Navigator.of(context).pop(),
+                    StarBridgeIconAction(
+                      controlKey: const Key('profile-ship-data-close'),
+                      label: strings.text('profile.shipData.close'),
+                      onActivate: (source) =>
+                          dismissStarBridgeDialog(context, source: source),
                       icon: const StarBridgeIcon(
                         StarBridgeIconSemantic.windowClose,
                       ),

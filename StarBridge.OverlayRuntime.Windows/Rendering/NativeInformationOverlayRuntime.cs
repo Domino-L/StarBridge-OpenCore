@@ -20,11 +20,11 @@ public sealed partial class NativeInformationOverlayRuntime :
     IInformationOverlayRuntime,
     IInformationOverlayLiveUpdateSink,
     IInformationOverlayAppearanceCatalog,
+    IInformationOverlayAppearanceConfigurationCatalog,
     IInformationOverlayReminderSink
 {
     private const int WmHotkey = 0x0312;
     private const int WmGameCompatibleHotkey = 0x8053;
-    private const int HotkeyId = 0x5B31;
     private const uint ModNoRepeat = 0x4000;
     private const int ErrorHotkeyAlreadyRegistered = 1409;
     private const int WsPopup = unchecked((int)0x80000000);
@@ -32,6 +32,12 @@ public sealed partial class NativeInformationOverlayRuntime :
     private const int WsExNoActivate = 0x08000000;
 
     private readonly Func<GameLogSessionSnapshot> _sessionProvider;
+    private readonly IInformationOverlayLocalSource? _localSource;
+    private InformationOverlayLocalSourceFrame? ReadLocalSource()
+    {
+        try { return _localSource?.Capture(); }
+        catch { return InformationOverlayLocalSourceFrame.Unavailable; }
+    }
     private readonly Func<LocalGamePresenceSnapshot>? _localPresenceProvider;
     private PlayerPresenceKind? _confirmedLocalPresence;
     private PlayerPresenceKind? _lastRenderedLocalPresence;
@@ -69,7 +75,7 @@ public sealed partial class NativeInformationOverlayRuntime :
     private DispatcherTimer? _appearanceFocusTimer;
     private readonly GameCompatibleHotkeyListener _gameCompatibleHotkey = new();
     private readonly OverlayHotkeyTriggerGate _hotkeyTriggerGate = new(TimeSpan.FromMilliseconds(180));
-    private bool _windowsHotkeyRegistered;
+    private bool _registeredHotkeyChoice;
     private long _nextHotkeyRegistrationAttempt;
     private string _hotkeyState = "disabled";
     private OverlayHotkeyBindingPlan? _hotkeyPlan;
@@ -100,8 +106,12 @@ public sealed partial class NativeInformationOverlayRuntime :
         Func<InformationOverlayRosterPreferences>? rosterPreferences = null,
         Func<LocalGamePresenceSnapshot>? localPresenceProvider = null,
         Func<CancellationToken, Task>? prepareCommunity = null,
-        Func<InformationOverlayRuntimeWorkspace, InformationOverlayModuleReadResult>? moduleProvider = null)
+        Func<InformationOverlayRuntimeWorkspace, InformationOverlayModuleReadResult>? moduleProvider = null,
+        string? installedAppearanceDataRoot = null,
+        IInstalledAppearanceProgress? installedAppearanceProgress = null,
+        IInformationOverlayLocalSource? localSource = null)
     {
+        _localSource = localSource;
         _sessionProvider = sessionProvider ?? (() => GameLogSessionSnapshot.Empty);
         _localPresenceProvider = localPresenceProvider;
         _entitlementProvider = entitlementProvider ?? (() => []);
@@ -112,6 +122,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         _sceneModeProvider = sceneModeProvider ?? (() => null);
         _languageProvider = languageProvider;
         _rosterPreferences = rosterPreferences ?? (() => InformationOverlayRosterPreferences.Empty);
+        InitializeInstalledAppearanceRuntime(installedAppearanceDataRoot, installedAppearanceProgress);
         _thread = new Thread(RunControlThread)
         {
             IsBackground = true,
@@ -181,6 +192,15 @@ public sealed partial class NativeInformationOverlayRuntime :
             .ToArray();
     }
 
+    public IReadOnlyList<System.Text.Json.JsonElement> GetAppearanceConfigurations()
+    {
+        List<System.Text.Json.JsonElement> descriptions = [];
+        CollectExtendedAppearanceConfigurations(descriptions);
+        return descriptions.AsReadOnly();
+    }
+
+    partial void CollectExtendedAppearanceConfigurations(List<System.Text.Json.JsonElement> descriptions);
+
     private InformationOverlayRuntimeSnapshot ExecuteOnControlThread(
         InformationOverlayRuntimeCommand command,
         InformationOverlayRuntimeWorkspace workspace)
@@ -188,6 +208,11 @@ public sealed partial class NativeInformationOverlayRuntime :
         try
         {
             ApplyWorkspace(workspace);
+            if (_livePreviewSurface is not null)
+            {
+                if (command == InformationOverlayRuntimeCommand.Close) _livePreviewRestore = false;
+                return SetHealthySnapshot("closed", false);
+            }
             return command switch
             {
                 InformationOverlayRuntimeCommand.Open => OpenCore(retry: false),
@@ -203,6 +228,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             _snapshot = FailedSnapshot(workspace, ResolveFailureCode(exception), retryable: true);
             return _snapshot;
         }
+        finally { PublishStateIfChanged(); }
     }
 
     private void ApplyWorkspace(InformationOverlayRuntimeWorkspace workspace)
@@ -213,7 +239,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             ? new InformationOverlayModuleDemand(workspace.Sources, OverlayModuleSourceResolver.VisibleModules(workspace.Settings), workspace.TemporarySource)
             : null);
         RefreshPresentationLanguage();
-        if (workspace.HasInvalidSourceConfiguration)
+        if (workspace.HasInvalidConfiguration)
         {
             // Close must work for a damaged preset, but must not first refresh
             // the old HWND or leave hotkey/game-follow able to read legacy data.
@@ -223,7 +249,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             return;
         }
         ConfigureHotkey(workspace.HotkeyBinding, workspace.HotkeyEnabled);
-        UpdateFollowGameState();
+        UpdateFollowGameState(); RevokeReminderPreview(); SyncDirectUnread();
         if (_window is { IsVisible: true })
         {
             RefreshWindow(force: true);
@@ -262,9 +288,10 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private InformationOverlayRuntimeSnapshot OpenCore(bool retry, bool prepared = false)
     {
+        if (_livePreviewSurface is not null) return SetHealthySnapshot("closed", false);
         RefreshPresentationLanguage();
         var workspace = _workspace ?? throw new InvalidOperationException("Overlay workspace is unavailable.");
-        if (workspace.HasInvalidSourceConfiguration)
+        if (workspace.HasInvalidConfiguration)
         {
             TryCloseWindow();
             return _snapshot = FailedSnapshot(workspace, "overlay.workspace_invalid_preset", retryable: false);
@@ -291,7 +318,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         var sourceMode = SafeReadSourceMode();
         var preference = SourcePreference(sourceMode, settings.ScenePreference);
         var community = !workspace.UsesModuleSources && (sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null) ? SafeReadCommunity() : null;
-        if (!workspace.UsesModuleSources && !prepared && _prepareCommunity is not null && community is null &&
+        if (ReadLocalSource() is null && !workspace.UsesModuleSources && !prepared && _prepareCommunity is not null && community is null &&
             (sourceMode == "community" || preference == OverlayScenePreference.Auto && room is null))
         {
             var pending = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -304,9 +331,12 @@ public sealed partial class NativeInformationOverlayRuntime :
             return _snapshot = FailedSnapshot(workspace, "overlay.runtime_unavailable", retryable: true);
         var localSession = SafeReadSession();
         var localPresence = ReadLocalDisplayPresence();
+        // Opening a new window starts the sync window for sources re-read after a lapse.
+        StartModuleSync(DateTimeOffset.UtcNow);
         var modules = ReadModules(workspace, localSession, localPresence);
         var content = modules is null
-            ? ProjectSource(room, community, preference, workspace.Language, sourceMode == "community", localSession, localPresence)
+            ? ReadLocalSource() is { } localFrame ? ProjectLocalOwned(localFrame.Read(), workspace.Language)
+                : ProjectSource(room, community, preference, workspace.Language, sourceMode == "community", localSession, localPresence)
             : (Scene: modules.Members.Scene, Command: modules.Notice.Command, Chat: modules.Chat.Chat.ToArray());
         _lastRenderedSourceMode = sourceMode;
         BeforeWindowCreation?.Invoke(content.Scene);
@@ -326,6 +356,7 @@ public sealed partial class NativeInformationOverlayRuntime :
             content.Scene.Context, targetDpiScale, modules);
         overlay.Closed += OverlayClosed;
         _window = overlay;
+        PrepareInstalledAppearanceWindow(overlay);
         overlay.SetMenuAbove(_menuWindow);
         Exception? failure = null;
         var opened = OverlayStartupBoundary.TryShow(
@@ -352,6 +383,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         _lastRenderedDpiScale = targetDpiScale;
         _lastRenderedEntitlements = entitlements;
         _lastRenderedModules = modules;
+        ObserveShownForStandby();
         ScheduleModuleValidation(modules);
         if (modules is not null) ModulesPresented?.Invoke(modules, overlay.ObserveModules());
 
@@ -387,6 +419,7 @@ public sealed partial class NativeInformationOverlayRuntime :
                     TryCloseWindow();
                     _snapshot = FailedSnapshot(_workspace!, ResolveFailureCode(error), retryable: true);
                 }
+                PublishStateIfChanged();
             }).Task.ConfigureAwait(false);
         }
         catch (Exception error) when (error is OperationCanceledException or InvalidOperationException)
@@ -462,7 +495,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         var settings = resolution.Settings;
         var bounds = ResolveTargetSurfaceBounds(out var targetDpiScale);
         var rosterPreferences = SafeReadRosterPreferences();
-        var rosterSettings = new OverlayRosterSelectionSettings(rosterPreferences.Pinned, rosterPreferences.Excluded);
+        var rosterSettings = OverlayRosterSelectionSettings.FromHostPreferences(rosterPreferences);
         var rosterChanged = !Equals(_lastRosterPreferences, rosterPreferences);
         var room = !_workspace.UsesModuleSources ? SafeReadRoom() : null;
         var sourceMode = SafeReadSourceMode();
@@ -487,7 +520,8 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
         _surfaceBounds = bounds;
         var content = modules is null
-            ? ProjectSource(room, community, preference, _workspace.Language, sourceMode == "community", session, localPresence)
+            ? ReadLocalSource() is { } localFrame ? ProjectLocalOwned(localFrame.Read(), _workspace.Language)
+                : ProjectSource(room, community, preference, _workspace.Language, sourceMode == "community", session, localPresence)
             : (Scene: modules.Members.Scene, Command: modules.Notice.Command, Chat: modules.Chat.Chat.ToArray());
         _lastRenderedSourceMode = sourceMode;
         var continuity = SourceContinuity(content.Scene.Context.Kind, room, community);
@@ -524,6 +558,7 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private void EvaluateGameWindowRules(bool initialSync = false)
     {
+        SampleOverlayUsage(); SyncNoticeSafety(); if (_livePreviewSurface is not null) { ValidateLivePreviewScope(); return; }
         if (ValidateMenuInformationLayer()) return;
         if (_workspace is null)
         {
@@ -533,11 +568,12 @@ public sealed partial class NativeInformationOverlayRuntime :
         var settings = _workspace.Settings;
         var running = StarCitizenProcessProbe.IsRunning();
         var foreground = StarCitizenProcessProbe.IsForeground();
-        ValidateReminder(foreground);
+        ValidateReminder(foreground); SyncRally(foreground); SyncDirectUnread();
         var wasRunning = _previousGameRunning;
         var wasForeground = _previousGameForeground;
         _previousGameRunning = running;
         _previousGameForeground = foreground;
+        ObserveStandbyGameRunning(running);
         UpdateFollowGameState(running, foreground);
 
         var openForStart = settings.AutoOpenOverlayOnGameStart && running &&
@@ -562,15 +598,13 @@ public sealed partial class NativeInformationOverlayRuntime :
         {
             RefreshWindow();
         }
-        else
+        else if (FinishPreparedOpenIfReady()) return;
+        // An open HUD reports hotkey and follow-game changes too.
+        _snapshot = _snapshot with
         {
-            if (FinishPreparedOpenIfReady()) return;
-            _snapshot = _snapshot with
-            {
-                HotkeyState = _hotkeyState,
-                FollowGameState = _followGameState
-            };
-        }
+            HotkeyState = _hotkeyState,
+            FollowGameState = _followGameState
+        };
     }
 
     private void UpdateFollowGameState(bool? running = null, bool? foreground = null)
@@ -609,30 +643,29 @@ public sealed partial class NativeInformationOverlayRuntime :
         // Workspace/content refresh is not a hotkey configuration change.
         // Preserve the raw-input key-down filter and the duplicate-trigger gate,
         // and avoid stopping its message thread on every source refresh.
-        if (plan == _hotkeyPlan &&
-            ((plan.InformationHotkey is null && plan.MenuHotkey is null) || _gameCompatibleHotkey.IsRunning))
+        var useRegistered = _workspace?.UseRegisteredHotkey == true;
+        if (plan == _hotkeyPlan && useRegistered == _registeredHotkeyChoice &&
+            ((plan.InformationHotkey is null && plan.MenuHotkey is null && _hotkeyRoutes.Host.Count == 0 && _temporaryHotkeys.Count == 0) || _gameCompatibleHotkey.IsRunning))
             return;
 
         var previousState = _hotkeyState;
-        UnregisterHotkey();
+        var previousMenuState = _menuHotkeyState;
+        _registeredHotkeyChoice = useRegistered;
         _hotkeyPlan = plan;
         Interlocked.Increment(ref _hotkeyConfigurationRevision);
+        _firstUseAcceptedHotkeyInputs = 0;
+        _firstUseLastHotkeyOutcome = null;
         if (_messageWindow is null)
         {
             _hotkeyState = _menuHotkeyState = "unavailable";
             return;
         }
 
-        var windowsError = 0;
-        if (plan.InformationHotkey is { } chord)
-        {
-            _windowsHotkeyRegistered = RegisterHotKey(_messageWindow.Handle,
-                HotkeyId, chord.Modifiers | ModNoRepeat, chord.VirtualKey);
-            windowsError = _windowsHotkeyRegistered ? 0 : Marshal.GetLastWin32Error();
-        }
         _nextHotkeyRegistrationAttempt = Environment.TickCount64 + 5000;
-        var routes = plan.CreateGameCompatibleRoutes(0, MenuHotkeyCommand);
-        var gameCompatible = routes.Count > 0 && _gameCompatibleHotkey.Start(
+        var routes = _hotkeyRoutes.Build(plan.CreateGameCompatibleRoutes(0, MenuHotkeyCommand));
+        SyncRegisteredHotkeys(useRegistered ? routes : []);
+        var informationRegistered = RegisteredHotkeys.Holds(0);
+        var gameCompatible = (routes.Length > 0 || _gameCompatibleHotkey.IsRunning) && _gameCompatibleHotkey.Start(
             _messageWindow.Handle, WmGameCompatibleHotkey, routes);
         _menuHotkeyState = plan.MenuState switch
         {
@@ -643,37 +676,32 @@ public sealed partial class NativeInformationOverlayRuntime :
             OverlayHotkeyBindingState.Reserved => "reserved",
             _ => "invalid"
         };
+        if (_menuHotkeyState != previousMenuState)
+            DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=registration state=" + _menuHotkeyState);
         _hotkeyState = plan.InformationState == OverlayHotkeyBindingState.Disabled ? "disabled" :
             plan.InformationState != OverlayHotkeyBindingState.Ready ? "invalid" :
-            (_windowsHotkeyRegistered, gameCompatible) switch
-        {
-            (true, true) => "registered",
-            (false, true) => "gameCompatibleOnly",
-            (true, false) => "desktopOnly",
-            (false, false) when windowsError == ErrorHotkeyAlreadyRegistered => "conflict",
-            _ => "failed"
-        };
+            InformationHotkeyChannel.State(useRegistered, informationRegistered, gameCompatible, !informationRegistered);
         if (_hotkeyState != previousState)
-            DesktopRuntimeDiagnostics.WriteDiagnosticLog($"native-overlay-hotkey-registration | state={_hotkeyState} windowsError={windowsError}");
+            DesktopRuntimeDiagnostics.WriteDiagnosticLog($"native-overlay-hotkey-registration | state={_hotkeyState} failed={RegisteredHotkeys.Failed.Count}");
     }
 
     private void RetryGlobalHotkeyRegistration()
     {
         // Startup overlap or another program can temporarily own the chord.
         // Retry on the HWND's STA without restarting the working game listener.
-        if (_windowsHotkeyRegistered || _hotkeyPlan?.InformationHotkey is not { } chord ||
-            _messageWindow is null || _hotkeyState is "disabled" or "invalid" ||
+        if (!_registeredHotkeyChoice || _messageWindow is null || RegisteredHotkeys.Failed.Count == 0 ||
             Environment.TickCount64 < _nextHotkeyRegistrationAttempt)
             return;
 
         _nextHotkeyRegistrationAttempt = Environment.TickCount64 + 5000;
-        if (!RegisterHotKey(_messageWindow.Handle, HotkeyId,
-                chord.Modifiers | ModNoRepeat, chord.VirtualKey))
-            return;
+        if (!RegisteredHotkeys.RetryFailed()) return;
 
-        _windowsHotkeyRegistered = true;
-        _hotkeyState = _gameCompatibleHotkey.IsRunning ? "registered" : "desktopOnly";
-        _snapshot = _snapshot with { HotkeyState = _hotkeyState };
+        _registrationFailures = RegisteredHotkeys.FailedText;
+        if (_hotkeyState is not ("disabled" or "invalid") && RegisteredHotkeys.Holds(0))
+        {
+            _hotkeyState = _gameCompatibleHotkey.IsRunning ? "registered" : "desktopOnly";
+            _snapshot = _snapshot with { HotkeyState = _hotkeyState };
+        }
         DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-overlay-hotkey-registration-recovered");
     }
 
@@ -705,11 +733,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         _hotkeyPlan = null;
         _gameCompatibleHotkey.Stop();
         _hotkeyTriggerGate.Reset();
-        if (_windowsHotkeyRegistered && _messageWindow is not null)
-        {
-            _ = UnregisterHotKey(_messageWindow.Handle, HotkeyId);
-        }
-        _windowsHotkeyRegistered = false;
+        SyncRegisteredHotkeys([]);
     }
 
     private IntPtr MessageWindowProc(
@@ -721,29 +745,38 @@ public sealed partial class NativeInformationOverlayRuntime :
     {
         _ = hwnd;
         _ = lParam;
-        if (message == WmHotkey && wParam.ToInt32() == HotkeyId)
+        if (message == WmHotkey && RegisteredHotkeys.TryResolve(wParam.ToInt32(), out var registeredCommand))
         {
             handled = true;
-            HandleHotkeyTrigger(requireGameForeground: false);
+            DispatchHotkey(registeredCommand);
         }
         else if (message == WmGameCompatibleHotkey)
         {
             handled = true;
-            if (wParam.ToInt32() == MenuHotkeyCommand)
-            {
-                try { HandleMenuHotkeyTrigger(); }
-                catch { DesktopRuntimeDiagnostics.WriteDiagnosticLog("menu-hotkey-intent-unavailable"); }
-            }
-            else if (wParam.ToInt32() == 0) HandleHotkeyTrigger(requireGameForeground: true);
+            DispatchHotkey(wParam.ToInt32());
         }
         return IntPtr.Zero;
     }
 
-    private void HandleHotkeyTrigger(bool requireGameForeground)
+    private void DispatchHotkey(int command)
     {
+        // With the choice on, both channels can see one press; the first one acts.
+        if (_registeredHotkeyChoice &&
+            !RegisteredHotkeys.AcceptPress(command, unchecked((uint)GetMessageTime()))) return;
+        if (command == MenuHotkeyCommand)
+        {
+            try { HandleMenuHotkeyTrigger(); }
+            catch { DesktopRuntimeDiagnostics.WriteDiagnosticLog("menu-hotkey-intent-unavailable"); }
+        }
+        else if (command == 0) HandleHotkeyTrigger();
+        else TriggerTemporaryHotkey(command);
+    }
+
+    private void HandleHotkeyTrigger()
+    {
+        if (_livePreviewSurface is not null) return;
         RefreshPresentationLanguage();
         if (_workspace?.HotkeyEnabled != true ||
-            requireGameForeground && !StarCitizenProcessProbe.IsForeground() ||
             !_hotkeyTriggerGate.TryAccept(unchecked((uint)GetMessageTime())))
         {
             return;
@@ -751,7 +784,12 @@ public sealed partial class NativeInformationOverlayRuntime :
 
         try
         {
-            _ = _window is { IsVisible: true } || _openingCancellation is not null ? CloseCore() : OpenCore(retry: false);
+            // Only an admitted information-hotkey message reaches this point;
+            // registration, timer ticks, menu keys and normal Open never count.
+            if (_firstUseAcceptedHotkeyInputs < 9007199254740991) _firstUseAcceptedHotkeyInputs++;
+            _firstUseLastHotkeyOutcome = "failed";
+            var result = _window is { IsVisible: true } || _openingCancellation is not null ? CloseCore() : OpenCore(retry: false);
+            _firstUseLastHotkeyOutcome = result.WindowState;
         }
         catch (Exception exception)
         {
@@ -761,6 +799,7 @@ public sealed partial class NativeInformationOverlayRuntime :
                 _snapshot = FailedSnapshot(_workspace, ResolveFailureCode(exception), retryable: true);
             }
         }
+        finally { PublishStateIfChanged(); }
     }
 
     private void RunControlThread()
@@ -788,11 +827,13 @@ public sealed partial class NativeInformationOverlayRuntime :
                     {
                         RetryGlobalHotkeyRegistration();
                         EvaluateGameWindowRules();
+                        ObserveInstalledAppearanceRuntime();
                     }
                     catch (Exception exception)
                     {
                         DesktopRuntimeDiagnostics.WriteDiagnosticLog($"native-overlay-follow-game-failed | {exception}");
                     }
+                    PublishStateIfChanged();
                 },
                 _dispatcher);
             _gameWindowTimer.Start();
@@ -817,11 +858,14 @@ public sealed partial class NativeInformationOverlayRuntime :
             return;
         }
         _controlThreadCleanedUp = true;
+        CloseLivePreviewCore(restore: false);
+        CloseAppearancePreviewCore(); ClearRallyOnControlThread();
         _gameWindowTimer?.Stop();
         _gameWindowTimer = null;
         UnregisterHotkey();
         _gameCompatibleHotkey.Dispose();
         TryCloseWindow();
+        DisposeInstalledAppearanceRuntime();
         if (_messageWindow is not null)
         {
             _messageWindow.RemoveHook(MessageWindowProc);
@@ -846,10 +890,12 @@ public sealed partial class NativeInformationOverlayRuntime :
             ScheduleModuleValidation(null);
         }
         _snapshot = SetHealthySnapshot("closed", isVisible: false);
+        PublishStateIfChanged();
     }
 
     private void TryCloseWindow()
     {
+        StartModuleSync(null);
         var pending = _openingCancellation;
         _openingCancellation = null;
         pending?.Cancel();
@@ -857,6 +903,7 @@ public sealed partial class NativeInformationOverlayRuntime :
         _appearanceFocusTimer = null;
         var window = _window;
         _window = null;
+        ObserveInstalledAppearanceRuntime();
         _lastRenderedSession = null;
         _lastRenderedBounds = null;
         _lastRenderedEntitlements = [];
@@ -895,8 +942,17 @@ public sealed partial class NativeInformationOverlayRuntime :
             !resolution.IsAvailable,
             isVisible ? _moduleFailure : null,
             Retryable: isVisible && ModuleFailureRetryable);
+        ObserveInstalledAppearanceRuntime();
         return _snapshot;
     }
+
+    // An installed private appearance may account for normal runtime use.
+    // Preview has its own owner and never publishes a normal open receipt.
+    // Public builds erase this hook and contain no appearance progress policy.
+    partial void ObserveInstalledAppearanceRuntime();
+    partial void InitializeInstalledAppearanceRuntime(string? dataRoot, IInstalledAppearanceProgress? progress);
+    partial void PrepareInstalledAppearanceWindow(OverlayCompositionHudWindow overlay);
+    partial void DisposeInstalledAppearanceRuntime();
 
     private static InformationOverlayRuntimeSnapshot FailedSnapshot(
         InformationOverlayRuntimeWorkspace workspace,
@@ -952,6 +1008,7 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private GameLogSessionSnapshot SafeReadSession()
     {
+        if (ReadLocalSource() is { } frame) return frame.Read().Session;
         try
         {
             return _sessionProvider() ?? GameLogSessionSnapshot.Empty;
@@ -966,17 +1023,19 @@ public sealed partial class NativeInformationOverlayRuntime :
     {
         var prefs = SafeReadRosterPreferences();
         _lastRosterPreferences = prefs;
-        return new(prefs.Pinned, prefs.Excluded);
+        return OverlayRosterSelectionSettings.FromHostPreferences(prefs);
     }
 
     private InformationOverlayRosterPreferences SafeReadRosterPreferences()
     {
+        if (ReadLocalSource() is not null) return InformationOverlayRosterPreferences.Empty;
         try { return _rosterPreferences() ?? InformationOverlayRosterPreferences.Empty; }
         catch { return InformationOverlayRosterPreferences.Empty; }
     }
 
     private string[] SafeReadEntitlements()
     {
+        if (ReadLocalSource() is not null) return [];
         try
         {
             return (_entitlementProvider() ?? [])

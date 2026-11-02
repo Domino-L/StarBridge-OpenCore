@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 
 import '../presence/manual_presence.dart';
 import 'menu_account_avatar.dart';
 
 import '../../features/friends/friends_module.dart';
 import '../../platform/window/menu_preview_window_port.dart';
+import '../../platform/window/menu_read_feedback.dart';
 import '../../platform/window/menu_profile_navigation.dart';
 import '../../platform/window/menu_avatar_presentation.dart';
 
@@ -23,6 +27,7 @@ final class MenuFriendsSession
     DateTime Function()? now,
     this.presence,
     this.identity,
+    this.identityChanges,
   }) : _now = now ?? DateTime.now {
     if (_port is FriendsActivityPort) {
       _activity = (_port as FriendsActivityPort).changes.listen((_) {
@@ -32,6 +37,7 @@ final class MenuFriendsSession
       });
     }
     presence?.addListener(_presenceChanged);
+    identityChanges?.addListener(_presenceChanged);
     _subscription = _port.invalidations.listen((_) {
       if (_disposed) return;
       _identityEpoch++;
@@ -48,6 +54,9 @@ final class MenuFriendsSession
   final FriendsPort _port;
   final ManualPresenceController? presence;
   final ({String name, String handle, String? avatar})? Function()? identity;
+  // Account reads can settle after the friend directory. Re-project only the
+  // current identity; do not retire friend commands or start another read.
+  final Listenable? identityChanges;
   late final _ownAvatar = MenuAccountAvatar(() => _emit(_view));
   final _peerAvatars = <String, MenuAccountAvatar>{};
   FriendsSnapshot? _lastSnapshot;
@@ -143,6 +152,14 @@ final class MenuFriendsSession
   Map<String, FriendRow> _targets = {};
   bool _active = false, _reading = false, _disposed = false;
   bool _silentRead = false;
+  // A 10s background refresh usually changes nothing; resending the whole
+  // view (inline avatars included) re-parses it and rebuilds every open menu
+  // panel. Only that refresh may skip an identical view; every other emit,
+  // including action results the menu awaits, is always delivered.
+  bool _quietEmit = false;
+  String? _lastPublished;
+  int _readSerial = 0;
+  MenuReadFeedback? _readFeedback;
   bool _busy = false, _requiresRefresh = false;
   String _section = 'friends';
   String? _query, _feedback;
@@ -202,8 +219,9 @@ final class MenuFriendsSession
     final pending = _pending;
     final own = view['state'] == 'signedOut' ? null : identity?.call();
     final ownPhoto = _ownAvatar.read(own?.avatar);
-    _publish({
+    final next = <String, Object?>{
       ...view,
+      'readFeedback': _reading && !_silentRead ? _readFeedback?.wire : null,
       'interactive': true,
       'scope': 'friends$_identityEpoch',
       'section': _section,
@@ -225,11 +243,13 @@ final class MenuFriendsSession
       if (presence != null && view['state'] != 'signedOut')
         'self': {
           'key': _presenceKey,
-          'status': presence!.snapshot.selfKey,
+          'status': presence!.selfKey,
           'change': presence!.canChange,
           'busy': presence!.busy,
           'failed': presence!.failed,
         },
+      'canEnterOffline': presence?.canEnterOffline ?? false,
+      'canRestoreOnline': presence?.canRestoreOnline ?? false,
       'actions': {
         if (!_busy && !_requiresRefresh && _fresh)
           for (final entry in _targets.entries)
@@ -243,12 +263,33 @@ final class MenuFriendsSession
           'name': pending.name,
           'action': pending.action,
         },
-    });
+    };
+    final encoded = jsonEncode(next);
+    if (_quietEmit && encoded == _lastPublished) return;
+    _lastPublished = encoded;
+    _publish(next);
   }
 
   @override
   void act(String action, String key, String value) {
-    if (_disposed || !_active || _busy) return;
+    if (_disposed || !_active) return;
+    if (action == 'resumeOnline') {
+      if (key == _presenceKey &&
+          value.isEmpty &&
+          presence?.canRestoreOnline == true) {
+        unawaited(presence!.restoreOnline());
+      }
+      return;
+    }
+    if (action == 'offlineMode') {
+      if (key == _presenceKey &&
+          value.isEmpty &&
+          presence?.canEnterOffline == true) {
+        unawaited(presence!.selectOffline());
+      }
+      return;
+    }
+    if (_busy) return;
     if (action == 'presence') {
       if (key == _presenceKey &&
           presence?.canChange == true &&
@@ -269,7 +310,7 @@ final class MenuFriendsSession
       return;
     }
     if (action == 'refresh') {
-      _retire();
+      _retire(keepDisplay: true);
       unawaited(_read(reconcile: true));
       return;
     }
@@ -277,6 +318,7 @@ final class MenuFriendsSession
         const {'friends', 'incoming', 'outgoing', 'blocked'}.contains(value)) {
       _section = value;
       _query = null;
+      if (!_requiresRefresh) _feedback = null;
       _retire();
       if (_requiresRefresh) {
         _emit({'state': 'unavailable'});
@@ -296,6 +338,7 @@ final class MenuFriendsSession
       }
       _section = 'search';
       _query = query;
+      if (!_requiresRefresh) _feedback = null;
       _retire();
       if (_requiresRefresh) {
         _emit({'state': 'unavailable'});
@@ -413,8 +456,18 @@ final class MenuFriendsSession
   @override
   void show(bool visible) {
     if (_disposed || visible == _active) return;
+    // Hiding keeps only the basic display (no target keys) for the next
+    // opening of this identity and list; reopening showed a 2.6 s loading
+    // screen every time (build16 window traces, 2026-10-22).
+    final resume = visible ? _takeResume() : null;
+    if (!visible) {
+      final basic = _basicDisplay();
+      _resume = basic == null
+          ? null
+          : (_identityEpoch, _section, _query, basic);
+    }
     _active = visible;
-    _retire();
+    _retire(display: resume);
     _timer?.cancel();
     _timer = null;
     if (visible) {
@@ -429,7 +482,42 @@ final class MenuFriendsSession
     }
   }
 
-  void _retire() {
+  (int, String, String?, Map<String, Object?>)? _resume;
+
+  Map<String, Object?>? _takeResume() {
+    final resume = _resume;
+    _resume = null;
+    if (resume == null) return null;
+    final (epoch, section, query, display) = resume;
+    return epoch == _identityEpoch && section == _section && query == _query
+        ? display
+        : null;
+  }
+
+  // Never carry target keys or detailed shared fields into a kept display.
+  Map<String, Object?>? _basicDisplay() => _view['state'] == 'ready'
+      ? <String, Object?>{
+          'state': 'ready',
+          'incoming': _view['incoming'] ?? 0,
+          'matched': _view['matched'] ?? 0,
+          for (final group in const ['rows', 'requests'])
+            group: [
+              for (final row in (_view[group] as List? ?? const []))
+                if (row is Map)
+                  {
+                    'name': row['name'],
+                    'presence': row['presence'],
+                    'avatar': row['avatar'],
+                  },
+            ],
+        }
+      : null;
+
+  void _retire({bool keepDisplay = false, Map<String, Object?>? display}) {
+    // A manual renewal may keep basic display in this exact account/query.
+    final previous = display ?? (keepDisplay ? _basicDisplay() : null);
+    _readFeedback = null;
+    _lastPublished = null;
     _clearPeerAvatars();
     _epoch++;
     _targets = {};
@@ -437,7 +525,7 @@ final class MenuFriendsSession
     _readAt = null;
     _reading = false;
     _port.cancelPending();
-    _view = {'state': _active ? 'loading' : 'idle'};
+    _view = previous ?? {'state': _active ? 'loading' : 'idle'};
     if (_active) {
       _emit(_view);
     } else {
@@ -449,6 +537,7 @@ final class MenuFriendsSession
     try {
       await _readCore(reconcile: reconcile, silent: silent);
     } finally {
+      _quietEmit = false;
       _drainActivity();
     }
   }
@@ -463,6 +552,9 @@ final class MenuFriendsSession
     }
     _reading = true;
     _silentRead = silent;
+    _readFeedback = silent
+        ? null
+        : MenuReadFeedback(++_readSerial, currentMenuReadOrigin);
     if (!silent) _emit(_view);
     final epoch = _epoch;
     FriendsReadResult result;
@@ -481,6 +573,9 @@ final class MenuFriendsSession
     }
     if (_disposed || !_active || epoch != _epoch) return;
     _reading = false;
+    _readFeedback = null;
+    // The rest of this read is synchronous; only its own emit may be skipped.
+    _quietEmit = silent;
     final snapshot = result.snapshot;
     if (result.state != FriendsReadState.ready ||
         snapshot == null ||
@@ -503,8 +598,9 @@ final class MenuFriendsSession
       return;
     }
     if (reconcile) {
+      // Only a command with an unknown outcome leaves relationships to check.
+      _feedback = _requiresRefresh ? 'reviewed' : null;
       _requiresRefresh = false;
-      _feedback = 'reviewed';
     }
     if (!_project(snapshot)) {
       _targets = {};
@@ -516,8 +612,11 @@ final class MenuFriendsSession
   bool _project(FriendsSnapshot snapshot, {bool mediaOnly = false}) {
     // Only bounded inline avatars and opaque UI keys cross engines; no target
     // refs, action grants, URLs, endpoints or unfiltered shared maps.
+    final matched = _query != null
+        ? snapshot.groups[FriendsSection.friends] ?? const <FriendRow>[]
+        : const <FriendRow>[];
     final rows = _query != null
-        ? snapshot.results
+        ? [...matched, ...snapshot.results]
         : snapshot.groups[FriendsSection.values.byName(_section)] ?? const [];
     final requests = _section == 'friends' && _query == null
         ? snapshot.groups[FriendsSection.incoming] ?? const <FriendRow>[]
@@ -563,13 +662,14 @@ final class MenuFriendsSession
           : requestDisplay;
       destination.add({
         'name': _text(
-          _section == 'search'
+          _section == 'search' && row.relationship != 'friend'
               ? row.name
               : row.callsign.isEmpty
               ? row.gameId
               : row.callsign,
         ),
         if (row.relationship == 'friend') 'gameId': _text(row.gameId),
+        if (row.notAddableHere) 'notAddable': true,
         'key': key,
         'avatar': avatar,
         if (row.relationship == 'friend' &&
@@ -617,6 +717,7 @@ final class MenuFriendsSession
     _emit({
       'state': 'ready',
       'incoming': snapshot.groups[FriendsSection.incoming]?.length ?? 0,
+      'matched': matched.length,
       'rows': display,
       'requests': requestDisplay,
     });
@@ -644,6 +745,7 @@ final class MenuFriendsSession
   @override
   void dispose() {
     presence?.removeListener(_presenceChanged);
+    identityChanges?.removeListener(_presenceChanged);
     if (_disposed) return;
     show(false);
     _disposed = true;

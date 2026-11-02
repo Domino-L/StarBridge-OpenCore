@@ -43,6 +43,10 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
         'appearanceMode': patch.appearanceMode!.name,
       if (patch.motionPreference != null)
         'motionPreference': patch.motionPreference!.name,
+      if (patch.interactionStyle != null)
+        'interactionStyle': patch.interactionStyle!.name,
+      if (patch.holidayAppearance != null)
+        'holidayAppearance': patch.holidayAppearance,
       if (patch.applicationBehavior != null)
         'applicationBehavior': {
           'launchAtStartup': patch.applicationBehavior!.launchAtStartup,
@@ -122,11 +126,30 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
       ),
     };
     final behaviorValue = values['applicationBehavior'];
+    final interaction = switch (values['interactionStyle']) {
+      'standard' => InteractionStyle.standard,
+      'rail' => InteractionStyle.rail,
+      'scan' => InteractionStyle.scan,
+      'glow' => InteractionStyle.glow,
+      null when !values.containsKey('interactionStyle') =>
+        InteractionStyle.standard,
+      _ => throw const BridgeFormatException(
+        'Interaction style is unsupported.',
+      ),
+    };
     if (behaviorValue != null && behaviorValue is! Map) {
       throw const BridgeFormatException(
         'Application preferences application behavior is invalid.',
       );
     }
+    // 旧 Host 没有这个字段：缺就按默认开。
+    final holidayAppearance = switch (values['holidayAppearance']) {
+      final bool enabled => enabled,
+      null => true,
+      _ => throw const BridgeFormatException(
+        'Holiday appearance preference is invalid.',
+      ),
+    };
     final applicationBehavior = behaviorValue == null
         ? ApplicationBehaviorPreferences.defaults
         : _parseApplicationBehavior(
@@ -137,7 +160,9 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
         localeOverride: locale,
         appearanceMode: appearance,
         motionPreference: motion,
+        interactionStyle: interaction,
         applicationBehavior: applicationBehavior,
+        holidayAppearance: holidayAppearance,
       ),
       revision: revision,
       source: source,

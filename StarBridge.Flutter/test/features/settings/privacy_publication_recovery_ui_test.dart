@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_page.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_settings.dart';
@@ -8,29 +9,30 @@ import 'package:starbridge_flutter/features/settings/privacy_publication_port.da
 import 'local_privacy_page_test.dart' show app, viewport, PublishingPrivacy;
 
 void main() {
-  testWidgets('saved enabled but stopped offers recovery without editing scopes', (
-    tester,
-  ) async {
-    final port = RecoveryPrivacy()..withdrawn = true;
-    final c = LocalPrivacyController(port);
-    addTearDown(c.dispose);
-    await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
-    await tester.pumpAndSettle();
-    expect(find.text('共享已停止'), findsOneWidget);
-    expect(port.actions.where((a) => a == 'apply'), isEmpty);
-    expect(c.dirty, isFalse);
-    final saved = port.snapshot;
-    final retry = find.byKey(const Key('privacy-reapply'));
-    expect(retry, findsOneWidget);
-    expect(c.canRetryPublication, isTrue);
-    await tester.ensureVisible(retry);
-    await tester.tap(retry);
-    await tester.pumpAndSettle();
-    expect(port.actions.where((a) => a == 'apply'), hasLength(1));
-    expect(port.writes, 0);
-    expect(identical(port.snapshot, saved), isTrue);
-    expect(find.text('共享已生效'), findsOneWidget);
-  });
+  testWidgets(
+    'saved enabled but stopped offers recovery without editing scopes',
+    (tester) async {
+      final port = RecoveryPrivacy()..withdrawn = true;
+      final c = LocalPrivacyController(port);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
+      await tester.pumpAndSettle();
+      expect(find.text('共享已停止'), findsOneWidget);
+      expect(port.actions.where((a) => a == 'apply'), isEmpty);
+      expect(c.dirty, isFalse);
+      final saved = port.snapshot;
+      final retry = find.byKey(const Key('privacy-reapply'));
+      expect(retry, findsOneWidget);
+      expect(c.canRetryPublication, isTrue);
+      await tester.ensureVisible(retry);
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+      expect(port.actions.where((a) => a == 'apply'), hasLength(1));
+      expect(port.writes, 0);
+      expect(identical(port.snapshot, saved), isTrue);
+      expect(find.text('共享已生效'), findsOneWidget);
+    },
+  );
   testWidgets('automatic recovery keeps a manual retry entry', (tester) async {
     final port = RecoveryPrivacy()..reconnecting = true;
     final c = LocalPrivacyController(port);
@@ -56,7 +58,7 @@ void main() {
       expect(
         find.text(
           code.endsWith('forbidden')
-              ? '服务拒绝了此次共享，已停止继续发送。请确认账号权限并重新确认共享，不会自动扩大共享范围。'
+              ? '服务拒绝了此次共享，将间隔重试。请检查账号权限；已有共享同意和范围保留。'
               : '未能确认共享结果，请检查连接后重试。',
         ),
         findsOneWidget,
@@ -97,8 +99,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<OutlinedButton>(find.byKey(const Key('privacy-reapply')))
-          .onPressed,
+          .widget<StarBridgeActionButton>(
+            find
+                .ancestor(
+                  of: find.byKey(const Key('privacy-reapply')),
+                  matching: find.byType(StarBridgeActionButton),
+                )
+                .first,
+          )
+          .onActivate,
       isNull,
     );
     await c.applyPublication();

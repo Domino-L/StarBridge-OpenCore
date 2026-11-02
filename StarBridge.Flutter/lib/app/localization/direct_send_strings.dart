@@ -25,6 +25,12 @@ const directSendZhCn = <String, String>{
   'direct.send.leaveUnknown': '消息可能已经送达。离开将清除保留的输入，请勿重新发送相同内容，稍后查看历史确认。',
   'direct.send.keep': '留在会话',
   'direct.send.discard': '放弃输入并离开',
+  'direct.send.pendingTip': '发送中',
+  'direct.send.failed': '发送失败',
+  'direct.send.retry': '重试',
+  'direct.send.failedTip': '发送失败，点击重试',
+  'direct.connection.reconnecting': '正在重新连接…',
+  'direct.connection.restored': '已恢复',
 };
 
 const directSendZhTw = <String, String>{
@@ -54,6 +60,12 @@ const directSendZhTw = <String, String>{
   'direct.send.leaveUnknown': '訊息可能已經送達。離開將清除保留的輸入，請勿重新傳送相同內容，稍後查看歷史確認。',
   'direct.send.keep': '留在對話',
   'direct.send.discard': '放棄輸入並離開',
+  'direct.send.pendingTip': '傳送中',
+  'direct.send.failed': '傳送失敗',
+  'direct.send.retry': '重試',
+  'direct.send.failedTip': '傳送失敗，點擊重試',
+  'direct.connection.reconnecting': '正在重新連線…',
+  'direct.connection.restored': '已恢復',
 };
 
 const directSendEn = <String, String>{
@@ -91,4 +103,10 @@ const directSendEn = <String, String>{
   'direct.send.leaveUnknown': 'The message may have arrived. Leaving clears the retained text. Do not resend it; check the history later.',
   'direct.send.keep': 'Stay in conversation',
   'direct.send.discard': 'Discard and leave',
+  'direct.send.pendingTip': 'Sending',
+  'direct.send.failed': 'Not sent',
+  'direct.send.retry': 'Retry',
+  'direct.send.failedTip': 'Not sent. Click to retry.',
+  'direct.connection.reconnecting': 'Reconnecting…',
+  'direct.connection.restored': 'Reconnected',
 };

@@ -44,7 +44,9 @@ internal sealed partial class ScmAccountBridgeHost
         {
             var result = await ExecutePartyRoomCoreAsync(context, payload, token);
             if (generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
-            result = ProjectRoomChat(result, OverlayLocalHandle());
+            var authenticatedViewer = RequireRelaySession(context).Legacy?.AccountId ??
+                (result.AuthorizedOverlayDirectory ?? result.Directory)?.ViewerAccountId;
+            result = ProjectRoomChat(result, OverlayLocalHandle(), authenticatedViewer);
             result = result with {
                 Chat = result.Chat is { } chat ? chat with {
                     Messages = chat.Messages.Select(m => ProjectRoomMessageAvatar(m, context, generation)).ToArray() } : null,
@@ -73,16 +75,23 @@ internal sealed partial class ScmAccountBridgeHost
     private string OverlayLocalHandle() => HangarIdentity is { } identity
         ? StarBridge.Core.Hangar.RsiHangarIdentityPolicy.DisplayHandle(identity.Identity) ?? "" : "";
 
-    internal static RoomCommandView ProjectRoomChat(RoomCommandView result, string verifiedHandle)
+    internal static RoomCommandView ProjectRoomChat(RoomCommandView result, string verifiedHandle,
+        string? authenticatedViewer = null)
     {
         RoomChatMessageView Project(RoomChatMessageView message) => message with {
-            // Only the authoritative RSI identity, never the editable callsign.
-            IsSelf = message.Kind == "player" && !string.IsNullOrWhiteSpace(verifiedHandle) &&
-                string.Equals(message.SenderGameId, verifiedHandle, StringComparison.OrdinalIgnoreCase)
+            // Prefer authenticated business identity. A matching game handle cannot
+            // override a different sender or missing ID in an identity-aware response.
+            // Old servers lacking viewer identity retain their verified-Handle fallback.
+            IsSelf = message.Kind == "player" && (!string.IsNullOrWhiteSpace(authenticatedViewer)
+                ? string.Equals(message.SenderAccountId, authenticatedViewer, StringComparison.Ordinal)
+                : !string.IsNullOrWhiteSpace(verifiedHandle) &&
+                  string.Equals(message.SenderGameId, verifiedHandle, StringComparison.OrdinalIgnoreCase))
         };
         return result with {
             Chat = result.Chat is { } page ? page with { Messages = page.Messages.Select(Project).ToArray() } : null,
-            Message = result.Message is { } sent ? Project(sent) with { IsSelf = sent.Kind == "player" } : null
+            Message = result.Message is { } sent ? Project(sent) with {
+                IsSelf = sent.Kind == "player" && (string.IsNullOrWhiteSpace(authenticatedViewer) ||
+                    string.Equals(sent.SenderAccountId, authenticatedViewer, StringComparison.Ordinal)) } : null
         };
     }
 
@@ -144,11 +153,12 @@ internal sealed partial class ScmAccountBridgeHost
     {
         // Overlay reads (including chat preflight) may precede avatar/UI projection.
         // Bind self to the authenticated account, never a callsign or display handle.
-        var viewer = RequireRelaySession(context).Legacy?.AccountId;
+        var viewer = RequireRelaySession(context).Legacy?.AccountId ?? directory.ViewerAccountId;
         return directory with { Rooms = directory.Rooms.Select(room => room with {
-            Members = room.Members.Select(member => member with {
-                IsSelf = !string.IsNullOrWhiteSpace(viewer) && !string.IsNullOrWhiteSpace(member.AccountId) &&
-                    string.Equals(member.AccountId, viewer, StringComparison.Ordinal)
+            Members = room.Members.Select(member => {
+                var isSelf = !string.IsNullOrWhiteSpace(viewer) && !string.IsNullOrWhiteSpace(member.AccountId) &&
+                    string.Equals(member.AccountId, viewer, StringComparison.Ordinal);
+                return ProjectRoomSelfPresence(member, context, Generation, isSelf) with { IsSelf = isSelf };
             }).ToArray()
         }).ToArray() };
     }
@@ -165,10 +175,14 @@ internal sealed partial class ScmAccountBridgeHost
         {
             var result = await SendRelayRequestAsync(session,
                 (active, ct) => reader.ReadAsync(active.AccessToken, ct), token);
-            if (_disposed || generation != Generation)
-                throw new BridgeStaleGenerationException(generation, Generation);
-            RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
-            _session = result.ActiveSession.Scm;
+            lock (_realtimeGate)
+            {
+                token.ThrowIfCancellationRequested();
+                if (_disposed || generation != Generation)
+                    throw new BridgeStaleGenerationException(generation, Generation);
+                RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
+                _session = result.ActiveSession.Scm;
+            }
             PublishPlayerActivity(context, generation, sequence, Notifications.PlayerActivitySources.Room(result.Result));
             return result.Result;
         }

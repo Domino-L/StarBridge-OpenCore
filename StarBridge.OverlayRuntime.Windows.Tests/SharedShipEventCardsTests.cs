@@ -55,9 +55,12 @@ internal static class SharedShipEventCardsTests
         var lines = System.IO.File.ReadAllLines(path);
         var header = lines[0].TrimStart('\uFEFF').Split('\t');
         var column = Array.IndexOf(header, "英文飞船名");
+        var maker = Array.IndexOf(header, "制造商");
         Check(column >= 0, "existing catalog has its English display-name column");
-        var names = lines.Skip(1).Select(line => line.Split('\t')).Where(row => row.Length > column)
-            .Select(row => row[column].Trim()).Where(value => value.Length > 0).ToArray();
+        var names = lines.Skip(1).Select(line => line.Split('\t')).Where(row => row.Length > column && row[column].Trim().Length > 0)
+            .SelectMany(row => maker >= 0 && row.Length > maker && row[maker].Trim().Length > 0
+                ? new[] { row[column].Trim(), row[maker].Trim() + " " + row[column].Trim() }
+                : new[] { row[column].Trim() }).ToArray();
         Check(names.All(raw => GameShipNames.Find(raw) is not null), "every full display-catalog model must be translated before event rendering");
         VerifyKnownInputs(names);
     }

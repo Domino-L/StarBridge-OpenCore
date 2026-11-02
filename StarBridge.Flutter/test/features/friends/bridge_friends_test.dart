@@ -9,6 +9,60 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  for (final (code, retryable, retained) in [
+    ('friends.read_transient', true, true), ('friends.read_transient', false, false),
+    ('bridge.disconnected', true, false), ('bridge.host_error', true, false),
+    ('friends.read_unavailable', true, false), ('friends.forbidden', true, false),
+    ('friends.data_invalid', true, false), ('friends.identity_unavailable', true, false)]) {
+    test('display retention requires the new transient category $code/$retryable', () async {
+      final host = Harness(error: code, retryable: retryable);
+      addTearDown(host.close);
+      expect((await host.adapter.read()).transientFailure, retained);
+    });
+  }
+  test(
+    'nonfriends never acquire friend sharing from an overbroad search response',
+    () {
+      for (final relation in [
+        'none',
+        'incoming',
+        'outgoing',
+        'blocked',
+        'unknown',
+      ]) {
+        final result = parseFriendsSnapshot({
+          'schemaVersion': 1,
+          'query': 'Search',
+          'friends': [],
+          'incoming': [],
+          'outgoing': [],
+          'blocked': [],
+          'results': [
+            {
+              'callsign': 'Search',
+              'gameId': '',
+              'relationship': relation,
+              'updatedAt': '2026-09-06T12:00:00Z',
+              'shared': {
+                'presence': 'InGame',
+                'sameServer': true,
+                'serverId': 'private-server',
+                'serverRegion': 'private-region',
+                'ship': 'private-ship',
+                'location': 'private-location',
+                'lastOnlineAt': '2026-09-06T12:00:00Z',
+              },
+              'sharedLabels': {
+                'ship': {'en': 'Private ship'},
+              },
+            },
+          ],
+        });
+        expect(result.results.single.shared, isEmpty);
+        expect(result.results.single.sharedLabels, isEmpty);
+      }
+    },
+  );
   test(
     'nonfriends never acquire friend sharing from an overbroad search response',
     () {
@@ -212,6 +266,7 @@ class Harness {
   Harness({
     this.signedIn = true,
     this.error,
+    this.retryable = false,
     this.holdRead = false,
     this.commandPayload,
     List<String> capabilities = const ['friends.read'],
@@ -236,6 +291,7 @@ class Harness {
   }
   final bool signedIn, holdRead;
   final String? error;
+  final bool retryable;
   final Map<String, Object?>? commandPayload;
   late final BridgeConnection connection;
   late final BridgeClientSession session;
@@ -265,7 +321,7 @@ class Harness {
             ? BridgeErrorBody(
                 code: error!,
                 message: 'private upstream detail',
-                retryable: false,
+                retryable: retryable,
               )
             : null,
         payload: account

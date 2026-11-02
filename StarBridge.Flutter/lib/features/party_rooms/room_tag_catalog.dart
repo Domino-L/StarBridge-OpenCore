@@ -1,3 +1,4 @@
+import '../../app/localization/app_strings.dart';
 import 'party_rooms_module.dart';
 import 'room_tag_definitions.dart';
 
@@ -23,17 +24,27 @@ final class RoomTagCatalog {
   static bool descendant(String node, String ancestor) =>
       normalize(node) == normalize(ancestor) ||
       pathIds(node).contains(normalize(ancestor));
-  static String fullText(RoomTag tag) {
-    if (!tag.isGameplay) return tag.text;
+  static String _display(String id, String fallback, AppStrings? strings) {
+    final key = 'rooms.tag.${normalize(id)}';
+    final value = strings?.text(key);
+    return value == null || value == key ? fallback : value;
+  }
+
+  // Omitting strings preserves the canonical text used by legacy matching.
+  static String fullText(RoomTag tag, {AppStrings? strings}) {
+    if (!tag.isGameplay) return _display(tag.id, tag.text, strings);
     final path = pathIds(tag.id);
     return path.isEmpty
         ? tag.text
-        : path.map((id) => definitions[id]!.$2).join(' / ');
+        : path.map((id) => name(id, strings: strings)).join(' / ');
   }
 
-  static String compactText(RoomTag tag) =>
-      tag.isGameplay ? fullText(tag).replaceAll(' / ', ' · ') : tag.text;
-  static String name(String id) => definitions[normalize(id)]?.$2 ?? id;
+  static String compactText(RoomTag tag, {AppStrings? strings}) =>
+      tag.isGameplay
+      ? fullText(tag, strings: strings).replaceAll(' / ', ' · ')
+      : fullText(tag, strings: strings);
+  static String name(String id, {AppStrings? strings}) =>
+      _display(id, definitions[normalize(id)]?.$2 ?? id, strings);
   static String group(String id) =>
       roomContextDefinitions.where((row) => row.$1 == id).firstOrNull?.$3 ??
       'other';
@@ -71,7 +82,11 @@ final class RoomTagCatalog {
         if (tag.isGameplay && !definitions.containsKey(normalize(tag.id)))
           tag.id,
   ];
-  String label(String id) => definitions[id]?.$2 ?? options[id]?.text ?? id;
+  String label(String id, {AppStrings? strings}) => _display(
+    id,
+    definitions[normalize(id)]?.$2 ?? options[id]?.text ?? id,
+    strings,
+  );
   Set<String> normalizeSelection(Iterable<String> ids) =>
       ids.map(normalize).toSet();
   Set<String> adding(Set<String> selected, String id) {

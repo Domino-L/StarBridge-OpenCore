@@ -7,11 +7,18 @@ import '../../features/personal_profile/personal_profile_models.dart';
 import '../../platform/window/menu_profile_navigation.dart';
 import 'menu_profile_view.dart';
 import 'menu_profile_images.dart';
+import '../../shared/remote_image_loader.dart';
 
 /// At most four independent read-only windows. Sources remain in the primary
 /// engine; each owns cancelable reads and is retired on identity invalidation.
 final class MenuProfilesSession implements MenuProfilesReadLease {
-  MenuProfilesSession(this.createPort, this.publish, {this.createOwnPort});
+  MenuProfilesSession(
+    this.createPort,
+    this.publish, {
+    this.createOwnPort,
+    this.createImages,
+  });
+  final RemoteImageLoader Function()? createImages;
   final PersonalProfilePort Function()? createOwnPort;
   final UserInteractionPort Function() createPort;
   final void Function(Map<String, Object?>) publish;
@@ -27,7 +34,7 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
       publish({'window': window, 'state': 'unavailable'});
       return;
     }
-    final entry = _ProfileRead(target);
+    final entry = _ProfileRead(target, createImages?.call());
     _windows[window] = entry;
     entry.timer = Timer.periodic(
       const Duration(seconds: 30),
@@ -220,7 +227,11 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
 }
 
 final class _ProfileRead {
-  _ProfileRead(this.target);
+  _ProfileRead(this.target, RemoteImageLoader? owner)
+    : images = MenuProfileImages(
+        remoteImages: owner,
+        kind: RemoteImageResourceKind.organization,
+      );
   final MenuProfileTarget target;
   UserInteractionPort? port;
   PersonalProfilePort? ownPort;
@@ -229,7 +240,7 @@ final class _ProfileRead {
   bool reading = false;
   bool ready = false;
   int revision = 0;
-  final images = MenuProfileImages();
+  final MenuProfileImages images;
   Future<void> releasePort() async {
     final old = port, oldSubscription = subscription;
     final oldOwn = ownPort;

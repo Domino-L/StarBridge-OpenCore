@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show InteractionScope;
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_drag_surface.dart';
+import '../../design_system/interaction/starbridge_snack_bar.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../platform/window/native_viewport_visibility.dart';
 import 'personal_profile_favorite_ships.dart';
 import 'personal_profile_favorite_modules.dart';
 import 'personal_profile_favorite_dialog.dart';
@@ -13,6 +21,11 @@ import 'personal_profile_layout.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_module_controls.dart';
 import 'personal_profile_positions_module.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
+
+class _ProfileDragSession {
+  int? revision;
+}
 
 class PersonalProfileModuleGrid extends StatefulWidget {
   const PersonalProfileModuleGrid({
@@ -47,13 +60,101 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
   String? _draggedModuleId;
   int? _dragPreviewPosition;
   bool _dragPointerInside = false;
-  DialogRoute<List<String>>? _selectionRoute;
+  int _dragRevision = 0;
+  StarBridgeDialogRoute<List<String>>? _selectionRoute;
   NavigatorState? _selectionNavigator;
+  StarBridgeDialogRoute<void>? _detailsRoute;
+  String? _detailsModuleId;
+  PersonalProfileShipSummary? _detailsShip;
+
+  Map<String, PersonalProfileShipSummary> get _shipsById => {
+    for (final ship in [
+      ...widget.projection.favoriteShips,
+      ...widget.projection.local?.choices ?? widget.projection.favoriteShips,
+    ])
+      ship.identity.runtimeId: ship,
+  };
+
+  List<PersonalProfileShipSummary> _shipsFor(
+    PersonalProfileModuleLayoutItem item,
+    Map<String, PersonalProfileShipSummary> byId,
+  ) => item.favoriteShipIds == null
+      ? widget.projection.favoriteShips
+      : [for (final id in item.favoriteShipIds!) ?byId[id]];
+
+  bool _displaysShip(String moduleId, PersonalProfileShipSummary ship) {
+    final item = PersonalProfileLayout.normalize(widget.layout)
+        .where((item) => item.moduleId == moduleId && item.isVisible)
+        .firstOrNull;
+    return item != null &&
+        _shipsFor(
+          item,
+          _shipsById,
+        ).take(item.size.span).any((current) => identical(current, ship));
+  }
+
+  void _closeDetails() {
+    final route = _detailsRoute;
+    _detailsRoute = null;
+    _detailsModuleId = null;
+    _detailsShip = null;
+    retireStarBridgeDialog(route);
+  }
+
+  Future<void> _viewShip(
+    BuildContext caller,
+    String moduleId,
+    PersonalProfileShipSummary ship,
+    InteractionSource source,
+  ) async {
+    if (!caller.mounted ||
+        _detailsRoute?.isActive == true ||
+        !NativeViewportScope.isActive(context) ||
+        !_displaysShip(moduleId, ship)) {
+      return;
+    }
+    late StarBridgeDialogRoute<void> route;
+    await showProfileShipDataDialog(
+      caller,
+      ship,
+      source: source,
+      onRouteCreated: (created) {
+        _detailsRoute = route = created;
+        _detailsModuleId = moduleId;
+        _detailsShip = ship;
+      },
+    );
+    if (identical(_detailsRoute, route)) {
+      _detailsRoute = null;
+      _detailsModuleId = null;
+      _detailsShip = null;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!NativeViewportScope.isActive(context)) {
+      _closeDetails();
+      _resetDrag();
+    }
+  }
 
   @override
   void didUpdateWidget(covariant PersonalProfileModuleGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.projection, widget.projection)) _closeSelection();
+    if (!identical(oldWidget.projection, widget.projection) ||
+        oldWidget.editing != widget.editing ||
+        oldWidget.visitorView != widget.visitorView ||
+        !PersonalProfileLayout.hasSameLayout(oldWidget.layout, widget.layout)) {
+      _resetDrag();
+    }
+    if (!identical(oldWidget.projection, widget.projection)) {
+      _closeSelection();
+      _closeDetails();
+    } else if (_detailsShip case final ship? when _detailsModuleId != null) {
+      if (!_displaysShip(_detailsModuleId!, ship)) _closeDetails();
+    }
   }
 
   void _closeSelection() {
@@ -70,7 +171,9 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
 
   @override
   void dispose() {
+    _resetDrag();
     _closeSelection();
+    _closeDetails();
     super.dispose();
   }
 
@@ -100,7 +203,11 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
       return StarBridgeSurface(
         role: SurfaceRole.panel,
         child: Text(
-          AppStrings.of(context).text('profile.layout.empty'),
+          AppStrings.of(context).text(
+            widget.visitorView
+                ? 'profile.visitor.layoutEmpty'
+                : 'profile.layout.empty',
+          ),
           style: Theme.of(context).textTheme.bodyMedium
               ?.copyWith(color: tokens.colors.textSecondary),
         ),
@@ -282,21 +389,37 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
     if (!widget.editing) {
       return child;
     }
+    final projection = widget.projection;
+    final session = _ProfileDragSession();
     return Draggable<String>(
       key: Key('profile-module-drag-${item.moduleId}'),
       data: item.moduleId,
       dragAnchorStrategy: childDragAnchorStrategy,
       maxSimultaneousDrags: 1,
-      onDragStarted: () => _startDrag(item.moduleId),
+      onDragStarted: () {
+        session.revision = ++_dragRevision;
+        _startDrag(item.moduleId);
+      },
       onDragUpdate: (details) =>
           _updateDragFromGlobal(item.moduleId, details.globalPosition),
       onDragEnd: (_) => _finishDrag(item.moduleId),
-      feedback: Material(
-        color: Colors.transparent,
-        child: SizedBox(
-          width: width,
-          height: _cellHeight,
-          child: Opacity(opacity: 0.94, child: child),
+      feedback: InteractionScope.relay(
+        context,
+        child: Material(
+          color: Colors.transparent,
+          child: SizedBox(
+            width: width,
+            height: _cellHeight,
+            child: StarBridgeDragSurface(
+              isCurrent: () =>
+                  mounted &&
+                  widget.editing &&
+                  identical(widget.projection, projection) &&
+                  session.revision == _dragRevision &&
+                  _draggedModuleId == item.moduleId,
+              child: Opacity(opacity: 0.94, child: child),
+            ),
+          ),
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.58, child: child),
@@ -333,23 +456,18 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
           )
         : null;
     final ids = item.favoriteShipIds;
-    final choices =
-        widget.projection.local?.choices ?? widget.projection.favoriteShips;
-    final byId = {
-      for (final ship in [...widget.projection.favoriteShips, ...choices])
-        ship.identity.runtimeId: ship,
-    };
+    final byId = _shipsById;
     return switch (PersonalProfileModuleIds.typeOf(item.moduleId)) {
       PersonalProfileModuleIds.favoriteShips => PersonalProfileFavoriteShips(
-        ships: ids == null
-            ? widget.projection.favoriteShips
-            : [for (final id in ids) ?byId[id]],
+        ships: _shipsFor(item, byId),
         hangarAvailable: widget.projection.hangarSummary.isAvailable,
         unresolvedCount: ids == null
             ? widget.projection.hangarSummary.unresolvedFavoriteCount
             : ids.where((id) => !byId.containsKey(id)).length,
         span: item.size.span,
         headerTrailing: controls,
+        onViewShipData: (caller, ship, source) =>
+            _viewShip(caller, item.moduleId, ship, source),
       ),
       PersonalProfileModuleIds.hangarSummary => PersonalProfileHangarOverview(
         summary: widget.projection.hangarSummary,
@@ -368,20 +486,24 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
 
   void _apply(BuildContext context, PersonalProfileLayoutMutation mutation) {
     if (mutation.failure == PersonalProfileLayoutFailure.selectionExceedsSize) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+      showStarBridgeSnackBar(
+        context,
+        starBridgeTimedSnackBar(
           content: Text(
             AppStrings.of(context).text('profile.favorites.resize'),
           ),
         ),
+        tone: ActionTone.danger,
       );
       return;
     }
     if (mutation.failure == PersonalProfileLayoutFailure.noSpace) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+      showStarBridgeSnackBar(
+        context,
+        starBridgeTimedSnackBar(
           content: Text(AppStrings.of(context).text('profile.layout.noSpace')),
         ),
+        tone: ActionTone.danger,
       );
       return;
     }
@@ -391,6 +513,7 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
   }
 
   void _startDrag(String moduleId) {
+    if (!widget.editing || !NativeViewportScope.isActive(context)) return;
     final base = PersonalProfileLayout.normalize(widget.layout);
     setState(() {
       _dragBaseLayout = base;
@@ -404,6 +527,7 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
   }
 
   void _updateDragFromGlobal(String moduleId, Offset globalPosition) {
+    if (_dragBaseLayout == null || moduleId != _draggedModuleId) return;
     final renderObject = _canvasKey.currentContext?.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.hasSize) {
       return;
@@ -456,6 +580,7 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
   }
 
   void _finishDrag(String moduleId) {
+    if (_dragBaseLayout == null || moduleId != _draggedModuleId) return;
     if (!_dragPointerInside) {
       _cancelDrag();
       return;
@@ -491,23 +616,33 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
   }
 
   void _clearDragState() {
-    setState(() {
-      _dragBaseLayout = null;
-      _dragPreviewLayout = null;
-      _draggedModuleId = null;
-      _dragPreviewPosition = null;
-      _dragPointerInside = false;
-    });
+    setState(_resetDrag);
+  }
+
+  void _resetDrag() {
+    _dragRevision++;
+    _dragBaseLayout = null;
+    _dragPreviewLayout = null;
+    _draggedModuleId = null;
+    _dragPreviewPosition = null;
+    _dragPointerInside = false;
   }
 
   Future<void> _editShips(
     PersonalProfileModuleLayoutItem item,
     List<PersonalProfileModuleLayoutItem> layout,
   ) async {
+    if (_selectionRoute?.isActive == true) return;
     final originalProjection = widget.projection;
     final navigator = Navigator.of(context, rootNavigator: true);
-    final route = DialogRoute<List<String>>(
-      context: context,
+    late StarBridgeDialogRoute<List<String>> route;
+    final result = await showStarBridgeDialog<List<String>>(
+      context,
+      onRouteCreated: (created) {
+        route = created;
+        _selectionRoute = created;
+        _selectionNavigator = navigator;
+      },
       builder: (_) => ProfileFavoriteDialog(
         local: originalProjection.local!,
         selected: item.favoriteShipIds ?? const [],
@@ -515,9 +650,6 @@ class _PersonalProfileModuleGridState extends State<PersonalProfileModuleGrid> {
         reserved: ProfileFavoriteModules.reserved(layout, item.moduleId),
       ),
     );
-    _selectionRoute = route;
-    _selectionNavigator = navigator;
-    final result = await navigator.push(route);
     if (identical(_selectionRoute, route)) {
       _selectionRoute = null;
       _selectionNavigator = null;

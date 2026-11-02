@@ -13,6 +13,34 @@ bool sameMenuConversation(Conversation a, Conversation b) =>
     a.ref == b.ref ||
     (a.conversationKey != null && a.conversationKey == b.conversationKey);
 
+/// Retained display history never keeps receipt/attachment command grants or
+/// a previous read's transient provenance. The session still owns the cache.
+Map<String, Object?> menuCachedHistory(Map<String, Object?> view) => {
+  ...view,
+  'receipts': <String, String>{},
+  'readFeedback': null,
+  'messages': [
+    for (final raw in view['messages'] as List)
+      {...raw as Map<String, Object?>, 'attachmentKey': null},
+  ],
+};
+
+List<Map<String, Object?>> menuConversationRows(
+  Map<String, Conversation> targets,
+  Map<String, String?> portraits,
+) => [
+  for (final row in targets.entries)
+    {
+      'key': row.key,
+      'name': menuChatText(row.value.name, 128),
+      'preview': menuChatText(row.value.preview, 256),
+      'avatar': portraits[row.key],
+      'time': row.value.time.toUtc().toIso8601String(),
+      'unread': row.value.unread,
+      'request': row.value.request,
+    },
+];
+
 /// Directory presentation only; selected-history grants remain in the session.
 Future<({Map<String, Conversation> targets, Map<String, String?> portraits})>
 readMenuConversationSnapshot(

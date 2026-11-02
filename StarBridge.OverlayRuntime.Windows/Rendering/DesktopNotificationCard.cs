@@ -14,6 +14,10 @@ using Brush = System.Windows.Media.Brush;
 /// <summary>Direction A projection. This same element is rendered by the native window and offline QA.</summary>
 internal sealed class DesktopNotificationCard : Border
 {
+    internal static double PresentationHeight(DesktopNotification notice) =>
+        notice.ExecHangar is {} hangar && notice.Preview != "hiddenDetails"
+            ? 220 + (hangar.MonitoringEndsAt is not null ? 18 : 0) + (hangar.Mute is not null ? 26 : 0)
+            : 170;
     private readonly Border _hover;
     private readonly bool _reduceMotion;
     private readonly TextBlock _hoverHint;
@@ -50,6 +54,10 @@ internal sealed class DesktopNotificationCard : Border
             if (direct.Conversations > 1)
                 body = Local($"{direct.Conversations} 个会话有新私信。", $"{direct.Conversations} 個對話有新私訊。", $"New messages in {direct.Conversations} conversations.");
         }
+        if (notice.Trade is {} trade && !hidden) {
+            title = trade.Title;
+            body = trade.Body;
+        }
         if (notice.Community is {} community && !hidden) {
             title = community.Name;
             body = community.Management ? Local("有新的加入申请待处理。", "有新的加入申請待處理。", "New join requests need your review.")
@@ -59,6 +67,18 @@ internal sealed class DesktopNotificationCard : Border
         if (notice.GameIdentityMismatch && !hidden) {
             title = Local("游戏身份需要核对", "遊戲身分需要核對", "Review your game identity");
             body = Local("游戏身份与应用记录不一致，请打开应用核对。", "遊戲身分與應用程式記錄不一致，請開啟應用程式核對。", "Your game identity differs from the app record. Open the app to review.");
+        }
+        if (notice.ExecHangar is {} hangar && !hidden) {
+            title = hangar.LeaveWarning ? Local("行政机库离场提醒", "行政機庫離場提醒", "Leave the executive hangar")
+                : Local("行政机库提醒", "行政機庫提醒", "Executive hangar reminder");
+            if (hangar.Test) title += Local(" · 测试", " · 測試", " · Test");
+            if (hangar.LeaveWarning) tone = Paint(light ? "#B62F43" : "#F26D75");
+            var time = hangar.Boundary.ToLocalTime().ToString("HH:mm:ss");
+            body = hangar.AtOpen ? hangar.Opening ? Local("行政机库已开启。", "行政機庫已開啟。", "The executive hangar is open.")
+                : Local("行政机库已关闭。", "行政機庫已關閉。", "The executive hangar is closed.")
+                : hangar.Opening ? Local($"{time} 开启。", $"{time} 開啟。", $"Opens at {time}.")
+                : Local($"{time} 关闭。", $"{time} 關閉。", $"Closes at {time}.");
+            if (hangar.LeaveWarning) body = Local("行政机库即将消杀，请立即离开机库。", "行政機庫即將消殺，請立即離開機庫。", "Hangar clearance imminent. Leave the hangar now.");
         }
         if (notice.Activity is { } activity) {
             tone = Paint(activity.Kind switch {
@@ -76,7 +96,7 @@ internal sealed class DesktopNotificationCard : Border
             };
             body = (string.IsNullOrWhiteSpace(activity.GameId) ? "" : "@" + activity.GameId + " · ") + change;
         }
-        Width = 380; Height = 170;
+        Width = 380; Height = PresentationHeight(notice);
         Background = Paint(light ? "#F5F8FA" : "#101A21");
         BorderBrush = Paint(light ? "#BAC9D1" : "#47606E"); BorderThickness = new(1); CornerRadius = new(9);
         SnapsToDevicePixels = true;
@@ -85,6 +105,7 @@ internal sealed class DesktopNotificationCard : Border
             BorderBrush = Paint(light ? "#7596AD" : "#7394A7"), BorderThickness = new(1),
             CornerRadius = new(8), IsHitTestVisible = false, Opacity = 0 };
         grid.Children.Add(_hover);
+        grid.Children.Add(new NotificationBrandWatermark(light, 84));
         grid.Children.Add(new Border { Width = 3, Background = tone, HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0,9,0,9) });
         var content = new Grid { Margin = new(17, 10, 12, 10) };
         content.RowDefinitions.Add(new() { Height = new(28) });
@@ -103,7 +124,7 @@ internal sealed class DesktopNotificationCard : Border
         brand.Source = new BitmapImage(new Uri($"pack://application:,,,/{assemblyName};component/Assets/Brand/notification_mark_{(light ? "light" : "dark")}.png"));
         header.Children.Add(brand);
         header.Children.Add(Text("StarBridge", primary, 13, true));
-        header.Children.Add(Text("  ·  " + (notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.GameIdentityMismatch ? Local("游戏身份", "遊戲身分", "Game identity") : notice.FriendRequests > 0 ? Local("好友申请", "好友申請", "Friend requests") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
+        header.Children.Add(Text("  ·  " + (notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.ExecHangar != null ? Local("行政机库", "行政機庫", "Executive hangar") : notice.GameIdentityMismatch ? Local("游戏身份", "遊戲身分", "Game identity") : notice.FriendRequests > 0 ? Local("好友申请", "好友申請", "Friend requests") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.SourceKind == OrganizationNotificationSourceKind.OfficialFleet ? Local("主舰队聊天", "主艦隊聊天", "Main fleet chat") : group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
         content.Children.Add(header);
         var text = new StackPanel { Margin = new(0,9,0,0) };
         text.Children.Add(Text(title, primary, 15, true));
@@ -125,9 +146,12 @@ internal sealed class DesktopNotificationCard : Border
                 : new Image { Source = bitmap, Stretch = Stretch.UniformToFill };
             DockPanel.SetDock(avatar, Dock.Left); identity.Children.Add(avatar);
         }
-        identity.Children.Add(text); Grid.SetRow(identity,1); content.Children.Add(identity);
+        identity.Children.Add(notice.ExecHangar is {} liveHangar && !hidden
+            ? new ExecHangarNotificationPanel(liveHangar, notice.Locale, light, primary, secondary, accent, notice.IsCurrent, dismiss) : text);
+        Grid.SetRow(identity,1); content.Children.Add(identity);
         var footer = new DockPanel();
         var action = MakeButton(notice.Activated == null || hidden ? Local("打开应用 →", "開啟應用程式 →", "Open app →")
+            : notice.ExecHangar != null ? Local("查看倒计时 →", "查看倒計時 →", "View countdown →")
             : notice.GameIdentityMismatch ? Local("打开应用核对 →", "開啟應用程式核對 →", "Open app to review →")
             : notice.FriendRequests > 0 ? Local("查看好友申请 →", "查看好友申請 →", "View friend requests →")
             : notice.DirectMessage != null ? Local("查看私信 →", "查看私訊 →", "View direct messages →")
@@ -135,7 +159,8 @@ internal sealed class DesktopNotificationCard : Border
             : Local("查看房间提醒 →", "查看房間提醒 →", "View room reminders →"), accent, open, light);
         DockPanel.SetDock(action, Dock.Right); footer.Children.Add(action);
         _idleHint = Local("悬停暂停收起", "游標停留時暫停收起", "Hover to keep open");
-        _pausedHint = Local("已暂停自动收起", "已暫停自動收起", "Auto-dismiss paused");
+        _pausedHint = notice.ExecHangar is not null ? Local("鼠标移开后收起", "滑鼠移開後收起", "Dismisses after you move away")
+            : Local("已暂停自动收起", "已暫停自動收起", "Auto-dismiss paused");
         _hoverHint = Text(_idleHint, secondary, 11);
         footer.Children.Add(_hoverHint);
         Grid.SetRow(footer, 2); content.Children.Add(footer);
@@ -193,7 +218,7 @@ internal sealed class DesktopNotificationCard : Border
         FontWeight = emphasis ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center,
         TextTrimming = TextTrimming.CharacterEllipsis
     };
-    private static Button MakeButton(string text, Brush color, Action action, bool light, bool close = false)
+    internal static Button MakeButton(string text, Brush color, Action action, bool light, bool close = false)
     {
         var button = new Button { Content = text, Foreground = color, Background = Brushes.Transparent,
             BorderThickness = new(0), Padding = new(7,3,7,3), FontSize = 12, Focusable = false,
@@ -218,5 +243,64 @@ internal sealed class DesktopNotificationCard : Border
         button.Template = template;
         button.Click += (_, e) => { e.Handled = true; action(); };
         return button;
+    }
+}
+
+/// <summary>One quiet brand stamp for native reminder cards, never a layout column or input target.</summary>
+internal sealed class NotificationBrandWatermark : FrameworkElement
+{
+    // Cache the alpha mask once; use the approved logo's silhouette, not its bright colour palette.
+    private static readonly Lazy<ImageBrush?> Mask = new(LoadMask);
+    private static readonly Brush DarkInk = Ink(36, 138, 165, 183);
+    private static readonly Brush LightInk = Ink(26, 55, 85, 103);
+    private readonly bool _light;
+
+    internal NotificationBrandWatermark(bool light, double size = 60)
+    {
+        _light = light;
+        Name = "NotificationBrandWatermark";
+        Width = Height = size;
+        HorizontalAlignment = HorizontalAlignment.Right;
+        VerticalAlignment = VerticalAlignment.Center;
+        Margin = new(0, 0, 12, 0);
+        IsHitTestVisible = false;
+        Focusable = false;
+        SnapsToDevicePixels = true;
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        base.OnRender(dc);
+        if (Mask.Value is not { } mask) return; // Optional decoration must never suppress a reminder.
+        dc.PushOpacityMask(mask);
+        dc.DrawRectangle(_light ? LightInk : DarkInk, null, new Rect(RenderSize));
+        dc.Pop();
+    }
+
+    // Pure decoration is not announced as a second logo or focusable control.
+    protected override System.Windows.Automation.Peers.AutomationPeer? OnCreateAutomationPeer() => null;
+
+    private static Brush Ink(byte alpha, byte red, byte green, byte blue)
+    {
+        var brush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(alpha, red, green, blue));
+        brush.Freeze(); return brush;
+    }
+
+    private static ImageBrush? LoadMask()
+    {
+        try {
+            var assembly = Uri.EscapeDataString(typeof(NotificationBrandWatermark).Assembly.GetName().Name!);
+            var image = new BitmapImage(); image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 192;
+            image.UriSource = new Uri($"pack://application:,,,/{assembly};component/Assets/Brand/notification_mark_dark.png");
+            image.EndInit(); image.Freeze();
+            var mask = new ImageBrush(image) { Stretch = Stretch.Uniform };
+            RenderOptions.SetBitmapScalingMode(mask, BitmapScalingMode.HighQuality);
+            mask.Freeze(); return mask;
+        }
+        catch (Exception error) when (error is System.IO.IOException or InvalidOperationException or NotSupportedException or UriFormatException) {
+            return null;
+        }
     }
 }

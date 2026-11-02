@@ -114,6 +114,12 @@ void main() {
     );
     expect(find.text('同意'), findsNothing);
     expect(find.byType(Checkbox), findsNothing);
+    // The same terms as the first-launch page, without asking to accept again.
+    for (final heading in ['使用风险与非官方声明', '数据与可选功能', '游戏素材权利声明', '完整客户端许可']) {
+      expect(find.text(heading), findsOneWidget, reason: heading);
+    }
+    expect(find.byKey(const Key('usage-terms-consent')), findsNothing);
+    expect(find.byKey(const Key('test-build-accept')), findsNothing);
     await tester.tap(find.byKey(const Key('client-license-close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('client-license-dialog')), findsNothing);

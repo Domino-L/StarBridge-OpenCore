@@ -13,6 +13,8 @@ class TraySurfaceCoordinator {
     this.toggleOverlay,
     this.openOverlaySettings,
     this.setPresence,
+    this.enterOffline,
+    this.restoreOnline,
     this.refresh,
   }) {
     _channel.setMethodCallHandler(_action);
@@ -24,6 +26,8 @@ class TraySurfaceCoordinator {
   final Future<void> Function()? toggleOverlay, openOverlaySettings;
   final Future<void> Function()? refresh;
   final Future<void> Function(PresenceVisibility mode)? setPresence;
+  final Future<void> Function()? enterOffline;
+  final Future<bool> Function()? restoreOnline;
   bool _disposed = false, _publishing = false, _dirty = false, _busy = false;
   void _changed() {
     _dirty = true;
@@ -59,8 +63,23 @@ class TraySurfaceCoordinator {
       throw PlatformException(code: 'tray.context_changed');
     }
     _busy = true;
+    var restored = false;
     try {
       switch (data['action']) {
+        case 'resumeOnline':
+          if (!snapshot.value.canRestoreOnline ||
+              restoreOnline == null ||
+              data['mode'] != null) {
+            throw PlatformException(code: 'tray.unavailable');
+          }
+          restored = await restoreOnline!();
+        case 'offlineMode':
+          if (!snapshot.value.canEnterOffline ||
+              enterOffline == null ||
+              data['mode'] != null) {
+            throw PlatformException(code: 'tray.unavailable');
+          }
+          await enterOffline!();
         case 'toggleOverlay':
           if (!snapshot.value.canToggleOverlay || toggleOverlay == null) {
             throw PlatformException(code: 'tray.unavailable');
@@ -85,7 +104,7 @@ class TraySurfaceCoordinator {
           throw PlatformException(code: 'tray.invalid_action');
       }
       if (_disposed) throw PlatformException(code: 'tray.unavailable');
-      if (data['scope'] != snapshot.value.scope) {
+      if (data['scope'] != snapshot.value.scope && !restored) {
         throw PlatformException(code: 'tray.context_changed');
       }
       return snapshot.value.toMap();

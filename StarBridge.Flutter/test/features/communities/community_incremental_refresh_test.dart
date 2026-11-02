@@ -9,7 +9,6 @@ import 'package:starbridge_flutter/features/communities/community_workspace_port
 import 'package:starbridge_flutter/features/communities/community_workspace_view.dart';
 import 'package:starbridge_flutter/features/communities/community_workspace_header.dart';
 import 'package:starbridge_flutter/features/communities/community_member_role_dialog.dart';
-import 'package:starbridge_flutter/features/communities/community_member_role_copy.dart';
 
 import 'community_workspace_test.dart'
     show WorkspaceTestPort, workspacePayload, mediaChunk;
@@ -154,10 +153,11 @@ void main() {
       await tester.pumpWidget(host(port, const Locale('zh', 'CN')));
       await tester.pumpAndSettle();
       await openMemberActions(tester, 'b' * 32);
-      await tester.tap(find.byKey(ValueKey('assign-member-${'b' * 32}')));
+      await tester.tap(
+        find.byKey(ValueKey<Object>('assign-member-${'b' * 32}')),
+      );
       await tester.pumpAndSettle();
-      final context = tester.element(find.byType(CommunityMemberRoleDialog));
-      await tester.tap(find.byTooltip(memberRoleText(context, 'close')));
+      await tester.tap(find.byKey(const Key('member-role-close')));
       await tester.pumpAndSettle();
       expect(find.byType(CommunityMemberRoleDialog), findsNothing);
       expect(reads, 1);

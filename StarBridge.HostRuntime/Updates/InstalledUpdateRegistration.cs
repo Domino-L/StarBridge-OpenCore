@@ -27,8 +27,7 @@ internal sealed record InstalledUpdateRegistration(string Directory, string Vers
         foreach (var file in new[] { "starbridge_flutter.exe", "flutter_windows.dll", "unins000.exe", "unins000.dat",
             "native_host/StarBridge.NativeHost.exe", "native_host/maintenance/StarBridge.UpdateHelper.exe" })
             if (!File.Exists(Path.Combine(Directory, file))) throw new InvalidDataException("Incomplete installation.");
-        if (ApplicationUpdateVersion.ParseInstalled(FileVersionInfo.GetVersionInfo(client).ProductVersion) !=
-            ApplicationUpdateVersion.Parse(Version)) throw new InvalidDataException("Registered version does not match.");
+        InstalledUpdateVersionMismatchException.RequireMatch(FileVersionInfo.GetVersionInfo(client).ProductVersion, Version);
     }
 
     internal void RequireShape()

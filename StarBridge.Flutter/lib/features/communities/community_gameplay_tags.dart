@@ -1,5 +1,8 @@
+import 'community_tag_localization.dart';
+
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_creation_port.dart';
 import 'legacy_community_tag_catalog.dart';
@@ -65,7 +68,11 @@ class CommunityGameplayTags extends StatelessWidget {
 
         final sizes = [
           for (final name in names)
-            measure(_option(name)?.name ?? name, style, labelWidth) +
+            measure(
+                  _option(name)?.localizedName(context) ?? name,
+                  style,
+                  labelWidth,
+                ) +
                 const Offset(22, 12),
         ];
         bool fits(Iterable<Size> items) {
@@ -111,11 +118,20 @@ class CommunityGameplayTags extends StatelessWidget {
     children: [
       for (final name in names.take(visible)) _tag(context, name, tagWidth),
       if (names.length > visible)
-        Tooltip(
-          message: names.skip(visible).join(' · '),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 5),
-            child: Text('+${names.length - visible}'),
+        // Keep each full hint accessible: merging sibling tooltips retains
+        // only one tooltip field, losing the names represented by +N.
+        Semantics(
+          container: true,
+          child: StarBridgeTooltip(
+            message: names
+                .skip(visible)
+                .map((name) => _option(name)?.localizedName(context) ?? name)
+                .join(' · '),
+            consumeEscape: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Text('+${names.length - visible}'),
+            ),
           ),
         ),
     ],
@@ -154,28 +170,32 @@ class CommunityGameplayTags extends StatelessWidget {
     final foreground = Theme.of(context).brightness == Brightness.dark
         ? accent
         : Color.lerp(accent, Colors.black, .48)!;
-    final label = tag?.name ?? name;
-    return Tooltip(
-      message: tag == null
-          ? name
-          : '${category?.name ?? ''} · $label\n${tag.description}',
-      child: Container(
-        constraints: tagWidth == null
-            ? null
-            : BoxConstraints(maxWidth: tagWidth),
-        key: ValueKey('community-gameplay-tag-$name'),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: accent.withValues(alpha: .14),
-          border: Border.all(color: accent.withValues(alpha: .68)),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          label,
-          maxLines: tagWidth == null ? null : 1,
-          overflow: tagWidth == null ? null : TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+    final label = tag?.localizedName(context) ?? name;
+    return Semantics(
+      container: true,
+      child: StarBridgeTooltip(
+        message: tag == null
+            ? name
+            : '${category?.localizedName(context) ?? ''} · $label\n${tag.localizedDescription(context)}',
+        consumeEscape: false,
+        child: Container(
+          constraints: tagWidth == null
+              ? null
+              : BoxConstraints(maxWidth: tagWidth),
+          key: ValueKey('community-gameplay-tag-$name'),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: .14),
+            border: Border.all(color: accent.withValues(alpha: .68)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            label,
+            maxLines: tagWidth == null ? null : 1,
+            overflow: tagWidth == null ? null : TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+          ),
         ),
       ),
     );

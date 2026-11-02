@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import 'help_support_action.dart';
+import 'help_support_waiting.dart';
 import 'local_privacy_settings.dart';
 
 /// First-use notice, not a second privacy editor. Only explicit actions save.
@@ -22,11 +27,15 @@ class FirstUsePrivacyDialog extends StatefulWidget {
 class _FirstUsePrivacyDialogState extends State<FirstUsePrivacyDialog> {
   bool _saving = false;
   bool _failed = false;
+  InteractionSource _waitSource = InteractionSource.programmatic;
+  int _waitPhase = 0;
 
-  Future<void> _save(bool enabled) async {
+  Future<void> _save(bool enabled, InteractionSource source) async {
     if (_saving) return;
     setState(() {
       _saving = true;
+      _waitSource = source;
+      _waitPhase++;
       _failed = false;
     });
     var saved = false;
@@ -39,7 +48,11 @@ class _FirstUsePrivacyDialogState extends State<FirstUsePrivacyDialog> {
     }
     if (!mounted) return;
     if (saved) {
-      Navigator.of(context).pop(false);
+      dismissStarBridgeDialog<bool>(
+        context,
+        source: _waitSource,
+        result: false,
+      );
       return;
     }
     setState(() {
@@ -59,47 +72,24 @@ class _FirstUsePrivacyDialogState extends State<FirstUsePrivacyDialog> {
         title: Text(s.text('privacy.first.title')),
         content: SizedBox(
           width: 500,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(s.text('privacy.first.body')),
-                const SizedBox(height: 20),
-                Text(
-                  s.text('privacy.first.scope'),
-                  style: Theme.of(context).textTheme.titleSmall,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_saving)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: HelpSupportWaiting(
+                    key: ValueKey(('first-privacy-wait', _waitPhase)),
+                    label: s.text('privacy.local.saving'),
+                    source: _waitSource,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.organizationsPending
-                      ? s.text('privacy.first.organizationsPending')
-                      : _scope(s, true),
-                  key: const Key('first-privacy-fleet-summary'),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _scope(s, false),
-                  key: const Key('first-privacy-room-summary'),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  s.text('privacy.first.excluded'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const Divider(height: 28),
-                Text(s.text('privacy.first.remember')),
-                const SizedBox(height: 8),
-                TextButton(
-                  key: const Key('first-privacy-adjust'),
-                  onPressed: _saving
-                      ? null
-                      : () => Navigator.of(context).pop(true),
-                  child: Text(s.text('privacy.first.adjust')),
-                ),
-                if (_failed)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
+              if (_failed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Semantics(
+                    liveRegion: true,
                     child: Text(
                       s.text('privacy.first.failed'),
                       style: TextStyle(
@@ -107,19 +97,67 @@ class _FirstUsePrivacyDialogState extends State<FirstUsePrivacyDialog> {
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(s.text('privacy.first.body')),
+                      const SizedBox(height: 20),
+                      Text(
+                        s.text('privacy.first.scope'),
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.organizationsPending
+                            ? s.text('privacy.first.organizationsPending')
+                            : _scope(s, true),
+                        key: const Key('first-privacy-fleet-summary'),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _scope(s, false),
+                        key: const Key('first-privacy-room-summary'),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        s.text('privacy.first.excluded'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const Divider(height: 28),
+                      Text(s.text('privacy.first.remember')),
+                      const SizedBox(height: 8),
+                      HelpSupportAction(
+                        controlKey: const Key('first-privacy-adjust'),
+                        onActivate: _saving
+                            ? null
+                            : (source) => dismissStarBridgeDialog<bool>(
+                                context,
+                                source: source,
+                                result: true,
+                              ),
+                        child: Text(s.text('privacy.first.adjust')),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
-          TextButton(
-            key: const Key('first-privacy-decline'),
-            onPressed: _saving ? null : () => _save(false),
+          HelpSupportAction(
+            controlKey: const Key('first-privacy-decline'),
+            onActivate: _saving ? null : (source) => _save(false, source),
             child: Text(s.text('privacy.first.decline')),
           ),
-          FilledButton(
-            key: const Key('first-privacy-accept'),
-            onPressed: _saving ? null : () => _save(true),
+          HelpSupportAction(
+            controlKey: const Key('first-privacy-accept'),
+            kind: StarBridgeActionKind.primary,
+            onActivate: _saving ? null : (source) => _save(true, source),
             child: Text(
               s.text(_saving ? 'privacy.local.saving' : 'privacy.first.accept'),
             ),

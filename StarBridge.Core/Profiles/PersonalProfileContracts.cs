@@ -167,7 +167,9 @@ public sealed record PersonalProfileModuleContract(
     int Span,
     bool IsVisible,
     int Order,
-    int Position = -1);
+    int Position = -1,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string[]? FavoriteShipIds = null);
 
 public sealed record PersonalProfileAvailabilityWindowContract(
     int[] Days,
@@ -219,7 +221,8 @@ public sealed record PersonalProfileFleetAffiliationContract(
     string PositionTitle,
     string PositionColor,
     string? LogoImageData = null,
-    string? Kind = null);
+    string? Kind = null,
+    string? LogoUrl = null);
 
 public sealed record PersonalProfileHangarShipContract(
     string Code,
@@ -266,7 +269,29 @@ public sealed record PersonalProfileDocumentContract(
     bool IsGameplayStatisticsPublic = false,
     string Visibility = "private",
     int AvatarStyle = 0,
-    string WallpaperId = "none");
+    string WallpaperId = "none",
+    PersonalProfilePagePresentationContract? Presentation = null,
+    string FleetAffiliationStatus = "unavailable")
+{
+    // Missing/null/unknown status from an older server must never imply no membership.
+    public string FleetAffiliationStatus { get; init; } = FleetAffiliationStatus is "shown" or "none"
+        ? FleetAffiliationStatus : "unavailable";
+}
+
+public sealed record PersonalProfilePagePresentationContract(
+    int SchemaVersion,
+    Dictionary<string, string> Origins,
+    string? SourceVersion);
+
+// Only explicitly edited display groups are writable. Identity, privacy, live
+// presence and inventory retain their own owners and are never page edits.
+public sealed record PersonalProfilePageEditContract(
+    long ExpectedRevision,
+    string? SourceVersion,
+    string[] EditedGroups,
+    int AvatarStyle,
+    string WallpaperId,
+    PersonalProfileContentContract Content);
 
 public sealed record PersonalProfilePresentationUpdateContract(
     long ExpectedRevision,

@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import '../hangar/local_hangar_copy.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_ship_names.dart';
@@ -33,26 +37,15 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
       for (final ship in widget.local.retainedChoices)
         ship.identity.runtimeId: ship,
     };
-    final selectedFormer = [
-      for (final id in _selected)
-        if (retained[id]?.formerlyOwned == true) retained[id]!,
-    ];
-    final effectiveChoices = widget.local.choices.map((ship) {
-      if (ship.formerlyOwned) {
-        for (final selected in selectedFormer) {
-          if (selected.identity.englishName.trim().toLowerCase() ==
-              ship.identity.englishName.trim().toLowerCase()) {
-            return selected;
-          }
-        }
-      }
-      return ship;
-    }).toList();
+    // Local choices and saved favorites reference instances. Never substitute
+    // a selected historical ID for another ship merely sharing its model.
+    final effectiveChoices = widget.local.choices;
     final known = effectiveChoices.map((e) => e.identity.runtimeId).toSet();
     final missing = _selected.where((id) => !known.contains(id)).toList();
     final choices = effectiveChoices
         .where(
           (s) => [
+            s.identity.nickname ?? '',
             s.identity.englishName,
             s.identity.simplifiedChineseName,
             s.identity.traditionalChineseName,
@@ -73,13 +66,16 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
               key: const Key('profile-favorites-capacity'),
             ),
             SizedBox(height: context.tokens.space.md),
-            TextField(
-              key: const Key('profile-favorite-search'),
-              decoration: InputDecoration(
-                labelText: strings.text('profile.local.search'),
+            StarBridgeFieldFrame(
+              builder: (_, focus) => TextField(
+                key: const Key('profile-favorite-search'),
+                focusNode: focus,
+                decoration: InputDecoration(
+                  labelText: strings.text('profile.local.search'),
+                ),
+                onChanged: (value) =>
+                    setState(() => _query = value.trim().toLowerCase()),
               ),
-              onChanged: (value) =>
-                  setState(() => _query = value.trim().toLowerCase()),
             ),
             SizedBox(height: context.tokens.space.sm),
             if (!widget.local.hangarAvailable)
@@ -91,12 +87,14 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
                     if (retained[id] case final ship?)
                       _choice(context, ship)
                     else
-                      CheckboxListTile(
-                        key: Key('profile-favorite-$id'),
-                        value: true,
-                        title: Text(
-                          strings.text('profile.favorites.unavailable'),
+                      StarBridgeCheckboxTile(
+                        controlKey: Key('profile-favorite-$id'),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
                         ),
+                        dense: false,
+                        value: true,
+                        label: strings.text('profile.favorites.unavailable'),
                         onChanged: (_) => setState(() => _selected.remove(id)),
                       ),
                   if (choices.isEmpty && missing.isEmpty)
@@ -109,19 +107,24 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          controlKey: const Key('profile-favorites-cancel'),
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(strings.text('common.cancel')),
         ),
-        FilledButton(
-          key: const Key('profile-favorites-apply'),
-          onPressed:
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          controlKey: const Key('profile-favorites-apply'),
+          onActivate:
               _selected.length > widget.capacity ||
                   _selected.any(widget.reserved.contains)
               ? null
-              : () => Navigator.pop(
+              : (source) => dismissStarBridgeDialog<List<String>>(
                   context,
-                  List<String>.unmodifiable(_selected),
+                  source: source,
+                  result: List<String>.unmodifiable(_selected),
                 ),
           child: Text(strings.text('profile.favorites.apply')),
         ),
@@ -135,20 +138,18 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
     final reserved = widget.reserved.contains(id);
     final strings = AppStrings.of(context);
     final index = widget.local.choices.indexOf(ship) + 1;
-    return CheckboxListTile(
-      key: Key('profile-favorite-$id'),
+    return StarBridgeCheckboxTile(
+      controlKey: Key('profile-favorite-$id'),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
       dense: true,
       value: checked,
-      title: Text(
-        '${PersonalProfileShipNames.primary(context, ship.identity)}${ship.formerlyOwned ? ' · ${LocalHangarCopy(context).formerlyOwned}' : ''}',
-      ),
-      subtitle: Text(
-        reserved
-            ? strings.text('profile.favorites.used')
-            : index > 0
-            ? '${ship.manufacturer} · #$index'
-            : ship.manufacturer,
-      ),
+      label:
+          '${PersonalProfileShipNames.primary(context, ship.identity)}${ship.formerlyOwned ? ' · ${LocalHangarCopy(context).formerlyOwned}' : ''}',
+      subtitle: reserved
+          ? strings.text('profile.favorites.used')
+          : index > 0
+          ? '${PersonalProfileShipNames.secondary(context, ship.identity) ?? ship.manufacturer} · #$index'
+          : ship.manufacturer,
       onChanged: reserved || (!checked && _selected.length >= widget.capacity)
           ? null
           : (value) => setState(() {

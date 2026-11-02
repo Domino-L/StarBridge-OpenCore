@@ -6,12 +6,15 @@ internal static class MenuPreferencesTests
 {
     internal static async Task Verify()
     {
+        VerifyWidgets();
         var root = Path.Combine(Path.GetTempPath(), "StarBridge-menu-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
             var store = new MenuPreferencesStore(root);
             var initial = store.Read();
+            Require(initial.Settings.GetProperty("widgets").GetProperty("hangar").GetBoolean(),
+                "new menu preferences include the hangar widget on each opening");
             var layout = JsonSerializer.SerializeToElement(new { version = 1, panels = new[] { new { id = "browser", bounds = new[] { 50d, 70, 800, 500 } } }, open = Array.Empty<string>() });
             var saved = store.Save(0, layout, initial.Settings);
             Require(saved.Revision == 1 && new MenuPreferencesStore(root).Read().Layout.GetProperty("panels").GetArrayLength() == 1, "persists geometry");
@@ -384,6 +387,51 @@ internal static class MenuPreferencesTests
             var stale = await dispatcher.DispatchAsync(BridgeEnvelope.Request("applicationPreferences.menu.get", "old", 4, new { schemaVersion = 1 }));
             Require(stale.Response.Status != "ok", "stale generation denied");
             Console.WriteLine("PASS menu local geometry, revision conflict, allowlist, atomic preservation and generation checks");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private static void VerifyWidgets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "StarBridge-menu-widget-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new MenuPreferencesStore(root);
+            var initial = store.Read();
+            var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(initial.Settings.GetRawText())!;
+            settings["widgets"] = JsonSerializer.SerializeToElement(new { hangar = true, position = new[] { .72, .31 } });
+            settings["restoreDesktop"] = JsonSerializer.SerializeToElement(true);
+            settings["toolbar"] = JsonSerializer.SerializeToElement(new {
+                order = new[] { "browser", "hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "execHangar" },
+                hidden = new[] { "friends", "image" }, density = "compact", labels = "iconsOnly" });
+            var hangarLayout = JsonSerializer.SerializeToElement(new { version = 1,
+                panels = new[] { new { id = "execHangar", bounds = new[] { 100d, 120, 680, 620 } } },
+                open = new[] { "execHangar" } });
+            var saved = store.Save(0, hangarLayout, JsonSerializer.SerializeToElement(settings));
+            var restored = new MenuPreferencesStore(root).Read();
+            Require(restored.Layout.GetProperty("open")[0].GetString() == "execHangar" &&
+                restored.Layout.GetProperty("panels")[0].GetProperty("id").GetString() == "execHangar",
+                "hangar menu window geometry and opening survive restart without business state");
+            Require(restored.Settings.GetProperty("widgets").GetProperty("hangar").GetBoolean() &&
+                restored.Settings.GetProperty("widgets").GetProperty("position")[0].GetDouble() == .72 &&
+                restored.Settings.GetProperty("toolbar").GetProperty("order")[0].GetString() == "browser",
+                "menu widget and custom toolbar survive restart");
+            foreach (var invalid in new[] {
+                "{\"hangar\":true,\"position\":[-0.1,0]}",
+                "{\"hangar\":true,\"position\":[0,1.1]}",
+                "{\"hangar\":true,\"position\":[0]}",
+                "{\"hangar\":1,\"position\":[0,0]}",
+                "{\"hangar\":true,\"position\":[0,0],\"monitor\":true}"
+            })
+            {
+                settings["widgets"] = JsonDocument.Parse(invalid).RootElement.Clone();
+                try { store.Save(saved.Revision, saved.Layout, JsonSerializer.SerializeToElement(settings)); throw new Exception("invalid widget accepted"); }
+                catch (ArgumentException) { }
+            }
+            Require(store.Read().Revision == saved.Revision &&
+                store.Read().Settings.GetRawText() == saved.Settings.GetRawText(), "invalid widget writes preserve document");
+            Console.WriteLine("PASS menu widgets: local visibility, bounded placement, toolbar compatibility and atomic restart");
         }
         finally { Directory.Delete(root, true); }
     }

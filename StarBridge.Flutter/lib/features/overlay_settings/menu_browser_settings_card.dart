@@ -15,7 +15,10 @@ class MenuBrowserSettingsCard extends StatelessWidget {
         section: 'browser',
         read: (settings) => MenuBrowserPreferences.fromSettings(settings)!,
         patch: (value) => value.toSettingsPatch(),
-        editor: (value, onChanged) =>
-            MenuBrowserEditor(value: value, onChanged: onChanged),
+        editor: (value, onChanged, enabled) => MenuBrowserEditor(
+          value: value,
+          onChanged: onChanged,
+          enabled: enabled,
+        ),
       );
 }

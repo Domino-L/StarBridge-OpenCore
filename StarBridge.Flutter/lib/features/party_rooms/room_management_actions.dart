@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../common/social_identity_text.dart';
 
 import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -21,45 +24,46 @@ class RoomManagementActions extends StatelessWidget {
     spacing: 8,
     runSpacing: 8,
     children: [
-      OutlinedButton(
-        key: const ValueKey('menu-room-settings'),
-        onPressed: module.canManage
-            ? () => editRoomDialog(context, module)
+      StarBridgeActionButton(
+        controlKey: const ValueKey('menu-room-settings'),
+        onActivate: module.canManage
+            ? (source) => editRoomDialog(context, module, source: source)
             : null,
         child: Text(roomActionText(context, 'edit')),
       ),
-      OutlinedButton(
-        onPressed: module.canManage
-            ? () => _applications(context, module)
+      StarBridgeActionButton(
+        controlKey: const Key('room-applications-open'),
+        onActivate: module.canManage
+            ? (source) => _applications(context, module, source)
             : null,
-        style: semanticActionStyle(
-          context,
-          ActionTone.info,
-          emphasis: ActionEmphasis.outlined,
-        ),
+        tone: ActionTone.info,
         child: Text(
           '${roomActionText(context, 'applications')} · ${module.selectedRoom?.pendingApplications.length ?? 0}',
         ),
       ),
-      OutlinedButton(
-        onPressed: module.canManage ? () => _closeRoom(context, module) : null,
-        style: semanticActionStyle(
-          context,
-          ActionTone.danger,
-          emphasis: ActionEmphasis.outlined,
-        ),
+      StarBridgeActionButton(
+        controlKey: const Key('room-close-open'),
+        onActivate: module.canManage
+            ? (source) => _closeRoom(context, module, source)
+            : null,
+        tone: ActionTone.danger,
         child: Text(roomActionText(context, 'close')),
       ),
     ],
   );
 }
 
-Future<void> _closeRoom(BuildContext context, PartyRoomsModule module) async {
+Future<void> _closeRoom(
+  BuildContext context,
+  PartyRoomsModule module,
+  InteractionSource source,
+) async {
   final room = module.selectedRoom;
   final revision = module.contextRevision;
   if (room == null || !module.canManage) return;
-  final confirmed = await showDialog<bool>(
-    context: context,
+  final confirmed = await showStarBridgeDialog<bool>(
+    context,
+    source: source,
     useRootNavigator: false,
     builder: (context) => AlertDialog(
       icon: StarBridgeIcon(
@@ -69,17 +73,17 @@ Future<void> _closeRoom(BuildContext context, PartyRoomsModule module) async {
       title: Text(roomActionText(context, 'close')),
       content: Text('${room.title}\n\n${roomActionText(context, 'closeHint')}'),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: false),
           child: Text(roomActionText(context, 'cancel')),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: semanticActionStyle(
-            context,
-            ActionTone.danger,
-            emphasis: ActionEmphasis.filled,
-          ),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          tone: ActionTone.danger,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: true),
           child: Text(roomActionText(context, 'close')),
         ),
       ],
@@ -96,12 +100,14 @@ Future<void> _closeRoom(BuildContext context, PartyRoomsModule module) async {
 Future<void> _applications(
   BuildContext context,
   PartyRoomsModule module,
+  InteractionSource source,
 ) async {
   final roomId = module.directory?.currentRoomId;
   final revision = module.contextRevision;
   if (roomId == null || !module.canManage) return;
-  await showDialog<void>(
-    context: context,
+  await showStarBridgeDialog<void>(
+    context,
+    source: source,
     useRootNavigator: false,
     barrierDismissible: false,
     builder: (context) => ListenableBuilder(
@@ -162,14 +168,12 @@ Future<void> _applications(
                                 maxLines: 2,
                               ),
                             ),
-                            TextButton(
-                              key: ValueKey('decline-${item.id}'),
-                              style: semanticActionStyle(
-                                context,
-                                ActionTone.danger,
-                              ),
-                              onPressed: module.canManage
-                                  ? () => module.execute(
+                            StarBridgeActionButton(
+                              controlKey: ValueKey('decline-${item.id}'),
+                              kind: StarBridgeActionKind.quiet,
+                              tone: ActionTone.danger,
+                              onActivate: module.canManage
+                                  ? (_) => module.execute(
                                       RoomCommand(RoomOperation.decide, {
                                         'roomId': roomId,
                                         'applicationId': item.id,
@@ -180,15 +184,12 @@ Future<void> _applications(
                                   : null,
                               child: Text(roomActionText(context, 'decline')),
                             ),
-                            FilledButton(
-                              key: ValueKey('approve-${item.id}'),
-                              style: semanticActionStyle(
-                                context,
-                                ActionTone.success,
-                                emphasis: ActionEmphasis.filled,
-                              ),
-                              onPressed: module.canManage
-                                  ? () => module.execute(
+                            StarBridgeActionButton(
+                              controlKey: ValueKey('approve-${item.id}'),
+                              kind: StarBridgeActionKind.primary,
+                              tone: ActionTone.success,
+                              onActivate: module.canManage
+                                  ? (_) => module.execute(
                                       RoomCommand(RoomOperation.decide, {
                                         'roomId': roomId,
                                         'applicationId': item.id,
@@ -209,8 +210,12 @@ Future<void> _applications(
               ),
             ),
             actions: [
-              TextButton(
-                onPressed: module.writing ? null : () => Navigator.pop(context),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate: module.writing
+                    ? null
+                    : (source) =>
+                          dismissStarBridgeDialog(context, source: source),
                 child: Text(roomActionText(context, 'done')),
               ),
             ],

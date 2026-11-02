@@ -10,6 +10,19 @@ internal sealed partial class ScmAccountBridgeHost
         string? RoomId = null, string? ApplicationId = null);
     private readonly Dictionary<string, RoomAvatarTarget> _roomAvatarTargets = new();
     private readonly Dictionary<(string Id, string Scope, string? RoomId, string? ApplicationId), string> _roomAvatarReferences = new();
+    internal RoomMemberView ProjectRoomSelfPresence(RoomMemberView member, BridgeAccountContext context,
+        long generation, bool isSelf)
+    {
+        if (!isSelf) return member;
+        if (_disposed || generation != Generation || !Equals(context, GameplayTimeContext))
+            throw new BridgeStaleGenerationException(generation, Generation);
+        // Display the current user's authority only. This is neither a peer
+        // publication nor permission to expose game/server/location fields.
+        if (_session is null) return member;
+        return member with { PresenceText = ReadObservedPublicationVisibility()?.Observation switch {
+            0 => "离线", 1 => "应用在线", 2 => "游戏中", 3 => "隐身", _ => "状态未知"
+        } };
+    }
     private string RegisterRoomTarget(string id, string scope, string? roomId = null, string? applicationId = null)
     {
         var key = (id, scope, roomId, applicationId);
@@ -23,7 +36,7 @@ internal sealed partial class ScmAccountBridgeHost
     private RoomDirectoryView ProjectRoomAvatars(RoomDirectoryView directory, BridgeAccountContext context, long generation)
     {
         var scope = FriendScope(context, generation);
-        var viewer = RequireRelaySession(context).Legacy?.AccountId;
+        var viewer = RequireRelaySession(context).Legacy?.AccountId ?? directory.ViewerAccountId;
         lock (_roomAvatarGate)
         {
             foreach (var key in _roomAvatarTargets.Where(p => p.Value.Scope != scope || p.Value.Expires <= DateTimeOffset.UtcNow)
@@ -42,7 +55,7 @@ internal sealed partial class ScmAccountBridgeHost
                     var reference = RegisterRoomTarget(member.AccountId, scope,
                         directory.CurrentRoomId is null ? room.RoomId : null);
                     var isSelf = member.AccountId == viewer;
-                    return member with {
+                    return ProjectRoomSelfPresence(member, context, generation, isSelf) with {
                         UserRef = reference,
                         IsSelf = isSelf,
                         AvatarImageData = RoomAvatarProjection.PreferCurrentAccountAvatar(

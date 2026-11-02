@@ -30,6 +30,7 @@ class RecentlyPlayedPrivacySetting extends StatelessWidget {
     final snapshot = projection?.snapshot;
     final availability = snapshot?.availability;
     return AuthoritativePrivacySetting(
+      presentationChanges: module?.projection,
       settingKey: const Key('privacy-recently-played-authoritative'),
       titleKey: 'settings.privacy.social.recentlyPlayed',
       descriptionKey: 'settings.privacy.social.recentlyPlayedDescription',

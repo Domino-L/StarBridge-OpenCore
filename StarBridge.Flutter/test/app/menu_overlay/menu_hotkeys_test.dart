@@ -64,6 +64,17 @@ class _Hotkeys implements MenuHotkeyPort, MenuShortcutSettingsPort {
   }
 }
 
+// Models a Host whose ordered window queue is still busy (startup attach,
+// settings sync): the opening acknowledgement does not complete.
+class _BusyHostHotkeys extends _Hotkeys {
+  final opening = Completer<void>();
+  @override
+  Future<void> window(int request, String phase, int handle) async {
+    if (phase == 'opening') await opening.future;
+    phases.add((request, phase, handle));
+  }
+}
+
 class _Friends implements MenuFriendsReadLease {
   @override
   void show(bool visible) {}
@@ -100,6 +111,83 @@ void main() {
   MenuOpenLabels labels() =>
       (contextLabel: 'Menu', returnLabel: 'Return', settingsLabel: 'Settings');
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  testWidgets(
+    'a busy Host acknowledgement delays the native opening only briefly',
+    (tester) async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return call.method == 'preview' ? 7 : null;
+      });
+      bool previewed() => calls.any((c) => c.method == 'preview');
+      final keys = _BusyHostHotkeys();
+      final window = MethodChannelMenuPreviewWindow(
+        lifetime: MenuWindowLifetime(),
+        friends: (_) => _Friends(),
+        hotkeys: keys,
+        hotkeyLabels: labels,
+      );
+      window.initialize();
+      final opening = window.openLive(
+        contextLabel: 'Menu',
+        returnLabel: 'Return',
+        settingsLabel: 'Settings',
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(previewed(), isFalse, reason: 'a short wait comes first');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(previewed(), isTrue, reason: 'not the 3s Host request timeout');
+      final request =
+          (calls.singleWhere((c) => c.method == 'preview').arguments
+                  as Map)['request']
+              as int;
+      await state(request, 'visible');
+      expect(await opening, true);
+      // Delivery order is unchanged: opening is still acknowledged first.
+      keys.opening.complete();
+      await tester.pump();
+      expect(keys.phases.map((p) => p.$2), ['opening', 'visible']);
+      window.dispose();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'game hotkey menu prepares its engine once while idle, never mid-opening',
+    (tester) async {
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return call.method == 'prewarm' ? true : null;
+      });
+      final window = MethodChannelMenuPreviewWindow(
+        lifetime: MenuWindowLifetime(),
+        friends: (_) => _Friends(),
+        hotkeys: _Hotkeys(),
+        hotkeyLabels: labels,
+      );
+      window.initialize();
+      await tester.pump(const Duration(seconds: 7));
+      expect(calls, isEmpty, reason: 'startup work is not delayed');
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls, ['prewarm']);
+      window.dispose();
+      await tester.pump();
+
+      calls.clear();
+      final desktopOnly = MethodChannelMenuPreviewWindow(
+        lifetime: MenuWindowLifetime(),
+        friends: (_) => _Friends(),
+      );
+      desktopOnly.initialize();
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls, isEmpty, reason: 'no in-game hotkey, no resident engine');
+      desktopOnly.dispose();
+      await tester.pump();
+    },
+  );
 
   Future<Object?> incoming(String method, Object? args) async {
     final result = Completer<Object?>();

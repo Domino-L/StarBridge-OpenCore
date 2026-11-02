@@ -116,6 +116,12 @@ install(DIRECTORY "${MAINTENANCE_HELPER_OUTPUT_DIR}/"
   COMPONENT Runtime
   PATTERN "*.pdb" EXCLUDE)
 
+# Check the actual installed bundle, including direct Flutter builds.
+install(CODE "
+  set(SB_OVERLAY_BUNDLE_ROOT \"${CMAKE_INSTALL_PREFIX}/native_host\")
+  include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_overlay_bundle.cmake\")
+  " COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

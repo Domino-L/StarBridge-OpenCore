@@ -26,6 +26,34 @@ abstract interface class MenuProfileTargets {
   MenuProfileTarget? profileTarget(String key);
 }
 
+bool validMenuProfileWindow(Map arguments, int? opening) =>
+    arguments['opening'] == opening &&
+    arguments['window'] is String &&
+    RegExp(r'^p[1-9][0-9]{0,8}$').hasMatch(arguments['window'] as String);
+
+/// Resolve only through the original source lease, retaining its current-grant
+/// check. Renderer-local keys never become profile authority references.
+MenuProfileTarget? resolveMenuProfileTarget(
+  Map arguments,
+  Object? friends,
+  Object? communications,
+  Map<String, Object?> features,
+) {
+  final key = arguments['key'];
+  if (key is! String) return null;
+  final owner = switch (arguments['source']) {
+    'friends' => friends,
+    'comms' => communications,
+    'organizations' => features['organizations'],
+    'organizationChat' => features['organizationChat'],
+    _ => null,
+  };
+  final target = owner is MenuProfileTargets ? owner.profileTarget(key) : null;
+  return key.length <= 64 && target != null && target.isCurrent()
+      ? target
+      : null;
+}
+
 /// Main-engine read leases. IDs are renderer-local, never authority references.
 abstract interface class MenuProfilesReadLease {
   void open(String window, MenuProfileTarget target);

@@ -8,6 +8,13 @@ abstract interface class CommunityShipReportPort {
   );
 }
 
+/// Receipt ownership survives same-account workspace loss, never account/Host
+/// retirement. It is separate from authority to submit a new report.
+abstract interface class CommunityShipReportReceiptScope {
+  Stream<void> get reportReceiptRetirements;
+  bool get reportReceiptQueryAvailable;
+}
+
 final class CommunityShipReportIntent {
   CommunityShipReportIntent({
     required this.targetRef,

@@ -11,6 +11,7 @@ enum OverlayWorkspaceFieldKind {
   color,
   eventTypes,
   eventDurations,
+  hotkey,
 }
 
 @immutable
@@ -182,7 +183,12 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'appearance',
     OverlayWorkspaceFieldKind.choice,
     '界面皮肤',
-    options: ['Default', 'NightShadow', 'LagrangeWeave', 'Verdict'],
+    options: [
+      'Default',
+      'NightShadow',
+      'Verdict',
+      'HajiCitizen',
+    ],
     selectableOptions: ['Default', 'NightShadow', 'Verdict'],
   ),
   OverlayWorkspaceFieldSpec(
@@ -205,7 +211,6 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
       'Gatac',
       'Musashi',
       'NightShadow',
-      'LagrangeWeave',
       'Verdict',
     ],
     selectableOptions: [
@@ -249,7 +254,12 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'appearance',
     OverlayWorkspaceFieldKind.choice,
     '指定皮肤',
-    options: ['Default', 'NightShadow', 'LagrangeWeave', 'Verdict'],
+    options: [
+      'Default',
+      'NightShadow',
+      'Verdict',
+      'HajiCitizen',
+    ],
     userVisible: false,
   ),
 
@@ -355,7 +365,6 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
       'NightShadowBlackCurtainTear',
       'NightShadowBladeCurtainUnfold',
       'NightShadowCrimsonFold',
-      'LagrangeWeaveEquilibrium',
       'VerdictProtocol',
     ],
   ),
@@ -494,6 +503,56 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     '外观装饰透明度',
     userVisible: false,
     unit: OverlayWorkspaceUnit.percent,
+  ),
+  // Calm display has its own block under the module opacity controls of the
+  // overview, members and chat modules (OverlayCalmDisplayControls).
+  OverlayWorkspaceFieldSpec(
+    'calmDisplay',
+    'appearance',
+    OverlayWorkspaceFieldKind.choice,
+    '安静显示',
+    options: ['Unset', 'Off', 'On'],
+    userVisible: false,
+  ),
+  OverlayWorkspaceFieldSpec(
+    'calmWaitSeconds',
+    'appearance',
+    OverlayWorkspaceFieldKind.numberChoice,
+    '无变化多久后淡出',
+    numberOptions: [5, 10, 20, 30],
+    userVisible: false,
+    unit: OverlayWorkspaceUnit.seconds,
+  ),
+  OverlayWorkspaceFieldSpec(
+    'calmIdleOpacity',
+    'appearance',
+    OverlayWorkspaceFieldKind.number,
+    '空闲时不透明度',
+    userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
+  ),
+  OverlayWorkspaceFieldSpec(
+    'calmLitOpacity',
+    'appearance',
+    OverlayWorkspaceFieldKind.number,
+    '点亮时不透明度',
+    userVisible: false,
+    unit: OverlayWorkspaceUnit.percent,
+  ),
+  OverlayWorkspaceFieldSpec(
+    'calmLightWhen',
+    'appearance',
+    OverlayWorkspaceFieldKind.choice,
+    '点亮时机',
+    options: ['Relevant', 'Any'],
+    userVisible: false,
+  ),
+  OverlayWorkspaceFieldSpec(
+    'calmPeekHotkey',
+    'appearance',
+    OverlayWorkspaceFieldKind.hotkey,
+    '按住查看',
+    userVisible: false,
   ),
 
   OverlayWorkspaceFieldSpec(

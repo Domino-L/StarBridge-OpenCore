@@ -1,3 +1,5 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:convert';
 
 import '../../features/party_rooms/party_rooms_module.dart';
@@ -63,7 +65,7 @@ final class MenuRoomLobbyInvitations {
       action = _session.button(operation.name, (value) async {
         if (_lobbyInvitations.epoch != epoch) {
           _session.emit({
-            ..._session.currentView,
+            ..._session.templateView,
             'rejectedAction': action['key'],
           });
           return;
@@ -193,7 +195,9 @@ final class MenuRoomLobbyInvitations {
     if (!valid()) return;
     if (operation != RoomOperation.invitePreview) {
       _state.uncertain = result.status == 'unknown';
-      _state.notice = _state.uncertain ? '操作结果未确认，请刷新核对，不要重复提交。' : '';
+      _state.notice = _state.uncertain
+          ? MenuOverlayText('menu.overlay.errors.unconfirmed')
+          : '';
     }
     _lobbyInvitations.reply = {
       'request': raw['request'],
@@ -201,10 +205,10 @@ final class MenuRoomLobbyInvitations {
       'error': result.error,
       'preview': ?preview,
     };
-    final lobby = _session.currentView['lobby'];
+    final lobby = _session.templateView['lobby'];
     if (lobby is Map) {
       _session.emit({
-        ..._session.currentView,
+        ..._session.templateView,
         'lobby': {...lobby, 'invitationReply': _lobbyInvitations.reply},
       });
     }

@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -54,7 +56,7 @@ Future<MenuFeatureView> ready(
   String tab,
 ) async {
   for (var i = 0; i < 100; i++) {
-    final view = MenuFeatureView.parse(session.currentView);
+    final view = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     if (view.state == 'ready' &&
         !view.busy &&
         !view.refreshing &&
@@ -144,17 +146,25 @@ void main() {
       final ships = await ready(session, 'ships');
       port.shipsError = const CommunityFailure('unavailable');
       await session.refresh(silent: true);
-      final retained = MenuFeatureView.parse(session.currentView);
+      final retained = MenuFeatureView.parse(
+        resolvedMenuCopy(session.currentView),
+      );
       expect(retained.rows.length, ships.rows.length);
       expect(retained.organization!.bodyError, false);
       expect(retained.buttons, isEmpty);
       port.shipsError = const CommunityFailure('notAllowed');
       await session.refresh(silent: true);
-      expect(MenuFeatureView.parse(session.currentView).rows, isEmpty);
+      expect(
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).rows,
+        isEmpty,
+      );
       port.shipsGate = Completer<void>();
       port.shipsError = null;
       final pending = session.refresh();
-      expect(MenuFeatureView.parse(session.currentView).rows, isEmpty);
+      expect(
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).rows,
+        isEmpty,
+      );
       port.shipsGate!.complete();
       await pending;
     },
@@ -173,7 +183,7 @@ void main() {
     final reads = port.queries.length;
     port.mediaGate!.complete();
     await Future<void>.delayed(const Duration(milliseconds: 250));
-    final shown = MenuFeatureView.parse(session.currentView);
+    final shown = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     expect(shown.organization!.rows.every((r) => r.avatar != null), isTrue);
     expect(port.queries.length, reads);
   });
@@ -185,7 +195,7 @@ void main() {
     var chat = await ready(session, 'chat');
     for (var i = 0; i < 100 && chat.rows.any((r) => r.avatar == null); i++) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
-      chat = MenuFeatureView.parse(session.currentView);
+      chat = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     }
     expect(chat.rows, isNotEmpty);
     expect(chat.rows.every((r) => r.avatar != null), isTrue);
@@ -198,7 +208,7 @@ void main() {
     });
     session.act(ships.organization!.sections['chat']!, '');
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    final shown = MenuFeatureView.parse(session.currentView);
+    final shown = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     expect(shown.organization!.tab, 'chat');
     expect(shown.organization!.bodyLoading, isFalse);
     expect(shown.rows.map((r) => r.avatar), photos);
@@ -207,7 +217,10 @@ void main() {
     port.chatGate!.complete();
     await ready(session, 'chat');
     port.changes.add(null);
-    expect(MenuFeatureView.parse(session.currentView).rows, isEmpty);
+    expect(
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).rows,
+      isEmpty,
+    );
   });
   for (final mode in ['refresh', 'silent', 'reopen', 'return']) {
     test('loaded ships retain body through $mode', () async {
@@ -234,13 +247,17 @@ void main() {
         session.show(false);
         session.show(true);
       } else if (mode == 'return') {
-        final view = MenuFeatureView.parse(session.currentView);
+        final view = MenuFeatureView.parse(
+          resolvedMenuCopy(session.currentView),
+        );
         session.act(view.organization!.sections['ships']!, '');
       } else {
         reading = session.refresh(silent: mode == 'silent');
       }
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      final shown = MenuFeatureView.parse(session.currentView);
+      final shown = MenuFeatureView.parse(
+        resolvedMenuCopy(session.currentView),
+      );
       expect(shown.organization!.tab, 'ships');
       expect(shown.organization!.bodyLoading, isFalse);
       expect(shown.rows.length, count);

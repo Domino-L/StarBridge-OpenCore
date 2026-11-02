@@ -24,6 +24,8 @@ void main() {
           if (const bool.fromEnvironment('HANGAR_INVENTORY_GOLDENS')) {
             for (final font in {
               'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+              'Saira': 'assets/fonts/Saira-VF.ttf',
+              'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
               'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
               'Source Code Pro': 'assets/fonts/SourceCodeVF-Upright.ttf',
             }.entries) {

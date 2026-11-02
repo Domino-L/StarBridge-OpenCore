@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -187,7 +188,10 @@ class _IntervalSelector extends StatelessWidget {
           style: Theme.of(context).textTheme.bodySmall,
         ),
         SizedBox(height: tokens.space.xs),
-        DropdownButtonFormField<int>(
+        StarBridgeSelectFormField<int>(
+          identity: ('notification-play-interval', titleKey),
+          controlKey: ValueKey('$titleKey-control'),
+          semanticLabel: strings.text(titleKey),
           initialValue: value,
           isExpanded: true,
           items: [

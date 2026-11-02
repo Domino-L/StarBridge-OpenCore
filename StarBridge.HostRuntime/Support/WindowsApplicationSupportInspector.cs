@@ -17,13 +17,15 @@ internal sealed class WindowsApplicationSupportInspector :
     private readonly string _currentExecutable;
     private readonly Func<string?> _gameLogPath;
     private readonly Action<string> _openDirectory;
+    private readonly Action? _clearImageReadCaches;
 
     internal WindowsApplicationSupportInspector(
         string dataRoot,
         string? currentExecutable,
         Func<string?>? gameLogPath = null,
         Action<string>? openDirectory = null,
-        Func<ProcessStartInfo, Process?>? shellStart = null)
+        Func<ProcessStartInfo, Process?>? shellStart = null,
+        Action? clearImageReadCaches = null)
     {
         if (string.IsNullOrWhiteSpace(dataRoot))
         {
@@ -36,6 +38,7 @@ internal sealed class WindowsApplicationSupportInspector :
         _currentExecutable = NormalizePath(currentExecutable);
         _gameLogPath = gameLogPath ?? (() => null);
         _openDirectory = openDirectory ?? (path => OpenDirectory(path, shellStart ?? Process.Start));
+        _clearImageReadCaches = clearImageReadCaches;
     }
 
     public ApplicationSupportSnapshot Inspect() => new(
@@ -54,7 +57,11 @@ internal sealed class WindowsApplicationSupportInspector :
         _openDirectory(_dataRoot);
     }
 
-    public int ClearImageCache() => ImageCacheMaintenance.Clear(_dataRoot);
+    public int ClearImageCache()
+    {
+        _clearImageReadCaches?.Invoke();
+        return ImageCacheMaintenance.Clear(_dataRoot);
+    }
 
     public void OpenInstalledApps() => Process.Start(new ProcessStartInfo
     {

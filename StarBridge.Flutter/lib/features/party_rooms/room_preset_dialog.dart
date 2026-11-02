@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 
 import 'room_preset_choices.dart';
 
@@ -7,16 +11,19 @@ import 'room_chat_module.dart';
 import 'room_preset_port.dart';
 import '../overlay_settings/overlay_preset_inspection_port.dart';
 import '../overlay_settings/overlay_preset_import_preview.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 Future<void> roomPresetDialog(
   BuildContext context,
   RoomChatModule module, {
   RoomChatMessage? message,
+  InteractionSource? source,
 }) async {
   if (!module.presetsAvailable) return;
   final revision = module.contextRevision;
-  final result = await showDialog<String>(
-    context: context,
+  final result = await showStarBridgeDialog<String>(
+    context,
+    source: source,
     barrierDismissible: false,
     builder: (_) => _PresetDialog(
       module: module,
@@ -26,7 +33,7 @@ Future<void> roomPresetDialog(
   );
   if (context.mounted && result != null && message != null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      starBridgeTimedSnackBar(
         content: Text('${roomActionText(context, 'presetImported')} $result'),
       ),
     );
@@ -51,10 +58,17 @@ class _PresetDialogState extends State<_PresetDialog> {
   late final _catalog = widget.module.presets!.readPresets();
   bool _busy = false, _closing = false;
   String? _error;
+  ModalRoute<dynamic>? _route, _inspectionRoute;
   @override
   void initState() {
     super.initState();
     widget.module.addListener(_changed);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
   }
 
   void _changed() {
@@ -63,7 +77,13 @@ class _PresetDialogState extends State<_PresetDialog> {
     }
     _closing = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      // Context loss invalidates this flow, not whichever route is on top.
+      for (final route in [_inspectionRoute, _route]) {
+        if (route != null && route.isActive) {
+          route.navigator?.removeRoute(route);
+        }
+      }
     });
   }
 
@@ -74,9 +94,10 @@ class _PresetDialogState extends State<_PresetDialog> {
   }
 
   Future<void> _act(
-    RoomPresetCatalog catalog, [
+    RoomPresetCatalog catalog,
+    InteractionSource source, {
     RoomPresetChoice? choice,
-  ]) async {
+  }) async {
     if (_busy || !widget.module.isCurrentContext(_context)) return;
     setState(() {
       _busy = true;
@@ -98,17 +119,24 @@ class _PresetDialogState extends State<_PresetDialog> {
               !widget.module.isCurrentContext(_context)) {
             return;
           }
-          final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (_) => OverlayPresetImportPreview(
-              name: preview.name,
-              settings: preview.settings,
-              layout: preview.layout,
-              currentSettings: null,
-              sources: preview.sources,
-              removedOrganizationBindings: preview.removedOrganizationBindings,
-            ),
+          final confirmed = await showStarBridgeDialog<bool>(
+            context,
+            source: source,
+            builder: (previewContext) {
+              _inspectionRoute = ModalRoute.of(previewContext);
+              return OverlayPresetImportPreview(
+                name: preview.name,
+                settings: preview.settings,
+                layout: preview.layout,
+                currentSettings: null,
+                sources: preview.sources,
+                removedOrganizationBindings:
+                    preview.removedOrganizationBindings,
+                onConfirmSource: (value) => source = value,
+              );
+            },
           );
+          _inspectionRoute = null;
           if (!mounted ||
               _closing ||
               !widget.module.isCurrentContext(_context) ||
@@ -134,7 +162,7 @@ class _PresetDialogState extends State<_PresetDialog> {
       }
       if (!mounted || _closing) return;
       if (result != null) {
-        Navigator.of(context).pop(result);
+        dismissStarBridgeDialog(context, source: source, result: result);
         return;
       }
       setState(() => _error = widget.module.error ?? 'contextChanged');
@@ -158,8 +186,10 @@ class _PresetDialogState extends State<_PresetDialog> {
       return AlertDialog(
         content: Text(t('contextChanged')),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) =>
+                dismissStarBridgeDialog(context, source: source),
             child: Text(t('cancel')),
           ),
         ],
@@ -198,10 +228,11 @@ class _PresetDialogState extends State<_PresetDialog> {
                         widget.message!.attachment?['title'] as String? ?? '',
                       ),
                       const SizedBox(height: 12),
-                      FilledButton(
-                        onPressed: _busy || _error != null
+                      StarBridgeActionButton(
+                        kind: StarBridgeActionKind.primary,
+                        onActivate: _busy || _error != null
                             ? null
-                            : () => _act(catalog),
+                            : (source) => _act(catalog, source),
                         child: Text(t(_busy ? 'working' : 'importPreset')),
                       ),
                     ] else if (catalog.presets.isEmpty)
@@ -210,7 +241,8 @@ class _PresetDialogState extends State<_PresetDialog> {
                       RoomPresetChoices(
                         choices: catalog.presets,
                         enabled: !_busy,
-                        onSelected: (choice) => _act(catalog, choice),
+                        onSelected: (choice, source) =>
+                            _act(catalog, source, choice: choice),
                       ),
                     if (_busy) const LinearProgressIndicator(),
                     if (_error != null) Text(t(_error!)),
@@ -221,8 +253,11 @@ class _PresetDialogState extends State<_PresetDialog> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: _busy
+                ? null
+                : (source) => dismissStarBridgeDialog(context, source: source),
             child: Text(t('cancel')),
           ),
         ],

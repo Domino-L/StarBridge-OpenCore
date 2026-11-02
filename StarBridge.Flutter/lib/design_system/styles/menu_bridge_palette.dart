@@ -20,6 +20,13 @@ abstract final class BridgeInk {
   static const divider = Color(0xff26333c);
   static const selected = Color(0xff173348);
   static const scrim = Color(0x85000000);
+  static const onAccent = Color(0xff06121b);
+  // Game placement chrome retains its original colors and opacity.
+  static const placementHover = Color(0xffa0d7fa);
+  static const placementLabel = Color(0xf2173348);
+  static const placementReadout = Color(0xeb080c10);
+  static const placementBarShadow = Color(0x8c000000);
+  static const placementToolShadow = Color(0x80000000);
 }
 
 /// Reused menu controls inherit a light desktop theme, while the actual game

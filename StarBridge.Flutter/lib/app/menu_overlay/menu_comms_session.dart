@@ -1,7 +1,11 @@
+import 'menu_overlay_text.dart';
+import '../localization/app_strings.dart';
+import 'package:flutter/widgets.dart' show Locale;
 import 'dart:async';
-
+import 'package:flutter/foundation.dart';
 import '../../features/direct_messages/direct_messages_module.dart';
 import '../../platform/window/menu_preview_window_port.dart';
+import '../../platform/window/menu_read_feedback.dart';
 import '../../platform/window/menu_profile_navigation.dart';
 import '../../platform/window/menu_notice.dart';
 import '../../platform/window/menu_avatar_presentation.dart';
@@ -11,10 +15,7 @@ import 'menu_comms_invitations.dart';
 import 'menu_chat_archive.dart';
 import 'menu_account_avatar.dart';
 import 'menu_conversation_snapshot.dart';
-
-/// Visible-only communication lease in the primary engine.
-/// Opaque UI keys resolve against the latest account-scoped directory here;
-/// Target refs and receipt identifiers never cross to the surface.
+/// Visible communication lease: account-scoped refs remain in the primary engine.
 final class MenuCommsSession
     implements
         MenuCommsReadLease,
@@ -27,7 +28,9 @@ final class MenuCommsSession
     this._port,
     this._sendView, {
     this.archive,
+    this.locale,
     this.ownAvatar,
+    this.identityChanges,
     MenuCommsInvitations Function(void Function(Map<String, Object?>))?
     invitations,
   }) {
@@ -44,10 +47,17 @@ final class MenuCommsSession
       _clear();
       if (_visible) unawaited(_read());
     });
+    identityChanges?.addListener(_identityChanged);
   }
+  final Locale Function()? locale;
   final DirectMessagesPort _port;
   final MenuChatArchive? archive;
   final String? Function()? ownAvatar;
+  final Listenable? identityChanges;
+  // Display-only updates must not invalidate command refs or clear drafts.
+  void _identityChanged() {
+    if (!_disposed && _visible) _emit(_view);
+  }
   late final _ownPhoto = MenuAccountAvatar(() {
     if (_visible) _emit(_view);
   });
@@ -56,8 +66,12 @@ final class MenuCommsSession
   final _attachmentCodes = <String, String>{};
   int _attachmentSerial = 0;
   final void Function(Map<String, Object?>) _sendView;
-  void _publish(Map<String, Object?> view) =>
-      _sendView(_avatars.enabled ? view : withoutMenuAvatars(view));
+  void _publish(Map<String, Object?> view) => _sendView(
+    resolveMenuOverlayValue(
+      _avatars.enabled ? view : withoutMenuAvatars(view),
+      AppStrings.resolve(locale?.call() ?? const Locale('zh', 'CN')),
+    ) as Map<String, Object?>,
+  );
   @override
   set showAvatars(bool value) {
     if (_disposed || _avatars.enabled == value) return;
@@ -66,11 +80,12 @@ final class MenuCommsSession
     _portraits.clear();
     if (_visible) _emit(_view);
   }
-
   late final StreamSubscription<void> _subscription;
   Timer? _timer;
   bool _visible = false, _disposed = false, _reading = false;
   bool _silentRead = false;
+  int _readSerial = 0;
+  MenuReadFeedback? _readFeedback;
   int _epoch = 0, _serial = 0, _before = 0, _oldest = 0;
   int _identityEpoch = 0;
   bool _directoryNeeded = true;
@@ -134,7 +149,6 @@ final class MenuCommsSession
     _targets[_selectedKey!] = _selected!;
     unawaited(_read());
   }
-
   DateTime? _permissionAt;
   bool get _supportsSending =>
       _port is DirectMessageSender &&
@@ -142,15 +156,12 @@ final class MenuCommsSession
   bool get _permissionFresh =>
       _permissionAt != null &&
       DateTime.now().difference(_permissionAt!) < const Duration(seconds: 30);
-
-  // Stable conversation identity survives renewed Host command references.
-  // Older hosts without this field retain drafts only while their ref is valid.
+  // Stable identity survives renewed refs; older hosts retain drafts only while refs remain valid.
   MenuMessageDraft? _draftFor(Conversation target) => _drafts.forTarget(
     target.conversationKey == null
         ? 'ref:${target.ref}'
         : 'conversation:${target.conversationKey}',
   );
-
   void _emit(Map<String, Object?> view) {
     _view = view;
     if (_disposed) return;
@@ -158,6 +169,8 @@ final class MenuCommsSession
     final draft = selected == null ? null : _draftFor(selected);
     _publish({
       ...view,
+      // Always override cached/spread decoration with the current read fact.
+      'readFeedback': _reading && !_silentRead ? _readFeedback?.wire : null,
       if (view['state'] == 'ready') ...{
         'ownAvatar': _ownPhoto.read(ownAvatar?.call()),
         'refreshing': _reading && !_silentRead,
@@ -165,18 +178,7 @@ final class MenuCommsSession
         'inviteAvailable': _invitations?.supportsSend == true,
         'archiveAvailable': archive != null,
         'busy': _sending,
-        'rows': [
-          for (final row in _targets.entries)
-            {
-              'key': row.key,
-              'name': menuChatText(row.value.name, 128),
-              'preview': menuChatText(row.value.preview, 256),
-              'avatar': _portraits[row.key],
-              'time': row.value.time.toUtc().toIso8601String(),
-              'unread': row.value.unread,
-              'request': row.value.request,
-            },
-        ],
+        'rows': menuConversationRows(_targets, _portraits),
       },
       if (view['state'] == 'ready' && _readStatus.isNotEmpty)
         'readStatus': _readStatus,
@@ -190,7 +192,6 @@ final class MenuCommsSession
       },
     });
   }
-
   @override
   void compose(String action, String key, String text, int revision) {
     if (_disposed ||
@@ -225,7 +226,6 @@ final class MenuCommsSession
       if (action == 'send' && !_permissionFresh) unawaited(_read());
     }
   }
-
   Future<void> _send(
     Conversation target,
     MenuMessageDraft draft,
@@ -249,7 +249,6 @@ final class MenuCommsSession
     }
     if (_visible) unawaited(_read());
   }
-
   @override
   MenuProfileTarget? profileTarget(String key) {
     if (key == 'self' && _visible && !_disposed && _selected != null) {
@@ -279,7 +278,6 @@ final class MenuCommsSession
               _targets[key]?.ref == row.ref),
     );
   }
-
   @override
   void show(bool visible) {
     if (_disposed || visible == _visible) return;
@@ -295,15 +293,14 @@ final class MenuCommsSession
       );
     }
   }
-
   void _cancel() {
+    _readFeedback = null;
     _supplementing = false;
     _receipting = false;
     _epoch++;
     _reading = false;
     _port.cancel();
   }
-
   void _clear({bool keepDirectory = false}) {
     _invitations?.closeFlow();
     _invitationView = null;
@@ -328,7 +325,6 @@ final class MenuCommsSession
     _hasOlder = false;
     _emit({'state': _visible ? 'loading' : 'idle'});
   }
-
   @override
   void act(String action, String key) {
     if (_disposed || !_visible || _sending) return;
@@ -432,7 +428,9 @@ final class MenuCommsSession
                 ? {'state': 'loading'}
                 : {
                     'state': 'ready',
-                    'notice': selected == null ? '' : '正在读取消息…',
+                    'notice': selected == null
+                        ? ''
+                        : MenuOverlayText('menu.overlay.comms.reading'),
                   })
           : {
               ...cached,
@@ -443,12 +441,15 @@ final class MenuCommsSession
     );
     unawaited(_read(silent: action == 'select' && cached != null));
   }
-
   Future<void> _read({bool silent = false}) async {
     if (_disposed || !_visible || _reading || _sending || _receipting) return;
     _reading = true;
     _silentRead = silent;
-    if (_selected != null && !silent) _emit(_view);
+    _readFeedback = silent
+        ? null
+        : MenuReadFeedback(++_readSerial, currentMenuReadOrigin);
+    // Directory reads also publish provenance only after this admission gate.
+    if (!silent) _emit(_view);
     final epoch = _epoch, selected = _selected;
     try {
       final Map<String, Object?> view;
@@ -505,7 +506,10 @@ final class MenuCommsSession
             }
           } on Object {
             if (!_current(epoch)) return;
-            _emit({..._view, 'notice': '本机记录暂时无法读取，正在获取在线消息。'});
+            _emit({
+              ..._view,
+              'notice': MenuOverlayText('menu.overlay.comms.localUnavailable'),
+            });
           }
         }
         final page = await _bounded(
@@ -578,7 +582,7 @@ final class MenuCommsSession
         view = {
           'state': 'ready',
           'notice': page.localHistoryUnavailable
-              ? '消息已读取，但本机记录保存失败；重启后可能需要重新读取。'
+              ? MenuOverlayText('menu.overlay.comms.cacheFailed')
               : '',
           'name': menuChatText(selected.name, 128),
           'profileKey': _selectedKey,
@@ -613,12 +617,9 @@ final class MenuCommsSession
       }
       if (_current(epoch)) {
         _reading = false;
+        _readFeedback = null;
         if (selected != null) {
-          final display = {...view, 'receipts': <String, String>{}};
-          display['messages'] = [
-            for (final raw in view['messages'] as List)
-              {...raw as Map<String, Object?>, 'attachmentKey': null},
-          ];
+          final display = menuCachedHistory(view);
           final key = (_historyIdentity(selected), _before);
           _history.remove(key);
           if (_history.length >= 48) _history.remove(_history.keys.first);
@@ -641,6 +642,7 @@ final class MenuCommsSession
     } on Object catch (error) {
       if (!_current(epoch)) return;
       _reading = false;
+      _readFeedback = null;
       final restricted =
           error is DirectReadFailure &&
           const [
@@ -659,7 +661,9 @@ final class MenuCommsSession
         _emit({
           ..._view,
           'receipts': <String, String>{},
-          'notice': silent ? '' : '消息刷新失败，当前显示上次内容。草稿已保留，请重新读取。',
+          'notice': silent
+              ? ''
+              : MenuOverlayText('menu.overlay.comms.refreshFailed'),
         });
         return;
       }
@@ -693,7 +697,6 @@ final class MenuCommsSession
       }
     }
   }
-
   bool _current(int epoch) => !_disposed && _visible && epoch == _epoch;
   Future<void> _readDirectory(int epoch) async {
     final rows = await _bounded(_port.directory(), epoch);
@@ -713,18 +716,24 @@ final class MenuCommsSession
       ..addAll(snapshot.portraits);
     _directoryNeeded = false;
   }
-
   Future<void> _clearLocal(Conversation target, int epoch) async {
     try {
       await archive!.clear('private', target.ref);
       if (!_current(epoch)) return;
       _history.removeWhere((key, _) => key.$1 == _historyIdentity(target));
-      _emit({..._view, 'notice': '本机会话记录已清除。在线消息未删除，后续读取可再次缓存。'});
+      _emit({
+        ..._view,
+        'notice': MenuOverlayText('menu.overlay.comms.localCleared'),
+      });
     } on Object {
-      if (_current(epoch)) _emit({..._view, 'notice': '本机记录未能清除，请重试。'});
+      if (_current(epoch)) {
+        _emit({
+          ..._view,
+          'notice': MenuOverlayText('menu.overlay.comms.clearFailed'),
+        });
+      }
     }
   }
-
   Future<void> _markRead(String ref, int through, int epoch) async {
     _receipting = true;
     _emit(_view);
@@ -766,7 +775,6 @@ final class MenuCommsSession
       }
     }
   }
-
   Future<T> _bounded<T>(Future<T> task, int epoch) => task.timeout(
     const Duration(seconds: 10),
     onTimeout: () {
@@ -774,10 +782,10 @@ final class MenuCommsSession
       throw const DirectReadFailure('unavailable');
     },
   );
-
   @override
   void dispose() {
     if (_disposed) return;
+    identityChanges?.removeListener(_identityChanged);
     show(false);
     _disposed = true;
     _drafts.clear();

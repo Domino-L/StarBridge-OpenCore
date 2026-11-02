@@ -240,7 +240,7 @@ void main() {
             .count,
         0,
       );
-      await tester.tap(find.byTooltip('通知'));
+      await tester.tap(find.byKey(const ValueKey('top-action-notifications')));
       await tester.pumpAndSettle();
       expect(find.text('通知中心'), findsOneWidget);
       expect(find.text('房间提醒'), findsNothing);

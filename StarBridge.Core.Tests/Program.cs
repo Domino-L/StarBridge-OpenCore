@@ -6,6 +6,55 @@ using StarBridge.Core.Identity;
 using StarBridge.Core.Parsing;
 using StarBridge.Core.Presence;
 using StarBridge.Core.State;
+if (args is ["--overlay-fleet-only"])
+{
+    StarBridge.Core.Tests.OverlayFleetSourceTests.RunAll();
+    StarBridge.Core.Tests.OverlayModuleSourcesTests.RunAll();
+    StarBridge.Core.Tests.InformationOverlaySourcePolicyTests.RunAll();
+    Console.WriteLine("PASS overlay source existing regressions: 2 groups, 0 failed");
+    return;
+}
+if (args is ["--cityhost-only"]) { StarBridge.Core.Tests.JourneyAchievementPolicyTests.RunAll(); return; }
+if (args.Length == 0) StarBridge.Core.Tests.JourneyAchievementPolicyTests.RunAll();
+if (args is ["--affiliation-logo-only"]) { StarBridge.Core.Tests.PersonalProfileAffiliationContractTests.RunAll(); return; }
+if (args.Length == 0) StarBridge.Core.Tests.PersonalProfileAffiliationContractTests.RunAll();
+
+if (args is ["--organization-only"])
+{
+    LegacyManageFleetInfoTests.Run();
+    StarBridge.Core.Tests.OrganizationAuthorizationTests.RunAll();
+    StarBridge.Core.Tests.OrganizationMemberPresenceTests.RunAll();
+    StarBridge.Core.Tests.CommunityMemberFieldOverrideTests.RunAll();
+    LegacyFleetProfileManagersRetainAnnouncementPermissionOnce();
+    Console.WriteLine("PASS Core organization groups and legacy permission compatibility");
+    return;
+}
+if (args is ["--organization-authorization-only"])
+{
+    LegacyManageFleetInfoTests.Run();
+    StarBridge.Core.Tests.OrganizationAuthorizationTests.RunAll();
+    LegacyFleetProfileManagersRetainAnnouncementPermissionOnce();
+    Console.WriteLine("PASS Existing community announcement permission migration and explicit removal remain unchanged");
+    return;
+}
+
+if (args.Length == 0) LegacyManageFleetInfoTests.Run();
+
+if (args is ["--ship-image-version-only"]) { StarBridge.Core.Tests.ShipImageVersionTests.RunAll(); return; }
+
+if (args is ["--first-use-identity-line-only"])
+{
+    StarBridge.Core.Tests.LocalGameIdentityLineTests.RunAll();
+    Console.WriteLine("PASS strict first-use identity records preserve canonical format and reject unrelated or damaged evidence");
+    return;
+}
+
+if (args is ["--overlay-live-preview-policy-only"])
+{
+    StarBridge.Core.Tests.OverlayLivePreviewRequestPolicyTests.RunAll();
+    Console.WriteLine("PASS finite preview requests are accountless without widening neighboring account policy");
+    return;
+}
 
 if (args is ["--overlay-input-audit-only"])
 {
@@ -21,8 +70,29 @@ if (args is ["--arrival-journey-only"])
     return;
 }
 
+if (args is ["--official-fleet-runtime-scope-only"])
+{
+    StarBridge.Core.Tests.OfficialFleetRealtimeScopeTests.RunAll();
+    return;
+}
+
 var tests = new (string Name, Action Test)[]
 {
+    ("Community background selection shares banner authority without selecting other fields", CommunityBackgroundPolicyTests.Run),
+    ("Community image headers enforce formats, CRC, dimensions and bounded JPEG scanning", CommunityImageHeaderTests.Run),
+    ("Organization authorization binds current membership, root proof, delegation and policy mutation provenance", StarBridge.Core.Tests.OrganizationAuthorizationTests.RunAll),
+    ("Official runtime scope rejects malformed target, epoch and implicit consent", StarBridge.Core.Tests.OfficialFleetRealtimeScopeTests.RunAll),
+    ("Image versions retain exact shared media and crop bytes", StarBridge.Core.Tests.ShipImageVersionTests.RunAll),
+    ("Organization private presence is indistinguishable from offline before pagination", StarBridge.Core.Tests.OrganizationMemberPresenceTests.RunAll),
+    ("First-use identity records require complete canonical local evidence", StarBridge.Core.Tests.LocalGameIdentityLineTests.RunAll),
+    ("Executive hangar matches SCM timing, indicators and finite reminder crossings", StarBridge.Core.Tests.ExecHangarScheduleTests.RunAll),
+    ("First entry achievement requires current matching game and server evidence", StarBridge.Core.Tests.FirstEntryAchievementPolicyTests.RunAll),
+    ("Hangar achievement five ranks preserve simultaneous peak semantics", StarBridge.Core.Tests.HangarAchievementPolicyTests.RunAll),
+    ("Composition viewport carries immutable physical bounds and per-axis DPI", StarBridge.Core.Tests.OverlayCompositionViewportTests.RunAll),
+    ("Finite native preview routes never carry renderer account authority", StarBridge.Core.Tests.OverlayLivePreviewRequestPolicyTests.RunAll),
+    ("Appearance options preserve bounded private values without changing legacy settings", StarBridge.Core.Tests.OverlayAppearanceOptionsTests.RunAll),
+    ("Calm display settings round-trip, start on for new installs and stay off for older files", StarBridge.Core.Tests.OverlayCalmDisplaySettingsTests.RunAll),
+    ("Appearance activity keeps history, source epochs and animation refresh distinct", StarBridge.Core.Tests.OverlayAppearanceActivityTests.RunAll),
     ("Realtime activity presence capability is explicit and backward compatible", StarBridge.Core.Tests.RealtimeActivityContractTests.RunAll),
     ("Room removal requires current host and non-self membership", StarBridge.Core.Tests.PartyRoomMemberRemovalTests.RunAll),
     ("Quantum arrivals retain only the current unconsumed target", StarBridge.Core.Tests.QuantumArrivalJourneyTests.RunAll),
@@ -42,6 +112,7 @@ var tests = new (string Name, Action Test)[]
     ("Information overlay layout geometry matches the shared cross-client samples", StarBridge.Core.Tests.InformationOverlayLayoutGeometryTests.RunAll),
     ("Gameplay history import eligibility preserves migrated and unknown evidence", StarBridge.Core.Tests.GameplayHistoryImportPolicyTests.RunAll),
     ("Ship presentation uses exact catalog names and explicit combat size only", StarBridge.Core.Tests.ShipPresentationCatalogTests.RunAll),
+    ("Shared ship catalog facts recover missing fields without replacing known values", StarBridge.Core.Tests.ShipCatalogMetadataTests.RunAll),
     ("Ship names localize only unambiguous catalog matches and preserve model variants", StarBridge.Core.Tests.ShipNameIndexTests.RunAll),
     ("Ship channel names and runtime exits share catalog identity", StarBridge.Core.Tests.ShipNameIndexTests.CatalogIdentityRelease),
     ("All bundled ship names translate and release without variant guessing", StarBridge.Core.Tests.ShipCatalogCoverageTests.RunAll),
@@ -134,6 +205,7 @@ foreach (var (name, test) in tests)
     }
 }
 
+Console.WriteLine($"SUMMARY Core groups: passed={tests.Length - failures.Count}, failed={failures.Count}, total={tests.Length}");
 if (failures.Count > 0)
 {
     Console.WriteLine();

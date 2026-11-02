@@ -11,9 +11,13 @@ public sealed partial class OverlayBridgeDispatcher
     private OverlayTemporarySource? CurrentTemporarySource(OverlayWorkspaceReadResult workspace)
     {
         var scope = _sourceScope();
+        // A session choice only ever overrode a plan's fixed source. Once that
+        // plan follows the shared choice again (the same plan, no switch), a
+        // leftover must not keep overriding it: the shared choice is the rule.
         if (!workspace.SourcePresetsEnabled || _temporarySelection is not { } selected ||
             selected.PresetId != workspace.ActivePresetId || selected.Source.OwnerKey != scope.OwnerKey ||
-            selected.Source.Generation != scope.Generation || scope.Generation != _generation())
+            selected.Source.Generation != scope.Generation || scope.Generation != _generation() ||
+            workspace.Presets.FirstOrDefault(p => p.IsActive)?.Sources?.Binding.Mode is null or OverlaySourceMode.None)
         {
             _temporarySelection = null;
             return null;

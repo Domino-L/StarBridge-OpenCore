@@ -3,7 +3,8 @@ namespace StarBridge.HostRuntime.Notifications;
 using System.Text.Json;
 using StarBridge.NativeBridge;
 
-internal sealed record AudioSettings(int SchemaVersion = 1, int Revision = 0, bool Enabled = false, double Volume = 0.65, bool DoNotDisturb = false);
+internal sealed record AudioSettings(int SchemaVersion = 1, int Revision = 0, bool Enabled = false, double Volume = 0.65, bool DoNotDisturb = false,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] int SuppressionRevision = 0);
 
 // Device-only preference. Never imports or writes WPF account files.
 internal sealed class NotificationAudioSettingsStore(string root)
@@ -18,11 +19,12 @@ internal sealed class NotificationAudioSettingsStore(string root)
         using var document = JsonDocument.Parse(bytes);
         var expected = new HashSet<string>(["schemaVersion", "revision", "enabled", "volume"]);
         if (document.RootElement.TryGetProperty("doNotDisturb", out _)) expected.Add("doNotDisturb");
+        if (document.RootElement.TryGetProperty("suppressionRevision", out _)) expected.Add("suppressionRevision");
         foreach (var property in document.RootElement.EnumerateObject())
             if (!expected.Remove(property.Name)) throw new IOException("Invalid audio settings");
         if (expected.Count != 0) throw new IOException("Invalid audio settings");
         var value = JsonSerializer.Deserialize<AudioSettings>(bytes, BridgeProtocol.JsonOptions);
-        if (value is null || value.SchemaVersion != 1 || value.Revision < 0 || !double.IsFinite(value.Volume) || value.Volume is < 0 or > 1)
+        if (value is null || value.SchemaVersion != 1 || value.Revision < 0 || value.SuppressionRevision < 0 || value.SuppressionRevision > value.Revision || !double.IsFinite(value.Volume) || value.Volume is < 0 or > 1)
             throw new IOException("Invalid audio settings");
         return value;
     }
@@ -31,7 +33,8 @@ internal sealed class NotificationAudioSettingsStore(string root)
         if (!double.IsFinite(volume) || volume is < 0 or > 1) throw new ArgumentException("Invalid volume");
         var current = Read(); // A damaged file is not permission to overwrite it.
         if (current.Revision != revision) throw new AudioConflictException();
-        var next = new AudioSettings(Revision: checked(revision + 1), Enabled: enabled, Volume: volume, DoNotDisturb: doNotDisturb ?? current.DoNotDisturb);
+        var next = new AudioSettings(Revision: checked(revision + 1), Enabled: enabled, Volume: volume, DoNotDisturb: doNotDisturb ?? current.DoNotDisturb,
+            SuppressionRevision: !enabled || volume == 0 ? checked(revision + 1) : current.SuppressionRevision);
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try {

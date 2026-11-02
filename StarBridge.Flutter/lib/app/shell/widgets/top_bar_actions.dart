@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../design_system/icons/starbridge_icon.dart';
+import '../../../design_system/interaction/starbridge_native_icon_action.dart';
 import '../../../design_system/tokens/starbridge_tokens.dart';
 import '../../feature_registry.dart';
 import '../../localization/app_strings.dart';
@@ -20,6 +21,7 @@ class TopBarActions extends StatelessWidget {
     required this.onAccountLogin,
     required this.onAccountLogout,
     required this.onAccountIssueAction,
+    this.sharingIndicator,
     super.key,
   });
 
@@ -31,6 +33,7 @@ class TopBarActions extends StatelessWidget {
   final VoidCallback onAccountLogin;
   final VoidCallback onAccountLogout;
   final VoidCallback onAccountIssueAction;
+  final Widget? sharingIndicator;
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +45,7 @@ class TopBarActions extends StatelessWidget {
           projection: projection,
           onSelect: onSelect,
         ),
-        SizedBox(width: context.tokens.space.xs),
+        const TopBarDivider(),
         AccountMenu(
           destinations: accountMenuDestinations,
           projection: projection,
@@ -52,6 +55,7 @@ class TopBarActions extends StatelessWidget {
           onLogout: onAccountLogout,
           onIssueAction: onAccountIssueAction,
         ),
+        ?sharingIndicator,
       ],
     );
   }
@@ -71,29 +75,17 @@ class _TopActionCluster extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return Container(
+    // Plain icons (QualityPass ⑦ A): no boxed group and no dividers between
+    // them; hover/focus still light each button. Hit area is unchanged.
+    return SizedBox(
       key: const Key('top-action-cluster'),
       height: tokens.density.controlHeight,
-      decoration: BoxDecoration(
-        color: tokens.surfaces.raised.fill,
-        borderRadius: tokens.shape.small,
-        border: Border.all(
-          color: tokens.surfaces.raised.border,
-          width: tokens.stroke.regular,
-        ),
-        boxShadow: tokens.surfaces.raised.shadows,
-      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           for (var index = 0; index < descriptors.length; index++) ...[
-            if (index > 0)
-              Container(
-                width: tokens.stroke.hairline,
-                height: tokens.icons.medium,
-                color: tokens.surfaces.chrome.border,
-              ),
-            _action(descriptors[index], index),
+            if (index > 0) SizedBox(width: tokens.space.xxs),
+            _action(descriptors[index]),
           ],
         ],
       ),
@@ -108,12 +100,10 @@ class _TopActionCluster extends StatelessWidget {
     };
   }
 
-  Widget _action(FeatureDescriptor descriptor, int index) {
+  Widget _action(FeatureDescriptor descriptor) {
     Widget button(int value) => _TopIconButton(
       count: value,
       descriptor: descriptor,
-      position: index,
-      total: descriptors.length,
       onPressed: () => onSelect(descriptor),
     );
     final count = descriptor.attentionCount;
@@ -127,18 +117,33 @@ class _TopActionCluster extends StatelessWidget {
   }
 }
 
+/// Thin vertical rule between the title bar's groups (selector, icons,
+/// account). Low contrast; it separates without boxing anything.
+class TopBarDivider extends StatelessWidget {
+  const TopBarDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: tokens.space.xs),
+      child: SizedBox(
+        width: tokens.stroke.hairline,
+        height: tokens.icons.medium,
+        child: ColoredBox(color: tokens.surfaces.chrome.border),
+      ),
+    );
+  }
+}
+
 class _TopIconButton extends StatelessWidget {
   const _TopIconButton({
     required this.descriptor,
-    required this.position,
-    required this.total,
     required this.onPressed,
     required this.count,
   });
 
   final FeatureDescriptor descriptor;
-  final int position;
-  final int total;
   final int count;
   final VoidCallback onPressed;
 
@@ -148,9 +153,11 @@ class _TopIconButton extends StatelessWidget {
     final label = AppStrings.of(context).text(descriptor.labelKey);
     return NavigationPrefetch(
       prepare: descriptor.prefetch,
-      child: IconButton(
-        onPressed: onPressed,
-        tooltip: label,
+      child: StarBridgeNativeIconAction(
+        controlKey: ValueKey('top-action-${descriptor.id}'),
+        onActivate: (_) => onPressed(),
+        label: label,
+        semanticLabel: count > 0 ? '$label\n$count' : label,
         style: ButtonStyle(
           minimumSize: WidgetStatePropertyAll(
             Size.square(
@@ -158,22 +165,7 @@ class _TopIconButton extends StatelessWidget {
             ),
           ),
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(
-              borderRadius: BorderRadiusDirectional.only(
-                topStart: position == 0
-                    ? Radius.circular(tokens.shape.radiusSmall)
-                    : Radius.zero,
-                bottomStart: position == 0
-                    ? Radius.circular(tokens.shape.radiusSmall)
-                    : Radius.zero,
-                topEnd: position == total - 1
-                    ? Radius.circular(tokens.shape.radiusSmall)
-                    : Radius.zero,
-                bottomEnd: position == total - 1
-                    ? Radius.circular(tokens.shape.radiusSmall)
-                    : Radius.zero,
-              ),
-            ),
+            RoundedRectangleBorder(borderRadius: tokens.shape.small),
           ),
           side: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.focused)) {

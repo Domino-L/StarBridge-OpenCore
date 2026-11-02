@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../localization/app_strings.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../features/common/social_read_activity.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 Future<bool?> showFirstCloseBehaviorPrompt(BuildContext context) {
-  return showDialog<bool>(
-    context: context,
+  return showStarBridgeDialog<bool>(
+    context,
     barrierDismissible: true,
     builder: (dialogContext) {
       final strings = AppStrings.of(dialogContext);
@@ -13,14 +19,24 @@ Future<bool?> showFirstCloseBehaviorPrompt(BuildContext context) {
         title: Text(strings.text('settings.lifecycle.close.title')),
         content: Text(strings.text('settings.lifecycle.close.body')),
         actions: [
-          TextButton(
-            key: const Key('first-close-exit'),
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+          StarBridgeActionButton(
+            controlKey: const Key('first-close-exit'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: false,
+            ),
             child: Text(strings.text('settings.lifecycle.close.exit')),
           ),
-          FilledButton(
-            key: const Key('first-close-background'),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+          StarBridgeActionButton(
+            controlKey: const Key('first-close-background'),
+            kind: StarBridgeActionKind.primary,
+            onActivate: (source) => dismissStarBridgeDialog(
+              dialogContext,
+              source: source,
+              result: true,
+            ),
             child: Text(strings.text('settings.lifecycle.close.background')),
           ),
         ],
@@ -36,8 +52,10 @@ Future<void> showFirstStartupChoicePrompt(
   var selected = true;
   var saving = false;
   var saveFailed = false;
-  return showDialog<void>(
-    context: context,
+  var saveRevision = 0;
+  var saveSource = InteractionSource.programmatic;
+  return showStarBridgeDialog<void>(
+    context,
     barrierDismissible: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
@@ -53,9 +71,10 @@ Future<void> showFirstStartupChoicePrompt(
               children: [
                 Text(strings.text('settings.lifecycle.startup.body')),
                 const SizedBox(height: 16),
-                SwitchListTile(
-                  key: const Key('first-startup-enabled'),
-                  contentPadding: EdgeInsets.zero,
+                StarBridgeSwitch.tile(
+                  controlKey: const Key('first-startup-enabled'),
+                  preserveNativeTile: true,
+                  label: strings.text('settings.lifecycle.startup.option'),
                   value: selected,
                   onChanged: saving
                       ? null
@@ -63,9 +82,22 @@ Future<void> showFirstStartupChoicePrompt(
                           selected = value;
                           saveFailed = false;
                         }),
-                  title: Text(
-                    strings.text('settings.lifecycle.startup.option'),
-                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 4,
+                  child: saving
+                      ? KeyedSubtree(
+                          key: ValueKey(('startup-save', saveRevision)),
+                          child: SocialReadActivity(
+                            key: const Key('first-startup-save-activity'),
+                            source: saveSource,
+                            opening: false,
+                            label: strings.text('settings.general.saving'),
+                            height: 4,
+                          ),
+                        )
+                      : null,
                 ),
                 if (saveFailed) ...[
                   const SizedBox(height: 8),
@@ -80,12 +112,15 @@ Future<void> showFirstStartupChoicePrompt(
             ),
           ),
           actions: [
-            FilledButton(
-              key: const Key('first-startup-continue'),
-              onPressed: saving
+            StarBridgeActionButton(
+              controlKey: const Key('first-startup-continue'),
+              kind: StarBridgeActionKind.primary,
+              onActivate: saving
                   ? null
-                  : () async {
+                  : (source) async {
                       setDialogState(() {
+                        saveSource = source;
+                        saveRevision++;
                         saving = true;
                         saveFailed = false;
                       });
@@ -94,7 +129,7 @@ Future<void> showFirstStartupChoicePrompt(
                         return;
                       }
                       if (saved) {
-                        Navigator.of(dialogContext).pop();
+                        dismissStarBridgeDialog(dialogContext, source: source);
                       } else {
                         setDialogState(() {
                           saving = false;
@@ -109,4 +144,21 @@ Future<void> showFirstStartupChoicePrompt(
       },
     ),
   );
+}
+
+/// Holds the standalone startup prompt while first-use setup will ask startup
+/// and close behaviour itself. Releasing it lets the prompt cover users who do
+/// not get setup (existing users, official builds or a failed eligibility read).
+final class FirstUseChoiceHold {
+  FirstUseChoiceHold(this._onRelease);
+  final void Function() _onRelease;
+  bool _active = false;
+
+  bool get active => _active;
+
+  void set(bool active) {
+    if (_active == active) return;
+    _active = active;
+    if (!active) _onRelease();
+  }
 }

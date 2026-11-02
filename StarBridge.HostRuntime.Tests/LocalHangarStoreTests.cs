@@ -13,12 +13,16 @@ internal static class LocalHangarStoreTests
 {
     public static Task Verify()
     {
+        LocalHangarPersonalDataTests.Verify();
+        InventoryReadTimeSurvivesLocalEdits();
         FirstSaveReopens();
+        BookmarksPersistIndependentlyPerInstance();
         FormerOwnershipSurvivesAndRemainsInstanceScoped();
         ReorderedMultisetsKeepInstances();
         PartialIsAdditiveAndEmptyNeedsConfirmation();
         RevisionAndRetryAreConditional();
         ChangedDuplicateCountsAreAmbiguous();
+        DuplicateRemovalRequiresExactLocalChoices();
         DamagedStorageCannotBeReadOrOverwritten();
         InvalidRequestsDoNotCreateStorage();
         CommitGuardAndFailedWritersPreserveSnapshot();
@@ -29,6 +33,77 @@ internal static class LocalHangarStoreTests
         PermissionFailuresPreserveSnapshot();
         CapacityAndPartialCancellationPreserveSnapshot();
         return Task.CompletedTask;
+    }
+
+    private static DateTimeOffset? InventoryTime(LocalHangarSnapshot snapshot)
+    {
+        var json = JsonSerializer.SerializeToElement(snapshot);
+        return json.TryGetProperty("InventorySavedAt", out var time) && time.ValueKind == JsonValueKind.String
+            ? time.GetDateTimeOffset() : snapshot.SavedAt;
+    }
+
+    private static void InventoryReadTimeSurvivesLocalEdits()
+    {
+        using var test = new Fixture();
+        var store = new LocalHangarStore(test.Root);
+        var observed = new[] { Ship("time", 0, "Carrack") };
+        var first = store.Save(Owner, 0, "time-first", observed, false, false);
+        var path = Directory.GetFiles(Path.Combine(test.Root, "hangar-local-v1"), "*.json").Single();
+        var oldTime = DateTimeOffset.UtcNow.AddDays(-2);
+        RewriteSnapshot(path, snapshot => {
+            var legacy = JsonSerializer.SerializeToNode(snapshot)!.AsObject();
+            legacy.Remove("InventorySavedAt");
+            var withoutTime = legacy.Deserialize<LocalHangarSnapshot>()!;
+            return withoutTime with { SavedAt = oldTime,
+                Ships = withoutTime.Ships.Select(ship => ship with { AddedAt = oldTime }).ToArray() };
+        });
+        var legacyBytes = File.ReadAllBytes(path);
+        Require(InventoryTime(store.Read(Owner)) == oldTime && File.ReadAllBytes(path).SequenceEqual(legacyBytes),
+            "Legacy envelopes remain readable without being rewritten.");
+        var id = first.Ships.Single().Id;
+        var marked = store.SetFavorite(Owner, 1, "time-favorite", id, true);
+        Require(InventoryTime(marked) == oldTime && marked.SavedAt > oldTime,
+            "Bookmark changes the mutation time, never the RSI read/save time.");
+        const string png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        var image = store.SaveCustomImage(Owner, 2, "time-image", id, png);
+        Require(InventoryTime(image) == oldTime, "Image save preserves the RSI read/save time.");
+        var restored = store.SaveCustomImage(Owner, 3, "time-restore", id, null);
+        Require(InventoryTime(restored) == oldTime && InventoryTime(new LocalHangarStore(test.Root).Read(Owner)) == oldTime,
+            "Restoring default art preserves the RSI read/save time across reopen.");
+        var scan = store.Save(Owner, 4, "time-scan", observed, false, false);
+        Require(InventoryTime(scan) == scan.SavedAt && InventoryTime(scan) > oldTime,
+            "Confirmed RSI inventory save updates the separate read/save time.");
+        Require(InventoryTime(store.Save(Owner, 4, "time-scan", observed, false, false)) == InventoryTime(scan),
+            "Idempotent retries preserve the committed read/save time.");
+        var partial = store.Save(Owner, 5, "time-partial", observed, true, false);
+        Require(partial.Partial && InventoryTime(partial) == partial.SavedAt,
+            "Confirmed partial reads also update the read/save time while retaining their partial marker.");
+    }
+
+    private static void BookmarksPersistIndependentlyPerInstance()
+    {
+        using var test = new Fixture();
+        var store = new LocalHangarStore(test.Root);
+        var first = store.Save(Owner, 0, "bookmark-inventory", [Ship("a", 0, "Carrack"), Ship("b", 0, "Carrack")], false, false);
+        var a = first.Ships.Single(s => s.PledgeKey == "a").Id;
+        var b = first.Ships.Single(s => s.PledgeKey == "b").Id;
+        var marked = store.SetFavorite(Owner, 1, "bookmark-a", a, true);
+        Require(marked.Ships.Single(s => s.Id == a).IsFavorite && !marked.Ships.Single(s => s.Id == b).IsFavorite,
+            "A bookmark never applies to another same-model instance.");
+        Require(new LocalHangarStore(test.Root).Read(Owner).Ships.Single(s => s.Id == a).IsFavorite,
+            "Bookmarks survive a new store instance.");
+        Require(store.SetFavorite(Owner, 1, "bookmark-a", a, true).Revision == 2, "Retry must not create another write.");
+        Expect("hangar.revision_conflict", () => store.SetFavorite(Owner, 1, "bookmark-stale", b, true));
+        Expect("hangar.favorite_ship_unavailable", () => store.SetFavorite(Owner, 2, "bookmark-missing", "missing", true));
+        Expect("hangar.account_changed", () => store.SetFavorite(Owner, 2, "bookmark-cancel", b, true, () => false));
+        Require(store.Read(Owner).Revision == 2, "Rejected bookmarks preserve inventory.");
+        Require(store.Read(Owner with { Subject = "other-bookmark-owner" }).Ships.Count == 0, "Bookmarks are owner isolated.");
+        var archived = store.Save(Owner, 2, "bookmark-archive", [Ship("b", 0, "Carrack")], false, false);
+        Require(archived.FormerShips!.Single().Id == a && archived.FormerShips!.Single().IsFavorite,
+            "Removal retains the instance bookmark, without copying it to the remaining model.");
+        var cleared = store.SetFavorite(Owner, 3, "bookmark-clear-history", a, false);
+        Require(!cleared.FormerShips!.Single().IsFavorite, "A historical bookmark can be removed.");
+        Require(new LocalHangarStore(test.Root).Read(Owner).Ships.Single().Id == b, "Bookmark writes do not fabricate ownership.");
     }
 
     private static void FormerOwnershipSurvivesAndRemainsInstanceScoped()
@@ -123,13 +198,70 @@ internal static class LocalHangarStoreTests
         using var test = new Fixture();
         var store = new LocalHangarStore(test.Root);
         var saved = store.Save(Owner, 0, "duplicates", [Ship("pack", 0, "Carrack"), Ship("pack", 1, "Carrack")], false, false);
-        foreach (var partial in new[] { false, true })
+        var partial = store.Save(Owner, 1, "reduce-partial", [Ship("pack", 7, "Carrack")], true, false);
+        Require(partial.Ships.SequenceEqual(saved.Ships) && partial.FormerShips is null,
+            "Partial duplicate reductions keep all local identities without requiring a removal choice.");
+        var increased = store.Save(Owner, 2, "increase",
+            [Ship("pack", 0, "Carrack"), Ship("pack", 1, "Carrack"), Ship("pack", 2, "Carrack")], false, false);
+        Require(increased.Ships.Count == 3 && saved.Ships.All(increased.Ships.Contains),
+            "Increased duplicate counts retain existing local identities and add new instances.");
+    }
+
+    private static void DuplicateRemovalRequiresExactLocalChoices()
+    {
+        using var test = new Fixture();
+        var store = new LocalHangarStore(test.Root);
+        CollectedHangarShip[] old = [Ship("pack", 0, "Carrack"), Ship("pack", 1, "Carrack"), Ship("pack", 2, "Carrack"),
+            Ship("other", 0, "Carrack"), Ship("other", 1, "Carrack"), Ship("unique", 0, "Vulture")];
+        var original = store.Save(Owner, 0, "seed-choices", old, false, false);
+        var path = Directory.GetFiles(Path.Combine(test.Root, "hangar-local-v1"), "*.json").Single();
+        RewriteSnapshot(path, s => s with { Ships = s.Ships.Select((ship, i) => ship with {
+            IsFavorite = i % 2 == 0, CustomImagePath = $"synthetic-{i}.png", CustomImageCrop = new(0, 0, 1, 1) }).ToArray() });
+        var before = store.Read(Owner);
+        var bytes = File.ReadAllBytes(path);
+        CollectedHangarShip[] next = [old[0], old[1], old[3], old[5]];
+        var groups = store.PreviewRemovals(Owner, 1, next, false);
+        Require(groups.Count == 2 && groups.All(g => g.RequiredCount == 1) &&
+            File.ReadAllBytes(path).SequenceEqual(bytes), "Review is read-only and combines all reduced groups.");
+        Expect("hangar.removal_selection_required", () => store.Save(Owner, 1, "choice", next, false, false));
+        var a = before.Ships[0].Id; var b = before.Ships[3].Id;
+        Expect("hangar.removal_selection_required", () => store.Save(Owner, 1, "choice", next, false, false, removedShipIds: [a]));
+        Expect("hangar.invalid_removal_selection", () => store.Save(Owner, 1, "choice", next, false, false, removedShipIds: [a, a]));
+        Expect("hangar.invalid_removal_selection", () => store.Save(Owner, 1, "choice", next, false, false,
+            removedShipIds: [a, before.Ships[5].Id]));
+        Expect("hangar.invalid_removal_selection", () => store.Save(Owner, 1, "choice", next, true, false, removedShipIds: [a, b]));
+        Expect("hangar.account_changed", () => store.Save(Owner, 1, "choice", next, false, false, () => false, [a, b]));
+        Require(File.ReadAllBytes(path).SequenceEqual(bytes), "Missing, invalid or cancelled choices cannot alter any saved bytes.");
+        var saved = store.Save(Owner, 1, "choice", next, false, false, removedShipIds: [a, b]);
+        Require(saved.Ships.Count == 4 && saved.FormerShips!.Select(s => s.Id).ToHashSet().SetEquals([a, b]),
+            "Only user-selected local IDs become formerly owned, across both groups.");
+        Require(saved.Ships.All(s => before.Ships.Contains(s)) && saved.FormerShips!.All(s =>
+            before.Ships.Contains(s with { RemovedAt = null }) && s.RemovedAt == saved.SavedAt),
+            "Images, crops, AddedAt and bookmarks stay with each ID, including archived instances.");
+        Require(saved.InventorySavedAt == saved.SavedAt && saved.InventorySavedAt >= original.InventorySavedAt,
+            "Resolved saves are confirmed RSI inventory saves and update inventory time.");
+        var retry = new LocalHangarStore(test.Root).Save(Owner, 1, "choice", next.Reverse().ToArray(), false, false, removedShipIds: [b, a]);
+        Require(retry.Revision == saved.Revision && retry.InventorySavedAt == saved.InventorySavedAt,
+            "Idempotency includes order-independent removal choices and keeps the committed timestamp.");
+        Expect("hangar.revision_conflict", () => store.Save(Owner, 1, "choice", next, false, false,
+            removedShipIds: [before.Ships[1].Id, b]));
+        Expect("hangar.revision_conflict", () => store.PreviewRemovals(Owner, 1, next, false));
+        Require(store.PreviewRemovals(Owner, 2, [old[5]], false).Count == 0,
+            "An entirely absent group has no ambiguous survivor choice.");
+        var partial = store.Save(Owner, 2, "partial-after-choice", [old[1]], true, false);
+        Require(partial.Ships.Count == 4 && partial.FormerShips!.Count == 2,
+            "A later partial read preserves current and former local identities.");
+        foreach (var removedIndex in new[] { 0, 1 })
         {
-            Expect("hangar.ambiguous_instances", () => store.Save(Owner, 1, "reduce", [Ship("pack", 7, "Carrack")], partial, false));
-            Expect("hangar.ambiguous_instances", () => store.Save(Owner, 1, "increase",
-                [Ship("pack", 0, "Carrack"), Ship("pack", 1, "Carrack"), Ship("pack", 2, "Carrack")], partial, false));
+            using var pair = new Fixture();
+            var pairStore = new LocalHangarStore(pair.Root);
+            var two = pairStore.Save(Owner, 0, "pair", [old[0], old[1]], false, false);
+            var one = pairStore.Save(Owner, 1, "choose-one", [old[0]], false, false,
+                removedShipIds: [two.Ships[removedIndex].Id]);
+            Require(one.FormerShips!.Single().Id == two.Ships[removedIndex].Id &&
+                one.Ships.Single().Id == two.Ships[1 - removedIndex].Id,
+                "Either member of a two-to-one group can be explicitly archived; observation order cannot choose instead.");
         }
-        Require(store.Read(Owner).Ships.SequenceEqual(saved.Ships), "Ambiguous duplicate changes preserve every old instance.");
     }
 
     private static void DamagedStorageCannotBeReadOrOverwritten()
@@ -197,8 +329,8 @@ internal static class LocalHangarStoreTests
             Expect("hangar.storage_write_failed", () => store.Save(Owner, 1, "blocked", [Ship("b", 0, "Vulture")], false, false));
         using (var blocker = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            Expect("hangar.storage_read_failed", () => store.Read(Owner));
-            Expect("hangar.storage_read_failed", () => store.Save(Owner, 1, "unreadable", [Ship("b", 0, "Vulture")], false, false));
+            Expect("hangar.storage_busy", () => store.Read(Owner));
+            Expect("hangar.storage_busy", () => store.Save(Owner, 1, "unreadable", [Ship("b", 0, "Vulture")], false, false));
         }
         Require(File.ReadAllBytes(path).SequenceEqual(original) && Directory.GetFiles(folder, "*.tmp").Length == 0,
             "Failed replacement/read preserves original bytes and cleans only its own temporary file.");
@@ -215,14 +347,15 @@ internal static class LocalHangarStoreTests
         var path = Directory.GetFiles(Path.Combine(test.Root, "hangar-local-v1"), "*.json").Single();
         RewriteSnapshot(path, s => s with { Ships = s.Ships.Select((ship, i) => i == 1 ? ship : ship with
             { CustomImagePath = "synthetic-image.png", CustomImageCrop = new(0.1, 0.2, 0.5, 0.5) }).ToArray() });
-        var asymmetric = File.ReadAllBytes(path);
+        var asymmetric = store.Read(Owner);
         Require(store.Read(Owner).Ships.Count == 3, "Valid persisted customization remains readable.");
-        Expect("hangar.ambiguous_instances", () => store.Save(Owner, 1, "asymmetric", observations.Reverse().ToArray(), false, false));
-        Require(File.ReadAllBytes(path).SequenceEqual(asymmetric), "Asymmetric per-instance fields block reassignment.");
+        var preserved = store.Save(Owner, 1, "asymmetric", observations.Reverse().ToArray(), false, false);
+        Require(preserved.Ships.OrderBy(s => s.Id).SequenceEqual(asymmetric.Ships.OrderBy(s => s.Id)),
+            "Different images and crops remain bound to local IDs, never to unverified RSI child indices.");
         RewriteSnapshot(path, s => s with { Ships = s.Ships.Select(ship => ship with
             { CustomImagePath = "synthetic-image.png", CustomImageCrop = new(0.1, 0.2, 0.5, 0.5) }).ToArray() });
         var before = store.Read(Owner);
-        var after = store.Save(Owner, 1, "symmetric", observations.Reverse().ToArray(), false, false);
+        var after = store.Save(Owner, 2, "symmetric", observations.Reverse().ToArray(), false, false);
         Require(after.Ships.OrderBy(s => s.Id).SequenceEqual(before.Ships.OrderBy(s => s.Id)),
             "Singleton customization and symmetric duplicate ID/custom-field multisets survive rescanning.");
     }
@@ -272,6 +405,9 @@ internal static class LocalHangarStoreTests
         var original = File.ReadAllBytes(path);
         Func<LocalHangarSnapshot, LocalHangarSnapshot>[] invalid = [
             s => s with { Revision = 0 }, s => s with { SavedAt = null }, s => s with { OperationId = "" },
+            s => s with { InventorySavedAt = DateTimeOffset.UnixEpoch.AddTicks(-1) },
+            s => s with { InventorySavedAt = s.SavedAt!.Value.AddTicks(1) },
+            s => s with { InventorySavedAt = s.SavedAt!.Value.ToOffset(TimeSpan.FromHours(1)) },
             s => s with { Ships = [s.Ships[0], s.Ships[0]] }, s => s with { Ships = null! },
             s => s with { Ships = [s.Ships[0] with { Title = "" }] },
             s => s with { Ships = [s.Ships[0] with { AddedAt = DateTimeOffset.MinValue }] },

@@ -4,6 +4,13 @@ import '../../app/localization/app_strings.dart';
 import 'community_workspace_copy.dart';
 
 const communityManagementCopy = <String, (String, String, String)>{
+  'activityApplications': ('正在读取加入申请…', '正在讀取加入申請…', 'Loading applications…'),
+  'activityInvites': ('正在读取邀请码…', '正在讀取邀請碼…', 'Loading invite codes…'),
+  'activitySending': (
+    '正在处理管理请求…',
+    '正在處理管理請求…',
+    'Processing management request…',
+  ),
   'title': ('申请与邀请', '申請與邀請', 'Applications and invites'),
   'applications': ('加入申请', '加入申請', 'Applications'),
   'invites': ('邀请码', '邀請碼', 'Invite codes'),

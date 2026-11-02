@@ -12,6 +12,8 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  starbridge_interaction:
+    path: packages/starbridge_interaction
   video_player: ^2.14.0
   video_player_win: ^3.2.2
 
@@ -28,6 +30,8 @@ flutter:
     - assets/brand/
     - assets/brand/small_icons/dark_surface/
     - assets/brand/small_icons/light_surface/
+    - assets/brand/holiday/
+    - assets/achievements/
     # Explicit entries also invalidate incremental bundles when SCM is integrated.
     - assets/brand/scm_mark.png
     - assets/brand/scm_wordmark.png
@@ -50,3 +54,14 @@ flutter:
     - family: Source Code Pro
       fonts:
         - asset: assets/fonts/SourceCodeVF-Upright.ttf
+    - family: Saira
+      fonts:
+        - asset: assets/fonts/Saira-VF.ttf
+    - family: Rajdhani
+      fonts:
+        - asset: assets/fonts/Rajdhani-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Rajdhani-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Rajdhani-Bold.ttf
+          weight: 700

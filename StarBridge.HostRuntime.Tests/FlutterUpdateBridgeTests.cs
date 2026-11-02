@@ -87,6 +87,18 @@ internal static class FlutterUpdateBridgeTests
             new { schemaVersion = 1, version = "0.6.7", path = "untrusted" });
         if ((await routed.DispatchAsync(injected)).Response.Status != "error") throw new Exception("Installation accepted UI path.");
         await VerifyProgress();
+        InstalledUpdateVersionMismatchException.RequireMatch("0.7.0.4+4", "0.7.0.4");
+        using var mismatched = new FlutterUpdateBridgeDispatcher(null, () => "0.7.0.4", () => 1,
+            installation: new FlutterUpdateInstallation((_, _) => {
+                InstalledUpdateVersionMismatchException.RequireMatch("0.7.0.4", "0.7.0.2");
+                throw new Exception("Mismatch was accepted.");
+            }, (_, _) => throw new Exception("Mismatched installation handed off.")));
+        var mismatchReply = (await mismatched.DispatchAsync(BridgeEnvelope.Request(
+            FlutterUpdateBridgeDispatcher.PrepareRequestName, "mismatch", 1,
+            new { schemaVersion = 1, version = "0.7.0.5" }))).Response;
+        if (mismatchReply.Status != "error" || mismatchReply.Error?.Code != InstalledUpdateVersionMismatchException.Code ||
+            mismatchReply.Error.Retryable || mismatchReply.Error.Message != "Installed version verification failed.")
+            throw new Exception("Installation mismatch lost its safe actionable error code.");
     }
     private static async Task VerifyProgress()
     {

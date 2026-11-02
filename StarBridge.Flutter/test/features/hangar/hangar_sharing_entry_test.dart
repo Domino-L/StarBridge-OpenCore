@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/features/account/account_module.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
@@ -54,7 +55,13 @@ void main() {
       await tester.tap(entry);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        tester
+            .widget<StarBridgeCheckboxTile>(
+              find.byWidgetPredicate(
+                (w) => w is StarBridgeCheckboxTile && w.label == 'Org B',
+              ),
+            )
+            .value,
         isTrue,
       );
       await account.logout();
@@ -136,8 +143,9 @@ class _SharingPort implements CommunityHangarSharingPort {
   @override
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> selectedRefs,
-  ) async {
+    List<String> selectedRefs, {
+    bool includeImages = false,
+  }) async {
     writes++;
     selected = List.of(selectedRefs);
     return const CommunityHangarSharingOutcome('accepted');

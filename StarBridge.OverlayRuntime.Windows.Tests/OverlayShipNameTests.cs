@@ -52,6 +52,7 @@ internal static class OverlayShipNameTests
         var count = 0;
         var displayOnlyChinese = 0;
         var failures = new List<string>();
+        ShipCatalogVariantAssertions.CheckVariantPolicy(failures);
         foreach (var row in lines.Skip(1).Select(line => line.Split('\t')).Where(row => row.Length > Math.Max(en, zh)))
         {
             var english = row[en].Trim(); var chinese = row[zh].Trim();
@@ -70,9 +71,10 @@ internal static class OverlayShipNameTests
                     else if (name.RuntimeId is not null && match.RuntimeId != name.RuntimeId) failures.Add("Chinese label maps another variant: " + raw);
                     continue;
                 }
-                if (match?.ChineseName != name.ChineseName) failures.Add("Catalog spelling mismatch: " + raw);
-                if (ShipDisplayNamePresentation.ResolveChinese(raw, "待确认") != name.ChineseName) failures.Add("Native rendering mismatch: " + raw);
-                if (match is not null) CheckBothScenes(raw, match.ChineseName);
+                var expected = ShipCatalogVariantAssertions.ExpectedChinese(raw, english, chinese, match, failures);
+                if (match?.ChineseName != expected) failures.Add("Catalog spelling mismatch: " + raw);
+                if (ShipDisplayNamePresentation.ResolveChinese(raw, "待确认") != expected) failures.Add("Native rendering mismatch: " + raw);
+                if (match is not null) CheckBothScenes(raw, expected);
             }
             count++;
         }

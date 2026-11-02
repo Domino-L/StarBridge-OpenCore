@@ -5,10 +5,12 @@ using System.Text.Json.Nodes;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Communities;
 
-internal static class CommunityProfileClientTests
+internal static partial class CommunityProfileClientTests
 {
     internal static async Task Verify()
     {
+        await WideImageCapabilities();
+        await Background();
         await ReadAndSave();
         await LateReadCannotRestoreDraft();
         await ConcurrentSaveIsNotDuplicated();

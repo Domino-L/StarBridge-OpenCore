@@ -9,7 +9,7 @@ internal sealed partial class ScmAccountBridgeHost
     public async Task<object> SubmitAccountAppealAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
     {
         var input = AccountSafetyRequest.Appeal(payload);
-        var session = RequireRelaySession(context);
+        var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         var generation = Generation;
         if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);

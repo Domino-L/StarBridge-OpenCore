@@ -1,5 +1,13 @@
+import 'menu_overlay_locale.dart';
+import '../localization/app_strings.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
+import '../../design_system/interaction/starbridge_slider.dart';
 
 import 'menu_bridge_style.dart';
 import 'menu_workspace_controller.dart';
@@ -50,7 +58,14 @@ class _ReferenceAdjustment {
 /// Presentation state only. File selection, capture and WebView ownership stay
 /// native; no file paths or browser scripts can be supplied by the surface.
 class MenuLocalToolsController extends ChangeNotifier {
-  MenuLocalToolsController(this.call);
+  MenuLocalToolsController(this.call, {this.locale});
+  final Locale Function()? locale;
+  String _text(String key, [Map<String, Object?> args = const {}]) =>
+      menuOverlayFormat(
+        AppStrings.resolve(locale?.call() ?? const Locale('zh', 'CN')),
+        key,
+        args,
+      );
   final MenuLocalCall call;
   Uint8List? reference, screenshot;
   Uint8List? referencePreview;
@@ -97,6 +112,9 @@ class MenuLocalToolsController extends ChangeNotifier {
   bool get canUndo => _undo.isNotEmpty;
   String notice = '';
   bool busy = false, closed = false;
+  InteractionSource imageFeedbackSource = InteractionSource.programmatic;
+  void _beginImageFeedback([InteractionSource? source]) =>
+      imageFeedbackSource = source ?? captureStarBridgeActivationSource()();
   MenuDisplayPreferences display = const MenuDisplayPreferences();
   MenuSocialPreferences social = const MenuSocialPreferences();
   bool get showClock => display.showClock;
@@ -115,6 +133,7 @@ class MenuLocalToolsController extends ChangeNotifier {
   Future<void> image({bool capture = false}) async {
     if (busy || closed) return;
     final hideMenu = screenshotPreferences.hideMenu;
+    _beginImageFeedback();
     busy = true;
     if (capture) screenshotNoticeKey = '';
     notice = '';
@@ -212,10 +231,14 @@ class MenuLocalToolsController extends ChangeNotifier {
         }
         revision++;
       } else if (selected != null) {
-        notice = '图片无法读取，请选择 PNG、JPEG 或 BMP 图片（不超过 32 MB）。';
+        notice = _text('menu.overlay.image.invalid');
       }
     } on Object {
-      if (!closed) notice = capture ? '截图未完成，请重试。' : '图片未打开，请重试。';
+      if (!closed) {
+        notice = capture
+            ? _text('menu.overlay.image.captureFailed')
+            : _text('menu.overlay.image.openFailed');
+      }
     } finally {
       if (!closed) {
         busy = false;
@@ -234,8 +257,10 @@ class MenuLocalToolsController extends ChangeNotifier {
     required bool copy,
     required bool toDirectory,
     required MenuScreenshotPreferences preferences,
+    InteractionSource? source,
   }) async {
     if (busy || closed || screenshot == null) return;
+    _beginImageFeedback(source);
     busy = true;
     notice = '';
     screenshotNoticeKey = '';
@@ -303,6 +328,7 @@ class MenuLocalToolsController extends ChangeNotifier {
 
   Future<void> captureAndSave({bool toDirectory = false}) async {
     if (busy || closed) return;
+    final source = captureStarBridgeActivationSource()();
     final before = revision;
     final preferences = screenshotPreferences;
     screenshotNoticeKey = '';
@@ -312,12 +338,14 @@ class MenuLocalToolsController extends ChangeNotifier {
         copy: false,
         toDirectory: toDirectory,
         preferences: preferences,
+        source: source,
       );
     }
   }
 
   Future<void> editScreenshot(MenuImageEdit edit, {bool undo = false}) async {
     if (busy || closed || screenshot == null) return;
+    _beginImageFeedback();
     busy = true;
     screenshotNoticeKey = '';
     notice = '';
@@ -340,7 +368,7 @@ class MenuLocalToolsController extends ChangeNotifier {
       screenshotPreview = result;
       revision++;
     } on Object {
-      if (!closed) notice = '调整未完成，原截图仍保留，请重试。';
+      if (!closed) notice = _text('menu.overlay.image.adjustFailed');
     } finally {
       if (!closed) {
         busy = false;
@@ -355,6 +383,7 @@ class MenuLocalToolsController extends ChangeNotifier {
 
   Future<void> editReference(MenuImageEdit edit, {bool undo = false}) async {
     if (busy || closed || reference == null) return;
+    _beginImageFeedback();
     busy = true;
     notice = '';
     notifyListeners();
@@ -449,11 +478,12 @@ class MenuLocalToolsController extends ChangeNotifier {
   Future<bool> pin(Map<String, Object?> frame, {int? editSerial}) async {
     if (closed || reference == null) return false;
     if (busy) {
-      notice = '另一项图片操作正在处理，请稍后再固定。';
+      notice = _text('menu.overlay.image.pinBusy');
       notifyListeners();
       return false;
     }
     final serial = editSerial ?? referenceEditSerial;
+    _beginImageFeedback();
     busy = true;
     notice = '';
     notifyListeners();
@@ -474,11 +504,13 @@ class MenuLocalToolsController extends ChangeNotifier {
             h.toDouble(),
           );
         }
-        notice = pinDirty ? '调整尚未应用到游戏，请点击“更新固定画面”。' : '已固定。返回游戏后显示，再打开菜单可调整。';
+        notice = pinDirty
+            ? _text('menu.overlay.image.pinDirty')
+            : _text('menu.overlay.image.pinned');
       }
       return !closed;
     } on Object {
-      if (!closed) notice = '固定未完成，请缩小图片窗口后重试。';
+      if (!closed) notice = _text('menu.overlay.image.pinFailed');
       return false;
     } finally {
       if (!closed) {
@@ -490,6 +522,7 @@ class MenuLocalToolsController extends ChangeNotifier {
 
   Future<void> clear({bool capture = false, bool unpinOnly = false}) async {
     if (busy || closed) return;
+    _beginImageFeedback();
     busy = true;
     notifyListeners();
     try {
@@ -524,12 +557,12 @@ class MenuLocalToolsController extends ChangeNotifier {
       }
       revision++;
       notice = unpinOnly
-          ? '已取消固定。'
+          ? _text('menu.overlay.image.unpinned')
           : capture
-          ? '已清除预览，不会删除已保存的文件。'
-          : '已清除参考图并取消固定，不会删除原文件。';
+          ? _text('menu.overlay.image.clearedScreenshot')
+          : _text('menu.overlay.image.clearedReference');
     } on Object {
-      if (!closed) notice = '操作未完成，请重试。';
+      if (!closed) notice = _text('menu.overlay.errors.actionRetry');
     } finally {
       if (!closed) {
         busy = false;
@@ -573,6 +606,7 @@ class MenuLocalToolsController extends ChangeNotifier {
   @override
   void dispose() {
     closed = true;
+    imageFeedbackSource = InteractionSource.programmatic;
     notice = referenceNoticeKey = screenshotNoticeKey = '';
     reference = referencePreview = screenshot = screenshotPreview = null;
     _referenceUndo.clear();
@@ -617,14 +651,19 @@ class MenuLocalSettings extends StatelessWidget {
               onChanged: (value) => tools.settings(restoration: value),
             ),
             BridgeMenuAction(
-              label: '窗口边缘吸附',
+              key: const Key('menu-local-snap'),
+              label: menuText(context, 'menu.overlay.window.snap'),
+              selected: tools.snapWindows,
               onPressed: () => tools.settings(snap: !tools.snapWindows),
-              child: Text('${tools.snapWindows ? "✓" : "—"} 窗口边缘吸附'),
+              child: Text(
+                '${tools.snapWindows ? "✓" : "—"} ${menuText(context, 'menu.overlay.window.snap')}',
+              ),
             ),
             BridgeMenuAction(
-              label: '重置窗口位置',
+              key: const Key('menu-local-reset-layout'),
+              label: menuText(context, 'menu.overlay.window.resetLayout'),
               onPressed: workspace.resetPlacements,
-              child: const Text('重置窗口位置'),
+              child: Text(menuText(context, 'menu.overlay.window.resetLayout')),
             ),
             const SizedBox(height: 12),
             MenuDisplayEditor(
@@ -637,14 +676,17 @@ class MenuLocalSettings extends StatelessWidget {
               onChanged: (value) => tools.settings(social: value),
             ),
             const SizedBox(height: 12),
-            const Text('背景压暗'),
-            Slider(
+            Text(menuText(context, 'menu.overlay.window.dimming')),
+            StarBridgeSlider(
+              controlKey: const Key('menu-local-dimming'),
+              semanticLabel: menuText(context, 'menu.overlay.window.dimming'),
+              valueLabel: (value) => '${(value * 100).round()}%',
               value: tools.dimming,
               min: .3,
               max: .9,
               onChanged: (value) => tools.settings(dim: value),
             ),
-            const BridgeCaption('只调整菜单，不改变信息浮层或游戏画面。'),
+            BridgeCaption(menuText(context, 'menu.overlay.window.menuOnly')),
             const SizedBox(height: 16),
             MenuToolbarEditor(
               value: tools.toolbar,

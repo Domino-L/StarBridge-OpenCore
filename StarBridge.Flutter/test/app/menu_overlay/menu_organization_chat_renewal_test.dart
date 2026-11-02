@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_organizations_session.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_feature_view.dart';
@@ -165,15 +167,20 @@ void main() {
       session.show(true);
       await ready(session, 'chat');
       await Future<void>.delayed(const Duration(milliseconds: 80));
-      final original = MenuFeatureView.parse(session.currentView);
-      final identity = (session.currentView['organization'] as Map)['identity'];
+      final original = MenuFeatureView.parse(
+        resolvedMenuCopy(session.currentView),
+      );
+      final identity =
+          (resolvedMenuCopy(session.currentView)['organization']
+              as Map)['identity'];
       final reads = port.calls.length;
       port.renewal++;
       await session.refresh(silent: true);
       session.act(original.organization!.navigation.single.key, '');
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(
-        (session.currentView['organization'] as Map)['identity'],
+        (resolvedMenuCopy(session.currentView)['organization']
+            as Map)['identity'],
         identity,
       );
       expect(
@@ -190,23 +197,35 @@ void main() {
     session.show(true);
     await ready(session, 'chat');
     await Future<void>.delayed(const Duration(milliseconds: 80));
-    final view = MenuFeatureView.parse(session.currentView);
+    final view = MenuFeatureView.parse(resolvedMenuCopy(session.currentView));
     session.act(
-      view.buttons.singleWhere((b) => b.label == '发送消息').key,
+      view.buttons.singleWhere((b) => b.role == 'sendMessage').key,
       'fixture draft',
     );
     await Future<void>.delayed(const Duration(milliseconds: 100));
-    expect((session.currentView['chat'] as Map)['status'], 'unknown');
-    expect((session.currentView['chat'] as Map)['revision'], 0);
     expect(
-      MenuFeatureView.parse(session.currentView).buttons
-          .any((b) => b.label == '发送消息'),
+      (resolvedMenuCopy(session.currentView)['chat'] as Map)['status'],
+      'unknown',
+    );
+    expect(
+      (resolvedMenuCopy(session.currentView)['chat'] as Map)['revision'],
+      0,
+    );
+    expect(
+      MenuFeatureView.parse(resolvedMenuCopy(session.currentView)).buttons
+          .any((b) => b.role == 'sendMessage'),
       false,
     );
     port.confirm = true;
     await session.refresh(silent: true);
-    expect((session.currentView['chat'] as Map)['status'], 'sent');
-    expect((session.currentView['chat'] as Map)['revision'], 1);
+    expect(
+      (resolvedMenuCopy(session.currentView)['chat'] as Map)['status'],
+      'sent',
+    );
+    expect(
+      (resolvedMenuCopy(session.currentView)['chat'] as Map)['revision'],
+      1,
+    );
     expect(port.sent, hasLength(1));
   });
 }

@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
@@ -8,6 +9,7 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/bridge/bridge_client_session.dart';
+import 'image_cache_maintenance_controller.dart';
 import 'bridge_local_event_history.dart';
 import 'application_support_module.dart';
 import 'application_support_page.dart';
@@ -30,12 +32,14 @@ class DiagnosticsSettingsPage extends StatefulWidget {
     this.createRuntime,
     this.historyPort,
     this.session,
+    this.imageMaintenance,
     super.key,
   });
   final ApplicationSupportModule support;
   final RuntimeStatusController Function()? createRuntime;
   final LocalHistoryPort? historyPort;
   final BridgeClientSession? session;
+  final ImageCacheMaintenanceController? imageMaintenance;
 
   @override
   State<DiagnosticsSettingsPage> createState() =>
@@ -142,6 +146,7 @@ class _DiagnosticsSettingsPageState extends State<DiagnosticsSettingsPage> {
               DiagnosticsMaintenancePanel(
                 support: widget.support,
                 session: widget.session,
+                imageMaintenance: widget.imageMaintenance,
               ),
               SizedBox(height: tokens.space.sm),
               FlutterInstallationPanel(session: widget.session),

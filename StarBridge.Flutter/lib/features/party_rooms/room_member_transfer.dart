@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
 import 'room_commands.dart';
 import 'room_member_policy.dart';
 
 String roomTransferText(BuildContext context, String key) {
-  final locale = Localizations.localeOf(context);
+  return roomTransferTextForLocale(Localizations.localeOf(context), key);
+}
+
+String roomTransferTextForLocale(Locale locale, String key) {
   final index = locale.languageCode != 'zh'
       ? 2
       : locale.countryCode == 'TW'
@@ -26,8 +33,9 @@ String roomTransferText(BuildContext context, String key) {
 Future<void> transferRoomHost(
   BuildContext context,
   PartyRoomsModule module,
-  RoomMember member,
-) async {
+  RoomMember member, {
+  InteractionSource? source,
+}) async {
   final room = module.selectedRoom;
   final revision = module.contextRevision;
   if (!module.canTransferHost ||
@@ -35,8 +43,9 @@ Future<void> transferRoomHost(
       !canRemoveRoomMember(room, member)) {
     return;
   }
-  final accepted = await showDialog<bool>(
-    context: context,
+  final accepted = await showStarBridgeDialog<bool>(
+    context,
+    source: source,
     useRootNavigator: false,
     builder: (context) => AlertDialog(
       title: Text(roomTransferText(context, 'transfer')),
@@ -44,12 +53,16 @@ Future<void> transferRoomHost(
         '${member.displayName}\n\n${roomTransferText(context, 'hint')}',
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: false),
           child: Text(roomActionText(context, 'cancel')),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: true),
           child: Text(roomTransferText(context, 'transfer')),
         ),
       ],

@@ -1,14 +1,29 @@
+import '../../design_system/theme/classic_font_scope.dart';
+import '../../shared/guide/guide_empty_state.dart';
+import 'community_directory_controls.dart';
+import 'community_initial_read_wait.dart';
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
-import 'community_directory_presentation.dart';
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
 
-import 'dart:convert';
+import 'community_directory_presentation.dart';
+import 'community_directory_notice.dart';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/controls/semantic_action_style.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../common/organization_workspace_frame.dart';
+import '../common/social_read_activity.dart';
 import 'communities_module.dart';
 import 'community_directory_details.dart';
 import 'example_communities.dart';
@@ -51,19 +66,31 @@ class _CommunitiesPageState extends State<CommunitiesPage>
   }
 
   late final CommunitiesModule model;
+  late final SocialReadActivityBinding _directoryActivity;
   late final bool example;
   final search = TextEditingController();
   int revision = 0;
   final _workspaceKey = GlobalKey<CommunityWorkspaceViewState>();
   Future<bool> _confirmWorkspaceLeave() async =>
       await _workspaceKey.currentState?.confirmLeave() ?? true;
-  DialogRoute<bool>? _confirmation;
-  DialogRoute<String>? _filterDialog;
-  DialogRoute<void>? _outboxDialog;
-  DialogRoute<void>? _detailsDialog;
+  StarBridgeDialogRoute<bool>? _confirmation;
+  StarBridgeDialogRoute<String>? _filterDialog;
+  StarBridgeDialogRoute<void>? _outboxDialog;
+  StarBridgeDialogRoute<void>? _detailsDialog;
+  StarBridgeDialogRoute<CommunityCreationOutcome>? _creationDialog;
+  StarBridgeDialogRoute<CommunityInviteOutcome>? _inviteDialog;
   bool _creating = false;
   bool _inviting = false;
-  String t(String key) => AppStrings.of(context).text('communities.$key');
+  // Owned routes can still lay out while the page is being retired. Retain
+  // its latest inherited value, including caller-local language overrides.
+  late AppStrings _strings;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _strings = AppStrings.of(context);
+  }
+
+  String t(String key) => _strings.text('communities.$key');
   @override
   void initState() {
     super.initState();
@@ -71,6 +98,19 @@ class _CommunitiesPageState extends State<CommunitiesPage>
     example = port is ExampleCommunities;
     model = widget.module ?? CommunitiesModule(port);
     model.confirmWorkspaceLeave = _confirmWorkspaceLeave;
+    _directoryActivity = SocialReadActivityBinding(
+      model,
+      () => model.showDirectoryProgress,
+      initialRead:
+          !model.busy &&
+          model.selected == null &&
+          (model.directory == null || model.view != 'discover'),
+      phaseIdentity: () => model.directoryReadEpoch,
+    );
+    if (model.showDirectoryProgress) {
+      // This page joined an already admitted read; it did not initiate it.
+      _directoryActivity.source = InteractionSource.programmatic;
+    }
     revision = model.accountRevision;
     model.addListener(_changed);
     search.text = model.query;
@@ -90,24 +130,33 @@ class _CommunitiesPageState extends State<CommunitiesPage>
     if (revision != model.accountRevision) {
       revision = model.accountRevision;
       search.clear();
-      final route = _confirmation;
-      if (route?.isActive == true) route!.navigator?.removeRoute(route, false);
-      final filter = _filterDialog;
-      if (filter?.isActive == true) filter!.navigator?.removeRoute(filter);
-      final outbox = _outboxDialog;
-      if (outbox?.isActive == true) outbox!.navigator?.removeRoute(outbox);
-      final details = _detailsDialog;
-      if (details?.isActive == true) details!.navigator?.removeRoute(details);
+      for (final route in [
+        _confirmation,
+        _filterDialog,
+        _outboxDialog,
+        _detailsDialog,
+        _creationDialog,
+        _inviteDialog,
+      ]) {
+        retireStarBridgeDialog(route);
+      }
     }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    final details = _detailsDialog;
-    if (details?.isActive == true) details!.navigator?.removeRoute(details);
-    final outbox = _outboxDialog;
-    if (outbox?.isActive == true) outbox!.navigator?.removeRoute(outbox);
+    for (final route in [
+      _confirmation,
+      _filterDialog,
+      _outboxDialog,
+      _detailsDialog,
+      _creationDialog,
+      _inviteDialog,
+    ]) {
+      retireStarBridgeDialog(route);
+    }
+    _directoryActivity.dispose();
     model.removeListener(_changed);
     if (model.confirmWorkspaceLeave == _confirmWorkspaceLeave) {
       model.confirmWorkspaceLeave = null;
@@ -118,29 +167,32 @@ class _CommunitiesPageState extends State<CommunitiesPage>
   }
 
   Future<void> act(CommunityCard card, String action) async {
+    if (!mounted || _confirmation != null) return;
     final currentRevision = model.accountRevision;
-    final route = DialogRoute<bool>(
-      context: context,
+    final confirmed = await showStarBridgeDialog<bool>(
+      context,
       builder: (context) => AlertDialog(
         title: Text(t('action.$action')),
         content: Text('${card.name}\n\n${t('confirm.$action')}'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            controlKey: const Key('community-command-cancel'),
+            onActivate: (source) =>
+                dismissStarBridgeDialog(context, source: source, result: false),
             child: Text(t('cancel')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            controlKey: const Key('community-command-confirm'),
+            onActivate: (source) =>
+                dismissStarBridgeDialog(context, source: source, result: true),
             child: Text(t('action.$action')),
           ),
         ],
       ),
+      onRouteCreated: (route) => _confirmation = route,
     );
-    _confirmation = route;
-    final confirmed = await Navigator.of(
-      context,
-      rootNavigator: true,
-    ).push(route);
     _confirmation = null;
     if (confirmed == true &&
         mounted &&
@@ -151,8 +203,8 @@ class _CommunitiesPageState extends State<CommunitiesPage>
 
   Future<void> _showDirectoryDetails(CommunityCard initial) async {
     if (_detailsDialog != null) return;
-    final route = DialogRoute<void>(
-      context: context,
+    await showStarBridgeDialog<void>(
+      context,
       builder: (dialogContext) => AnimatedBuilder(
         animation: model,
         builder: (_, _) {
@@ -163,36 +215,41 @@ class _CommunitiesPageState extends State<CommunitiesPage>
             row: row,
             text: t,
             message: model.message == null ? null : t(model.message!),
-            onClose: () => Navigator.pop(dialogContext),
+            onClose: () => dismissStarBridgeDialog(
+              dialogContext,
+              source: currentStarBridgeActivationSource,
+            ),
             onAction: row == null || !model.canExecute(row)
                 ? null
                 : (action) => act(row, action),
-            onEnter: model.writing || row == null
+            onEnter: model.writing || row == null || row.displayOnly
                 ? null
                 : () {
-                    Navigator.pop(dialogContext);
+                    dismissStarBridgeDialog(
+                      dialogContext,
+                      source: currentStarBridgeActivationSource,
+                    );
                     model.open(row);
                   },
           );
         },
       ),
+      onRouteCreated: (route) => _detailsDialog = route,
     );
-    _detailsDialog = route;
-    await Navigator.of(context, rootNavigator: true).push(route);
-    if (identical(_detailsDialog, route)) _detailsDialog = null;
+    _detailsDialog = null;
   }
 
   Future<void> _openInvitationOutbox() async {
     final port = model.port;
     if (port is! CommunityInvitationSendPort || _outboxDialog != null) return;
-    final route = DialogRoute<void>(
-      context: context,
+    await showStarBridgeDialog<void>(
+      context,
+      useRootNavigator: false,
       builder: (_) => CommunityInvitationOutboxDialog(
         port: port as CommunityInvitationSendPort,
       ),
+      onRouteCreated: (route) => _outboxDialog = route,
     );
-    _outboxDialog = route;
-    await Navigator.of(context).push(route);
     _outboxDialog = null;
   }
 
@@ -201,15 +258,17 @@ class _CommunitiesPageState extends State<CommunitiesPage>
     if (_creating || model.writing || port is! CommunityCreationPort) return;
     final currentRevision = model.accountRevision;
     setState(() => _creating = true);
-    final result = await showDialog<CommunityCreationOutcome>(
-      context: context,
+    final result = await showStarBridgeDialog<CommunityCreationOutcome>(
+      context,
       barrierDismissible: false,
       builder: (_) => CommunityCreationDialog(
         example: example,
         port: port as CommunityCreationPort,
         invalidations: model.port.invalidations,
       ),
+      onRouteCreated: (route) => _creationDialog = route,
     );
+    _creationDialog = null;
     if (!mounted) return;
     setState(() => _creating = false);
     if (result == null || currentRevision != model.accountRevision) return;
@@ -236,15 +295,17 @@ class _CommunitiesPageState extends State<CommunitiesPage>
         ? port.createAdmissionPrivacy()
         : widget.createAdmissionPrivacy?.call();
     setState(() => _inviting = true);
-    await showDialog<CommunityInviteOutcome>(
-      context: context,
+    await showStarBridgeDialog<CommunityInviteOutcome>(
+      context,
       barrierDismissible: false,
       builder: (_) => CommunityInviteDialog(
         port: port as CommunityInvitePort,
         privacy: privacy,
         example: example,
       ),
+      onRouteCreated: (route) => _inviteDialog = route,
     );
+    _inviteDialog = null;
     if (!mounted) return;
     setState(() => _inviting = false);
     if (currentRevision != model.accountRevision) return;
@@ -259,11 +320,17 @@ class _CommunitiesPageState extends State<CommunitiesPage>
     final internal =
         model.selected != null &&
         const {'owner', 'member'}.contains(model.selected!.relationship);
-    if (internal) {
-      return Padding(padding: const EdgeInsets.all(20), child: _content());
+    // Joined communities use the main fleet's two-screen holo shell,
+    // full-bleed like the main fleet page (user decision 2026-10-23).
+    if (internal && model.port is CommunityWorkspacePort) {
+      return ClassicFontScope(
+        child: _workspaceView(model.selected!, holo: true),
+      );
     }
-    return Padding(
-      padding: const EdgeInsets.all(20),
+    if (internal) {
+      return OrganizationWorkspacePage(child: _content());
+    }
+    return OrganizationWorkspacePage(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -275,15 +342,19 @@ class _CommunitiesPageState extends State<CommunitiesPage>
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
               ),
-              TextButton(
-                onPressed: model.busy ? null : () => model.refresh(),
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                controlKey: const Key('community-directory-refresh'),
+                onActivate: model.busy ? null : (_) => model.refresh(),
                 child: Text(t('refresh')),
               ),
               if (model.port is CommunityCreationPort)
-                FilledButton(
-                  onPressed: model.writing || _creating
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.primary,
+                  controlKey: const Key('community-create-open'),
+                  onActivate: model.writing || _creating
                       ? null
-                      : createOrganization,
+                      : (_) => createOrganization(),
                   child: Text(creationText(context, 'title')),
                 ),
             ],
@@ -306,19 +377,27 @@ class _CommunitiesPageState extends State<CommunitiesPage>
             runSpacing: 8,
             children: [
               if (model.port is CommunityInvitePort)
-                OutlinedButton(
-                  onPressed: model.writing || _creating || _inviting
+                StarBridgeActionButton(
+                  controlKey: const Key('community-admission-open'),
+                  onActivate: model.writing || _creating || _inviting
                       ? null
-                      : enterInvite,
+                      : (_) => enterInvite(),
                   child: Text(inviteText(context, 'title')),
                 ),
               if (model.port is CommunityInvitationSendPort &&
                   (model.port as CommunityInvitationSendPort)
                       .invitationSendingAvailable)
-                OutlinedButton.icon(
-                  onPressed: _openInvitationOutbox,
-                  icon: const StandardIcon(StandardIconSemantic.outbox),
-                  label: Text(invitationSendText(context, 'records')),
+                StarBridgeActionButton(
+                  controlKey: const Key('community-outbox-open'),
+                  onActivate: (_) => _openInvitationOutbox(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const StandardIcon(StandardIconSemantic.outbox),
+                      const SizedBox(width: 8),
+                      Text(invitationSendText(context, 'records')),
+                    ],
+                  ),
                 ),
             ],
           ),
@@ -359,9 +438,10 @@ class _CommunitiesPageState extends State<CommunitiesPage>
   }
 
   Future<void> _showFilters() async {
+    if (!mounted || _filterDialog != null) return;
     final revision = model.accountRevision;
-    final route = DialogRoute<String>(
-      context: context,
+    final value = await showStarBridgeDialog<String>(
+      context,
       builder: (context) => Dialog(
         child: SizedBox(
           width: 400,
@@ -369,285 +449,260 @@ class _CommunitiesPageState extends State<CommunitiesPage>
           child: CommunityFilterPanel(
             value: model.filters,
             invalidations: model.port.invalidations,
-            onApply: (value) => Navigator.pop(context, value),
+            onApply: (value) => dismissStarBridgeDialog(
+              context,
+              source: currentStarBridgeActivationSource,
+              result: value,
+            ),
           ),
         ),
       ),
+      onRouteCreated: (route) => _filterDialog = route,
     );
-    _filterDialog = route;
-    final value = await Navigator.of(context, rootNavigator: true).push(route);
     _filterDialog = null;
     if (mounted && revision == model.accountRevision && value != null) {
       await model.refresh(newFilters: value);
     }
   }
 
+  Widget _workspaceView(CommunityCard selected, {bool holo = false}) =>
+      CommunityWorkspaceView(
+        holo: holo,
+        key: _workspaceKey,
+        port: model.port as CommunityWorkspacePort,
+        targetRef: selected.targetRef,
+        organizationKey: selected.key,
+        session: model.workspaceSession,
+        onFocused: model.onWorkspaceFocused,
+        onGovernanceChanged: model.refreshCurrentMembership,
+        onNameConfirmed: (code, name) =>
+            model.applyOrganizationName(selected.key, code, name),
+        actions: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final action in selected.actions)
+              StarBridgeActionButton(
+                controlKey: ValueKey('community-workspace-command-$action'),
+                tone: action == 'leave' ? ActionTone.warning : null,
+                onActivate: !model.canExecute(selected)
+                    ? null
+                    : (_) => act(selected, action),
+                child: Text(t('action.$action')),
+              ),
+          ],
+        ),
+      );
+
   Widget _content({bool showFilterButton = true}) {
     final selected = model.selected;
-    return Card(
-      color: context.tokens.surfaces.panel.fill,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: context.tokens.surfaces.panel.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (selected != null) ...[
-              if (!const {'owner', 'member'}.contains(selected.relationship))
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: TextButton(
-                    onPressed: () => model.open(null),
-                    child: Text(t('back')),
+    final content = OrganizationWorkspaceSurface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (selected != null) ...[
+            if (!const {'owner', 'member'}.contains(selected.relationship))
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('community-directory-back'),
+                  onActivate: (_) => model.open(null),
+                  child: Text(t('back')),
+                ),
+              ),
+            Expanded(
+              child:
+                  model.port is CommunityWorkspacePort &&
+                      const {'owner', 'member'}.contains(selected.relationship)
+                  ? _workspaceView(selected)
+                  : SingleChildScrollView(child: _card(selected, detail: true)),
+            ),
+          ] else ...[
+            ...communityDirectoryControls(
+              model: model,
+              search: search,
+              text: t,
+              showFilterButton: showFilterButton,
+              onFilters: _showFilters,
+            ),
+            if (model.message != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  t(model.message!),
+                  style: TextStyle(
+                    color: model.message!.startsWith('done.')
+                        ? context.tokens.colors.success
+                        : context.tokens.colors.warning,
                   ),
                 ),
-              Expanded(
-                child:
-                    model.port is CommunityWorkspacePort &&
-                        const {
-                          'owner',
-                          'member',
-                        }.contains(selected.relationship)
-                    ? CommunityWorkspaceView(
-                        key: _workspaceKey,
-                        port: model.port as CommunityWorkspacePort,
-                        targetRef: selected.targetRef,
-                        organizationKey: selected.key,
-                        session: model.workspaceSession,
-                        onFocused: model.onWorkspaceFocused,
-                        onGovernanceChanged: model.refreshCurrentMembership,
-                        onNameConfirmed: (code, name) => model
-                            .applyOrganizationName(selected.key, code, name),
-                        actions: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final action in selected.actions)
-                              OutlinedButton(
-                                onPressed: !model.canExecute(selected)
-                                    ? null
-                                    : () => act(selected, action),
-                                style: action == 'leave'
-                                    ? OutlinedButton.styleFrom(
-                                        foregroundColor:
-                                            context.tokens.colors.warning,
-                                      )
-                                    : null,
-                                child: Text(t('action.$action')),
-                              ),
-                          ],
-                        ),
-                      )
-                    : SingleChildScrollView(
-                        child: _card(selected, detail: true),
-                      ),
               ),
-            ] else ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: search,
-                      maxLength: 128,
-                      decoration: InputDecoration(
-                        labelText: t('search'),
-                        counterText: '',
+            if (model.directory != null &&
+                (model.showDirectoryProgress ||
+                    model.error != null ||
+                    model.directory!.cachedAtUtc != null))
+              CommunityDirectoryNotice(
+                model,
+                progress: SocialReadActivity(
+                  key: ValueKey((
+                    'community-directory-read',
+                    _directoryActivity.revision,
+                  )),
+                  source: _directoryActivity.source,
+                  opening: _directoryActivity.opening,
+                  label: t('loading'),
+                  height: 4,
+                ),
+              ),
+            Expanded(
+              child: model.busy && model.directory == null
+                  ? Center(
+                      child: CommunityInitialReadWait.directory(
+                        key: ValueKey((
+                          'community-directory-initial',
+                          _directoryActivity.revision,
+                        )),
+                        source: model.showDirectoryProgress
+                            ? _directoryActivity.source
+                            : InteractionSource.programmatic,
+                        opening:
+                            model.showDirectoryProgress &&
+                            _directoryActivity.opening,
+                        label: t('loading'),
                       ),
-                      enabled: !model.writing,
-                      onSubmitted: (_) => model.refresh(newQuery: search.text),
+                    )
+                  : model.error != null && model.directory == null
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(t(model.error!), textAlign: TextAlign.center),
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            controlKey: const Key('community-directory-retry'),
+                            onActivate: (_) => model.refresh(),
+                            child: Text(t('retry')),
+                          ),
+                        ],
+                      ),
+                    )
+                  : model.directory?.items.isEmpty != false &&
+                        model.view == 'mine' &&
+                        model.query.isEmpty &&
+                        model.directory?.cachedAtUtc == null &&
+                        GuideEmptyState.active(context)
+                  ? GuideEmptyState(
+                      'communities',
+                      onPrimary: () => unawaited(
+                        model.refresh(newView: 'discover', force: true),
+                      ),
+                    )
+                  : model.directory?.items.isEmpty != false
+                  ? Center(
+                      child: Text(
+                        t(
+                          model.directory?.cachedAtUtc != null
+                              ? 'shortcutsCachedEmpty'
+                              : model.query.isNotEmpty
+                              ? 'emptySearch'
+                              : 'empty.${model.view}',
+                        ),
+                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final textScale =
+                            (MediaQuery.textScalerOf(context).scale(14) / 14)
+                                .clamp(1.0, 3.0);
+                        final horizontal =
+                            constraints.maxHeight < 464 * textScale &&
+                            constraints.maxWidth >= 720 * textScale;
+                        final columns =
+                            ((constraints.maxWidth + 12) /
+                                    (horizontal ? 1000 * textScale : 532))
+                                .floor()
+                                .clamp(1, 4);
+                        final rows = model.directory!.items;
+                        return ListView.separated(
+                          key: PageStorageKey(
+                            'community-directory-${model.view}-${model.query}-${model.filters}',
+                          ),
+                          itemCount: (rows.length / columns).ceil(),
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (_, rowIndex) => Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (
+                                var column = 0;
+                                column < columns;
+                                column++
+                              ) ...[
+                                if (column > 0) const SizedBox(width: 12),
+                                Expanded(
+                                  child:
+                                      rowIndex * columns + column >= rows.length
+                                      ? const SizedBox.shrink()
+                                      : _card(
+                                          rows[rowIndex * columns + column],
+                                          horizontal: horizontal,
+                                        ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: model.writing
+            ),
+            if (model.canPrevious || model.directory?.next != null)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('community-directory-previous'),
+                    onActivate: model.busy || !model.canPrevious
                         ? null
-                        : () => model.refresh(newQuery: search.text),
-                    child: Text(t('searchButton')),
+                        : (_) => model.previous(),
+                    child: Text(t('previous')),
+                  ),
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('community-directory-next'),
+                    onActivate: model.busy || model.directory?.next == null
+                        ? null
+                        : (_) => model.next(),
+                    child: Text(t('next')),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (model.view == 'discover') ...[
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (showFilterButton)
-                      OutlinedButton(
-                        onPressed: model.writing ? null : _showFilters,
-                        child: Text(t('filters')),
-                      ),
-                    SizedBox(
-                      width: 180,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: model.filters == null
-                            ? 'recommended'
-                            : (jsonDecode(model.filters!) as Map)['sort']
-                                      as String? ??
-                                  'recommended',
-                        key: ValueKey('sort-${model.filters}'),
-                        decoration: InputDecoration(labelText: t('sort')),
-                        items: [
-                          for (final sort in [
-                            'recommended',
-                            'recent',
-                            'members',
-                            'name',
-                          ])
-                            DropdownMenuItem(
-                              value: sort,
-                              child: Text(t('sort.$sort')),
-                            ),
-                        ],
-                        onChanged: model.writing
-                            ? null
-                            : (sort) {
-                                final filters = model.filters == null
-                                    ? <String, dynamic>{}
-                                    : Map<String, dynamic>.from(
-                                        jsonDecode(model.filters!),
-                                      );
-                                filters['sort'] = sort;
-                                unawaited(
-                                  model.refresh(
-                                    newFilters: jsonEncode(filters),
-                                  ),
-                                );
-                              },
-                      ),
-                    ),
-                    if (model.directory?.totalCount != null)
-                      Text(
-                        '${model.directory!.totalCount} ${t('resultCount')}',
-                      ),
-                    if (model.filters != null && model.filters != '{}')
-                      TextButton(
-                        onPressed: model.writing
-                            ? null
-                            : () => model.refresh(newFilters: '{}'),
-                        child: Text(t('reset')),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (model.message != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    t(model.message!),
-                    style: TextStyle(
-                      color: model.message!.startsWith('done.')
-                          ? context.tokens.colors.success
-                          : context.tokens.colors.warning,
-                    ),
-                  ),
-                ),
-              Expanded(
-                child: model.busy && model.directory == null
-                    ? Center(
-                        child: Semantics(
-                          label: t('loading'),
-                          child: const CircularProgressIndicator(),
-                        ),
-                      )
-                    : model.error != null
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(t(model.error!), textAlign: TextAlign.center),
-                            TextButton(
-                              onPressed: () => model.refresh(),
-                              child: Text(t('retry')),
-                            ),
-                          ],
-                        ),
-                      )
-                    : model.directory?.items.isEmpty != false
-                    ? Center(
-                        child: Text(
-                          t(
-                            model.query.isNotEmpty
-                                ? 'emptySearch'
-                                : 'empty.${model.view}',
-                          ),
-                        ),
-                      )
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          final textScale =
-                              (MediaQuery.textScalerOf(context).scale(14) / 14)
-                                  .clamp(1.0, 3.0);
-                          final horizontal =
-                              constraints.maxHeight < 464 * textScale &&
-                              constraints.maxWidth >= 720 * textScale;
-                          final columns =
-                              ((constraints.maxWidth + 12) /
-                                      (horizontal ? 1000 * textScale : 532))
-                                  .floor()
-                                  .clamp(1, 4);
-                          final rows = model.directory!.items;
-                          return ListView.separated(
-                            key: PageStorageKey(
-                              'community-directory-${model.view}-${model.query}-${model.filters}',
-                            ),
-                            itemCount: (rows.length / columns).ceil(),
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (_, rowIndex) => Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                for (
-                                  var column = 0;
-                                  column < columns;
-                                  column++
-                                ) ...[
-                                  if (column > 0) const SizedBox(width: 12),
-                                  Expanded(
-                                    child:
-                                        rowIndex * columns + column >=
-                                            rows.length
-                                        ? const SizedBox.shrink()
-                                        : _card(
-                                            rows[rowIndex * columns + column],
-                                            horizontal: horizontal,
-                                          ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              if (model.canPrevious || model.directory?.next != null)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: model.busy || !model.canPrevious
-                          ? null
-                          : model.previous,
-                      child: Text(t('previous')),
-                    ),
-                    TextButton(
-                      onPressed: model.busy || model.directory?.next == null
-                          ? null
-                          : model.next,
-                      child: Text(t('next')),
-                    ),
-                  ],
-                ),
-            ],
           ],
-        ),
+        ],
       ),
+    );
+    // A workspace owns its separate asynchronous content branches; a directory
+    // response must not pretend that its workspace has finished loading.
+    if (selected != null) return content;
+    final items = model.directory?.items.length ?? 0;
+    return LoadingContentProbe(
+      route: '/communities',
+      status: model.busy
+          ? (model.directory == null
+                ? LoadingContentStatus.waiting
+                : LoadingContentStatus.partial)
+          : model.directory?.cachedAtUtc != null
+          ? LoadingContentStatus.partial
+          : model.error != null
+          ? LoadingContentStatus.failed
+          : model.directory == null
+          ? LoadingContentStatus.unavailable
+          : items == 0
+          ? LoadingContentStatus.empty
+          : LoadingContentStatus.data,
+      items: items,
+      child: content,
     );
   }
 

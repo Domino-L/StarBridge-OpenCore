@@ -1,3 +1,6 @@
+import 'package:starbridge_flutter/features/official_fleet/bridge_official_fleet_members_adapter.dart';
+import 'package:starbridge_flutter/features/official_fleet/official_fleet_members_models.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -64,6 +67,91 @@ void main() {
     await invalidated.timeout(const Duration(seconds: 1));
     await harness.close();
   });
+
+  test('optional SCM profile uses the existing typed fleet details', () async {
+    final harness = _OfficialFleetHostHarness(
+      profile: {
+        'memberCount': 1286,
+        'rsiDescription': 'Explore',
+        'scmSupplementalDescription': 'Supplement',
+        'languageLabels': ['English'],
+        'tags': ['Exploration'],
+      },
+    );
+    final snapshot = await harness.adapter.read();
+    expect(snapshot.fleet?.profile?.rsiDescription, 'Explore');
+    expect(snapshot.fleet?.profile?.scmSupplementalDescription, 'Supplement');
+    expect(snapshot.fleet?.profile?.memberCount, 1286);
+    expect(snapshot.fleet?.profile?.starBridgeRoleName, isNull);
+    expect(snapshot.fleet?.officialRankValue, 4);
+    await harness.close();
+  });
+
+  test('malformed profile media and negative counts fail closed', () async {
+    for (final patch in [
+      {'bannerUrl': 'http://invalid.example/image.png'},
+      {'memberCount': -1},
+    ]) {
+      final harness = _OfficialFleetHostHarness(
+        profile: {'languageLabels': <String>[], 'tags': <String>[], ...patch},
+      );
+      expect(
+        (await harness.adapter.read()).availability,
+        OfficialFleetAvailability.unavailable,
+      );
+      await harness.close();
+    }
+  });
+  test('member bridge reads use the verified session and keep missing facts unknown', () async {
+    final harness = _OfficialFleetHostHarness();
+    final adapter = BridgeOfficialFleetMembersAdapter(harness._session);
+    const query = OfficialFleetMemberDirectoryQuery(
+      sourceRef: 'officialFleet:7',
+      search: 'Pilot',
+    );
+    final snapshot = await adapter.read(query);
+    expect(snapshot.coverage, OfficialFleetRosterCoverage.scmRegisteredMembers);
+    expect(snapshot.totalPages, 2);
+    expect(snapshot.members.single.gameId, isEmpty);
+    expect(snapshot.members.single.starBridgeConnected, isNull);
+    expect(
+      snapshot.members.single.presence,
+      OfficialFleetMemberPresence.unknown,
+    );
+    expect(snapshot.onlineCount, isNull);
+    expect(harness.requests.last.accountContext?.subject, 'synthetic-subject');
+    await adapter.close();
+    await harness.close();
+  });
+
+  test('member projection rejects other sources, false presence and duplicate rows', () {
+    const query = OfficialFleetMemberDirectoryQuery(
+      sourceRef: 'officialFleet:7',
+      search: 'Pilot',
+    );
+    final good = _memberPayload();
+    final row = (good['members'] as List).single;
+    for (final patch in <Map<String, Object?>>[
+      {'sourceRef': 'officialFleet:8'},
+      {'search': 'other'},
+      {'totalPages': 1},
+      {'coverage': 'completeOfficialRoster'},
+      {'onlineCount': 2},
+      {
+        'members': [row, row],
+      },
+      {
+        'members': [
+          {...row as Map<String, Object?>, 'presence': 'online'},
+        ],
+      },
+    ]) {
+      expect(
+        () => parseOfficialFleetMembers({...good, ...patch}, query),
+        throwsA(isA<BridgeFormatException>()),
+      );
+    }
+  });
 }
 
 final class _OfficialFleetHostHarness {
@@ -71,6 +159,7 @@ final class _OfficialFleetHostHarness {
     this.signedIn = true,
     this.member = true,
     this.rankValue = 4,
+    this.profile,
   }) {
     final pair = InMemoryBridgeConnection.createPair();
     _host = pair.host;
@@ -86,6 +175,7 @@ final class _OfficialFleetHostHarness {
   final bool signedIn;
   final bool member;
   final int rankValue;
+  final Map<String, Object?>? profile;
   late final BridgeConnection _host;
   late final BridgeClientSession _session;
   late final StreamSubscription<BridgeEnvelope> _subscription;
@@ -110,6 +200,10 @@ final class _OfficialFleetHostHarness {
       }, context: signedIn ? context : null);
       return;
     }
+    if (request.name == 'officialFleet.getMembers') {
+      await _send(request, _memberPayload(), context: context);
+      return;
+    }
     if (request.name != 'officialFleet.getCurrent') {
       throw StateError('Unexpected request ${request.name}');
     }
@@ -125,6 +219,7 @@ final class _OfficialFleetHostHarness {
               'logoUrl': null,
               'officialRankName': 'Officer',
               'officialRankValue': rankValue,
+              'profile': profile,
             }
           : null,
       'freshness': 'live',
@@ -168,3 +263,29 @@ final class _OfficialFleetHostHarness {
     await _host.close();
   }
 }
+
+Map<String, Object?> _memberPayload() => {
+  'schemaVersion': 1,
+  'sourceRef': 'officialFleet:7',
+  'search': 'Pilot',
+  'filter': 'all',
+  'pageNumber': 1,
+  'pageSize': 50,
+  'totalCount': 51,
+  'totalPages': 2,
+  'onlineCount': null,
+  'inGameCount': null,
+  'coverage': 'scmRegisteredMembers',
+  'supportedFilters': ['all'],
+  'members': [
+    {
+      'memberRef': 'a' * 64,
+      'callsign': 'Pilot',
+      'gameId': '',
+      'officialRankName': 'Member',
+      'officialRankValue': null,
+      'presence': 'unknown',
+      'starBridgeConnected': null,
+    },
+  ],
+};

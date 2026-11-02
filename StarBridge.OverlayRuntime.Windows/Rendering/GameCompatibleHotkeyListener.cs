@@ -55,6 +55,7 @@ internal sealed class GameCompatibleHotkeyTriggerFilter
         return (input.PressedModifiers & GameCompatibleHotkeyModifiers.SupportedMask) ==
                (_binding.Modifiers & GameCompatibleHotkeyModifiers.SupportedMask);
     }
+    internal bool MatchesPrimary(uint key) => key == _binding.VirtualKey;
 }
 
 internal sealed class GameCompatibleHotkeyTriggerRouter
@@ -84,6 +85,7 @@ internal sealed class GameCompatibleHotkeyTriggerRouter
         commandId = acceptedCommand ?? 0;
         return acceptedCommand.HasValue;
     }
+    internal bool ContainsPrimary(uint key) => _routes.Any(route => route.Filter.MatchesPrimary(key));
 }
 
 internal sealed class OverlayHotkeyTriggerGate
@@ -157,6 +159,7 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
     private int _lastError;
     private bool _rawInputRegistered;
     private bool _disposed;
+    private long _lastShortcutDiagnostic;
 
     internal GameCompatibleHotkeyListener()
     {
@@ -206,6 +209,11 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
             throw new ObjectDisposedException(nameof(GameCompatibleHotkeyListener));
         }
 
+        if (IsRunning && targetWindow == _targetWindow && targetMessage == _targetMessage)
+        {
+            _triggerRouter = new GameCompatibleHotkeyTriggerRouter(routes);
+            return true;
+        }
         Stop();
         if (targetWindow == IntPtr.Zero ||
             targetMessage == 0 ||
@@ -483,13 +491,20 @@ internal sealed class GameCompatibleHotkeyListener : IDisposable
                 targetMessage = _targetMessage;
             }
 
-            if (triggerRouter?.TryResolve(
+            var commandId = 0;
+            var resolved = triggerRouter?.TryResolve(
                     new GameCompatibleHotkeyInput(
                         rawInput.Keyboard.VirtualKey,
                         ResolvePressedModifiers(),
                         isKeyDown,
                         IsInjected: false),
-                    out var commandId) == true &&
+                    out commandId) == true;
+            if (isKeyDown && triggerRouter?.ContainsPrimary(rawInput.Keyboard.VirtualKey) == true &&
+                Environment.TickCount64 - _lastShortcutDiagnostic >= 1500 && StarCitizenProcessProbe.IsForeground()) {
+                _lastShortcutDiagnostic = Environment.TickCount64;
+                DesktopRuntimeDiagnostics.WriteDiagnosticLog("native-menu-shortcut | stage=input accepted=" + resolved);
+            }
+            if (resolved &&
                 targetWindow != IntPtr.Zero &&
                 targetMessage != 0)
             {

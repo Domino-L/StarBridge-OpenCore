@@ -27,8 +27,12 @@ public sealed record InformationOverlayRuntimeWorkspace(
     bool SourcePresetsEnabled = false,
     OverlayTemporarySource? TemporarySource = null)
 {
+    // Off: every shortcut is read through Raw Input and no hotkey is registered.
+    public bool UseRegisteredHotkey { get; init; }
     public bool UsesModuleSources => SourcePresetsEnabled || Sources is not null;
     public bool HasInvalidSourceConfiguration => UsesModuleSources && Sources is null;
+    public bool IsPresetCorrupt { get; init; }
+    public bool HasInvalidConfiguration => IsPresetCorrupt || HasInvalidSourceConfiguration;
 }
 
 /// <summary>Process-local display choice, scoped to the exact signed-in session.
@@ -105,6 +109,41 @@ public interface IInformationOverlayRuntime : IDisposable
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>Optional push of the same snapshot <c>Sync</c> returns, raised only
+/// when it differs from the last one raised. Runs on the runtime's own thread:
+/// handlers must return quickly and never call back into the runtime.</summary>
+public interface IInformationOverlayRuntimeStateSource
+{
+    event Action<InformationOverlayRuntimeSnapshot>? StateChanged;
+}
+
+/// <summary>Optional declarative presentation forms from installed appearances.
+/// Descriptions never grant use, publication or entitlement.</summary>
+public interface IInformationOverlayAppearanceConfigurationCatalog
+{
+    IReadOnlyList<System.Text.Json.JsonElement> GetAppearanceConfigurations();
+}
+
+/// <summary>Optional read-only installed collection. A query may refresh account
+/// receipts but cannot start usage, equip items, or grant appearance access.</summary>
+public interface IInformationOverlayAppearanceProgressCatalog
+{
+    IReadOnlyList<string> GetAppearanceProgressIds();
+    ValueTask<System.Text.Json.JsonElement?> ReadAppearanceProgressAsync(
+        string appearanceId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Optional isolated, content-free native preview of an installed appearance.
+/// Opening never applies a skin, reads live business sources, or saves a preset.
+/// Opaque session IDs make late closes harmless to a replacement preview.</summary>
+public interface IInformationOverlayAppearancePreviewRuntime
+{
+    IReadOnlyList<string> GetLivePreviewAppearanceIds();
+    ValueTask<string?> OpenAppearancePreviewAsync(string appearanceId,
+        OverlayAppearanceOptions options, bool reduceMotion = false, CancellationToken cancellationToken = default);
+    ValueTask CloseAppearancePreviewAsync(string sessionId, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Host changes schedule a coalesced native refresh; no HWND or render
 /// implementation crosses this boundary.</summary>
 public interface IInformationOverlayLiveUpdateSink
@@ -113,6 +152,10 @@ public interface IInformationOverlayLiveUpdateSink
     // A menu may temporarily hide an enabled HUD. Keep the existing authorized
     // source driver alive without claiming the HWND is visible.
     bool HasDisplayDemand => IsVisible;
+    // While the game runs and the HUD is closed, keep its module sources' leases
+    // renewed by ordinary fresh reads so reopening has data at once. Not a display
+    // demand: no events, prompts or window refreshes follow from it.
+    bool HasStandbyDemand => false;
     // Null means legacy single-source mode, not a missing v2 source grant.
     InformationOverlayModuleDemand? ModuleDemand => null;
     void RequestContentRefresh();

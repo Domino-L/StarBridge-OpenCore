@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+
 import '../../features/party_rooms/room_invitation_dialog.dart';
 import 'app_composition.dart';
 
@@ -10,6 +12,9 @@ Future<bool> openRoomInvitationDestination(
   String route, {
   required bool Function() isCurrent,
 }) async {
+  // Capture before the notification refresh: later pointer movement must not
+  // turn a keyboard-triggered destination into an animated opening.
+  final source = StarBridgeActivationOrigin.sourceOf(context);
   final rooms = composition.partyRooms;
   final revision = rooms.contextRevision;
   if (!await rooms.refreshForNotification()) return false;
@@ -26,6 +31,7 @@ Future<bool> openRoomInvitationDestination(
     rooms,
     host: sent,
     invitationId: invitationId,
+    source: source,
   );
   return true;
 }

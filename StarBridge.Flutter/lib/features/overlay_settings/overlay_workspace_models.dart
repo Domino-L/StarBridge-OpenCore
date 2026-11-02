@@ -7,11 +7,16 @@ import 'overlay_preset_sources.dart';
 import 'overlay_workspace_layout_item.dart';
 import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_appearance.dart';
+import 'overlay_appearance_options.dart';
+import 'overlay_appearance_configuration.dart';
+import 'overlay_workspace_hotkey_model.dart';
 
 export 'overlay_workspace_appearance.dart';
+export 'overlay_appearance_options.dart';
 
 export 'overlay_workspace_layout_item.dart';
 export 'overlay_preset_sources.dart';
+export 'overlay_workspace_hotkey_model.dart';
 
 enum OverlayWorkspaceAvailability { unavailable, available }
 
@@ -27,6 +32,7 @@ final class OverlayWorkspaceRuntimeDraft {
     required this.layout,
     required this.hotkey,
     this.sources,
+    this.appearanceOptions,
   });
 
   final int expectedRevision;
@@ -34,6 +40,7 @@ final class OverlayWorkspaceRuntimeDraft {
   final List<OverlayWorkspaceLayoutItem> layout;
   final OverlayWorkspaceHotkey hotkey;
   final OverlayPresetSources? sources;
+  final OverlayAppearanceOptions? appearanceOptions;
 
   Map<String, Object?> toMap() => <String, Object?>{
     'expectedRevision': expectedRevision,
@@ -41,6 +48,8 @@ final class OverlayWorkspaceRuntimeDraft {
     'layout': layout.map((item) => item.toMap()).toList(growable: false),
     'hotkey': hotkey.toUpdateMap(),
     if (sources != null) 'sources': sources!.toMap(),
+    if (appearanceOptions != null)
+      'appearanceOptions': appearanceOptions!.toMap(),
   };
 }
 
@@ -57,6 +66,7 @@ final class OverlayRuntimeSnapshot {
     required this.usedFallbackSkin,
     this.failureCode,
     this.retryable = false,
+    this.hotkeyRegistrationFailures,
   });
 
   const OverlayRuntimeSnapshot.unavailable({
@@ -69,7 +79,8 @@ final class OverlayRuntimeSnapshot {
        requestedSkin = 'Default',
        effectiveSkin = 'Default',
        usedFallbackSkin = false,
-       retryable = true;
+       retryable = true,
+       hotkeyRegistrationFailures = null;
 
   final String windowState;
   final bool isVisible;
@@ -81,6 +92,9 @@ final class OverlayRuntimeSnapshot {
   final bool usedFallbackSkin;
   final String? failureCode;
   final bool retryable;
+
+  /// Shortcuts Windows refused to register; they stay on Raw Input.
+  final String? hotkeyRegistrationFailures;
 
   bool get available => windowState != 'unavailable';
   bool get failed => windowState == 'failed';
@@ -100,7 +114,11 @@ final class OverlayRuntimeSnapshot {
       'usedFallbackSkin',
       'retryable',
     };
-    const optionalFields = <String>{'failureCode'};
+    const optionalFields = <String>{
+      'failureCode',
+      'hotkeyRegistrationFailures',
+    };
+    final registrationFailures = source['hotkeyRegistrationFailures'];
     final fields = source.keys.toSet();
     final windowState = source['windowState'];
     final isVisible = source['isVisible'];
@@ -153,6 +171,7 @@ final class OverlayRuntimeSnapshot {
         usedFallbackSkin is! bool ||
         (failureCode != null && failureCode is! String) ||
         retryable is! bool ||
+        (registrationFailures != null && registrationFailures is! String) ||
         isVisible != (windowState == 'open')) {
       throw const FormatException('Invalid overlay runtime response.');
     }
@@ -167,6 +186,7 @@ final class OverlayRuntimeSnapshot {
       usedFallbackSkin: usedFallbackSkin,
       failureCode: failureCode as String?,
       retryable: retryable,
+      hotkeyRegistrationFailures: registrationFailures as String?,
     );
   }
 }
@@ -250,7 +270,18 @@ final class OverlayWorkspaceSettings {
     'eventNotificationDecorationOpacity',
     'skipStartupTransitionWhenGameForeground',
     'requestedSkin',
+    'calmDisplay',
+    'calmWaitSeconds',
+    'calmIdleOpacity',
+    'calmLitOpacity',
+    'calmLightWhen',
+    'calmPeekHotkey',
   };
+
+  /// A peek key as the native HUD parses it; empty means unbound.
+  static final peekHotkeyPattern = RegExp(
+    r'^(?:(?:Ctrl|Alt|Shift|Win)\+)*(?:[A-Z0-9]|F(?:[1-9]|1[0-2]))$',
+  );
 
   static const _durationFields = <String>{
     'memberPresence',
@@ -268,9 +299,47 @@ final class OverlayWorkspaceSettings {
 
   final Map<String, Object?> values;
 
+  // 归档外观的旧值迁移；整数编号与 C# 的历史序列化值保持一致。
+  static const _archivedAppearanceValues = <String, Set<Object>>{
+    'skin': {'lagrangeweave', '2', 2},
+    'requestedSkin': {'lagrangeweave', '2', 2},
+    'theme': {'lagrangeweave', '14', 14},
+    'startupTransitionStyle': {'lagrangeweaveequilibrium', '6', 6},
+  };
+  static const _archivedAppearanceDefaults = <String, String>{
+    'skin': 'Default',
+    'requestedSkin': 'Default',
+    'theme': 'Default',
+    'startupTransitionStyle': 'BridgeTerminal',
+  };
+
   factory OverlayWorkspaceSettings.fromMap(Map<String, Object?> source) {
     source = Map<String, Object?>.from(source)
-      ..putIfAbsent('eventNotificationDecorationOpacity', () => 1.0);
+      ..putIfAbsent('eventNotificationDecorationOpacity', () => 1.0)
+      // A Host from before calm display: treat it as an older file (Unset).
+      ..putIfAbsent('calmDisplay', () => 'Unset')
+      ..putIfAbsent('calmWaitSeconds', () => 10)
+      ..putIfAbsent('calmIdleOpacity', () => 0.0)
+      ..putIfAbsent('calmLitOpacity', () => 0.0)
+      ..putIfAbsent('calmLightWhen', () => 'Relevant')
+      ..putIfAbsent('calmPeekHotkey', () => '');
+    // An archived skin takes its locked theme and transition with it; an archived
+    // theme or transition on another, valid appearance is replaced alone.
+    final archived = {
+      for (final entry in _archivedAppearanceValues.entries)
+        if (entry.value.contains(
+          source[entry.key] is String
+              ? (source[entry.key] as String).trim().toLowerCase()
+              : source[entry.key],
+        ))
+          entry.key,
+    };
+    final archivedSkin =
+        archived.contains('skin') || archived.contains('requestedSkin');
+    for (final field
+        in archivedSkin ? _archivedAppearanceDefaults.keys : archived) {
+      source[field] = _archivedAppearanceDefaults[field];
+    }
     if (!setEquals(source.keys.toSet(), requiredFields)) {
       throw const FormatException('Incomplete overlay workspace settings.');
     }
@@ -306,6 +375,9 @@ final class OverlayWorkspaceSettings {
         OverlayWorkspaceFieldKind.eventTypes =>
           value is int && value >= 0 && (value & ~_eventTypeMask) == 0,
         OverlayWorkspaceFieldKind.eventDurations => true,
+        OverlayWorkspaceFieldKind.hotkey =>
+          value is String &&
+              (value.isEmpty || peekHotkeyPattern.hasMatch(value)),
       };
       if (!valid) {
         throw FormatException('Invalid overlay setting: ${field.field}.');
@@ -353,6 +425,7 @@ final class OverlayWorkspacePreset {
     required this.settings,
     required this.layout,
     this.sources,
+    this.appearanceOptions = const OverlayAppearanceOptions.empty(),
   });
 
   final String id;
@@ -362,6 +435,7 @@ final class OverlayWorkspacePreset {
   final OverlayWorkspaceSettings settings;
   final List<OverlayWorkspaceLayoutItem> layout;
   final OverlayPresetSources? sources;
+  final OverlayAppearanceOptions appearanceOptions;
 
   factory OverlayWorkspacePreset.fromMap(Map<String, Object?> source) {
     final id = source['id'];
@@ -384,50 +458,17 @@ final class OverlayWorkspacePreset {
       sources: source['sources'] == null
           ? null
           : OverlayPresetSources.fromMap(stringMap(source['sources'])),
+      appearanceOptions: source.containsKey('appearanceOptions')
+          ? OverlayAppearanceOptions.fromMap(
+              stringMap(source['appearanceOptions']),
+            )
+          : const OverlayAppearanceOptions.empty(),
       settings: OverlayWorkspaceSettings.fromMap(stringMap(source['settings'])),
       layout: objectList(source['layout'])
           .map((item) => OverlayWorkspaceLayoutItem.fromMap(stringMap(item)))
           .toList(growable: false),
     );
   }
-}
-
-@immutable
-final class OverlayWorkspaceHotkey {
-  const OverlayWorkspaceHotkey({
-    required this.binding,
-    required this.enabled,
-    required this.runtimeState,
-  });
-
-  final String binding;
-  final bool enabled;
-  final String runtimeState;
-
-  factory OverlayWorkspaceHotkey.fromMap(Map<String, Object?> source) {
-    const fields = <String>{'binding', 'enabled', 'runtimeState'};
-    final binding = source['binding'];
-    final enabled = source['enabled'];
-    final runtimeState = source['runtimeState'];
-    if (!setEquals(source.keys.toSet(), fields) ||
-        binding is! String ||
-        binding.isEmpty ||
-        enabled is! bool ||
-        runtimeState is! String ||
-        runtimeState.isEmpty) {
-      throw const FormatException('Invalid overlay hotkey state.');
-    }
-    return OverlayWorkspaceHotkey(
-      binding: binding,
-      enabled: enabled,
-      runtimeState: runtimeState,
-    );
-  }
-
-  Map<String, Object?> toUpdateMap() => {
-    'binding': binding,
-    'enabled': enabled,
-  };
 }
 
 enum OverlayWorkspaceMutationKind {
@@ -458,6 +499,7 @@ final class OverlayWorkspaceMutation {
     this.automaticSource,
     this.temporaryOwnerKey,
     this.runtimeDraft,
+    this.appearanceOptions,
   });
 
   const OverlayWorkspaceMutation.saveActive({
@@ -466,6 +508,7 @@ final class OverlayWorkspaceMutation {
     required String renderMode,
     required OverlayWorkspaceHotkey hotkey,
     OverlayPresetSources? sources,
+    OverlayAppearanceOptions? appearanceOptions,
   }) : this._(
          kind: OverlayWorkspaceMutationKind.saveActive,
          settings: settings,
@@ -473,6 +516,7 @@ final class OverlayWorkspaceMutation {
          renderMode: renderMode,
          hotkey: hotkey,
          sources: sources,
+         appearanceOptions: appearanceOptions,
        );
 
   const OverlayWorkspaceMutation.activatePreset(String presetId)
@@ -541,12 +585,14 @@ final class OverlayWorkspaceMutation {
     required OverlayWorkspaceSettings settings,
     required List<OverlayWorkspaceLayoutItem> layout,
     OverlayPresetSources? sources,
+    OverlayAppearanceOptions? appearanceOptions,
   }) : this._(
          kind: OverlayWorkspaceMutationKind.importPreset,
          name: name,
          settings: settings,
          layout: layout,
          sources: sources,
+         appearanceOptions: appearanceOptions,
        );
 
   const OverlayWorkspaceMutation.configurePresetSources(
@@ -574,6 +620,7 @@ final class OverlayWorkspaceMutation {
   final ({String ownerKey, int generation, String source})? automaticSource;
   final String? temporaryOwnerKey;
   final OverlayWorkspaceRuntimeDraft? runtimeDraft;
+  final OverlayAppearanceOptions? appearanceOptions;
 
   Map<String, Object?> toPayload(int expectedRevision) {
     return <String, Object?>{
@@ -590,6 +637,8 @@ final class OverlayWorkspaceMutation {
       if (renderMode != null) 'renderMode': renderMode,
       if (hotkey != null) 'hotkey': hotkey!.toUpdateMap(),
       if (sources != null) 'sources': sources!.toMap(),
+      if (appearanceOptions != null)
+        'appearanceOptions': appearanceOptions!.toMap(),
       if (replaceAutoSwitchPresetId != null)
         'replaceAutoSwitchPresetId': replaceAutoSwitchPresetId,
       if (automaticSource case final trigger?)
@@ -628,6 +677,11 @@ final class OverlayWorkspaceSnapshot {
     this.failure,
     this.sourcePresetsEnabled = false,
     this.removedOrganizationBindings = false,
+    this.appearanceOptionsEnabled = false,
+    this.appearanceOptions = const OverlayAppearanceOptions.empty(),
+    this.appearanceConfigurations = const [],
+    this.livePreviewAppearanceIds = const {},
+    this.appearanceProgressIds = const {},
   });
 
   const OverlayWorkspaceSnapshot.unavailable({
@@ -649,6 +703,12 @@ final class OverlayWorkspaceSnapshot {
     required List<OverlayWorkspacePreset> presets,
     bool sourcePresetsEnabled = false,
     bool removedOrganizationBindings = false,
+    bool appearanceOptionsEnabled = false,
+    List<OverlayAppearanceConfiguration> appearanceConfigurations = const [],
+    Set<String> livePreviewAppearanceIds = const {},
+    Set<String> appearanceProgressIds = const {},
+    OverlayAppearanceOptions appearanceOptions =
+        const OverlayAppearanceOptions.empty(),
   }) : this._(
          availability: OverlayWorkspaceAvailability.available,
          revision: revision,
@@ -662,6 +722,11 @@ final class OverlayWorkspaceSnapshot {
          presets: presets,
          sourcePresetsEnabled: sourcePresetsEnabled,
          removedOrganizationBindings: removedOrganizationBindings,
+         appearanceOptionsEnabled: appearanceOptionsEnabled,
+         appearanceConfigurations: appearanceConfigurations,
+         livePreviewAppearanceIds: livePreviewAppearanceIds,
+         appearanceProgressIds: appearanceProgressIds,
+         appearanceOptions: appearanceOptions,
        );
 
   final OverlayWorkspaceAvailability availability;
@@ -677,6 +742,11 @@ final class OverlayWorkspaceSnapshot {
   final OverlaySettingsFailure? failure;
   final bool sourcePresetsEnabled;
   final bool removedOrganizationBindings;
+  final bool appearanceOptionsEnabled;
+  final List<OverlayAppearanceConfiguration> appearanceConfigurations;
+  final Set<String> livePreviewAppearanceIds;
+  final Set<String> appearanceProgressIds;
+  final OverlayAppearanceOptions appearanceOptions;
 }
 
 Map<String, Object?> stringMap(Object? value) {

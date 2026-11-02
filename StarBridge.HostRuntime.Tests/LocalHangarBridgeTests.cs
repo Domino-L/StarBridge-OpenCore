@@ -20,8 +20,13 @@ internal static class LocalHangarBridgeTests
             var saved = test.Send("save", new JsonObject { ["expectedRevision"] = 0, ["confirmEmpty"] = false });
             if (saved.Error != null || saved.Payload.GetProperty("total").GetInt32() != 2 ||
                 saved.Payload.GetProperty("revision").GetInt64() != 1)
-                throw new Exception("Confirmed scan was not durably saved");
+                throw new Exception($"Confirmed scan was not durably saved: {saved.Error?.Code ?? "ok"}");
             var repeated = test.Send("save", new JsonObject { ["expectedRevision"] = 0, ["confirmEmpty"] = false });
+            if (saved.Payload.GetProperty("inventorySavedAt").GetDateTimeOffset() !=
+                saved.Payload.GetProperty("savedAt").GetDateTimeOffset() ||
+                repeated.Payload.GetProperty("inventorySavedAt").GetDateTimeOffset() !=
+                saved.Payload.GetProperty("inventorySavedAt").GetDateTimeOffset())
+                throw new Exception("Inventory bridge lost the committed RSI read/save time.");
             if (repeated.Error != null || repeated.Payload.GetProperty("revision").GetInt64() != 1)
                 throw new Exception("Retry duplicated the save");
             test.Send("cancel", new JsonObject());
@@ -78,7 +83,41 @@ internal static class LocalHangarBridgeTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         VerifyEmptyConfirmation();
+        VerifyBookmarks();
+        LocalHangarReconciliationBridgeTests.Verify();
         return Task.CompletedTask;
+    }
+
+    private static void VerifyBookmarks()
+    {
+        var root = Directory.CreateTempSubdirectory("sb-hangar-bookmarks-");
+        try
+        {
+            var store = new LocalHangarStore(root.FullName);
+            using var test = new Harness(store);
+            var initial = store.Save(test.Owner.Account, 0, "bookmark-seed",
+                [new("a", 0, "Carrack", "Anvil", null), new("b", 0, "Carrack", "Anvil", null)], false, false);
+            var id = initial.Ships[0].Id;
+            var args = new JsonObject { ["shipId"] = id, ["favorite"] = true, ["expectedRevision"] = 1 };
+            var result = test.Send("favorite", args);
+            if (result.Payload.GetProperty("inventorySavedAt").GetDateTimeOffset() != initial.InventorySavedAt ||
+                result.Payload.GetProperty("savedAt").GetDateTimeOffset() < initial.SavedAt)
+                throw new Exception("Bookmark bridge changed the RSI inventory time.");
+            if (result.Error is not null || result.Payload.GetProperty("revision").GetInt64() != 2 ||
+                !result.Payload.GetProperty("ships")[0].GetProperty("isFavorite").GetBoolean() ||
+                result.Payload.GetProperty("ships")[1].GetProperty("isFavorite").GetBoolean())
+                throw new Exception("Bookmark bridge did not preserve separate instances.");
+            if (test.Send("favorite", args).Payload.GetProperty("revision").GetInt64() != 2)
+                throw new Exception("Bookmark retry duplicated a write.");
+            if (test.Send("favorite", new JsonObject { ["shipId"] = id, ["favorite"] = true,
+                ["expectedRevision"] = 2, ["owner"] = "injected" }).Error?.Code != "hangar.invalid_observation")
+                throw new Exception("Bookmark accepted caller-supplied ownership.");
+            test.Owner = test.Owner with { Account = test.Owner.Account with { Subject = "another-owner" } };
+            if (test.Send("favorite", new JsonObject { ["shipId"] = id, ["favorite"] = true,
+                ["expectedRevision"] = 0 }).Error?.Code != "hangar.favorite_ship_unavailable")
+                throw new Exception("Another account modified the original owner's bookmark.");
+        }
+        finally { root.Delete(true); }
     }
 
     private static void VerifyEmptyConfirmation()

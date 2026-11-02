@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
@@ -60,7 +61,20 @@ void main() {
     await tester.tap(refresh);
     await tester.pump();
     expect(port.readCount, baselineReads + 1);
-    expect(find.text('正在读取个人页面…'), findsOneWidget);
+    expect(find.byKey(const Key('profile-identity-header')), findsOneWidget);
+    expect(
+      tester
+          .widget<StarBridgeActionButton>(
+            find
+                .ancestor(
+                  of: refresh,
+                  matching: find.byType(StarBridgeActionButton),
+                )
+                .first,
+          )
+          .onActivate,
+      isNull,
+    );
     expect(port.saveCount, 0);
     port.pending!.complete(await port.delegate.read());
     await tester.pumpAndSettle();

@@ -1,10 +1,20 @@
+import '../../shared/guide/guide_empty_state.dart';
+import '../../shared/guide/guide_scope.dart';
+
 import 'dart:async';
 
+import '../../shared/diagnostics/loading_content_probe.dart';
+import '../../shared/diagnostics/loading_metrics.dart';
+
 import 'package:flutter/material.dart';
+
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_select_form_field.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../platform/window/native_viewport_visibility.dart';
 import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
@@ -77,7 +87,7 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
               !current &&
               module.state == RoomReadState.ready &&
               constraints.maxWidth - context.tokens.space.lg * 2 >= 1050;
-          return Padding(
+          final content = Padding(
             padding: EdgeInsets.all(context.tokens.space.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -90,11 +100,14 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                     ),
-                    TextButton(
-                      onPressed: module.busy
+                    StarBridgeActionButton(
+                      controlKey: const Key('rooms-refresh'),
+                      kind: StarBridgeActionKind.quiet,
+                      onActivate: module.busy
                           ? null
-                          : widget.onRefresh ??
-                                () => module.refresh(foreground: true),
+                          : (_) =>
+                                (widget.onRefresh ??
+                                () => module.refresh(foreground: true))(),
                       child: Text(
                         t(module.manualRefreshing ? 'refreshing' : 'refresh'),
                       ),
@@ -120,14 +133,14 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                       runSpacing: 8,
                       children: [
                         if (module.supportsInvitations)
-                          OutlinedButton(
-                            style: semanticActionStyle(
-                              context,
-                              ActionTone.info,
-                              emphasis: ActionEmphasis.outlined,
-                            ),
-                            onPressed: module.canCommand
-                                ? () => showRoomInvitations(context, module)
+                          StarBridgeActionButton(
+                            tone: ActionTone.info,
+                            onActivate: module.canCommand
+                                ? (source) => showRoomInvitations(
+                                    context,
+                                    module,
+                                    source: source,
+                                  )
                                 : null,
                             child: Text(
                               '${roomActionText(context, 'invitations')} · ${module.directory?.receivedInvitations.length ?? 0}',
@@ -136,12 +149,13 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                         if (module.supportsInvitations &&
                             current &&
                             module.selectedRoom?.viewerIsHost == true)
-                          OutlinedButton(
-                            onPressed: module.canInvite
-                                ? () => showRoomInvitations(
+                          StarBridgeActionButton(
+                            onActivate: module.canInvite
+                                ? (source) => showRoomInvitations(
                                     context,
                                     module,
                                     host: true,
+                                    source: source,
                                   )
                                 : null,
                             child: Text(
@@ -149,30 +163,48 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                             ),
                           ),
                         if (!current) ...[
-                          FilledButton(
-                            onPressed:
-                                module.canCommand &&
-                                    (module.directory?.tagOptions.isNotEmpty ??
-                                        false)
-                                ? () => createRoomDialog(context, module)
-                                : null,
-                            child: Text(roomActionText(context, 'create')),
+                          GuideAnchor(
+                            id: 'rooms.create',
+                            child: StarBridgeActionButton(
+                              controlKey: const Key('room-create-open'),
+                              kind: StarBridgeActionKind.primary,
+                              onActivate:
+                                  module.canCommand &&
+                                      (module
+                                              .directory
+                                              ?.tagOptions
+                                              .isNotEmpty ??
+                                          false)
+                                  ? (source) => createRoomDialog(
+                                      context,
+                                      module,
+                                      source: source,
+                                    )
+                                  : null,
+                              child: Text(roomActionText(context, 'create')),
+                            ),
                           ),
-                          OutlinedButton(
-                            onPressed: module.canCommand
-                                ? () => joinRoomDialog(context, module)
+                          StarBridgeActionButton(
+                            controlKey: const Key('room-code-join-open'),
+                            onActivate: module.canCommand
+                                ? (source) => joinRoomDialog(
+                                    context,
+                                    module,
+                                    source: source,
+                                  )
                                 : null,
                             child: Text(roomActionText(context, 'codeJoin')),
                           ),
                         ] else
-                          OutlinedButton(
-                            style: semanticActionStyle(
-                              context,
-                              roomLeaveTone(module.selectedRoom),
-                              emphasis: ActionEmphasis.outlined,
-                            ),
-                            onPressed: module.canCommand
-                                ? () => leaveRoomDialog(context, module)
+                          StarBridgeActionButton(
+                            controlKey: const Key('room-leave-open'),
+                            tone: roomLeaveTone(module.selectedRoom),
+                            onActivate: module.canCommand
+                                ? (source) => leaveRoomDialog(
+                                    context,
+                                    module,
+                                    source: source,
+                                  )
                                 : null,
                             child: Text(roomActionText(context, 'leave')),
                           ),
@@ -201,7 +233,9 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                       ),
                       SizedBox(
                         width: 230,
-                        child: DropdownButtonFormField<String>(
+                        child: StarBridgeSelectFormField<String>(
+                          identity: 'rooms-example',
+                          controlKey: const Key('rooms-example-trigger'),
                           key: ValueKey('rooms-example-${module.previewScene}'),
                           initialValue: module.previewScene,
                           decoration: InputDecoration(
@@ -239,25 +273,30 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: TextField(
-                            key: const Key('rooms-tag-search'),
-                            controller: _query,
-                            decoration: InputDecoration(
-                              labelText: tagCopy(context, 'search'),
+                          child: StarBridgeFieldFrame(
+                            enabled: true,
+                            builder: (_, focus) => TextField(
+                              focusNode: focus,
+                              key: const Key('rooms-tag-search'),
+                              controller: _query,
+                              decoration: InputDecoration(
+                                labelText: tagCopy(context, 'search'),
+                              ),
+                              onChanged: (_) => setState(() {}),
                             ),
-                            onChanged: (_) => setState(() {}),
                           ),
                         ),
                         if (!wideFilters) const SizedBox(width: 8),
                         if (!wideFilters)
-                          OutlinedButton(
-                            key: const Key('rooms-tag-filter'),
-                            onPressed: () async {
+                          StarBridgeActionButton(
+                            controlKey: const Key('rooms-tag-filter'),
+                            onActivate: (source) async {
                               final result = await showRoomTagPicker(
                                 context,
                                 options: module.directory!.tagOptions,
                                 selected: _filterTags,
                                 filter: true,
+                                source: source,
                               );
                               if (mounted && result != null) {
                                 setState(() => _filterTags = result);
@@ -268,8 +307,9 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                             ),
                           ),
                         if (_filterTags.isNotEmpty || _query.text.isNotEmpty)
-                          TextButton(
-                            onPressed: () => setState(() {
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            onActivate: (_) => setState(() {
                               _filterTags = {};
                               _query.clear();
                             }),
@@ -300,9 +340,13 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                           RoomReadState.loading => Center(
                             child: Text(t('loading')),
                           ),
-                          RoomReadState.signedOut => Center(
-                            child: Text(t('signedOut')),
-                          ),
+                          RoomReadState.signedOut =>
+                            guideOnlineRequired(
+                                  context,
+                                  AppStrings.of(context)
+                                      .text('navigation.rooms'),
+                                ) ??
+                                Center(child: Text(t('signedOut'))),
                           RoomReadState.unavailable => Center(
                             child: Text(t('error.${module.failure}')),
                           ),
@@ -318,6 +362,21 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                 ),
               ],
             ),
+          );
+          final items = module.directory?.rooms.length ?? 0;
+          return LoadingContentProbe(
+            route: '/rooms',
+            status: switch (module.state) {
+              RoomReadState.loading => LoadingContentStatus.waiting,
+              RoomReadState.ready =>
+                items == 0
+                    ? LoadingContentStatus.empty
+                    : LoadingContentStatus.data,
+              RoomReadState.signedOut => LoadingContentStatus.unavailable,
+              RoomReadState.unavailable => LoadingContentStatus.unavailable,
+            },
+            items: items,
+            child: content,
           );
         },
       );
@@ -336,6 +395,24 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
               current || RoomTagCatalog.matches(room, _filterTags, _query.text),
         )
         .toList();
+    if (rooms.isEmpty &&
+        !current &&
+        _filterTags.isEmpty &&
+        _query.text.isEmpty &&
+        GuideEmptyState.active(context)) {
+      return KeyedSubtree(
+        key: const Key('rooms-empty'),
+        child: GuideEmptyState(
+          'rooms',
+          onPrimary:
+              module.canCommand &&
+                  (module.directory?.tagOptions.isNotEmpty ?? false)
+              ? () => createRoomDialog(context, module)
+              : null,
+          onSecondary: () => module.refresh(foreground: true),
+        ),
+      );
+    }
     if (rooms.isEmpty) {
       return Center(
         key: const Key('rooms-empty'),
@@ -366,9 +443,14 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
                       ) ==
                       true
               ? null
-              : () {
+              : (source) {
                   module.select(rooms[index].id);
-                  joinRoomDialog(context, module, room: rooms[index]);
+                  joinRoomDialog(
+                    context,
+                    module,
+                    room: rooms[index],
+                    source: source,
+                  );
                 },
           supportsCommands: module.supportsCommands,
         ),
@@ -379,10 +461,12 @@ class _PartyRoomsPageState extends State<PartyRoomsPage> {
       room: module.selectedRoom!,
       serverTime: module.directory!.serverTime,
       onRemove: module.canManage
-          ? (member) => removeRoomMember(context, module, member)
+          ? (member, source) =>
+                removeRoomMember(context, module, member, source: source)
           : null,
       onTransfer: module.canTransferHost
-          ? (member) => transferRoomHost(context, module, member)
+          ? (member, source) =>
+                transferRoomHost(context, module, member, source: source)
           : null,
     );
     final chat = module.chat;

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'overlay_source_menu.dart';
+import '../../../design_system/interaction/starbridge_action_button.dart';
+import '../../../design_system/interaction/starbridge_tooltip.dart';
 
 import '../../../design_system/icons/icon_semantic.dart';
 import '../../../design_system/icons/starbridge_icon.dart';
@@ -31,113 +33,146 @@ class OverlaySceneSelector extends StatelessWidget {
     final tooltip = projection.fallbackReasonKey == null
         ? '$label\n${strings.text(overlaySourceHint(projection))}'
         : strings.text(projection.fallbackReasonKey!);
+    final primaryStyle = Theme.of(context).textTheme.labelLarge;
+    final secondaryStyle = Theme.of(context).textTheme.labelMedium
+        ?.copyWith(height: 1);
+    final subtitle = strings.text('top.overlayScene');
+    double lineHeight(String text, TextStyle? style) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: DefaultTextStyle.of(context).style.merge(style),
+        ),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        locale: Localizations.maybeLocaleOf(context),
+        maxLines: 1,
+      )..layout();
+      try {
+        return painter.height;
+      } finally {
+        painter.dispose();
+      }
+    }
+
+    // The chrome owns a fixed-height slot. Keep the selected source at the
+    // user's font size; only omit the constant subtitle when both lines do not
+    // fit. Do not scale text down or enlarge/reflow the whole title bar.
+    final showSubtitle =
+        lineHeight(label, primaryStyle) +
+            lineHeight(subtitle, secondaryStyle) <=
+        tokens.density.controlHeight - 2 * tokens.space.xxs;
+    final primaryLabel = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.fade,
+      softWrap: false,
+      style: primaryStyle,
+    );
 
     final controlShape = RoundedRectangleBorder(
       borderRadius: tokens.shape.small,
     );
-    return Tooltip(
+    return StarBridgeTooltip(
       message: tooltip,
+      consumeEscape: false,
       child: OverlaySourceMenu(
         projection: projection,
         onSelected: port.selectOverlayScene,
-        triggerBuilder: (context, controller) => OutlinedButton(
-          key: const Key('overlay-scene-selector'),
-          onPressed: projection.canChange
-              ? () => controller.isOpen ? controller.close() : controller.open()
-              : null,
-          style: ButtonStyle(
-            minimumSize: WidgetStatePropertyAll(
-              Size(tokens.density.controlHeight, tokens.density.controlHeight),
-            ),
-            maximumSize: WidgetStatePropertyAll(
-              Size(
-                mode == ShellLayoutMode.wide
-                    ? double.infinity
-                    : tokens.density.controlHeight,
-                tokens.density.controlHeight,
-              ),
-            ),
-            padding: WidgetStatePropertyAll(
-              mode == ShellLayoutMode.wide
-                  ? EdgeInsetsDirectional.fromSTEB(
-                      tokens.space.xs,
-                      tokens.space.xxs,
-                      tokens.space.sm,
-                      tokens.space.xxs,
-                    )
-                  : EdgeInsets.zero,
-            ),
-            shape: WidgetStatePropertyAll(controlShape),
-            backgroundColor: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.hovered) ||
-                  states.contains(WidgetState.focused)) {
-                return tokens.surfaces.selected.fill;
-              }
-              return tokens.surfaces.chrome.fill;
-            }),
-            foregroundColor: WidgetStateProperty.resolveWith((states) {
-              return states.contains(WidgetState.disabled)
-                  ? tokens.colors.textDisabled
-                  : tokens.colors.textPrimary;
-            }),
-            side: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.focused)) {
-                return BorderSide(
-                  color: tokens.colors.focusRing,
-                  width: tokens.stroke.focusWidth,
-                );
-              }
-              return BorderSide(
-                color: states.contains(WidgetState.disabled)
-                    ? tokens.surfaces.chrome.border
-                    : tokens.surfaces.chrome.border,
-                width: tokens.stroke.regular,
-              );
-            }),
-            overlayColor: WidgetStatePropertyAll(
-              tokens.colors.accent.withValues(alpha: 0.10),
-            ),
-            elevation: const WidgetStatePropertyAll(0),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _SceneLens(enabled: projection.canChange),
-              if (mode == ShellLayoutMode.wide) ...[
-                SizedBox(width: tokens.space.xs),
-                Flexible(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      Text(
-                        strings.text('top.overlayScene'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(height: 1),
-                      ),
-                    ],
+        triggerBuilder: (context, controller, focus, toggle) =>
+            StarBridgeActionButton(
+              controlKey: const Key('overlay-scene-selector'),
+              focusNode: focus,
+              onActivate: projection.canChange ? toggle : null,
+              minHeight: tokens.density.controlHeight,
+              nativeStyle: ButtonStyle(
+                minimumSize: WidgetStatePropertyAll(
+                  Size(
+                    tokens.density.controlHeight,
+                    tokens.density.controlHeight,
                   ),
                 ),
-                SizedBox(width: tokens.space.xs),
-                StarBridgeIcon(
-                  StarBridgeIconSemantic.menuDown,
-                  size: tokens.icons.small,
-                  color: projection.canChange
-                      ? tokens.colors.textSecondary
-                      : tokens.colors.textDisabled,
+                maximumSize: WidgetStatePropertyAll(
+                  Size(
+                    mode == ShellLayoutMode.wide
+                        ? double.infinity
+                        : tokens.density.controlHeight,
+                    tokens.density.controlHeight,
+                  ),
                 ),
-              ],
-            ],
-          ),
-        ),
+                padding: WidgetStatePropertyAll(
+                  mode == ShellLayoutMode.wide
+                      ? EdgeInsetsDirectional.fromSTEB(
+                          tokens.space.xs,
+                          tokens.space.xxs,
+                          tokens.space.sm,
+                          tokens.space.xxs,
+                        )
+                      : EdgeInsets.zero,
+                ),
+                shape: WidgetStatePropertyAll(controlShape),
+                backgroundColor: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.hovered) ||
+                      states.contains(WidgetState.focused)) {
+                    return tokens.surfaces.selected.fill;
+                  }
+                  return Colors.transparent;
+                }),
+                foregroundColor: WidgetStateProperty.resolveWith((states) {
+                  return states.contains(WidgetState.disabled)
+                      ? tokens.colors.textDisabled
+                      : tokens.colors.textPrimary;
+                }),
+                side: WidgetStateProperty.resolveWith((states) {
+                  if (states.contains(WidgetState.focused)) {
+                    return BorderSide(
+                      color: tokens.colors.focusRing,
+                      width: tokens.stroke.focusWidth,
+                    );
+                  }
+                  return BorderSide.none;
+                }),
+                overlayColor: WidgetStatePropertyAll(
+                  tokens.colors.accent.withValues(alpha: 0.10),
+                ),
+                elevation: const WidgetStatePropertyAll(0),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SceneLens(enabled: projection.canChange),
+                  if (mode == ShellLayoutMode.wide) ...[
+                    SizedBox(width: tokens.space.xs),
+                    Flexible(
+                      child: showSubtitle
+                          ? Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                primaryLabel,
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: secondaryStyle,
+                                ),
+                              ],
+                            )
+                          : primaryLabel,
+                    ),
+                    SizedBox(width: tokens.space.xs),
+                    StarBridgeIcon(
+                      StarBridgeIconSemantic.menuDown,
+                      size: tokens.icons.small,
+                      color: projection.canChange
+                          ? tokens.colors.textSecondary
+                          : tokens.colors.textDisabled,
+                    ),
+                  ],
+                ],
+              ),
+            ),
       ),
     );
   }
@@ -155,14 +190,6 @@ class _SceneLens extends StatelessWidget {
       width: tokens.icons.large,
       height: tokens.icons.large,
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: tokens.surfaces.raised.fill,
-        borderRadius: tokens.shape.small,
-        border: Border.all(
-          color: tokens.surfaces.raised.border,
-          width: tokens.stroke.hairline,
-        ),
-      ),
       child: StarBridgeIcon(
         StarBridgeIconSemantic.scene,
         size: tokens.icons.small,

@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "status": "Frozen exact actual Runtime to Host to isolated HTTP exports; synthetic upstream actors; no primary integration or real account acceptance",
+  "createdAtUtc": "2026-10-17T12:18:36.652Z",
+  "producer": {
+    "attempt": "final14",
+    "command": [
+      "exec",
+      "artifacts/bin/StarBridge.Server.Tests/release/StarBridge.Server.Tests.dll",
+      "--official-image-package-c-only"
+    ],
+    "sourceInputManifest": "validation/final14-inputs.json",
+    "sourceInputManifestSha256": "5607f096bbfdfb7e9475c62f3aec3e2139357104364a5b3f92113f98f55111a0",
+    "serverConsoleDllSha256": "05b9ba0c4e098e2f5bae8e07f3c727aa640bb545cbe0d5cc125bb24e318d970d",
+    "consoleLog": "validation/final14-official-image-package-c-only.log",
+    "consoleLogSha256": "41c608c7edc0584a428bc3bec25cc0c5895c88090e309dacb48378c8a6887383"
+  },
+  "files": [
+    {
+      "path": "bridge-anonymous-page.json",
+      "length": 1342,
+      "sha256": "2dfd538906b91d56ca020e4b16c9f8a2db14f5ca58605e9424a7b73fce508f87"
+    },
+    {
+      "path": "bridge-clear-result.json",
+      "length": 40,
+      "sha256": "56c98038a942957be2b8852765cbd18e97604f98cf318e20e165c32c7d8df46e"
+    },
+    {
+      "path": "bridge-image-chunk.json",
+      "length": 474,
+      "sha256": "0195281c72a8f6daec5e863b3783ac375ae4baf64cef739076d58cc5f10e62d5"
+    },
+    {
+      "path": "bridge-old-scope-editor.json",
+      "length": 694,
+      "sha256": "5e5ba29b57e90dd825cc50e59aaf708fdc5a9d4ce352c5009303f4aa0568dd38"
+    },
+    {
+      "path": "bridge-owner-editor.json",
+      "length": 882,
+      "sha256": "7ee122e418470fa17f9914e6b88d3db786492f6347d9355b56bf6d04babfb4b5"
+    },
+    {
+      "path": "bridge-positive-images-result.json",
+      "length": 40,
+      "sha256": "56c98038a942957be2b8852765cbd18e97604f98cf318e20e165c32c7d8df46e"
+    },
+    {
+      "path": "bridge-public-page.json",
+      "length": 1446,
+      "sha256": "9ee8ce022e90cbb6cf3ed15ad5ea37b77fb31e3c692fc9ffe317a0485b2f695a"
+    },
+    {
+      "path": "bridge-report-status.json",
+      "length": 179,
+      "sha256": "b3f8f859373e39efffc114bbfe73d7c50f6399632b77c66cfb71f54860de8286"
+    },
+    {
+      "path": "bridge-report-unknown.json",
+      "length": 203,
+      "sha256": "a5f65f8d7948d82a3d47a566d7bbaa103166cb5804988bf0d7cba4be71bbdce4"
+    },
+    {
+      "path": "request-clear-images.json",
+      "length": 116,
+      "sha256": "2b803639276b19abefc38d3ca1dc19d033d37711e0418858fc87d8192a13562c"
+    },
+    {
+      "path": "request-officialFleet-communication.json",
+      "length": 66,
+      "sha256": "a032bf9020851b6f20168ef4f9c667fb09f88dc24da07868092b4f1d9c8c2d80"
+    },
+    {
+      "path": "request-officialFleet-reportShipImage.json",
+      "length": 291,
+      "sha256": "33913b76c6a55ae8ef794c799070effe2c3899ee0c1b6582dc8edab45e319350"
+    },
+    {
+      "path": "request-officialFleet-shipImage.json",
+      "length": 200,
+      "sha256": "46109dd21527cbb0be9c76ec1bb332c6364b98857d4a72f455fa05b5d82b2688"
+    },
+    {
+      "path": "request-officialFleet-shipImageReportStatus.json",
+      "length": 67,
+      "sha256": "79a66c66710afd57a8ebad8172d0a9c53fe1ffe6d5f18f4b68320eef6ff197be"
+    },
+    {
+      "path": "request-officialFleet-ships.json",
+      "length": 209,
+      "sha256": "9934fddbbf1a971cb9248117eeeb51f59f17e8553b3fae123380a4cf9091b681"
+    },
+    {
+      "path": "request-owner-editor.json",
+      "length": 50,
+      "sha256": "7c2eee7c262b63300566a6837b1de122680222643b6ef24f7e10f77650ef00af"
+    },
+    {
+      "path": "request-positive-images.json",
+      "length": 198,
+      "sha256": "09757911f810f08623d9bd1efb9aaf9c988d7032e2544dd74b92ea37b61035a6"
+    }
+  ],
+  "scenes": [
+    {
+      "name": "public-reader-reporter",
+      "description": "Viewer42/owner43 public catalog, explicit image grant, visible then restricted G1 result, actual dispatched chunk and durable report unknown then own status after departure",
+      "calls": [
+        {
+          "method": "officialFleet.ships",
+          "request": "request-officialFleet-ships.json",
+          "response": "bridge-public-page.json"
+        },
+        {
+          "method": "officialFleet.ships",
+          "request": "request-officialFleet-ships.json",
+          "response": "bridge-anonymous-page.json",
+          "note": "Same source and opaque refs after actual G1 restricted observation; explicit image grant retained, no visible identity"
+        },
+        {
+          "method": "officialFleet.shipImage",
+          "request": "request-officialFleet-shipImage.json",
+          "response": "bridge-image-chunk.json"
+        },
+        {
+          "method": "officialFleet.reportShipImage",
+          "request": "request-officialFleet-reportShipImage.json",
+          "response": "bridge-report-unknown.json",
+          "note": "Actual durable report accepted by Relay, injected lost response before Host receipt"
+        },
+        {
+          "method": "officialFleet.shipImageReportStatus",
+          "request": "request-officialFleet-shipImageReportStatus.json",
+          "response": "bridge-report-status.json",
+          "note": "Same original requestId, after member departure and G1 outage; no original target lookup or POST retry"
+        }
+      ]
+    },
+    {
+      "name": "owner-editor-images-and-old-scope-clear",
+      "description": "Independent synthetic owner actor from existing B fixture; sourceRef value happens to match public scene but this is not the same account. No refs, versions, or actor IDs rewritten.",
+      "calls": [
+        {
+          "method": "officialFleet.hangarSharing",
+          "request": "request-owner-editor.json",
+          "response": "bridge-owner-editor.json"
+        },
+        {
+          "method": "officialFleet.saveHangarSharing",
+          "request": "request-positive-images.json",
+          "response": "bridge-positive-images-result.json"
+        },
+        {
+          "method": "officialFleet.hangarSharing",
+          "request": "request-owner-editor.json",
+          "response": "bridge-old-scope-editor.json",
+          "note": "After membership/inventory unavailable, existing exact scope remains for image-only reduction"
+        },
+        {
+          "method": "officialFleet.saveHangarSharing",
+          "request": "request-clear-images.json",
+          "response": "bridge-clear-result.json"
+        }
+      ]
+    }
+  ],
+  "compatibility": {
+    "bridgePageSchemaVersion": 1,
+    "relayNegotiatedSchemaVersion": 2,
+    "imageFeaturesProtocolVersion": 1,
+    "callableNames": [
+      "officialFleet.shipImage",
+      "officialFleet.reportShipImage",
+      "officialFleet.shipImageReportStatus"
+    ],
+    "clearUnion": "schemaVersion/sourceRef/editRef/kind=clearImages only",
+    "statusUnion": "schemaVersion/requestId only"
+  },
+  "constraints": [
+    "Files copied byte-for-byte after actual final14 console exit0; no token/production account material",
+    "Do not combine scene actors or substitute opaque refs",
+    "Image source and media IDs stay internal; owner identity authorization remains G1 scoped and original-deadline bound",
+    "No service enablement, deployment, visible client replacement, or real-account acceptance"
+  ]
+}

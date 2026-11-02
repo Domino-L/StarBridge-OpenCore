@@ -30,6 +30,7 @@ class FriendRequestPrivacySetting extends StatelessWidget {
     final snapshot = projection?.snapshot;
     final availability = snapshot?.availability;
     return AuthoritativePrivacySetting(
+      presentationChanges: module?.projection,
       settingKey: const Key('privacy-friend-requests-authoritative'),
       titleKey: 'settings.privacy.social.friendRequests',
       descriptionKey: 'settings.privacy.social.friendRequestsDescription',

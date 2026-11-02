@@ -324,13 +324,17 @@ void main() {
                   title: '图片',
                   icon: StarBridgeIconSemantic.friends,
                   builder: (_, _) => MenuNativePopup(
-                    menuChildren: [
-                      MenuItemButton(
-                        onPressed: () {},
+                    label: '测试菜单',
+                    entries: [
+                      StarBridgeMenuEntry(
+                        id: 'test-menu',
+                        label: '测试菜单',
+                        onActivate: (_) {},
                         child: const Text('测试菜单'),
                       ),
                     ],
-                    builder: (_, controller, _) => TextButton(
+                    builder: (_, controller, focus, _) => TextButton(
+                      focusNode: focus,
                       onPressed: controller.open,
                       child: const Text('打开弹出菜单'),
                     ),

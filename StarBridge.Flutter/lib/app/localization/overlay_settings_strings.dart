@@ -2,6 +2,8 @@ import 'overlay_workspace_strings.dart';
 import 'overlay_preview_strings.dart';
 import 'overlay_scene_strings.dart';
 import 'menu_product_strings.dart';
+import 'menu_hud_quick_strings.dart';
+import 'overlay_calm_strings.dart';
 
 const overlaySettingsZhCn = <String, String>{
   ...menuProductZhCn,
@@ -18,6 +20,8 @@ const overlaySettingsZhCn = <String, String>{
   'overlay.menu.return': '返回客户端',
   'overlay.menu.failed': '未能显示菜单浮层，请重试。',
   ...overlayScenesZhCn,
+  ...menuHudQuickZhCn,
+  ...overlayCalmZhCn,
   ...overlayWorkspaceZhCn,
   ...overlayPreviewZhCn,
   'overlay.editor.fullscreen': '全屏编辑',
@@ -41,7 +45,7 @@ const overlaySettingsZhCn = <String, String>{
   'overlay.preview.stageTitle': '实时构图',
   'overlay.preview.reference': '1920 × 1080 参考画布',
   'overlay.preview.visibleCount': '{count} 个可见元素',
-  'overlay.preview.draft': '未保存的更改已显示在预览中',
+  'overlay.preview.draft': '正在保存，预览已显示最新调整',
   'overlay.preview.saved': '预览与已保存设置一致',
   'overlay.runtime.previewTitle': '浮层布局预览',
   'overlay.runtime.previewDescription': '布局与显示设置会同步呈现；保存后用于游戏浮层。',
@@ -76,6 +80,7 @@ const overlaySettingsZhCn = <String, String>{
   'overlay.unavailable.body': '请检查连接后重新读取。',
   'overlay.error.hostUnavailable': '本机服务暂时不可用，请重新读取。',
   'overlay.error.readFailed': '无法读取已保存的设置，请重新读取。',
+  'overlay.error.versionUnsupported': '当前版本不支持已保存的浮层配置。配置未被修改，请使用支持该配置的版本打开。',
   'overlay.error.writeFailed': '未能保存更改，原设置仍然保留。',
   'overlay.error.writeConflict': '设置已在其他位置更新，请重新读取后再修改。',
   'overlay.error.invalidValue': '这项设置无法使用，请调整后重试。',
@@ -97,6 +102,8 @@ const overlaySettingsZhTw = <String, String>{
   'overlay.menu.return': '返回用戶端',
   'overlay.menu.failed': '未能顯示選單浮層，請重試。',
   ...overlayScenesZhTw,
+  ...menuHudQuickZhTw,
+  ...overlayCalmZhTw,
   ...overlayWorkspaceZhTw,
   ...overlayPreviewZhTw,
   'overlay.editor.fullscreen': '全螢幕編輯',
@@ -120,7 +127,7 @@ const overlaySettingsZhTw = <String, String>{
   'overlay.preview.stageTitle': '即時構圖',
   'overlay.preview.reference': '1920 × 1080 參考畫布',
   'overlay.preview.visibleCount': '{count} 個可見元素',
-  'overlay.preview.draft': '尚未儲存的變更已顯示在預覽中',
+  'overlay.preview.draft': '正在儲存，預覽已顯示最新調整',
   'overlay.preview.saved': '預覽與已儲存設定一致',
   'overlay.runtime.previewTitle': '浮層配置預覽',
   'overlay.runtime.previewDescription': '配置與顯示設定會同步呈現；儲存後用於遊戲浮層。',
@@ -155,6 +162,7 @@ const overlaySettingsZhTw = <String, String>{
   'overlay.unavailable.body': '請檢查連線後重新讀取。',
   'overlay.error.hostUnavailable': '本機服務暫時無法使用，請重新讀取。',
   'overlay.error.readFailed': '無法讀取已儲存的設定，請重新讀取。',
+  'overlay.error.versionUnsupported': '目前版本不支援已儲存的浮層設定。設定未被修改，請使用支援此設定的版本開啟。',
   'overlay.error.writeFailed': '未能儲存變更，原設定仍然保留。',
   'overlay.error.writeConflict': '設定已在其他位置更新，請重新讀取後再修改。',
   'overlay.error.invalidValue': '這項設定無法使用，請調整後重試。',
@@ -176,6 +184,8 @@ const overlaySettingsEn = <String, String>{
   'overlay.menu.return': 'Return to client',
   'overlay.menu.failed': 'The menu overlay could not be displayed. Please try again.',
   ...overlayScenesEn,
+  ...menuHudQuickEn,
+  ...overlayCalmEn,
   ...overlayWorkspaceEn,
   ...overlayPreviewEn,
   'overlay.editor.fullscreen': 'Edit fullscreen',
@@ -201,7 +211,7 @@ const overlaySettingsEn = <String, String>{
   'overlay.preview.stageTitle': 'Live composition',
   'overlay.preview.reference': '1920 × 1080 reference canvas',
   'overlay.preview.visibleCount': '{count} visible elements',
-  'overlay.preview.draft': 'Unsaved changes are shown in the preview',
+  'overlay.preview.draft': 'Saving; the preview shows your latest changes',
   'overlay.preview.saved': 'Preview matches the saved settings',
   'overlay.runtime.previewTitle': 'Overlay layout preview',
   'overlay.runtime.previewDescription':
@@ -244,6 +254,7 @@ const overlaySettingsEn = <String, String>{
   'overlay.error.hostUnavailable':
       'The local service is unavailable. Read the settings again.',
   'overlay.error.readFailed': 'Saved settings could not be read. Try again.',
+  'overlay.error.versionUnsupported': 'This version cannot read the saved overlay configuration. Nothing was changed. Open it with a version that supports this configuration.',
   'overlay.error.writeFailed':
       'Changes could not be saved. Your previous settings remain in place.',
   'overlay.error.writeConflict':

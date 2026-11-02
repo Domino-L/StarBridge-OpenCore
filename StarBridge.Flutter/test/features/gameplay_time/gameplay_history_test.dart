@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,17 +12,37 @@ import 'gameplay_time_test.dart' as support;
 import '../personal_profile/local_personal_profile_test.dart' as local;
 
 Future<void> prepare(WidgetTester tester, support.Harness h) async {
-  final task = h.controller.importHistory(() async => 'C:/synthetic/Game.log');
+  final task = h.controller.importHistory();
   await tester.pump();
   await task;
 }
 
 void main() {
+  testWidgets('LIVE history uses bound source without opening a picker', (
+    tester,
+  ) async {
+    final h = support.Harness();
+    await tester.pump();
+    final task = h.controller.importHistory();
+    await tester.pump();
+    await task;
+    expect(h.controller.value.preview, isNotNull);
+    expect(
+      h.requests
+          .singleWhere((r) => r.name == 'gameplayTime.historyPreview')
+          .payload
+          .containsKey('path'),
+      isFalse,
+    );
+    await h.close(tester);
+  });
   const renderGoldens = bool.fromEnvironment('GAMEPLAY_GOLDENS');
   setUpAll(() async {
     if (!renderGoldens) return;
     for (final font in {
       'Source Sans 3': 'assets/fonts/SourceSans3VF-Upright.ttf',
+      'Saira': 'assets/fonts/Saira-VF.ttf',
+      'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
@@ -112,9 +130,7 @@ void main() {
         final h = support.Harness();
         await tester.pump();
         h.holdNames.add('gameplayTime.$request');
-        final task = h.controller.importHistory(
-          () async => 'C:/synthetic/Game.log',
-        );
+        final task = h.controller.importHistory();
         await tester.pump();
         await tester.pump(const Duration(seconds: 64));
         expect(h.controller.value.busy, isTrue);
@@ -166,9 +182,7 @@ void main() {
         findsNothing,
       );
       expect(find.byKey(const Key('gameplay-history-import')), findsNothing);
-      await old.controller.importHistory(
-        () async => throw StateError('must not pick'),
-      );
+      await old.controller.importHistory();
       expect(old.requests.where((r) => r.name.contains('history')), isEmpty);
       await tester.pumpWidget(const SizedBox());
       await old.close(tester);
@@ -210,17 +224,12 @@ void main() {
     'unavailable',
     'busy',
   ]) {
-    testWidgets('status $state blocks file selection', (tester) async {
+    testWidgets('status $state blocks history scanning', (tester) async {
       final h = support.Harness()..statusResult = state;
       await tester.pump();
-      var selected = false;
-      final task = h.controller.importHistory(() async {
-        selected = true;
-        return null;
-      });
+      final task = h.controller.importHistory();
       await tester.pump();
       await task;
-      expect(selected, isFalse);
       expect(h.controller.value.preview, isNull);
       expect(
         h.requests.where((r) => r.name == 'gameplayTime.historyConfirm'),
@@ -230,49 +239,30 @@ void main() {
     });
   }
 
-  testWidgets(
-    'picker cancel, picker failure and preview cancel preserve eligibility',
-    (tester) async {
-      final h = support.Harness();
-      await tester.pump();
-      final cancel = h.controller.importHistory(() async => null);
-      await tester.pump();
-      await cancel;
-      expect(h.controller.value.historyState, 'available');
-      expect(
-        h.requests.where((r) => r.name == 'gameplayTime.historyPreview'),
-        isEmpty,
-      );
-      final fail = h.controller.importHistory(
-        () async => throw StateError('synthetic failure'),
-      );
-      await tester.pump();
-      await fail;
-      expect(h.controller.value.historyError, 'unavailable');
-      await prepare(tester, h);
-      expect(h.controller.value.preview!.seconds, 5400);
-      h.controller.cancelPreview(h.controller.value.preview!);
-      expect(h.controller.value.preview, isNull);
-      expect(h.controller.value.historyState, 'available');
-      expect(
-        h.requests.where((r) => r.name == 'gameplayTime.historyConfirm'),
-        isEmpty,
-      );
-      await prepare(tester, h);
-      final confirm = h.controller.confirmHistory(h.controller.value.preview!);
-      await tester.pump();
-      await confirm;
-      expect(h.controller.value.historyState, 'imported');
-      expect(h.controller.value.historicalSeconds, 5400);
-      expect(h.controller.value.seconds, 0);
-      final count = h.requests.length;
-      await h.controller.importHistory(
-        () async => throw StateError('already imported'),
-      );
-      expect(h.requests.length, count);
-      await h.close(tester);
-    },
-  );
+  testWidgets('preview cancel preserves eligibility', (tester) async {
+    final h = support.Harness();
+    await tester.pump();
+    await prepare(tester, h);
+    expect(h.controller.value.preview!.seconds, 5400);
+    h.controller.cancelPreview(h.controller.value.preview!);
+    expect(h.controller.value.preview, isNull);
+    expect(h.controller.value.historyState, 'available');
+    expect(
+      h.requests.where((r) => r.name == 'gameplayTime.historyConfirm'),
+      isEmpty,
+    );
+    await prepare(tester, h);
+    final confirm = h.controller.confirmHistory(h.controller.value.preview!);
+    await tester.pump();
+    await confirm;
+    expect(h.controller.value.historyState, 'imported');
+    expect(h.controller.value.historicalSeconds, 5400);
+    expect(h.controller.value.seconds, 0);
+    final count = h.requests.length;
+    await h.controller.importHistory();
+    expect(h.requests.length, count);
+    await h.close(tester);
+  });
 
   testWidgets(
     'confirmation waits 65 seconds and retries the identical preview once',
@@ -352,29 +342,6 @@ void main() {
     });
   }
 
-  testWidgets('account switch discards a pending native picker result', (
-    tester,
-  ) async {
-    final h = support.Harness();
-    await tester.pump();
-    final picker = Completer<String?>();
-    final task = h.controller.importHistory(() => picker.future);
-    await tester.pump();
-    expect(h.controller.value.operation, 'choosing');
-    h.changeAccount();
-    await tester.pump();
-    picker.complete('C:/synthetic/Game.log');
-    await tester.pump();
-    await task;
-    expect(h.controller.value.preview, isNull);
-    expect(
-      h.requests.where((r) => r.name == 'gameplayTime.historyPreview'),
-      isEmpty,
-    );
-    expect(h.controller.value.busy, isFalse);
-    await h.close(tester);
-  });
-
   for (final locale in AppStrings.supportedLocales) {
     for (final width in [360.0, 1100.0]) {
       testWidgets(
@@ -387,10 +354,7 @@ void main() {
             support.app(
               MediaQuery(
                 data: const MediaQueryData(textScaler: TextScaler.linear(1.3)),
-                child: GameplayTimePanel(
-                  controller: h.controller,
-                  pickLog: () async => 'C:/synthetic/Game.log',
-                ),
+                child: GameplayTimePanel(controller: h.controller),
               ),
               locale: locale,
             ),
@@ -434,7 +398,7 @@ void main() {
   }
 
   testWidgets(
-    'profile keeps remote history alongside local detail; visibility hides metric',
+    'profile keeps account detail separate from local total; visibility hides metric',
     (tester) async {
       final h = support.Harness()..seconds = 3600;
       final profile = createPersonalProfileModule(
@@ -442,7 +406,7 @@ void main() {
       );
       await profile.initialize();
       await tester.pump();
-      final minutes = profile.projection.value.gameplayMinutes;
+      final minutes = profile.projection.value.gameplayMinutes!;
       await tester.pumpWidget(
         support.app(
           PersonalProfileSummaryStrip(
@@ -453,19 +417,19 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Existing historical playtime'), findsOneWidget);
+      expect(find.text('Total on this PC'), findsOneWidget);
       expect(
-        find.text('${minutes ~/ 60} h ${minutes % 60} min'),
+        find.text('Account total: ${minutes ~/ 60} h ${minutes % 60} min'),
         findsOneWidget,
       );
-      expect(find.text('Total on this PC: 1 h 0 min'), findsOneWidget);
+      expect(find.text('1 h 0 min'), findsOneWidget);
       expect(profile.projection.value.gameplayMinutes, minutes);
       expect(find.byType(Switch), findsNothing);
       final hide = h.controller.setVisibility(false);
       await tester.pump();
       await hide;
       await tester.pumpAndSettle();
-      expect(find.text('Existing historical playtime'), findsNothing);
+      expect(find.text('Account total'), findsNothing);
       expect(profile.projection.value.gameplayMinutes, minutes);
       await tester.pumpWidget(const SizedBox());
       profile.dispose();
@@ -507,10 +471,7 @@ void main() {
             findsOneWidget,
           );
           expect(
-            find.descendant(
-              of: find.byType(PersonalProfileSummaryStrip),
-              matching: find.text('—'),
-            ),
+            find.textContaining(strings.text('gameplay.remoteUnavailable')),
             findsOneWidget,
           );
           expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);

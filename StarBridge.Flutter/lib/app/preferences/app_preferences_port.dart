@@ -14,7 +14,11 @@ abstract interface class AppPreferencesPort {
 
   Future<bool> setMotionPreference(MotionPreference preference);
 
+  Future<bool> setInteractionStyle(InteractionStyle style);
+
   Future<bool> setApplicationBehavior(ApplicationBehaviorPreferences behavior);
+
+  Future<bool> setHolidayAppearance(bool enabled);
 
   Future<bool> retry();
 

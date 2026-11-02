@@ -1,0 +1,92 @@
+// Guided empty states: what will appear here and how to make it appear.
+const guideEmptyWords = <String, (String, String, String)>{
+  'empty.hangar.title': ('机库还空着', '機庫還空著', 'Your hangar is empty'),
+  'empty.hangar.body': (
+    '打开 RSI 机库登录一下，点头像展开账号信息，就能开始读取。读到的船先给你过目，确认了才入库。',
+    '開啟 RSI 機庫登入一下，點頭像展開帳號資訊，就能開始讀取。讀到的船先給你過目，確認了才入庫。',
+    'Open the RSI hangar, sign in and expand your account by clicking the avatar, then start reading. You check the ships before anything is saved.',
+  ),
+  'empty.hangar.note': (
+    '登录状态只留在这台电脑上。只是读取，不会买、送或回收任何东西。',
+    '登入狀態只留在這台電腦上。只是讀取，不會買、送或回收任何東西。',
+    'Sign-in stays on this computer. Reading never buys, gifts or melts anything.',
+  ),
+  'empty.hangar.primary': ('读取机库', '讀取機庫', 'Read hangar'),
+  'empty.fleet.title': ('还没有主舰队', '還沒有主艦隊', 'No main fleet yet'),
+  'empty.fleet.body': (
+    '主舰队跟着 RSI 官网走。在官网加入舰队后，回来刷新一下就有了。',
+    '主艦隊跟著 RSI 官網走。在官網加入艦隊後，回來重新整理一下就有了。',
+    'Your main fleet follows the RSI website. Join a fleet there, then refresh here.',
+  ),
+  'empty.fleet.primary': ('刷新', '重新整理', 'Refresh'),
+  'empty.fleet.secondary': ('打开 RSI 官网', '開啟 RSI 官網', 'Open RSI website'),
+  'empty.rooms.title': ('现在没人建房', '現在沒人建房', 'No rooms right now'),
+  'empty.rooms.body': (
+    '可以创建房间，按玩法和标签招人；或者过会儿再刷新看看。',
+    '可以建立房間，按玩法和標籤招人；或者過一會兒再重新整理看看。',
+    'Create a room and recruit by gameplay and tags, or refresh again later.',
+  ),
+  'empty.rooms.primary': ('开个房间', '開個房間', 'Create a room'),
+  'empty.rooms.secondary': ('刷新', '重新整理', 'Refresh'),
+  'empty.trades.title': ('还没做过买卖', '還沒做過買賣', 'No trades yet'),
+  'empty.trades.body': (
+    '去市场搜搜想要的东西，先看看行情。',
+    '去市場搜搜想要的東西，先看看行情。',
+    'Search the market for what you want and check the prices.',
+  ),
+  'empty.trades.primary': ('去市场', '去市場', 'Go to market'),
+  'empty.communities.title': (
+    '还没加入社区组织',
+    '還沒加入社群組織',
+    'Not in an organization yet',
+  ),
+  'empty.communities.body': (
+    '社区组织是跨舰队的长期组织。搜一搜申请加入，或者填别人给你的客户端内邀请码。',
+    '社群組織是跨艦隊的長期組織。搜一搜申請加入，或者填別人給你的客戶端內邀請碼。',
+    'Organizations are long-term groups across fleets. Search and apply, or enter an in-app invite code someone gave you.',
+  ),
+  'empty.communities.primary': ('找组织', '找組織', 'Find organizations'),
+  'empty.communities.secondary': ('填邀请码', '填邀請碼', 'Enter invite code'),
+  'empty.friends.title': ('好友列表还空着', '好友列表還空著', 'No friends yet'),
+  'empty.friends.body': (
+    '加个好友，对方上线、进游戏你都能看到，还能直接私聊。',
+    '加個好友，對方上線、進遊戲你都能看到，還能直接私聊。',
+    'Add a friend to see when they are online or in game, and chat directly.',
+  ),
+  'empty.friends.primary': ('加好友', '加好友', 'Add friend'),
+  'empty.messages.title': ('还没有私聊', '還沒有私聊', 'No chats yet'),
+  'empty.messages.body': (
+    '从好友列表或舰队成员页点一下，就能给对方发消息。',
+    '從好友列表或艦隊成員頁點一下，就能給對方發訊息。',
+    'Start a chat from your friends list or the fleet members page.',
+  ),
+  'empty.messages.primary': ('打开好友', '開啟好友', 'Open friends'),
+  'empty.notifications.title': ('这里很安静', '這裡很安靜', 'All quiet here'),
+  'empty.notifications.body': (
+    '有人邀请你、申请入队，或者审批有结果了，都会在这提醒你。',
+    '有人邀請你、申請入隊，或者審批有結果了，都會在這提醒你。',
+    'Invitations, join requests and decisions will show up here.',
+  ),
+  'empty.achievements.title': (
+    '履历从这里开始',
+    '履歷從這裡開始',
+    'Your journey starts here',
+  ),
+  'empty.achievements.body': (
+    '达成条件，成就就会点亮挂在这。',
+    '達成條件，成就就會點亮掛在這。',
+    'Achievements light up here once you meet their conditions.',
+  ),
+  'empty.achievements.primary': ('看看全部成就', '看看全部成就', 'See all achievements'),
+  'empty.online.title': (
+    '{feature}要在线账号才能用',
+    '{feature}要線上帳號才能用',
+    '{feature} needs an online account',
+  ),
+  'empty.online.body': (
+    '现在是本地模式，数据只存在本机上。',
+    '現在是本機模式，資料只存在本機上。',
+    'You are in local mode; data stays on this computer.',
+  ),
+  'empty.online.primary': ('前往账号与识别', '前往帳號與識別', 'Account and recognition'),
+};

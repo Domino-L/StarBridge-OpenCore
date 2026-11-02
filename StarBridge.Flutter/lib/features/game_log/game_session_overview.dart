@@ -95,7 +95,7 @@ class _GameSessionOverviewBody extends StatelessWidget {
         label: text('sessionVersion'),
         value: version,
         color: value.verifiedChannels.contains(value.channel)
-            ? tokens.colors.accent
+            ? tokens.colors.stateAccent
             : tokens.colors.textSecondary,
       ),
       _SessionFactData(
@@ -121,7 +121,7 @@ class _GameSessionOverviewBody extends StatelessWidget {
         label: text('serverArea'),
         value: serverArea,
         color: value.serverState == 'connected' && value.serverShard != null
-            ? tokens.colors.accent
+            ? tokens.colors.stateAccent
             : tokens.colors.textSecondary,
       ),
       _SessionFactData(
@@ -129,7 +129,7 @@ class _GameSessionOverviewBody extends StatelessWidget {
         label: text('location'),
         value: location,
         color: value.locationState == 'confirmed'
-            ? tokens.colors.accent
+            ? tokens.colors.stateAccent
             : tokens.colors.textSecondary,
       ),
       _SessionFactData(
@@ -137,7 +137,7 @@ class _GameSessionOverviewBody extends StatelessWidget {
         label: text('ship'),
         value: ship,
         color: value.shipState == 'confirmed'
-            ? tokens.colors.accent
+            ? tokens.colors.stateAccent
             : tokens.colors.textSecondary,
       ),
     ];
@@ -357,7 +357,8 @@ class _SessionStateBadge extends StatelessWidget {
       child: Text(
         value,
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        overflow: TextOverflow.fade,
+        softWrap: false,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(color: color),
       ),
     );

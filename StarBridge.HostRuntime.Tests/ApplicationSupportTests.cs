@@ -64,7 +64,7 @@ internal static class ApplicationSupportTests
         {
             var images = Directory.CreateDirectory(Path.Combine(root, "Images")).FullName;
             var ship = Directory.CreateDirectory(Path.Combine(images, "ShipMedia")).FullName;
-            File.WriteAllText(Path.Combine(images, "fleet-test-logo.png"), "fixture");
+            File.WriteAllText(Path.Combine(images, "fleet-test-logo-012345abcdef.png"), "fixture");
             File.WriteAllText(Path.Combine(ship, Guid.NewGuid().ToString("N") + ".image"), "fixture");
             File.WriteAllText(Path.Combine(images, "avatar.png"), "keep");
             File.WriteAllText(Path.Combine(images, "unknown.png"), "keep");

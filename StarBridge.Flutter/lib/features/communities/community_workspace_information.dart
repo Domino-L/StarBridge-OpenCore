@@ -1,10 +1,16 @@
+import 'community_workspace_header.dart';
+import 'community_announcements_port.dart';
+import 'community_announcements_dialog.dart';
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
 import 'community_workspace_controller.dart';
 import 'community_gameplay_tags.dart';
 import 'community_workspace_copy.dart';
@@ -25,6 +31,103 @@ final class CommunityWorkspaceInformation {
   final CommunityWorkspace workspace;
   final Future<void> Function(String, {bool all}) copy;
   String t(String key) => workspaceText(context, key);
+  Widget header({
+    required CommunityWorkspacePort port,
+    required bool expanded,
+    required VoidCallback onToggleExpansion,
+    required Future<void> Function() onRefresh,
+    required Future<void> Function(Widget) onDetails,
+  }) {
+    return CommunityWorkspaceHeader(
+      expanded: expanded,
+      onToggleExpansion: onToggleExpansion,
+      workspace: workspace,
+      logo: model.image('logo'),
+      logoLoading: model.imageLoading('logo'),
+      logoFailed: model.imageFailed('logo'),
+      onRefresh: onRefresh,
+      onCopyContacts: copyContacts,
+      onCopyContact: (value) => copy(value),
+      onDetails: () => onDetails(detailsPanel(port)),
+      announcement:
+          port is CommunityAnnouncementsPort &&
+              (port as CommunityAnnouncementsPort).announcementsAvailable
+          ? CommunityAnnouncementEntry(
+              key: ValueKey('announcements:${model.targetRef}'),
+              controller: model.announcements,
+              port: port as CommunityAnnouncementsPort,
+              targetRef: model.targetRef,
+            )
+          : Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                t('sectionUnavailable'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+    );
+  }
+
+  /// Everything about the organization: shown by the details dialog of the
+  /// classic header and of the holo shell's bar.
+  Widget detailsPanel(CommunityWorkspacePort port) {
+    final headerInformation = information;
+    final details = this.details;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(workspace.name, style: Theme.of(context).textTheme.titleLarge),
+        Text(workspace.code),
+        details,
+        const Divider(height: 32),
+        if (port is CommunityAnnouncementsPort &&
+            (port as CommunityAnnouncementsPort).announcementsAvailable) ...[
+          CommunityAnnouncementEntry(
+            key: ValueKey('detail-announcements:${model.targetRef}'),
+            controller: model.announcements,
+            port: port as CommunityAnnouncementsPort,
+            targetRef: model.targetRef,
+            expanded: true,
+          ),
+          const Divider(height: 32),
+        ] else ...[
+          Text(
+            t('announcements'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(t('sectionUnavailable')),
+          const Divider(height: 32),
+        ],
+        headerInformation,
+      ],
+    );
+  }
+
+  /// Active hours and time zone, or empty when the community set none.
+  String get activityText => [
+    workspace.activityWindows.isNotEmpty
+        ? communityActivitySummary(context, workspace.activityWindows)
+        : workspace.activeTime,
+    communityTimeZoneSummary(context, workspace),
+  ].where((v) => v.isNotEmpty).join(' · ');
+
+  /// The active hours in the viewer's own clock; empty in the same offset.
+  String get viewerActivityText => communityViewerActivitySummary(
+    context,
+    workspace.activityWindows,
+    workspace.timeZoneStandardOffsetMinutes,
+  );
+
+  /// Every contact as (platform, value), the website last.
+  List<(String, String)> get contactEntries => [
+    for (final entry in workspace.externalContacts)
+      if (entry.$1.trim().isNotEmpty && entry.$2.trim().isNotEmpty) entry,
+    if (workspace.websiteUrl?.isNotEmpty == true)
+      (t('website'), workspace.websiteUrl!),
+  ];
+
   void copyContacts() {
     final separator = AppStrings.of(context).locale.languageCode == 'zh'
         ? '：'
@@ -58,6 +161,16 @@ final class CommunityWorkspaceInformation {
         .length;
     return LayoutBuilder(
       builder: (context, constraints) {
+        // The same snapshot can outlive its page for one route-removal frame.
+        // Resolve inherited presentation from this live projection, not the
+        // original page element captured when the snapshot was created.
+        final projection = CommunityWorkspaceInformation(
+          context: context,
+          model: model,
+          workspace: workspace,
+          copy: copy,
+        );
+        String t(String key) => projection.t(key);
         final columns = constraints.maxWidth >= 1000
             ? 4
             : constraints.maxWidth >= 650
@@ -75,7 +188,7 @@ final class CommunityWorkspaceInformation {
               const SizedBox(height: 8),
               Text(
                 '${t('online')} · $online',
-                style: TextStyle(color: context.tokens.colors.accent),
+                style: TextStyle(color: context.tokens.colors.stateAccent),
               ),
               Text(
                 '${t('gaming')} · $gaming',
@@ -93,7 +206,7 @@ final class CommunityWorkspaceInformation {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _fact(
+              projection._fact(
                 t('activity'),
                 [
                   workspace.activityWindows.isNotEmpty
@@ -122,11 +235,21 @@ final class CommunityWorkspaceInformation {
                       t('contacts'),
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
-                    TextButton.icon(
-                      key: const Key('community-copy-all-contacts'),
-                      onPressed: copyContacts,
-                      icon: const StandardIcon(StandardIconSemantic.copyAll, size: 18),
-                      label: Text(t('copyAll')),
+                    StarBridgeActionButton(
+                      kind: StarBridgeActionKind.quiet,
+                      controlKey: const Key('community-copy-all-contacts'),
+                      onActivate: (_) => projection.copyContacts(),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const StandardIcon(
+                            StandardIconSemantic.copyAll,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(t('copyAll')),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -138,10 +261,16 @@ final class CommunityWorkspaceInformation {
                   Row(
                     children: [
                       Expanded(child: SelectableText('$platform · $value')),
-                      IconButton(
-                        onPressed: () => copy(value),
-                        tooltip: t('copy'),
-                        icon: const StandardIcon(StandardIconSemantic.copy, size: 18),
+                      StarBridgeIconAction(
+                        controlKey: ValueKey(
+                          'community-copy-contact-$platform-$value',
+                        ),
+                        onActivate: (_) => copy(value),
+                        label: t('copy'),
+                        icon: const StandardIcon(
+                          StandardIconSemantic.copy,
+                          size: 18,
+                        ),
                       ),
                     ],
                   ),

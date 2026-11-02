@@ -34,10 +34,11 @@ Future<CommunityShipImage> assembleCommunityShipImage(
   String targetRef,
   String shipRef, {
   required void Function() checkCurrent,
+  String? expectedVersion,
 }) async {
   final bytes = BytesBuilder(copy: false);
   var offset = 0;
-  String? version, hash, mime;
+  String? version = expectedVersion, hash, mime;
   int? total;
   (double, double, double)? crop;
   while (true) {
@@ -81,9 +82,9 @@ Future<CommunityShipImage> assembleCommunityShipImage(
         !const {'image/png', 'image/jpeg'}.contains(currentMime) ||
         data is! String ||
         data.length > 256 * 1024 ||
-        version != null &&
-            (version != currentVersion ||
-                hash != currentHash ||
+        version != null && version != currentVersion ||
+        total != null &&
+            (hash != currentHash ||
                 total != currentTotal ||
                 mime != currentMime ||
                 crop != currentCrop)) {

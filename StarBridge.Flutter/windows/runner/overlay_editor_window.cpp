@@ -1,6 +1,18 @@
 #include "overlay_editor_window.h"
 
-#include <shobjidl.h>
+namespace {
+
+// Windows treats a window that covers a whole monitor, or one marked through
+// ITaskbarList2::MarkFullscreenWindow, as a full-screen app, and Windows 11
+// then turns on Do Not Disturb. The editor stops one row short of the monitor
+// and stays above the taskbar by being topmost while it is the active window.
+RECT EditorRect(const RECT& monitor) {
+  RECT rect = monitor;
+  rect.bottom -= 1;
+  return rect;
+}
+
+}  // namespace
 
 OverlayEditorWindow::~OverlayEditorWindow() { Exit(); }
 
@@ -14,6 +26,7 @@ bool OverlayEditorWindow::Enter() {
   if (!GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST),
                       &monitor)) return false;
   saved.style = GetWindowLongPtr(window_, GWL_STYLE);
+  saved.topmost = (GetWindowLongPtr(window_, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
   snapshot_ = saved;
   ShowWindow(window_, SW_RESTORE);
   SetLastError(ERROR_SUCCESS);
@@ -23,14 +36,14 @@ bool OverlayEditorWindow::Enter() {
     Exit();
     return false;
   }
-  const RECT& rect = monitor.rcMonitor;
+  const RECT rect = EditorRect(monitor.rcMonitor);
   if (!SetWindowPos(window_, nullptr, rect.left, rect.top,
                     rect.right - rect.left, rect.bottom - rect.top,
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
     Exit();
     return false;
   }
-  MarkFullscreen(GetForegroundWindow() == window_);
+  KeepAboveTaskbar(GetForegroundWindow() == window_);
   return true;
 }
 
@@ -41,19 +54,18 @@ bool OverlayEditorWindow::Exit() {
     return true;
   }
   const auto saved = snapshot_.value();
-  // Stop WM_ACTIVATE/WM_DISPLAYCHANGE from reasserting the fullscreen taskbar
-  // hint while the restored style and maximized placement dispatch messages.
-  // Otherwise Explorer can keep the taskbar hidden after Flutter has already
-  // popped the editor route.
+  // Stop WM_ACTIVATE/WM_DISPLAYCHANGE from raising the editor above the
+  // taskbar again while the restored style and maximized placement dispatch
+  // messages after Flutter has already popped the editor route.
   snapshot_.reset();
-  MarkFullscreen(false);
+  RestoreZOrder(saved.topmost);
   const auto restoredStyle = saved.style & ~(WS_MAXIMIZE | WS_MINIMIZE);
   SetLastError(ERROR_SUCCESS);
   const auto previousStyle =
       SetWindowLongPtr(window_, GWL_STYLE, restoredStyle);
   if (previousStyle == 0 && GetLastError() != ERROR_SUCCESS) {
     snapshot_ = saved;
-    MarkFullscreen(GetForegroundWindow() == window_);
+    KeepAboveTaskbar(GetForegroundWindow() == window_);
     return false;
   }
   // A maximized Flutter window must make a real normal -> maximized
@@ -65,14 +77,14 @@ bool OverlayEditorWindow::Exit() {
   normalPlacement.showCmd = SW_SHOWNORMAL;
   if (!SetWindowPlacement(window_, &normalPlacement)) {
     snapshot_ = saved;
-    MarkFullscreen(GetForegroundWindow() == window_);
+    KeepAboveTaskbar(GetForegroundWindow() == window_);
     return false;
   }
   if (!SetWindowPos(window_, nullptr, 0, 0, 0, 0,
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE |
                     SWP_NOSIZE | SWP_FRAMECHANGED)) {
     snapshot_ = saved;
-    MarkFullscreen(GetForegroundWindow() == window_);
+    KeepAboveTaskbar(GetForegroundWindow() == window_);
     return false;
   }
   switch (saved.placement.showCmd) {
@@ -90,9 +102,6 @@ bool OverlayEditorWindow::Exit() {
       }
       break;
   }
-  // Clear again after the final frame/placement notifications. This is
-  // idempotent and makes Explorer repaint the taskbar region reliably.
-  MarkFullscreen(false);
   return true;
 }
 
@@ -101,24 +110,26 @@ void OverlayEditorWindow::FitMonitor() {
   MONITORINFO monitor{sizeof(MONITORINFO)};
   if (!GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST),
                       &monitor)) return;
-  const RECT& rect = monitor.rcMonitor;
+  const RECT rect = EditorRect(monitor.rcMonitor);
   SetWindowPos(window_, nullptr, rect.left, rect.top,
                rect.right - rect.left, rect.bottom - rect.top,
                SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 void OverlayEditorWindow::OnActivate(bool active) {
-  MarkFullscreen(this->active() && active);
+  if (!this->active()) return;
+  KeepAboveTaskbar(active);
 }
 
-void OverlayEditorWindow::MarkFullscreen(bool enabled) {
-  ITaskbarList2* taskbar = nullptr;
-  if (SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr,
-                                 CLSCTX_INPROC_SERVER,
-                                 IID_PPV_ARGS(&taskbar)))) {
-    if (SUCCEEDED(taskbar->HrInit())) {
-      taskbar->MarkFullscreenWindow(window_, enabled ? TRUE : FALSE);
-    }
-    taskbar->Release();
-  }
+// Topmost only while the editor is the active window: it covers the taskbar
+// like a full-screen surface, and switching to another app lets that app on top.
+void OverlayEditorWindow::KeepAboveTaskbar(bool enabled) {
+  const bool keep = enabled || (snapshot_.has_value() && snapshot_->topmost);
+  SetWindowPos(window_, keep ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void OverlayEditorWindow::RestoreZOrder(bool topmost) {
+  SetWindowPos(window_, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }

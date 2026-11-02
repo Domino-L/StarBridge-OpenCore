@@ -1,3 +1,5 @@
+const _menuFocusCall = 'AttachThreadInput';
+
 const helpSupportZhCn = <String, String>{
   'help.scm.openFailed': '未能打开浏览器，可手动访问 scm.flowcld.com。',
   'help.title': '帮助与支持',
@@ -80,7 +82,7 @@ const helpSupportZhCn = <String, String>{
   'help.legal.data.title': '你的数据与隐私',
   'help.legal.data.body': '应用会在这台设备上保存设置、登录状态、日志路径、浮层布局和必要缓存。游玩时长只有在你允许后才会记录。提交反馈时请勿填写密码、验证码、恢复码、支付信息或其他敏感内容。',
   'help.legal.safety.title': '游戏安全与信息准确性',
-  'help.legal.safety.body': '星海舰桥只读取你选择的 Game.log，不会进入或修改游戏进程、内存或文件，也不会替玩家完成游戏操作。游戏更新、日志不完整或网络波动可能造成延迟和识别错误；重要信息请以游戏客户端和官方服务为准。',
+  'help.legal.safety.body': '星海舰桥只读取你选择的 Game.log，不会进入或修改游戏进程、内存或文件，也不会替玩家完成游戏操作。游戏更新、日志不完整或网络波动可能造成延迟和识别错误；重要信息请以游戏客户端和官方服务为准。\n\n游戏内菜单：按 Alt+M 打开菜单时，如果 Windows 拒绝切换焦点，星海舰桥会短暂把菜单窗口的线程接入游戏窗口的输入队列（$_menuFocusCall），切换后立即解除。它不注入游戏，不读写游戏内存，也不发送按键。CIG 和反作弊程序如何看待这类行为，我们无法代为判定，请自行评估。',
   'help.legal.unofficial.title': '非官方说明',
   'help.legal.unofficial.body': '星海舰桥是玩家独立开发的非官方社区工具，与 Cloud Imperium 集团及其关联公司不存在隶属、合作、授权、赞助或认可关系。相关名称、商标、标志、图像、舰船设计和游戏素材的权利归其各自权利人所有。',
   'help.legal.use.title': '使用须知',
@@ -149,7 +151,7 @@ const helpSupportZhTw = <String, String>{
   'help.legal.data.title': '你的資料與隱私',
   'help.legal.data.body': '應用程式會在這台裝置上儲存設定、登入狀態、日誌路徑、浮層配置和必要快取。遊玩時間只有在你允許後才會記錄。提交回饋時請勿填寫密碼、驗證碼、復原碼、付款資訊或其他敏感內容。',
   'help.legal.safety.title': '遊戲安全與資訊準確性',
-  'help.legal.safety.body': '星海艦橋只讀取你選擇的 Game.log，不會進入或修改遊戲程序、記憶體或檔案，也不會替玩家完成遊戲操作。遊戲更新、日誌不完整或網路波動可能造成延遲和辨識錯誤；重要資訊請以遊戲客戶端和官方服務為準。',
+  'help.legal.safety.body': '星海艦橋只讀取你選擇的 Game.log，不會進入或修改遊戲程序、記憶體或檔案，也不會替玩家完成遊戲操作。遊戲更新、日誌不完整或網路波動可能造成延遲和辨識錯誤；重要資訊請以遊戲客戶端和官方服務為準。\n\n遊戲內選單：按 Alt+M 開啟選單時，如果 Windows 拒絕切換焦點，星海艦橋會短暫把選單視窗的執行緒接入遊戲視窗的輸入佇列（$_menuFocusCall），切換後立即解除。它不注入遊戲，不讀寫遊戲記憶體，也不傳送按鍵。CIG 和反作弊程式如何看待這類行為，我們無法代為判定，請自行評估。',
   'help.legal.unofficial.title': '非官方說明',
   'help.legal.unofficial.body': '星海艦橋是玩家獨立開發的非官方社群工具，與 Cloud Imperium 集團及其關聯公司不存在隸屬、合作、授權、贊助或認可關係。相關名稱、商標、標誌、圖像、艦船設計和遊戲素材的權利歸其各自權利人所有。',
   'help.legal.use.title': '使用須知',
@@ -218,7 +220,7 @@ const helpSupportEnUs = <String, String>{
   'help.legal.data.title': 'Your data and privacy',
   'help.legal.data.body': 'The app stores settings, sign-in state, selected log paths, overlay layouts, and required caches on this device. Play time is recorded only after you allow it. Never include passwords, verification or recovery codes, payment details, or other sensitive information in feedback.',
   'help.legal.safety.title': 'Game safety and accuracy',
-  'help.legal.safety.body': 'StarBridge only reads the Game.log you select. It does not enter or modify the game process, memory, or files, and it does not perform gameplay for you. Game updates, incomplete logs, and network changes may cause delays or errors. Confirm important information in the game and official services.',
+  'help.legal.safety.body': 'StarBridge only reads the Game.log you select. It does not enter or modify the game process, memory, or files, and it does not perform gameplay for you. Game updates, incomplete logs, and network changes may cause delays or errors. Confirm important information in the game and official services.\n\nIn-game menu: when you press Alt+M to open the menu and Windows refuses to switch focus, StarBridge briefly attaches the menu window\'s thread to the game window\'s input queue ($_menuFocusCall) and detaches it right after the switch. It does not inject into the game, read or write game memory, or send keystrokes. We cannot judge on behalf of CIG or anti-cheat software how they view this kind of behavior, so please assess it yourself.',
   'help.legal.unofficial.title': 'Unofficial project notice',
   'help.legal.unofficial.body': 'StarBridge is an independently developed community tool. It is not affiliated with, authorized, sponsored, or endorsed by Cloud Imperium or its related companies. Related names, trademarks, logos, images, ship designs, and game materials belong to their respective rights holders.',
   'help.legal.use.title': 'Usage notice',

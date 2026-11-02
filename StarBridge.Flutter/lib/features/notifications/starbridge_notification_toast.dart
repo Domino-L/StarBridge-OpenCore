@@ -1,7 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -14,8 +19,14 @@ VoidCallback showStarBridgeNotificationToast(
   required String title,
   required String message,
   Duration duration = const Duration(seconds: 4),
+  InteractionSource? source,
 }) {
   final overlay = Overlay.of(context, rootOverlay: true);
+  final link = InteractionScope.linkOf(context);
+  final data =
+      InteractionScope.maybeOf(context) ??
+      resolveStarBridgeInteraction(context);
+  final origin = source ?? StarBridgeActivationOrigin.sourceOf(context);
   late final OverlayEntry entry;
   var removed = false;
 
@@ -25,16 +36,23 @@ VoidCallback showStarBridgeNotificationToast(
     }
     removed = true;
     entry.remove();
+    entry.dispose();
   }
 
   entry = OverlayEntry(
-    builder: (_) => _StarBridgeNotificationOverlay(
-      alignment: alignment,
-      title: title,
-      message: message,
-      duration: duration,
-      onDismissed: remove,
-    ),
+    builder: (_) {
+      final child = _StarBridgeNotificationOverlay(
+        alignment: alignment,
+        title: title,
+        message: message,
+        duration: duration,
+        source: origin,
+        onDismissed: remove,
+      );
+      return link == null
+          ? InteractionScope(data: data, child: child)
+          : InteractionScope.follow(link, child: child);
+    },
   );
   overlay.insert(entry);
   return remove;
@@ -46,6 +64,7 @@ class _StarBridgeNotificationOverlay extends StatefulWidget {
     required this.title,
     required this.message,
     required this.duration,
+    required this.source,
     required this.onDismissed,
   });
 
@@ -53,6 +72,7 @@ class _StarBridgeNotificationOverlay extends StatefulWidget {
   final String title;
   final String message;
   final Duration duration;
+  final InteractionSource source;
   final VoidCallback onDismissed;
 
   @override
@@ -67,42 +87,86 @@ class _StarBridgeNotificationOverlayState
   Timer? _dismissTimer;
   var _closing = false;
   var _started = false;
+  var _closeInstant = false;
+  var _settleQueued = false;
+  late InteractionData _data;
+
+  bool get _instant =>
+      !(_data.animates) ||
+      widget.source == InteractionSource.keyboard ||
+      _closeInstant;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(vsync: this);
-    _dismissTimer = Timer(widget.duration, _dismiss);
+    _controller.addStatusListener(_statusChanged);
+    _dismissTimer = Timer(
+      widget.duration,
+      () => _dismiss(InteractionSource.programmatic),
+    );
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final motion = context.tokens.motion;
-    _controller.duration = motion.surfaceEnter;
-    _controller.reverseDuration = motion.surfaceExit;
+    _data = InteractionScope.of(context);
+    final durations = surfaceDurations(
+      _data.copyWith(reduceMotion: false),
+      SurfaceKind.toast,
+    );
+    _controller.duration = durations.enter;
+    _controller.reverseDuration = durations.exit;
     if (!_started) {
       _started = true;
-      _controller.forward();
+      if (_instant) {
+        _controller.value = 1;
+      } else {
+        _controller.forward();
+      }
+    } else if (_instant && !_settleQueued) {
+      // Dependency changes can arrive while the overlay is being built.
+      // Settle after that frame, without restarting the timer or reverse.
+      _settleQueued = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _settleQueued = false;
+        if (!mounted || !_instant) return;
+        _controller.stop(canceled: false);
+        _controller.value = _closing ? 0 : 1;
+      });
+    }
+  }
+
+  void _statusChanged(AnimationStatus status) {
+    if (_closing && status == AnimationStatus.dismissed && mounted) {
+      widget.onDismissed();
     }
   }
 
   @override
   void dispose() {
     _dismissTimer?.cancel();
+    _controller.removeStatusListener(_statusChanged);
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _dismiss() async {
+  void _dismiss(InteractionSource source) {
     if (_closing || !mounted) {
       return;
     }
     _closing = true;
+    _closeInstant = source == InteractionSource.keyboard;
     _dismissTimer?.cancel();
-    await _controller.reverse();
-    if (mounted) {
+    if (_instant || _controller.isDismissed) {
+      _controller.stop(canceled: false);
       widget.onDismissed();
+    } else {
+      // Status owns completion; changing reduced motion cannot cancel an
+      // awaited reverse and strand the entry. External cancellation stays
+      // immediate through the original returned remove callback.
+      setState(() {});
+      _controller.reverse();
     }
   }
 
@@ -117,31 +181,41 @@ class _StarBridgeNotificationOverlayState
       right: entersFromRight ? safePadding.right + tokens.space.md : null,
       top: entersFromBottom ? null : safePadding.top + tokens.space.md,
       bottom: entersFromBottom ? safePadding.bottom + tokens.space.md : null,
-      child: FadeTransition(
-        opacity: CurvedAnimation(
-          parent: _controller,
-          curve: tokens.motion.enterCurve,
-          reverseCurve: tokens.motion.exitCurve,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: math.min(
+            360,
+            math.max(
+              0,
+              MediaQuery.sizeOf(context).width -
+                  safePadding.horizontal -
+                  tokens.space.md * 2,
+            ),
+          ),
         ),
-        child: SlideTransition(
-          position:
-              Tween<Offset>(
-                begin: Offset(
-                  entersFromRight ? 0.08 : -0.08,
-                  entersFromBottom ? 0.06 : -0.06,
-                ),
-                end: Offset.zero,
-              ).animate(
-                CurvedAnimation(
-                  parent: _controller,
-                  curve: tokens.motion.enterCurve,
-                  reverseCurve: tokens.motion.exitCurve,
+        child: InteractionScope(
+          data: _data.copyWith(reduceMotion: _instant),
+          child: SuiteSurfaceTransition(
+            animation: _controller,
+            kind: SurfaceKind.toast,
+            alignment: widget.alignment,
+            toastFromLeft: !entersFromRight,
+            radius: tokens.shape.radiusMedium,
+            tone: _data.palette.success,
+            child: IgnorePointer(
+              ignoring: _closing,
+              child: ExcludeFocus(
+                excluding: _closing,
+                child: ExcludeSemantics(
+                  excluding: _closing,
+                  child: _StarBridgeNotificationCard(
+                    title: widget.title,
+                    message: widget.message,
+                    onDismiss: _dismiss,
+                  ),
                 ),
               ),
-          child: _StarBridgeNotificationCard(
-            title: widget.title,
-            message: widget.message,
-            onDismiss: _dismiss,
+            ),
           ),
         ),
       ),
@@ -158,7 +232,7 @@ class _StarBridgeNotificationCard extends StatelessWidget {
 
   final String title;
   final String message;
-  final VoidCallback onDismiss;
+  final ValueChanged<InteractionSource> onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -222,10 +296,13 @@ class _StarBridgeNotificationCard extends StatelessWidget {
                             ),
                           ),
                           SizedBox(width: tokens.space.xs),
-                          IconButton(
-                            tooltip: MaterialLocalizations.of(context)
+                          StarBridgeIconAction(
+                            controlKey: const Key(
+                              'starbridge-notification-close',
+                            ),
+                            label: MaterialLocalizations.of(context)
                                 .closeButtonTooltip,
-                            onPressed: onDismiss,
+                            onActivate: onDismiss,
                             icon: StarBridgeIcon(
                               StarBridgeIconSemantic.windowClose,
                               size: tokens.icons.small,

@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
 
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../features/party_rooms/room_action_dialogs.dart';
 import '../../features/party_rooms/room_preset_choices.dart';
+import '../../features/common/social_read_activity.dart';
 import 'menu_room_preset_view.dart';
 
 class MenuRoomPresetControl extends StatefulWidget {
@@ -37,18 +43,20 @@ class _PresetControlState extends State<MenuRoomPresetControl> {
         : widget.view;
   }
 
-  Future<void> _open() async {
+  Future<void> _open(InteractionSource source) async {
     if (!widget.enabled || widget.view.open == null || _dialog != null) return;
     _selected = false;
     _openedRevision = widget.view.revision;
     final state = _dialog = ValueNotifier<MenuRoomPresetView?>(widget.view);
     widget.dispatch(widget.view.open!, '');
     try {
-      await showDialog<void>(
-        context: context,
+      await showStarBridgeDialog<void>(
+        context,
+        source: source,
         useRootNavigator: false,
         builder: (_) => _PresetPicker(
           view: state,
+          openingSource: source,
           select: (action) {
             _selected = true;
             widget.dispatch(action, '');
@@ -69,24 +77,37 @@ class _PresetControlState extends State<MenuRoomPresetControl> {
   }
 
   @override
-  Widget build(BuildContext context) => TextButton.icon(
-    key: const ValueKey('menu-room-share-preset'),
-    onPressed: widget.enabled && widget.view.open != null ? _open : null,
-    icon: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
-    label: Text(roomActionText(context, 'sharePreset')),
+  Widget build(BuildContext context) => StarBridgeActionButton(
+    kind: StarBridgeActionKind.quiet,
+    controlKey: const ValueKey('menu-room-share-preset'),
+    onActivate: widget.enabled && widget.view.open != null ? _open : null,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const StarBridgeIcon(StarBridgeIconSemantic.overlay),
+        const SizedBox(width: 8),
+        Text(roomActionText(context, 'sharePreset')),
+      ],
+    ),
   );
 }
 
 class _PresetPicker extends StatefulWidget {
-  const _PresetPicker({required this.view, required this.select});
+  const _PresetPicker({
+    required this.view,
+    required this.select,
+    required this.openingSource,
+  });
   final ValueNotifier<MenuRoomPresetView?> view;
   final ValueChanged<String> select;
+  final InteractionSource openingSource;
   @override
   State<_PresetPicker> createState() => _PickerState();
 }
 
 class _PickerState extends State<_PresetPicker> {
   bool _working = false, _closing = false;
+  InteractionSource _source = InteractionSource.pointer;
   @override
   void initState() {
     super.initState();
@@ -97,7 +118,7 @@ class _PickerState extends State<_PresetPicker> {
     if (widget.view.value == null && !_closing) {
       _closing = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) dismissStarBridgeDialog(context, source: _source);
       });
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,7 +152,13 @@ class _PickerState extends State<_PresetPicker> {
               Text(t('sharePresetHint')),
               const SizedBox(height: 12),
               if (view == null || !view.loaded && view.error == null)
-                const LinearProgressIndicator()
+                SocialReadActivity(
+                  key: const Key('menu-room-preset-catalog-wait'),
+                  source: widget.openingSource,
+                  opening: false,
+                  label: t('working'),
+                  height: 4,
+                )
               else if (view.error != null)
                 Text(t(view.error!))
               else if (view.choices.isEmpty)
@@ -140,20 +167,30 @@ class _PickerState extends State<_PresetPicker> {
                 RoomPresetChoices(
                   choices: view.choices,
                   enabled: !_working,
-                  onSelected: (choice) {
+                  onSelected: (choice, source) {
                     if (_working) return;
+                    _source = source;
                     setState(() => _working = true);
                     widget.select(choice.id);
                   },
                 ),
-              if (_working) const LinearProgressIndicator(),
+              if (_working)
+                SocialReadActivity(
+                  key: const Key('menu-room-preset-prepare-wait'),
+                  source: _source,
+                  opening: false,
+                  label: t('working'),
+                  height: 4,
+                ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source),
           child: Text(t('cancel')),
         ),
       ],
@@ -177,11 +214,11 @@ class MenuRoomPresetAttachment extends StatelessWidget {
     leading: const StarBridgeIcon(StarBridgeIconSemantic.overlay),
     title: Text(view.draftName ?? ''),
     subtitle: Text(roomActionText(context, 'presetDraft')),
-    trailing: IconButton(
-      key: const ValueKey('menu-room-clear-preset'),
-      tooltip: roomActionText(context, 'removeAttachment'),
-      onPressed: enabled && view.clear != null
-          ? () => dispatch(view.clear!, '')
+    trailing: StarBridgeIconAction(
+      controlKey: const ValueKey('menu-room-clear-preset'),
+      label: roomActionText(context, 'removeAttachment'),
+      onActivate: enabled && view.clear != null
+          ? (_) => dispatch(view.clear!, '')
           : null,
       icon: const StarBridgeIcon(StarBridgeIconSemantic.windowClose),
     ),

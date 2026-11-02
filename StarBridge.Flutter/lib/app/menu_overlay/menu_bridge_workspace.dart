@@ -1,3 +1,5 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/icons/icon_semantic.dart';
@@ -16,7 +18,11 @@ import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
 import 'menu_organizations_panel.dart';
 import 'menu_rooms_panel.dart';
+import 'menu_hud_quick_panel.dart';
 import 'menu_local_tools.dart';
+import 'menu_exec_hangar_window.dart';
+import '../../platform/window/menu_exec_hangar_summary.dart';
+import '../localization/app_strings.dart';
 
 class MenuBridgeWorkspace extends StatelessWidget {
   const MenuBridgeWorkspace({
@@ -38,6 +44,12 @@ class MenuBridgeWorkspace extends StatelessWidget {
     this.browserResume,
     this.screenshotDirectory,
     this.safeMode = false,
+    this.hangar,
+    this.hangarInitial,
+    this.onHangarSnapshot,
+    this.hangarPinned = false,
+    this.onHangarPinned,
+    this.onHangarSettings,
   });
   final MenuWorkspaceController controller;
   final MenuFriendsView? friends;
@@ -57,19 +69,40 @@ class MenuBridgeWorkspace extends StatelessWidget {
   final MenuBrowserResumeController? browserResume;
   final MenuScreenshotDirectoryPort? screenshotDirectory;
   final bool safeMode;
+  final MenuExecHangarSummaryPort? hangar;
+  final MenuExecHangarSummary? hangarInitial;
+  final ValueChanged<MenuExecHangarSummary>? onHangarSnapshot;
+  final bool hangarPinned;
+  final ValueChanged<bool>? onHangarPinned;
+  final VoidCallback? onHangarSettings;
   @override
   Widget build(BuildContext context) => MenuOverlayWorkspace(
     controller: controller,
     bridgeStyle: true,
-    closeLabel: '关闭窗口',
-    moveLabel: '拖动窗口',
-    resizeLabel: '调整窗口大小',
+    closeLabel: menuText(context, 'menu.overlay.window.closeWindow'),
+    moveLabel: menuText(context, 'menu.overlay.window.move'),
+    resizeLabel: menuText(context, 'menu.overlay.window.resize'),
     panels: [
+      if (hangar != null)
+        MenuPanelContent(
+          id: 'execHangar',
+          title: AppStrings.of(context).text('execHangar.title'),
+          icon: StarBridgeIconSemantic.friends,
+          builder: (_, _) => MenuExecHangarWindow(
+            port: hangar!,
+            active: controller.panelsVisible,
+            initial: hangarInitial,
+            onSnapshot: onHangarSnapshot,
+            pinned: hangarPinned,
+            onPinned: onHangarPinned,
+            onSettings: onHangarSettings,
+          ),
+        ),
       if (onFeatureAction != null)
-        for (final entry in const {
-          'organizations': '组织',
-          'rooms': '房间',
-          'hud': '信息浮层',
+        for (final entry in {
+          'organizations': menuText(context, 'menu.tools.organizations'),
+          'rooms': menuText(context, 'menu.tools.rooms'),
+          'hud': menuText(context, 'menu.tools.hud'),
         }.entries)
           MenuPanelContent(
             id: entry.key,
@@ -94,11 +127,12 @@ class MenuBridgeWorkspace extends StatelessWidget {
                     view:
                         features[entry.key] ?? const MenuFeatureView('loading'),
                     active:
-                        controller.activeId == 'rooms' && controller.panelsVisible,
+                        controller.activeId == 'rooms' &&
+                        controller.panelsVisible,
                     onAction: (key, value) =>
                         onFeatureAction!(entry.key, key, value),
                   )
-                : MenuFeaturePanel(
+                : MenuHudQuickPanel(
                     view:
                         features[entry.key] ?? const MenuFeatureView('loading'),
                     onAction: (key, value) =>
@@ -108,13 +142,13 @@ class MenuBridgeWorkspace extends StatelessWidget {
       if (localTools != null) ...[
         MenuPanelContent(
           id: 'screenshot',
-          title: '截图',
+          title: menuText(context, 'menu.tools.screenshot'),
           icon: StarBridgeIconSemantic.friends,
           builder: (_, _) => MenuImageTool(tools: localTools!, capture: true),
         ),
         MenuPanelContent(
           id: 'image',
-          title: '参考图',
+          title: menuText(context, 'menu.tools.image'),
           icon: StarBridgeIconSemantic.friends,
           chromeHidden: localTools!.referenceChromeHidden,
           builder: (_, _) =>
@@ -122,7 +156,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
         ),
         MenuPanelContent(
           id: 'browser',
-          title: '浏览器',
+          title: menuText(context, 'menu.tools.browser'),
           icon: StarBridgeIconSemantic.friends,
           builder: (_, _) => MenuBrowserTool(
             safeMode: safeMode,
@@ -134,7 +168,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
         ),
         MenuPanelContent(
           id: 'settings',
-          title: '菜单设置',
+          title: menuText(context, 'menu.overlay.window.settings'),
           icon: StarBridgeIconSemantic.friends,
           builder: (_, _) => MenuLocalSettings(
             tools: localTools!,
@@ -148,7 +182,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
       for (final entry in profiles.entries)
         MenuPanelContent(
           id: entry.key,
-          title: '个人页面',
+          title: menuText(context, 'menu.overlay.window.profile'),
           icon: StarBridgeIconSemantic.friends,
           builder: (_, _) => MenuProfileWindowPage(
             view: entry.value,
@@ -157,7 +191,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
         ),
       MenuPanelContent(
         id: 'friends',
-        title: '好友',
+        title: menuText(context, 'menu.tools.friends'),
         icon: StarBridgeIconSemantic.friends,
         builder: (_, _) => friends == null
             ? SingleChildScrollView(
@@ -186,7 +220,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
       ),
       MenuPanelContent(
         id: 'comms',
-        title: '通讯',
+        title: menuText(context, 'menu.tools.comms'),
         icon: StarBridgeIconSemantic.notifications,
         builder: (_, _) => friends == null
             ? SingleChildScrollView(
@@ -197,7 +231,8 @@ class MenuBridgeWorkspace extends StatelessWidget {
               )
             : comms != null && onCommsAction != null
             ? MenuCommsPanel(
-                active: controller.activeId == 'comms' && controller.panelsVisible,
+                active:
+                    controller.activeId == 'comms' && controller.panelsVisible,
                 embedded: true,
                 view: comms!,
                 onClose: () => controller.close('comms'),
@@ -208,7 +243,12 @@ class MenuBridgeWorkspace extends StatelessWidget {
                     ? null
                     : (key) => onProfile!('comms', key),
               )
-            : const BridgePlate(framed: false, child: BridgeCaption('通讯尚未接入。')),
+            : BridgePlate(
+                framed: false,
+                child: BridgeCaption(
+                  menuText(context, 'menu.overlay.comms.notConnected'),
+                ),
+              ),
       ),
     ],
   );

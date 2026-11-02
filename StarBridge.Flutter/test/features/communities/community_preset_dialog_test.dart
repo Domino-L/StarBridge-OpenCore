@@ -94,10 +94,10 @@ void main() {
       await open(tester, port, importing: true);
       await tester.pumpAndSettle();
       expect(port.imports, 0);
-      await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+      await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
       await tester.pumpAndSettle();
       expect(port.imports, 1);
-      expect(find.text('已新增预设: Fixture'), findsOneWidget);
+      expect(find.text('已新增方案: Fixture'), findsOneWidget);
       expect(find.byType(FilledButton), findsNothing);
     },
   );
@@ -107,7 +107,7 @@ void main() {
       port.failure = 'presetImportUnknown';
       await open(tester, port, importing: true);
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+      await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
       await tester.pumpAndSettle();
       expect(port.imports, 1);
       expect(find.text('重试'), findsNothing);
@@ -120,7 +120,7 @@ void main() {
     port.failure = 'presetChanged';
     await open(tester, port, importing: true);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+    await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
     await tester.pumpAndSettle();
     expect(port.imports, 1);
     expect(find.byType(FilledButton), findsNothing);

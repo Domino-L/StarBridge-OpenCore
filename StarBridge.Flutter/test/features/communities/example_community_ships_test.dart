@@ -1,17 +1,20 @@
 import 'package:starbridge_flutter/design_system/icons/standard_icon.dart';
+import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/features/communities/communities_module.dart';
 import 'package:starbridge_flutter/features/communities/example_communities.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_port.dart';
 import 'package:starbridge_flutter/features/communities/community_ships_panel.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_detail_dialog.dart';
 import 'package:starbridge_flutter/features/communities/community_catalog_ship_image.dart';
-import 'package:starbridge_flutter/features/communities/community_member_banner.dart';
+import 'package:starbridge_flutter/features/common/organization_member_row.dart';
 import 'package:starbridge_flutter/features/communities/community_ship_banner.dart';
 
 import 'community_ships_test.dart' show shipRow;
@@ -158,21 +161,36 @@ void main() {
           await tester.pumpWidget(host(port, locale, target: target));
           await tester.pumpAndSettle();
           // Scrollbar has its own gutter, outside the member cards.
-          final banner = find.byType(CommunityMemberBanner).first;
+          final banner = find.byType(OrganizationMemberRow).first;
           final list = find
               .ancestor(of: banner, matching: find.byType(ListView))
               .first;
+          final listContext = tester.element(list);
+          final scrollbar = ScrollbarTheme.of(listContext);
+          final thumbWidth =
+              scrollbar.thickness?.resolve({WidgetState.hovered}) ??
+              listContext.tokens.space.xs;
           expect(
             tester.getBottomRight(list).dx - tester.getBottomRight(banner).dx,
-            greaterThanOrEqualTo(16),
+            greaterThanOrEqualTo(
+              thumbWidth +
+                  (scrollbar.crossAxisMargin ?? 0) +
+                  listContext.tokens.space.xs,
+            ),
           );
           await tester.tap(
             find.byKey(const ValueKey('community-section-ships')),
           );
           await tester.pumpAndSettle();
           expect(find.byType(CommunityShipsPanel), findsOneWidget);
+          // These checks cover the list view; cards have their own tests.
+          await tester.tap(
+            find.byKey(const ValueKey('community-ships-view-list')),
+          );
+          await tester.pumpAndSettle();
           expect(find.byType(CommunityCatalogShipImage), findsWidgets);
-          expect(find.text('1–20 / 25'), findsOneWidget);
+          // "已显示 20 / 25 艘" (option D, 2026-10-29): pages accumulate.
+          expect(find.textContaining('20 / 25'), findsOneWidget);
           final filter = find.byKey(
             const ValueKey('community-ship-filter-concept'),
           );
@@ -195,13 +213,12 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(filter);
           await tester.pumpAndSettle();
-          expect(find.text('1–6 / 6'), findsOneWidget);
+          expect(find.textContaining('6 / 6'), findsOneWidget);
           final detailButton = find
               .descendant(
                 of: find.byType(CommunityShipsPanel),
                 matching: find.byWidgetPredicate(
                   (widget) =>
-                      widget is OutlinedButton &&
                       widget.key is ValueKey<String> &&
                       (widget.key as ValueKey<String>).value.startsWith(
                         'community-ship-details-',
@@ -250,10 +267,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('community-section-ships')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byWidgetPredicate((w) => w is StandardIcon && w.semantic == StandardIconSemantic.share));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) => w is StandardIcon && w.semantic == StandardIconSemantic.share,
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(find.byType(CheckboxListTile), findsNWidgets(2));
-      await tester.tap(find.byType(CheckboxListTile).first);
+      expect(find.byType(StarBridgeCheckboxTile), findsNWidgets(2));
+      await tester.tap(find.byType(StarBridgeCheckboxTile).first);
       await tester.pumpAndSettle();
       final boundary = tester.renderObject<RenderRepaintBoundary>(
         find
@@ -298,6 +319,34 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('community-section-ships')));
     await tester.pumpAndSettle();
+    // Review image of the default card grid, with its catalog art decoded.
+    for (final art in tester.widgetList<CommunityCatalogShipImage>(
+      find.byType(CommunityCatalogShipImage),
+    )) {
+      if (art.asset == null) continue;
+      await tester.runAsync(
+        () => precacheImage(
+          AssetImage(art.asset!),
+          tester.element(find.byType(CommunityShipsPanel)),
+          onError: (_, _) {},
+        ),
+      );
+    }
+    await tester.pumpAndSettle();
+    final cardsBoundary = tester.renderObject<RenderRepaintBoundary>(
+      find.byKey(const ValueKey('workspace-capture')),
+    );
+    await tester.runAsync(() async {
+      final image = await cardsBoundary.toImage();
+      final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+      final output = File('build/community-ships-example-cards.png');
+      await output.parent.create(recursive: true);
+      await output.writeAsBytes(bytes.buffer.asUint8List());
+      image.dispose();
+    });
+    // These checks cover the list view; cards have their own tests.
+    await tester.tap(find.byKey(const ValueKey('community-ships-view-list')));
+    await tester.pumpAndSettle();
     final banner = find.byType(CommunityShipBanner).first;
     expect(tester.getSize(banner).height, lessThanOrEqualTo(72));
     final cells = tester.widget<CommunityShipBanner>(banner);
@@ -309,7 +358,6 @@ void main() {
       cells.role,
       cells.owner,
       cells.importedAt,
-      cells.action,
     ]) {
       expect(tester.getCenter(find.byWidget(cell)).dy, closeTo(y, 1));
     }
@@ -324,7 +372,7 @@ void main() {
       await output.writeAsBytes(bytes.buffer.asUint8List());
       image.dispose();
     });
-    await tester.tap(find.byWidget(cells.action));
+    await tester.tap(find.byWidget(cells.identity));
     await tester.pumpAndSettle();
     final artwork = tester.widget<CommunityCatalogShipImage>(
       find.descendant(

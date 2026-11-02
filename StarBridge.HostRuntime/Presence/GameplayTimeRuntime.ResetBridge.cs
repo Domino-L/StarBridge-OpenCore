@@ -13,12 +13,16 @@ public sealed partial class GameplayTimeRuntime
     {
         BridgeDispatchBatch Reply(string state, string? previewId = null) =>
             new(BridgeEnvelope.Response(request, new { schemaVersion = 1, state, previewId }), []);
+        using var work = _work.Enter(default);
+        if (work is null) return Reply("accountChanged");
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellation, work.Token);
+        cancellation = lifetime.Token;
         try
         {
             BridgeEnvelopeValidator.ValidateWireShape(request);
             BridgeEnvelopeValidator.RequireCurrentVersion(request);
             var owner = _current();
-            bool Current() => !_disposed && !cancellation.IsCancellationRequested && _current() == owner;
+            bool Current() => OwnerIsCurrent(owner, cancellation);
             if (request.MessageType != BridgeMessageTypes.Request || owner.Context is null ||
                 request.AccountContext != owner.Context || request.SessionGeneration != owner.Generation || !Current())
                 return Reply("accountChanged");

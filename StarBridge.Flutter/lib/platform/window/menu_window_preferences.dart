@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../bridge/bridge_client_session.dart';
 import 'menu_settings_read.dart';
 import 'menu_toolbar_preferences.dart';
+import 'menu_desktop_widgets.dart';
 import 'menu_display_preferences.dart';
 import 'menu_social_preferences.dart';
 import 'menu_restore_preferences.dart';
@@ -24,6 +25,7 @@ class MenuWindowPreferences {
     'image',
     'browser',
     'settings',
+    'execHangar',
   };
   static const defaults = MenuWindowPreferences(
     0,
@@ -34,6 +36,10 @@ class MenuWindowPreferences {
       'dimming': 133 / 255,
       'restoreDesktop': false,
       'snapWindows': false,
+      'widgets': {
+        'hangar': true,
+        'position': [.04, .18],
+      },
     },
   );
   static MenuWindowPreferences? parse(Object? raw) {
@@ -58,6 +64,7 @@ class MenuWindowPreferences {
             'crashRecovery',
             'snapWindows',
             'toolbar',
+            'widgets',
             'display',
             'social',
             'browser',
@@ -99,6 +106,10 @@ class MenuWindowPreferences {
     if (MenuBrowserPreferences.fromSettings(settings) == null) return null;
     if (MenuImagePreferences.fromSettings(settings) == null) return null;
     if (MenuScreenshotPreferences.fromSettings(settings) == null) return null;
+    if (settings.containsKey('widgets') && settings['widgets'] == null ||
+        MenuDesktopWidgets.parse(settings['widgets']) == null) {
+      return null;
+    }
     if (settings.containsKey('toolbar') &&
         (settings['toolbar'] == null ||
             MenuToolbarPreferences.parse(settings['toolbar']) == null)) {

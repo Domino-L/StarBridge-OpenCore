@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_port.dart';
+import 'package:starbridge_flutter/features/communities/community_chat_copy.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 
 import 'bridge_communities_test.dart' show CommunityHarness;
@@ -15,6 +16,23 @@ Map<String, Object?> receipt() => {
 };
 
 void main() {
+  test('receipt copy reports only known reasons and never describes a send failure', () {
+    for (final error in [
+      'rateLimited',
+      'dataInvalid',
+      'refreshRequired',
+      'notFound',
+    ]) {
+      final key = communityChatReceiptCopyKey(error);
+      final row = communityChatCopy[key]!;
+      expect(row.$1, contains('已读状态'));
+      expect(row.$1, contains('未读提醒暂时保留'));
+      expect(row.$1, isNot(contains('草稿')));
+      expect(row.$3, isNot(contains('Sending')));
+    }
+    expect(communityChatReceiptCopyKey('outcomeUnknown'), 'readFailed');
+    expect(communityChatReceiptCopyKey('unclassified'), 'readFailed');
+  });
   final message = CommunityChatPage.parse(chatPage()).messages.last;
   test(
     'explicit receipt posts only scoped references and retains advanced cursor',

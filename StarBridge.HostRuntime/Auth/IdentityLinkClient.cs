@@ -119,7 +119,9 @@ public sealed record LegacyIdentityLinkPasswordCredential(string AccountName, st
 public sealed record ScmIdentityLinkResult(
     string Status,
     string LegacyAccountId,
-    string? ConflictId);
+    string? ConflictId,
+    string? Code = null,
+    string? Message = null);
 
 public sealed record ScmIdentityLinkProjection(string Status, string LegacyAccountId);
 
@@ -176,13 +178,13 @@ public sealed class IdentityLinkClient(
                 "旧账号关联挑战",
                 cancellationToken);
         }
-        catch (JsonException exception)
+        catch (JsonException)
         {
             ScmAuthDiagnostics.Write(
                 correlationId,
                 "identity-link-challenge-json",
                 "failed",
-                $"path={exception.Path ?? "unknown"} detail={exception.Message.Replace('\r', ' ').Replace('\n', ' ')}");
+                "error=invalid-payload");
             throw;
         }
     }
@@ -271,6 +273,11 @@ public sealed class IdentityLinkClient(
     {
         if (!response.IsSuccessStatusCode)
         {
+            if (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+            {
+                throw new LegacyIdentityLinkProofUnavailableException();
+            }
+
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 throw new LegacyIdentityLinkAuthenticationException();
@@ -300,10 +307,7 @@ public sealed class IdentityLinkClient(
             Content = JsonContent.Create(proof)
         };
         using var response = await scmHttpClient.SendAsync(request, linkSession.AccessToken, cancellationToken);
-        return await scmHttpClient.ReadJsonAsync<ScmIdentityLinkResult>(
-            response,
-            "旧账号关联确认",
-            cancellationToken);
+        return await ReadLinkResultAsync(response, cancellationToken);
     }
 
     public async Task<ScmIdentityLinkResult> ProvisionCompatibilityAccountAsync(
@@ -319,10 +323,36 @@ public sealed class IdentityLinkClient(
             Content = JsonContent.Create(new { CommandId = commandId })
         };
         using var response = await scmHttpClient.SendAsync(request, linkSession.AccessToken, cancellationToken);
-        return await scmHttpClient.ReadJsonAsync<ScmIdentityLinkResult>(
-            response,
-            "兼容档案创建",
-            cancellationToken);
+        return await ReadLinkResultAsync(response, cancellationToken);
+    }
+
+    private static async Task<ScmIdentityLinkResult> ReadLinkResultAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        // Identity-link errors carry stable codes. Do not display remote messages or identifiers.
+        if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            throw new IdentityLinkProofRejectedException();
+        if (response.StatusCode != HttpStatusCode.OK && response.StatusCode != HttpStatusCode.Conflict)
+        {
+            throw response.StatusCode switch
+            {
+                HttpStatusCode.Unauthorized => new ScmApiAuthenticationException("SCM account authorization is required."),
+                HttpStatusCode.Forbidden => new ScmApiForbiddenException("SCM identity-link authorization is required."),
+                >= HttpStatusCode.InternalServerError => new ScmApiUnavailableException("SCM identity-link service is temporarily unavailable."),
+                _ => new HttpRequestException("SCM identity-link request failed.", null, response.StatusCode)
+            };
+        }
+        ScmIdentityLinkResult? result;
+        try { result = await response.Content.ReadFromJsonAsync<ScmIdentityLinkResult>(cancellationToken); }
+        catch (Exception error) when (error is JsonException or NotSupportedException)
+        { throw new ScmApiProtocolException("SCM identity-link response is invalid."); }
+        if (response.StatusCode == HttpStatusCode.Conflict && result is
+            { Status: "CONFLICT", Code: "IDENTITY_LINK_CONFLICT", ConflictId: null })
+            return new ScmIdentityLinkResult("CONFLICT", string.Empty, null, "IDENTITY_LINK_CONFLICT");
+        if (response.StatusCode == HttpStatusCode.OK && result is
+            { Status: "LINKED", Code: null, ConflictId: null, Message: null } && !string.IsNullOrWhiteSpace(result.LegacyAccountId))
+            return result;
+        throw new ScmApiProtocolException("SCM identity-link response is invalid.");
     }
 
     public async Task<ScmIdentityLinkProjection?> ResolveAsync(
@@ -360,6 +390,13 @@ public sealed class IdentityLinkClient(
 
 public sealed class LegacyIdentityLinkAuthenticationException()
     : HttpRequestException("旧账号身份验证失败。", null, HttpStatusCode.Unauthorized);
+
+public sealed class IdentityLinkProofRejectedException()
+    : HttpRequestException("Identity-link proof is invalid or expired. Start account linking again.",
+        null, HttpStatusCode.UnprocessableEntity);
+
+public sealed class LegacyIdentityLinkProofUnavailableException()
+    : HttpRequestException("旧账号验证服务暂时不可用。", null, HttpStatusCode.ServiceUnavailable);
 
 public sealed class LegacyIdentityLinkRateLimitException(TimeSpan? retryAfter)
     : HttpRequestException("旧账号验证尝试过于频繁。", null, HttpStatusCode.TooManyRequests)

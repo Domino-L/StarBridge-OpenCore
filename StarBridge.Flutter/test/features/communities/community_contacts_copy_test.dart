@@ -66,7 +66,11 @@ void main() {
   }
   testWidgets('single copy retains just the selected value', (tester) async {
     await open(tester, const Locale('zh', 'CN'));
-    await tester.tap(find.byTooltip('复制').first);
+    await tester.tap(
+      find.byKey(
+        const ValueKey('community-copy-contact-Discord-organization-contact'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(writes, ['organization-contact']);
     expect(find.text('已复制'), findsOneWidget);

@@ -3,6 +3,7 @@ import 'dart:math';
 import '../bridge/bridge_client_session.dart';
 import '../bridge/bridge_envelope.dart';
 import 'native_host_connector.dart';
+import 'host_capability_refresh.dart';
 
 final class NativeHostSessionConnector implements NativeHostConnector {
   NativeHostSessionConnector({required this._platform, Random? random})
@@ -35,6 +36,7 @@ final class NativeHostSessionConnector implements NativeHostConnector {
           'protocols': {'minimum': 1, 'maximum': 1},
           'capabilities': [
             ..._requiredCapabilities,
+            'officialFleet.deferredProfile',
             'diagnostics.safeSummary',
             'diagnostics.dataLocation',
             'diagnostics.openDataDirectory',
@@ -68,6 +70,7 @@ final class NativeHostSessionConnector implements NativeHostConnector {
             'communities.manageAnnouncements',
             'communities.chatDetail',
             'communities.markChatRead',
+            'officialFleet.communication',
             'communities.sendChat',
             'communities.disband',
             'communities.media',
@@ -118,6 +121,7 @@ final class NativeHostSessionConnector implements NativeHostConnector {
             'partyRooms.chatAttachments',
             'privacy.local',
             'privacy.publication',
+            'privacy.publicationEvents',
             'overlay.presetSharing',
           ],
         },
@@ -131,7 +135,23 @@ final class NativeHostSessionConnector implements NativeHostConnector {
       }
       final ready = await session.request('host.ready');
       _validateReady(ready, handshake.hostInstanceId);
-      return _NativeHostLease(session, platformLease);
+      final readyCapabilities = HostCapabilityRefresh.validateReady(
+        ready,
+        handshake.hostInstanceId,
+        _requiredCapabilities,
+      );
+      if (readyCapabilities != null) {
+        session.acceptHostCapabilities(readyCapabilities);
+      }
+      return _NativeHostLease(
+        session,
+        platformLease,
+        HostCapabilityRefresh(
+          session,
+          handshake.hostInstanceId,
+          _requiredCapabilities,
+        ),
+      );
     } on Object {
       if (session != null) {
         await session.close();
@@ -198,11 +218,12 @@ final class _HostHandshake {
 }
 
 final class _NativeHostLease implements NativeHostLease {
-  _NativeHostLease(this.session, this._platformLease);
+  _NativeHostLease(this.session, this._platformLease, this._capabilityRefresh);
 
   @override
   final BridgeClientSession session;
   final NativeHostPlatformLease _platformLease;
+  final HostCapabilityRefresh _capabilityRefresh;
   bool _closed = false;
 
   @override
@@ -214,6 +235,7 @@ final class _NativeHostLease implements NativeHostLease {
       return;
     }
     _closed = true;
+    await _capabilityRefresh.close();
     await session.close();
     await _platformLease.close();
   }

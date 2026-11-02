@@ -6,6 +6,13 @@ abstract final class PersonalProfileShipNames {
   static String primary(
     BuildContext context,
     PersonalProfileShipIdentity identity,
+  ) => identity.nickname?.trim().isNotEmpty == true
+      ? identity.nickname!.trim()
+      : model(context, identity);
+
+  static String model(
+    BuildContext context,
+    PersonalProfileShipIdentity identity,
   ) {
     final locale = Localizations.localeOf(context);
     if (locale.languageCode != 'zh') {
@@ -24,6 +31,9 @@ abstract final class PersonalProfileShipNames {
     BuildContext context,
     PersonalProfileShipIdentity identity,
   ) {
+    if (identity.nickname?.trim().isNotEmpty == true) {
+      return model(context, identity);
+    }
     final primaryName = primary(context, identity);
     return primaryName == identity.englishName ? null : identity.englishName;
   }

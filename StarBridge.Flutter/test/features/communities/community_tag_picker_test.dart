@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/features/communities/community_creation_port.dart';
 import 'package:starbridge_flutter/features/communities/community_tag_picker.dart';
@@ -72,7 +73,9 @@ void main() {
         );
         expect(
           tester
-              .widget<CheckboxListTile>(find.byKey(const ValueKey('tag-tag5')))
+              .widget<StarBridgeCheckboxTile>(
+                find.byKey(const ValueKey('tag-tag5')),
+              )
               .onChanged,
           isNull,
         );
@@ -84,7 +87,9 @@ void main() {
         expect(original, hasLength(5));
         expect(
           tester
-              .widget<CheckboxListTile>(find.byKey(const ValueKey('tag-tag5')))
+              .widget<StarBridgeCheckboxTile>(
+                find.byKey(const ValueKey('tag-tag5')),
+              )
               .onChanged,
           isNotNull,
         );

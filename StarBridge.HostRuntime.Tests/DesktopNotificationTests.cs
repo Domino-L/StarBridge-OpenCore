@@ -25,8 +25,10 @@ internal static class DesktopNotificationTests
                 StarBridge.HostRuntime.Settings.ApplicationPreferencesSnapshot.Default with { MotionPreference = "reduce" });
             long gen = 1; var eligible = true; var sink = new Sink();
             long sequence = 0;
+            var rejectNativeActivation = false;
             using var settings = new NotificationSettingsBridgeDispatcher(root, () => gen, () => eligible, desktop: sink,
-                activationEvent: (g, payload) => BridgeEnvelope.Event("notificationSettings.activated", g, ++sequence, payload));
+                activationEvent: (g, payload) => rejectNativeActivation ? throw new OperationCanceledException("Synthetic native retirement") :
+                    BridgeEnvelope.Event("notificationSettings.activated", g, ++sequence, payload));
             var activations = new List<BridgeEnvelope>(); settings.EventReady += activations.Add;
             BridgeEnvelope Request(string name, object data) => BridgeEnvelope.Request("notificationSettings." + name, Guid.NewGuid().ToString("N"), gen, data);
             async Task<BridgeEnvelope> Call(string name, object data) => (await settings.DispatchAsync(Request(name, data))).Response;
@@ -72,6 +74,10 @@ internal static class DesktopNotificationTests
             Check((await Call("presentDesktop", new { schemaVersion = 1, ticket })).Payload.GetProperty("submitted").GetBoolean(), "Fresh authorized event can display");
             var real = sink.Seen.Last();
             Check(activations.Count == 0, "Showing a card does not activate or mark it read");
+            rejectNativeActivation = true;
+            real.Activated!();
+            Check(activations.Count == 0 && sequence == 0, "retired native activation must neither throw nor create navigation");
+            rejectNativeActivation = false;
             real.Activated!(); real.Activated!();
             Check(activations.Count == 1 && activations[0].SessionGeneration == gen, "Native activation is emitted once in the current generation");
             var click = new { schemaVersion = 1, activationId = activations[0].Payload.GetProperty("activationId").GetString() };

@@ -14,6 +14,7 @@ internal static class FriendRequestPrivacyTests
 
     internal static async Task Verify()
     {
+        await LegacyPasswordLoginTests.ScmSocialPrivacyPipeline();
         await ReadsDefaultAndWritesTheAccountPolicy();
         await RejectsMalformedAndUncertainWrites();
         RejectsUnscopedPayloads();

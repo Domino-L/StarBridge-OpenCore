@@ -57,9 +57,11 @@ FriendsSnapshot directory(
     _ => FriendsSection.friends,
   };
   return FriendsSnapshot(
-    groups: {
-      section: [row],
-    },
+    groups: query == null
+        ? {
+            section: [row],
+          }
+        : const {},
     results: query == null ? [] : [row],
     query: query,
   );

@@ -4,6 +4,27 @@ import '../../app/localization/app_strings.dart';
 
 const communityAnnouncementsCopy = <String, (String, String, String)>{
   'center': ('组织公告', '組織公告', 'Organization announcements'),
+  'ownOutcomes': ('公告处理结果', '公告處理結果', 'Announcement action results'),
+  'queryOriginal': ('查询原操作结果', '查詢原操作結果', 'Check original action'),
+  'officialOutcomeUnknown': (
+    '保存结果尚未确认。请查询原操作结果，不要重复发布。',
+    '儲存結果尚未確認。請查詢原操作結果，不要重複發布。',
+    'Saving is unconfirmed. Check the original action before posting again.',
+  ),
+  'noOwnOutcomes': ('暂无待确认操作。', '暫無待確認操作。', 'No unconfirmed actions.'),
+  'outcomesIncomplete': (
+    '结果列表尚未完整读取。',
+    '結果清單尚未完整讀取。',
+    'The results list is incomplete.',
+  ),
+  'resultAccepted': ('已确认保存', '已確認儲存', 'Confirmed saved'),
+  'resultRejected': ('已拒绝', '已拒絕', 'Rejected'),
+  'resultUnknown': ('待确认', '待確認', 'Unconfirmed'),
+  'resultUnconfirmed': (
+    '未找到可确认结果，仍未确认。',
+    '未找到可確認結果，仍未確認。',
+    'No confirmed result found. Still unconfirmed.',
+  ),
   'current': ('当前公告', '目前公告', 'Current announcement'),
   'history': ('公告历史', '公告歷史', 'Announcement history'),
   'empty': ('暂无当前公告', '暫無目前公告', 'No current announcement'),

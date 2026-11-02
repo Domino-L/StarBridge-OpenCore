@@ -7,6 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/localization/privacy_scope_settings_strings.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 import 'package:starbridge_flutter/features/settings/community_sharing.dart';
 import 'package:starbridge_flutter/features/communities/community_logo.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
@@ -18,6 +21,7 @@ import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'community_sharing_test.dart'
     show SharingFixture, target, membershipTime;
 import 'local_privacy_page_test.dart' show app, viewport, MemoryPrivacy;
+import '../communities/community_image_test_support.dart';
 
 Future<void> tapKey(WidgetTester tester, String key) async {
   final finder = find.byKey(Key(key));
@@ -30,12 +34,107 @@ void main() {
   setUpAll(() async {
     for (final entry in const {
       'Source Sans 3': 'SourceSans3VF-Upright.ttf',
+      'Saira': 'Saira-VF.ttf',
+      'Rajdhani': 'Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(
         entry.key,
       )..addFont(rootBundle.load('assets/fonts/${entry.value}'))).load();
     }
+  });
+  testWidgets('organization scope card uses its supplied logo without writes', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1280, 900));
+    const logo =
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    final port = SharingFixture()
+      ..settings = LocalPrivacySettings.editorDefaults.copyWith(communities: [])
+      ..targets = CommunitySharingTargets(
+        communities: [
+          CommunitySharingTarget(
+            code: 'A',
+            name: 'Fixture organization',
+            joinedAt: membershipTime,
+            logoImageData: logo,
+          ),
+        ],
+      );
+    final controller = LocalPrivacyController(port);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(app(LocalPrivacyPage(controller: controller)));
+    await settleCommunityImages(tester);
+    final card = find.byKey(const Key('privacy-scope-A'));
+    final image = find.descendant(
+      of: card,
+      matching: find.byType(CommunityLogo),
+    );
+    expect(tester.widget<CommunityLogo>(image).data, logo);
+    expect(
+      find.descendant(of: image, matching: find.byType(Image)),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<RawImage>(
+            find.descendant(of: image, matching: find.byType(RawImage)),
+          )
+          .image,
+      isNotNull,
+    );
+    expect(port.writes, 0);
+    expect(port.applies, 0);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets(
+    'applied receipt does not imply unconfirmed organization sharing',
+    (tester) async {
+      final port = CurrentReceiptFixture();
+      final c = LocalPrivacyController(port);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('privacy-publication-status')))
+            .data,
+        '已按保存的范围共享，组织范围待确认',
+      );
+      // A local draft is not an applied grant. Only saving may change the receipt.
+      c.enableCommunityChoices();
+      await tester.pumpAndSettle();
+      expect(find.text('已按保存的范围共享，组织范围待确认'), findsOneWidget);
+      expect(port.writes, 0);
+      expect(port.applies, 0);
+    },
+  );
+
+  testWidgets('explicit no-sharing choices are confirmed, not pending', (
+    tester,
+  ) async {
+    final port = CurrentReceiptFixture()
+      ..settings = LocalPrivacySettings.editorDefaults.copyWith(
+        communities: [
+          for (final code in ['A', 'B'])
+            CommunitySharingScope(
+              code: code,
+              joinedAt: membershipTime,
+              fields: 0,
+              administratorsCanView: false,
+              allMembersCanView: false,
+              visibilityGroupIds: const [],
+            ),
+        ],
+      );
+    final c = LocalPrivacyController(port);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
+    await tester.pumpAndSettle();
+    expect(find.text('已按保存的范围共享，组织范围待确认'), findsNothing);
+    expect(find.text('共享已生效'), findsOneWidget);
+    expect(port.writes, 0);
   });
   testWidgets(
     'applied receipt does not imply unconfirmed organization sharing',
@@ -119,10 +218,10 @@ void main() {
       for (final field in ['presence', 'ship', 'location', 'server']) {
         expect(
           tester
-              .widget<InkWell>(
+              .widget<StarBridgeSwitch>(
                 find.byKey(Key('privacy-scope-official-fleet-field-$field')),
               )
-              .onTap,
+              .onChanged,
           isNull,
         );
       }
@@ -226,9 +325,24 @@ void main() {
       await tester.pumpAndSettle();
       await tapKey(tester, 'privacy-organizations-migrate');
       expect(c.draft!.communities, isNull);
+      final staleConfirm = tester
+          .widget<StarBridgeActionButton>(
+            find.byWidgetPredicate(
+              (w) =>
+                  w is StarBridgeActionButton &&
+                  w.controlKey ==
+                      const Key('privacy-organizations-migrate-confirm'),
+            ),
+          )
+          .onActivate!;
       port.events.add(null);
       await tester.pumpAndSettle();
-      await tapKey(tester, 'privacy-organizations-migrate-confirm');
+      expect(
+        find.byKey(const Key('privacy-organizations-migrate-confirm')),
+        findsNothing,
+      );
+      staleConfirm(InteractionSource.pointer);
+      await tester.pumpAndSettle();
       expect(c.draft!.communities, isNull);
       expect(port.writes, 0);
       await tapKey(tester, 'privacy-organizations-migrate');
@@ -247,12 +361,28 @@ void main() {
       await tester.pumpWidget(app(LocalPrivacyPage(controller: c)));
       await tester.pumpAndSettle();
       await tapKey(tester, 'privacy-organizations-migrate');
+      final staleConfirm = tester
+          .widget<StarBridgeActionButton>(
+            find.byWidgetPredicate(
+              (w) =>
+                  w is StarBridgeActionButton &&
+                  w.controlKey ==
+                      const Key('privacy-organizations-migrate-confirm'),
+            ),
+          )
+          .onActivate!;
       port.targets = CommunitySharingTargets(
         primaryFleetCode: 'B',
         communities: [target('B')],
       );
       await c.refreshCommunityTargets();
-      await tapKey(tester, 'privacy-organizations-migrate-confirm');
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('privacy-organizations-migrate-confirm')),
+        findsNothing,
+      );
+      staleConfirm(InteractionSource.pointer);
+      await tester.pumpAndSettle();
       expect(c.draft!.communities, isNull);
       expect(port.writes, 0);
     },

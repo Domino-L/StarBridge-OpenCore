@@ -34,6 +34,15 @@ final class MethodChannelWindowChrome implements WindowChromePort {
   @override
   Future<void> close() => _invoke('close');
 
+  @override
+  Future<void> setIconVariant(String variant) async {
+    try {
+      await _channel.invokeMethod<void>('setIconVariant', variant);
+    } on MissingPluginException {
+      // Widget tests intentionally run without the Win32 runner.
+    }
+  }
+
   Future<void> _handleNativeMethod(MethodCall call) async {
     if (call.method == 'windowStateChanged' && call.arguments is bool) {
       _isMaximized.value = call.arguments as bool;

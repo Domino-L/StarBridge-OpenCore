@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -260,21 +263,19 @@ class _PrivacyAudienceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return InkWell(
+    return StarBridgeCheckboxTile(
       key: Key('privacy-scope-$scopeKey-audience-${choice.id}'),
-      onTap: choice.enabled ? () => choice.onChanged(!choice.selected) : null,
-      borderRadius: tokens.shape.small,
-      child: Padding(
+      controlKey: Key('privacy-scope-$scopeKey-checkbox-${choice.id}'),
+      value: choice.selected,
+      label: choice.label,
+      subtitle: choice.description,
+      onChanged: choice.enabled ? choice.onChanged : null,
+      rowBuilder: (control) => Padding(
         padding: EdgeInsets.symmetric(vertical: tokens.space.xs),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Checkbox(
-              value: choice.selected,
-              onChanged: choice.enabled
-                  ? (value) => choice.onChanged(value ?? false)
-                  : null,
-            ),
+            control,
             SizedBox(width: tokens.space.xs),
             Expanded(
               child: Column(
@@ -328,40 +329,36 @@ class _PrivacyFieldTile extends StatelessWidget {
               ? colors.foreground
               : tokens.colors.textSecondary
         : tokens.colors.textDisabled;
-    return Tooltip(
+    return StarBridgeTooltip(
       message: field.description,
-      child: MergeSemantics(
-        child: InkWell(
-          key: Key('privacy-scope-$scopeKey-field-${field.id}'),
-          onTap: enabled ? () => field.onChanged(!selected) : null,
-          // The switch owns keyboard focus; the whole row remains clickable.
-          canRequestFocus: false,
-          borderRadius: tokens.shape.small,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: Row(
-              children: [
-                StarBridgeIcon(
-                  field.icon,
-                  size: tokens.icons.medium,
-                  color: foreground,
+      excludeFromSemantics: true,
+      child: StarBridgeSwitch.tile(
+        key: Key('privacy-scope-$scopeKey-field-${field.id}'),
+        controlKey: Key('privacy-scope-$scopeKey-switch-${field.id}'),
+        value: selected,
+        label: field.label,
+        subtitle: field.description,
+        activeTrackColor: enabled ? colors.foreground : null,
+        onChanged: enabled ? field.onChanged : null,
+        rowBuilder: (control) => ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Row(
+            children: [
+              StarBridgeIcon(
+                field.icon,
+                size: tokens.icons.medium,
+                color: foreground,
+              ),
+              SizedBox(width: tokens.space.sm),
+              Expanded(
+                child: Text(
+                  field.label,
+                  style: Theme.of(context).textTheme.labelLarge
+                      ?.copyWith(color: foreground),
                 ),
-                SizedBox(width: tokens.space.sm),
-                Expanded(
-                  child: Text(
-                    field.label,
-                    style: Theme.of(context).textTheme.labelLarge
-                        ?.copyWith(color: foreground),
-                  ),
-                ),
-                Switch(
-                  key: Key('privacy-scope-$scopeKey-switch-${field.id}'),
-                  value: selected,
-                  activeTrackColor: enabled ? colors.foreground : null,
-                  onChanged: enabled ? field.onChanged : null,
-                ),
-              ],
-            ),
+              ),
+              control,
+            ],
           ),
         ),
       ),

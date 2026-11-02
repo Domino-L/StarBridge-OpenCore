@@ -1,4 +1,5 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -8,12 +9,20 @@ import 'package:flutter/material.dart';
 import '../friends/friends_module.dart';
 import 'user_interaction.dart';
 import 'user_profile_page.dart';
+import 'social_read_activity.dart';
+
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
 export 'user_interaction.dart' show UserTarget;
 
 import '../../app/localization/app_strings.dart';
 import '../../app/routing/open_destination_intent.dart';
-import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_menu_anchor.dart';
+import '../../design_system/interaction/starbridge_action_row.dart';
+import '../../design_system/interaction/starbridge_tooltip.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../platform/window/native_viewport_visibility.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 /// Callers supply only actions backed by their current account-scoped targets.
 /// Display names and avatar URLs are never used as user identifiers.
@@ -32,6 +41,7 @@ class UserAvatarMenu extends StatefulWidget {
     this.onViewProfile,
     this.target,
     this.includeSocialActions = true,
+    this.includeNameInHint = false,
     this.avatarImageData,
     this.avatarBytes,
     this.actions = const [],
@@ -43,6 +53,10 @@ class UserAvatarMenu extends StatefulWidget {
   final VoidCallback? onViewProfile;
   final UserTarget? target;
   final bool includeSocialActions;
+
+  /// For compact identity-only anchors: one bubble conveys both the person's
+  /// name and the menu action, rather than two nested hints at one position.
+  final bool includeNameInHint;
   final String? avatarImageData;
   final Uint8List? avatarBytes;
   final List<AvatarMenuAction> actions;
@@ -54,7 +68,14 @@ class UserAvatarMenu extends StatefulWidget {
 class _UserAvatarMenuState extends State<UserAvatarMenu> {
   FriendRow? social;
   bool loading = false, busy = false;
+  InteractionSource _readSource = InteractionSource.programmatic;
   int epoch = 0;
+  int _menuRevision = 0;
+
+  /// The portrait keeps its element when the menu scope is re-keyed for a
+  /// renewed target (user report 2026-10-29: avatars reloading in an idle
+  /// chat whenever the access reference changed).
+  final _portrait = GlobalKey();
   StreamSubscription<void>? subscription;
   UserInteractionPort? boundPort;
   @override
@@ -62,10 +83,16 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
     super.didChangeDependencies();
     final port = UserInteractionScope.maybeOf(context)?.port;
     if (identical(boundPort, port)) return;
+    epoch++;
+    _menuRevision++;
+    social = null;
+    loading = false;
+    busy = false;
     subscription?.cancel();
     boundPort = port;
     subscription = port?.invalidations.listen((_) {
       epoch++;
+      _menuRevision++;
       if (mounted) {
         setState(() {
           social = null;
@@ -79,10 +106,16 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
   @override
   void didUpdateWidget(UserAvatarMenu oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.target?.reference != widget.target?.reference) {
+    if (oldWidget.target?.reference != widget.target?.reference ||
+        oldWidget.target?.source != widget.target?.source ||
+        oldWidget.target?.contextRef != widget.target?.contextRef ||
+        oldWidget.isSelf != widget.isSelf ||
+        oldWidget.includeSocialActions != widget.includeSocialActions) {
       epoch++;
+      _menuRevision++;
       social = null;
       loading = false;
+      busy = false;
     }
   }
 
@@ -93,7 +126,7 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
     super.dispose();
   }
 
-  Future<void> loadSocial() async {
+  Future<void> loadSocial(InteractionSource source) async {
     final target = widget.target, port = boundPort;
     if (widget.isSelf ||
         !widget.includeSocialActions ||
@@ -104,6 +137,7 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
     }
     final current = ++epoch;
     setState(() {
+      _readSource = source;
       loading = true;
       social = null;
     });
@@ -138,7 +172,7 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
     });
     final strings = AppStrings.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      starBridgeTimedSnackBar(
         content: Text(
           strings.text(
             result.status == 'accepted'
@@ -153,7 +187,6 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final tokens = context.tokens;
     final scope = UserInteractionScope.maybeOf(context);
     final isSelf = widget.isSelf || social?.relationship == 'self';
     final target = widget.target;
@@ -180,40 +213,94 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
         isSelf &&
         (scope?.navigation.openSelf != null ||
             Actions.maybeFind<OpenDestinationIntent>(context) != null);
-    return NativeViewportMenu(
-      builder: (onOpen, onClose) => MenuAnchor(
-        onOpen: () {
-          onOpen();
-          unawaited(loadSocial());
-        },
-        onClose: onClose,
-        style: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(
-            tokens.surfaces.floating.fill,
-          ),
-          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-          side: WidgetStatePropertyAll(
-            BorderSide(color: tokens.surfaces.floating.border),
-          ),
-          maximumSize: const WidgetStatePropertyAll(Size(320, 480)),
-        ),
-        menuChildren: [
-          Padding(
-            padding: const EdgeInsets.all(12),
+    StarBridgeMenuEntry entry(
+      Object id,
+      String label,
+      FutureOr<void> Function()? callback, {
+      Widget? icon,
+      Color? color,
+    }) => StarBridgeMenuEntry(
+      id: id,
+      label: label,
+      onActivate: callback == null
+          ? null
+          : (source) =>
+                unawaited(runStarBridgeActivation<void>(source, callback)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[icon, const SizedBox(width: 8)],
+          Flexible(
             child: Text(
-              widget.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium,
+              label,
+              style: color == null ? null : TextStyle(color: color),
             ),
           ),
-          const Divider(height: 1),
-          MenuItemButton(
-            onPressed: canOpenSelf
-                ? () {
+        ],
+      ),
+    );
+    final customIds = <String, int>{};
+    Object customId(AvatarMenuAction action) => (
+      'avatar-custom',
+      action.label,
+      customIds.update(action.label, (count) => count + 1, ifAbsent: () => 0),
+    );
+    return NativeViewportMenu(
+      key: ValueKey(('avatar-menu-scope', _menuRevision)),
+      builder: (onOpen, onClose) => StarBridgeMenuAnchor(
+        semanticLabel: strings.text('avatar.menu'),
+        semanticHint: widget.name,
+        maximumSize: const Size(320, 480),
+        onOpen: onOpen,
+        onOpenWithSource: (source) => unawaited(loadSocial(source)),
+        onClose: onClose,
+        header: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const Divider(height: 16),
+              if (!canOpenSelf && (isSelf || onViewProfile == null))
+                SizedBox(
+                  width: 250,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      strings.text('avatar.profileUnavailable'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+              if (loading)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SocialReadActivity(
+                    key: ValueKey(('avatar-social-read', epoch)),
+                    source: _readSource,
+                    opening: false,
+                    label: strings.text('friends.loading'),
+                    height:
+                        ProgressIndicatorTheme.of(context).linearMinHeight ?? 4,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        entries: [
+          entry(
+            'avatar-view-profile',
+            strings.text(isSelf ? 'navigation.profile' : 'avatar.viewProfile'),
+            canOpenSelf
+                ? () async {
                     if (!context.mounted) return;
                     if (scope?.navigation.openSelf != null) {
-                      unawaited(scope!.navigation.openSelf!(context));
+                      await scope!.navigation.openSelf!(context);
                     } else {
                       Actions.invoke(context, ownProfile);
                     }
@@ -221,29 +308,11 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
                 : isSelf
                 ? null
                 : onViewProfile,
-            leadingIcon: const StandardIcon(StandardIconSemantic.accountCircle, size: 18),
-            child: Text(
-              strings.text(
-                isSelf ? 'navigation.profile' : 'avatar.viewProfile',
-              ),
+            icon: const StandardIcon(
+              StandardIconSemantic.accountCircle,
+              size: 18,
             ),
           ),
-          if (!canOpenSelf && (isSelf || onViewProfile == null))
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: SizedBox(
-                width: 250,
-                child: Text(
-                  strings.text('avatar.profileUnavailable'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: LinearProgressIndicator(),
-            ),
           if (social case final row? when !isSelf) ...[
             if (row.chatTargetRef != null &&
                 scope?.messagePage != null &&
@@ -251,56 +320,54 @@ class _UserAvatarMenuState extends State<UserAvatarMenu> {
                 !actions.any(
                   (a) => a.label == strings.text('avatar.sendMessage'),
                 ))
-              MenuItemButton(
-                leadingIcon: const StandardIcon(StandardIconSemantic.chatBubble, size: 18),
-                onPressed: busy
+              entry(
+                'avatar-send-message',
+                strings.text('avatar.sendMessage'),
+                busy
                     ? null
-                    : () => unawaited(
-                        scope!.navigation.open!(
-                          context,
-                          (pageContext) => scope.messagePage!(
-                            row,
-                            () => Navigator.of(pageContext).pop(),
-                          ),
-                          'direct.title',
+                    : () => scope!.navigation.open!(
+                        context,
+                        (pageContext) => scope.messagePage!(
+                          row,
+                          () => Navigator.of(pageContext).pop(),
                         ),
+                        'direct.title',
                       ),
-                child: Text(strings.text('avatar.sendMessage')),
+                icon: const StandardIcon(
+                  StandardIconSemantic.chatBubble,
+                  size: 18,
+                ),
               ),
             for (final action in row.actions.where(
               (a) => const ['send', 'accept', 'reject', 'cancel'].contains(a),
             ))
-              MenuItemButton(
-                onPressed: busy ? null : () => unawaited(execute(action, row)),
-                child: Text(strings.text('friends.action.$action')),
+              entry(
+                ('avatar-social', action),
+                strings.text('friends.action.$action'),
+                busy ? null : () => execute(action, row),
               ),
           ],
-          if (actions.isNotEmpty) const Divider(height: 1),
           for (final action in actions)
-            MenuItemButton(
-              onPressed: action.onPressed == null
+            entry(
+              customId(action),
+              action.label,
+              action.onPressed == null
                   ? null
                   : () {
                       if (context.mounted) action.onPressed!();
                     },
-              style: action.color == null
-                  ? null
-                  : ButtonStyle(
-                      foregroundColor: WidgetStatePropertyAll(action.color),
-                    ),
-              child: Text(action.label),
+              color: action.color,
             ),
         ],
-        builder: (context, controller, _) => Tooltip(
-          message: strings.text('avatar.menu'),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: () =>
-                  controller.isOpen ? controller.close() : controller.open(),
-              child: widget.child,
-            ),
+        builder: (context, controller, focus, toggle) => StarBridgeTooltip(
+          message: widget.includeNameInHint
+              ? '${widget.name} · ${strings.text('avatar.menu')}'
+              : strings.text('avatar.menu'),
+          child: StarBridgeActionRow(
+            controlKey: const Key('user-avatar-menu-anchor'),
+            focusNode: focus,
+            onActivate: (_, source) => toggle(source),
+            child: KeyedSubtree(key: _portrait, child: widget.child),
           ),
         ),
       ),

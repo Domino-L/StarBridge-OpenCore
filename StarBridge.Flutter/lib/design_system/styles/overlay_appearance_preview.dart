@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../platform/window/overlay_editor_window_port.dart';
@@ -12,12 +14,14 @@ class OverlayAppearancePreview extends StatefulWidget {
     required this.appearanceId,
     this.previewableIds = const {'Default', 'NightShadow'},
     this.editorWindow = const UnavailableOverlayEditorWindow(),
+    this.nativePoster,
     super.key,
   });
 
   final String appearanceId;
   final Set<String> previewableIds;
   final OverlayEditorWindowPort editorWindow;
+  final Uint8List? nativePoster;
 
   @override
   State<OverlayAppearancePreview> createState() =>
@@ -63,6 +67,9 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
         ? _assets[appearanceId]
         : null;
     final hasMotion = asset != null && motionAllowed;
+    final poster = widget.previewableIds.contains(appearanceId)
+        ? widget.nativePoster
+        : null;
     final playing =
         hasMotion &&
         !_paused &&
@@ -73,7 +80,7 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
       height: 210,
       child: ColoredBox(
         color: const Color(0xFF080F14),
-        child: asset == null
+        child: asset == null && poster == null
             ? const SizedBox.shrink()
             : Stack(
                 fit: StackFit.expand,
@@ -85,9 +92,19 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
                       controls: false,
                       repeat: true,
                     )
+                  else if (poster != null)
+                    Image.memory(
+                      poster,
+                      key: Key('overlay-native-preview-$appearanceId'),
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.none,
+                      excludeFromSemantics: true,
+                      errorBuilder: (context, error, stack) =>
+                          const SizedBox.shrink(),
+                    )
                   else
                     Image.asset(
-                      asset,
+                      asset!,
                       key: Key('overlay-native-preview-$appearanceId'),
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
@@ -111,20 +128,21 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
                         ),
                       ),
                     ),
-                  Positioned(
-                    left: 4,
-                    bottom: 0,
-                    child: TextButton(
-                      key: Key('overlay-preview-browse-$appearanceId'),
-                      onPressed: () => showAppearanceMotionBrowser(
-                        context,
-                        appearanceId,
-                        editorWindow: widget.editorWindow,
-                        previewableIds: widget.previewableIds,
+                  if (asset != null)
+                    Positioned(
+                      left: 4,
+                      bottom: 0,
+                      child: TextButton(
+                        key: Key('overlay-preview-browse-$appearanceId'),
+                        onPressed: () => showAppearanceMotionBrowser(
+                          context,
+                          appearanceId,
+                          editorWindow: widget.editorWindow,
+                          previewableIds: widget.previewableIds,
+                        ),
+                        child: Text(chinese ? '动画预览' : 'Browse motion'),
                       ),
-                      child: Text(chinese ? '动画预览' : 'Browse motion'),
                     ),
-                  ),
                 ],
               ),
       ),

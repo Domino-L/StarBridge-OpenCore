@@ -65,12 +65,36 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
                 Content = JsonContent.Create(new { Email = email, Password = password })
             };
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            if (response.StatusCode == HttpStatusCode.Unauthorized) return new(new(1, "rejected"));
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                try
+                {
+                    using var rejection = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 4096);
+                    var root = rejection.RootElement;
+                    var code = root.ValueKind == JsonValueKind.Object && root.EnumerateObject().Count(p => p.Name == "code") == 1
+                        ? Text(root, "code") : null;
+                    return new(new(1, code == "SCM_LOGIN_REQUIRED" ? "scmRequired" : "rejected"));
+                }
+                catch (JsonException)
+                {
+                    // The HTTP rejection is authoritative even without a structured explanation.
+                    token.ThrowIfCancellationRequested();
+                    return new(new(1, "rejected"));
+                }
+            }
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 var retry = response.Headers.RetryAfter?.Delta?.TotalSeconds ??
                     (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow)?.TotalSeconds ?? 60;
                 return new(new(1, "throttled", (int)Math.Clamp(Math.Ceiling(retry), 1, 3600)));
+            }
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                using var rejection = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 4096);
+                var fieldsInResponse = rejection.RootElement.EnumerateObject().ToArray();
+                var retired = fieldsInResponse.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() == fieldsInResponse.Length &&
+                    Text(rejection.RootElement, "code") == "LEGACY_LOGIN_RETIRED";
+                return new(new(1, retired ? "retired" : "unavailable"));
             }
             if (!response.IsSuccessStatusCode) return new(new(1, "unavailable"));
             // Bound the response; only validated display media crosses the Bridge.
@@ -117,7 +141,7 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             if (publicId is not null && response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
                 throw new AccountBridgeHostException("profile.visitor_not_visible");
-            if (!response.IsSuccessStatusCode) throw new HttpRequestException();
+            if (!response.IsSuccessStatusCode) throw PersonalProfileReadFailures.FromStatus(response.StatusCode);
             using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 8 * 1024 * 1024);
             var profile = json.RootElement.Deserialize<PersonalProfileDocumentContract>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
             token.ThrowIfCancellationRequested();
@@ -136,9 +160,9 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
             return profile with { Content = PersonalProfileContractPolicy.Normalize(profile.Content), FleetAffiliation = affiliation };
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception error) when (error is HttpRequestException or IOException or JsonException or OperationCanceledException)
+        catch (Exception error) when (error is HttpRequestException or IOException or JsonException or InvalidDataException or OperationCanceledException)
         {
-            throw new AccountBridgeHostException(AccountBridgeStableErrors.PersonalProfileReadUnavailable, retryable: true);
+            throw PersonalProfileReadFailures.FromException(error, token);
         }
     }
 

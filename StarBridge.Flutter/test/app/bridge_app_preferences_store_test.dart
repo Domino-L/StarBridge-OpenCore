@@ -10,6 +10,7 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  _holidayAppearanceTests();
   test('reads and patches device settings without account context', () async {
     final pair = InMemoryBridgeConnection.createPair();
     final updateRequest = Completer<BridgeEnvelope>();
@@ -120,6 +121,84 @@ void main() {
     await session.close();
     await pair.host.close();
   });
+}
+
+// 节日外观：旧 Host 不带这个字段时按默认开；带了就照读；改动时只发这一个字段。
+void _holidayAppearanceTests() {
+  test(
+    'holidayAppearance: missing reads as true, false reads as false',
+    () async {
+      final pair = InMemoryBridgeConnection.createPair();
+      final updateRequest = Completer<BridgeEnvelope>();
+      var reads = 0;
+      unawaited(
+        pair.host.incoming.forEach((request) async {
+          if (request.name == 'applicationPreferences.get') {
+            final payload = _payload(
+              revision: 1,
+              localeOverride: null,
+              appearanceMode: 'dark',
+              motionPreference: 'followSystem',
+              storageState: 'ready',
+            );
+            if (reads++ > 0) {
+              payload['preferences'] = Map<String, Object?>.from(
+                payload['preferences'] as Map,
+              )..['holidayAppearance'] = false;
+            }
+            await pair.host.send(_ok(request, payload));
+            return;
+          }
+          if (request.name == 'applicationPreferences.update') {
+            updateRequest.complete(request);
+            final payload = _payload(
+              revision: 2,
+              localeOverride: null,
+              appearanceMode: 'dark',
+              motionPreference: 'followSystem',
+              storageState: 'ready',
+            );
+            payload['preferences'] = Map<String, Object?>.from(
+              payload['preferences'] as Map,
+            )..['holidayAppearance'] = false;
+            await pair.host.send(_ok(request, payload));
+          }
+        }),
+      );
+      final session = BridgeClientSession(
+        connection: pair.client,
+        sessionGeneration: 7,
+      );
+      final store = BridgeAppPreferencesStore(session);
+
+      final missing = await store.read();
+      expect(missing.values.holidayAppearance, isTrue);
+      final explicit = await store.read();
+      expect(explicit.values.holidayAppearance, isFalse);
+
+      final updated = await store.update(
+        const AppPreferencesPatch.holidayAppearance(false),
+        expectedRevision: 1,
+      );
+      final request = await updateRequest.future;
+      expect(request.payload['patch'], {'holidayAppearance': false});
+      expect(updated.values.holidayAppearance, isFalse);
+      // 其他改动不会顺带发这个字段。
+      expect(
+        const AppPreferencesPatch.motion(MotionPreference.reduce)
+            .holidayAppearance,
+        isNull,
+      );
+      expect(
+        const AppPreferencesPatch.holidayAppearance(true).isEmpty,
+        isFalse,
+      );
+
+      store.dispose();
+      await session.close();
+      await pair.host.close();
+    },
+  );
 }
 
 Map<String, Object?> _payload({

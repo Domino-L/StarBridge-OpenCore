@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -153,7 +155,9 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 120));
       expect(views.every((view) => view.organization?.tab != 'chat'), isTrue);
       expect(
-        MenuFeatureView.parse(session.currentView).organization!.tab,
+        MenuFeatureView.parse(resolvedMenuCopy(session.currentView))
+            .organization!
+            .tab,
         'members',
       );
     },

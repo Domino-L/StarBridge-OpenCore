@@ -386,7 +386,10 @@ class GameLogController extends ValueNotifier<GameLogView> {
                   }.contains(body['state']))) {
         throw const FormatException();
       }
-      final retainedError = command == 'read' && value.error != 'unavailable'
+      final retainedError =
+          command == 'read' &&
+              value.error != 'unavailable' &&
+              value.error != 'accountChanged'
           ? value.error
           : null;
       value = GameLogView(
@@ -431,6 +434,9 @@ class GameLogController extends ValueNotifier<GameLogView> {
       }
     } on BridgeRemoteException catch (error) {
       if (_current(epoch)) {
+        // A rejected owner is not proof of a game Handle mismatch. Resolve the
+        // authoritative account again on the next read, preserving epoch guards.
+        if (error.code == 'gameLog.accountChanged') _context = null;
         value = _error(
           const {
                 'gameLog.path',

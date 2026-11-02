@@ -181,6 +181,7 @@ class ReferencePin {
   void Clear() {
     if (window_) { KillTimer(window_, 1); DestroyWindow(window_); window_ = nullptr; }
     suppressed_ = false;
+    foreground_pid_ = 0; foreground_game_ = false;
   }
   void Suppress(bool value) { suppressed_ = value; Sync(); }
   bool Set(HWND owner, const Map& args, bool enabled = true) {
@@ -244,13 +245,19 @@ class ReferencePin {
     if (!window_) return;
     bool game = false;
     if (!menu_() && !suppressed_) {
+      // This runs every 250 ms, so a snapshot only when the foreground process changes,
+      // or after 5 seconds so a PID reused by another process cannot stay wrong.
       DWORD pid = 0; GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-      HANDLE process = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
-      if (process) {
-        wchar_t path[32768]{}; DWORD size = static_cast<DWORD>(std::size(path));
-        game = QueryFullProcessImageNameW(process, 0, path, &size) && menu_image::IsGame(std::wstring(path, size));
-        CloseHandle(process);
+      const ULONGLONG now = GetTickCount64();
+      bool read = false;
+      if (pid && (pid != foreground_pid_ || now - foreground_read_at_ >= 5000)) {
+        if (menu_image::ReadProcessIsGame(pid, read)) {
+          foreground_pid_ = pid; foreground_game_ = read; foreground_read_at_ = now;
+        } else {
+          foreground_pid_ = 0; foreground_game_ = false;
+        }
       }
+      game = pid && pid == foreground_pid_ && foreground_game_;
     }
     if (menu_image::PinVisible(enabled_, menu_(), suppressed_, game))
       SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -271,6 +278,9 @@ class ReferencePin {
   HWND window_ = nullptr;
   std::function<bool()> menu_;
   bool suppressed_ = false;
+  DWORD foreground_pid_ = 0;
+  ULONGLONG foreground_read_at_ = 0;
+  bool foreground_game_ = false;
   bool enabled_ = true;
 };
 }

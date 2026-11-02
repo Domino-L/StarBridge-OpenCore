@@ -18,7 +18,9 @@ public sealed partial class NotificationSettingsBridgeDispatcher
         Action? publishSocial = null;
         Func<bool>? stillCurrent = null;
         lock (_gate) {
-            if (_disposed || token.IsCancellationRequested || request.SessionGeneration != generation()) return response;
+            if (_disposed || token.IsCancellationRequested) return response;
+            ObserveDirectUnread(request, response);
+            if (request.SessionGeneration != generation()) return response;
             // Consume the sequence before any preference, foreground or system gate.
             if (!_direct.Observe(request, response, generation())) {
                 if (_direct.LastStage is NotificationDeliveryStage.InvalidResponse or NotificationDeliveryStage.ContractUnavailable or

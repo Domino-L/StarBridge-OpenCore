@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
 
 /// Shared information/menu settings structure, including the compact inspector.
 class OverlayWorkspaceFrame extends StatelessWidget {
@@ -43,9 +44,9 @@ class OverlayWorkspaceFrame extends StatelessWidget {
             children: [
               Expanded(child: selector),
               const SizedBox(width: 8),
-              OutlinedButton(
-                key: toggleKey,
-                onPressed: onToggleSettings,
+              StarBridgeActionButton(
+                controlKey: toggleKey,
+                onActivate: (_) => onToggleSettings(),
                 child: Text(
                   AppStrings.of(context).text(
                     settingsOpen

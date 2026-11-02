@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_checkbox_tile.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
@@ -55,7 +56,12 @@ void main() {
         expect(tester.takeException(), isNull);
         final button = find.byKey(const Key('local-hangar-save'));
         expect(tester.widget<FilledButton>(button).onPressed, isNull);
-        await tester.tap(find.byKey(const Key('local-hangar-confirm')));
+        await tester.tap(
+          find.ancestor(
+            of: find.byKey(const Key('local-hangar-confirm')),
+            matching: find.byType(StarBridgeCheckboxTile),
+          ),
+        );
         await tester.pump();
         await tester.tap(button);
         await tester.pumpAndSettle();

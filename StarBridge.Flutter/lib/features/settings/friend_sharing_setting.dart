@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import 'friend_sharing_controller.dart';
 import 'privacy_page_drafts.dart';
+import 'sharing_settings_waiting.dart';
 
 class FriendSharingSetting extends StatefulWidget {
   const FriendSharingSetting({required this.session, super.key});
@@ -93,7 +96,12 @@ class _FriendSharingSettingState extends State<FriendSharingSetting> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               Text(strings.text('settings.privacy.friends.description')),
-              if (c.busy && c.snapshot == null) const LinearProgressIndicator(),
+              SharingSettingsWaiting(
+                owner: c,
+                pending: () => c.busy && c.snapshot == null,
+                titleKey: 'settings.privacy.friends.title',
+                labelKey: 'settings.privacy.loading',
+              ),
               Text(
                 strings.text(
                   c.error != null
@@ -115,12 +123,27 @@ class _FriendSharingSettingState extends State<FriendSharingSetting> {
                 16: 'location',
                 32: 'lastOnline',
               }.entries)
-                SwitchListTile.adaptive(
-                  key: Key('friend-sharing-${item.value}'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
+                StarBridgeSwitch.tile(
+                  controlKey: Key('friend-sharing-${item.value}'),
+                  preserveNativeTile: true,
+                  label: strings.text('settings.privacy.field.${item.value}'),
+                  titleWidget: Text(
                     strings.text('settings.privacy.field.${item.value}'),
                   ),
+                  rowBuilder: (control) =>
+                      resolveStarBridgeInteraction(context).suite ==
+                          InteractionSuite.standard
+                      ? control
+                      : ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            strings.text(
+                              'settings.privacy.field.${item.value}',
+                            ),
+                          ),
+                          enabled: c.canEdit && !(drafts?.saving ?? false),
+                          trailing: control,
+                        ),
                   value: fields & item.key != 0,
                   onChanged: c.canEdit && !(drafts?.saving ?? false)
                       ? (value) {
@@ -149,6 +172,12 @@ class _FriendSharingSettingState extends State<FriendSharingSetting> {
                         }
                       : null,
                 ),
+              SharingSettingsWaiting(
+                owner: c,
+                pending: () => c.busy && c.snapshot != null,
+                titleKey: 'settings.privacy.friends.title',
+                labelKey: 'privacy.local.saving',
+              ),
             ],
           ),
         ),

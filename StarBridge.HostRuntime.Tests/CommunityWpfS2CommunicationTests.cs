@@ -32,7 +32,8 @@ internal static class CommunityWpfS2CommunicationTests
             }
             Check(request.Method == HttpMethod.Get, "No unrelated mutations");
             var query = Uri.UnescapeDataString(request.RequestUri.Query);
-            Check(!query.Contains("projection=") && !query.Contains("view="), "S2 uses the existing WPF contract, not new server projections");
+            Check((path == "/api/fleets" ? query == "?projection=metadata" : !query.Contains("projection=")) &&
+                !query.Contains("view="), "S2 only opts into additive fleet media metadata; communication retains original contracts");
             if (path == "/api/fleets/membership") return Json(new { fleetCode = "A", fleetCodes = new[] { "A" } });
             if (path == "/api/fleets") return Json(new[] { new { code = "A", name = "Fixture", totalMembers = 2, logoImageData = Pixel } });
             Check(query.Contains("fleetCode=A"), "Only selected organization");

@@ -23,6 +23,8 @@
     <AssemblyMetadata Include="StarBridgeFlutterInstallerManifestUrl" Value="$(StarBridgeFlutterInstallerManifestUrl)" />
     <AssemblyMetadata Include="StarBridgeEnableInstalledUpdates" Value="$(StarBridgeEnableInstalledUpdates)" />
     <AssemblyMetadata Include="StarBridgeEnableLegacyCleanup" Value="$(StarBridgeEnableLegacyCleanup)" />
+    <AssemblyMetadata Include="StarBridgeEnableFirstUse" Value="$(StarBridgeEnableFirstUse)" />
+    <AssemblyMetadata Include="StarBridgeEnableConnectionModes" Value="$(StarBridgeEnableFirstUse)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,13 +32,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets/Audio/cue-catalog.v1.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets/Audio/cue-catalog.v1.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+             Condition="'$(StarBridgeAcceptanceMediaFree)' != 'true'" />
     <!-- The runtime reader intentionally does not search parent directories. -->
     <Content Include="../LICENSES/OFFICIAL-BINARY-LICENSE.txt" Link="OFFICIAL-BINARY-LICENSE.txt"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Private acceptance resources are staged explicitly, not redistributed as public source. -->
     <Content Include="../.private-ops/notification-audio/*.wav" Link="Assets/Audio/%(Filename)%(Extension)"
+             Condition="'$(StarBridgeAcceptanceMediaFree)' != 'true'"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="ValidateAcceptanceMediaFreeProfile" BeforeTargets="PrepareForBuild"
+          Condition="'$(StarBridgeAcceptanceMediaFree)' == 'true'">
+    <Error Condition="'$(StarBridgeIncludeRestrictedGameData)' != 'false' or '$(StarBridgeIncludeThirdPartyMedia)' != 'false'"
+           Text="AcceptanceMediaFree requires both restricted game data and third-party media to be explicitly disabled." />
+    <Error Condition="'$(StarBridgeEnableInstalledUpdates)' == 'true' or '$(StarBridgeEnableLegacyCleanup)' == 'true'"
+           Text="AcceptanceMediaFree is a private test profile; installed updates and legacy cleanup must remain disabled." />
+  </Target>
 
 </Project>

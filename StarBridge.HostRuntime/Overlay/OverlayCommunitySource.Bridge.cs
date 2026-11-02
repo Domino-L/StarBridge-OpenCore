@@ -33,6 +33,18 @@ internal sealed partial class OverlayCommunitySource
     }
     internal string Mode { get { lock (_sync) { CheckScope(); return _scope.Owner is null ? "unavailable" : _choice.Mode; } } }
 
+    // Display-only name of an organization the account still belongs to, for
+    // "X is unreachable". No I/O or grant; a rejected or unread directory names nothing.
+    internal string? PeekCommunityName(BridgeAccountContext owner, long generation, string code)
+    {
+        lock (_sync)
+        {
+            if (_disposed || _choiceFailed || _scope != (owner, generation) || _owner() != (owner, generation) ||
+                _catalogAt == default) return null;
+            return _catalog.FirstOrDefault(row => row.Code == code)?.Name;
+        }
+    }
+
     private async Task<IReadOnlyList<OverlayCommunityTarget>> CatalogAsync(
         (BridgeAccountContext? Owner, long Generation) scope, bool force, CancellationToken token)
     {
@@ -44,7 +56,7 @@ internal sealed partial class OverlayCommunitySource
             {
                 CheckScope();
                 if (_disposed || scope != _scope) throw new OperationCanceledException();
-                if (!force && _choiceStore is not null && _catalogAt != default && _now() - _catalogAt < TimeSpan.FromSeconds(30)) return _catalog;
+                if (!force && (_choiceStore is not null || _isFleetSession) && _catalogAt != default && _now() - _catalogAt < TimeSpan.FromSeconds(30)) return _catalog;
                 catalogRevision = _catalogRevision;
             }
             var targets = await _reader.ReadTargetsAsync(scope.Owner!, token).ConfigureAwait(false);
@@ -57,6 +69,7 @@ internal sealed partial class OverlayCommunitySource
                 // for removed memberships, including driver-only sources.
                 if (_catalog.Any(previous => !targets.Any(next => next.Code == previous.Code))) InvalidateRead();
                 _catalog = targets.ToArray(); _catalogAt = _now();
+                if (_isFleetSession) _fleetNotMember = targets.Count == 0;
                 foreach (var code in _workspaceRosters.Keys.Where(code => !_catalog.Any(x => x.Code == code)).ToArray())
                     RevokeWorkspace(code);
                 foreach (var code in _moduleAuthorities.Keys.Where(code => !_catalog.Any(x => x.Code == code)).ToArray())
@@ -76,6 +89,9 @@ internal sealed partial class OverlayCommunitySource
         var entered = false;
         try
         {
+            using var work = _retirement.Enter(token);
+            if (work is null) return Error(request, "identityUnavailable");
+            token = work.Token;
             BridgeEnvelopeValidator.ValidateWireShape(request);
             BridgeEnvelopeValidator.RequireCurrentVersion(request);
             var scope = _owner();
@@ -84,14 +100,17 @@ internal sealed partial class OverlayCommunitySource
                 return Error(request, "identityUnavailable");
             var body = request.Payload;
             var write = request.Name == SelectRequest;
-            var focus = request.Name == FocusRequest;
-            string[] allowed = write ? ["schemaVersion", "revision", "mode", "code"] : focus ? ["schemaVersion", "code"] : ["schemaVersion"];
+            var focusFleet = request.Name == FocusFleetRequest;
+            var focus = request.Name == FocusRequest || focusFleet;
+            string[] allowed = write ? ["schemaVersion", "revision", "mode", "code"] : focus && !focusFleet ? ["schemaVersion", "code"] : ["schemaVersion"];
             var names = body.EnumerateObject().Select(x => x.Name).ToArray();
-            if (request.Name is not (ReadRequest or SelectRequest or FocusRequest) || body.GetProperty("schemaVersion").GetInt32() != 1 ||
-                (write ? names.Length is < 3 or > 4 : names.Length != (focus ? 2 : 1)) || names.Distinct().Count() != names.Length || names.Except(allowed).Any())
+            if (request.Name is not (ReadRequest or SelectRequest or FocusRequest or FocusFleetRequest) || body.GetProperty("schemaVersion").GetInt32() != 1 ||
+                (write ? names.Length is < 3 or > 4 : names.Length != (focus && !focusFleet ? 2 : 1)) || names.Distinct().Count() != names.Length || names.Except(allowed).Any())
                 return Error(request, "invalidRequest");
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
             deadline.CancelAfter(TimeSpan.FromSeconds(20));
+            if (request.Name == ReadRequest || focusFleet || write && body.GetProperty("mode").GetString() == "fleet")
+                await ProbeFleetAsync(scope, deadline.Token).ConfigureAwait(false);
             // Local automatic/room choices remain writable even if directory reads fail.
             // A specific organization always needs a fresh authorization check.
             var selectingCommunity = write && body.GetProperty("mode").GetString() == "community";
@@ -100,7 +119,7 @@ internal sealed partial class OverlayCommunitySource
             {
                 try { await CatalogAsync(scope, selectingCommunity, deadline.Token).ConfigureAwait(false); }
                 catch (Exception e) when (!write && !token.IsCancellationRequested && !_stop.IsCancellationRequested &&
-                    e is Account.AccountBridgeHostException or OperationCanceledException)
+                    e is Account.AccountBridgeHostException or OperationCanceledException or IOException or HttpRequestException)
                 { catalogFailed = true; }
             }
             // Network authorization must not hold the local choice/roster gate.
@@ -111,14 +130,28 @@ internal sealed partial class OverlayCommunitySource
                 CheckScope();
                 if (_disposed || scope != _scope) return Error(request, "identityUnavailable");
                 if (_choiceFailed) return Error(request, "storage_unavailable");
-                if (focus)
+                if (focusFleet)
+                {
+                    _focusedModuleCommunity = null;
+                    _pageCode = null;
+                    _pageFleet = true;
+                    if (_choice.Mode == "auto")
+                    {
+                        InvalidateRead(); _content = null;
+                        if (_lastDemand is not null) _fleetSource?.ReadForDisplay();
+                        NotifyContentChanged();
+                    }
+                }
+                if (focus && !focusFleet)
                 {
                     var code = body.GetProperty("code").GetString();
                     if (!OverlaySceneChoiceStore.Valid("community", code)) return Error(request, "invalidRequest");
                     if (catalogFailed || !_catalog.Any(x => x.Code == code)) return Error(request, "targetUnavailable");
                     _focusedModuleCommunity = code;
-                    if (_pageCode != code)
+                    if (_pageCode != code || _pageFleet)
                     {
+                        _pageFleet = false;
+                        _fleetSource?.SuspendDisplayDemand();
                         _pageCode = code;
                         // Navigation is transient, never a persisted manual choice.
                         // Manual scenes and their in-flight reads remain untouched.
@@ -142,6 +175,8 @@ internal sealed partial class OverlayCommunitySource
                     var saved = _choiceStore?.Save(scope.Owner!, revision, mode, code, () => !_disposed && _owner() == scope)
                         ?? throw new IOException("Source store unavailable.");
                     _choice = saved; _explicitCode = code; InvalidateRead(); _content = null;
+                    if (!WantsFleet) _fleetSource?.SuspendDisplayDemand();
+                    else if (_lastDemand is not null) _fleetSource?.ReadForDisplay();
                     if (mode == "community") _focusedModuleCommunity = code;
                     AdoptWorkspace();
                     if (_lastDemand is not null && _wake.CurrentCount == 0) _wake.Release();
@@ -149,14 +184,16 @@ internal sealed partial class OverlayCommunitySource
                 var content = Read();
                 var room = _room();
                 var actual = _choice.Mode == "room" ? room is null ? null : "room" :
-                    _choice.Mode == "auto" && room is not null ? "room" : content is not null ? "org:" + content.Code : null;
+                    _choice.Mode == "auto" && room is not null ? "room" : content is not null ? WantsFleet ? "fleet" : "org:" + content.Code : null;
                 var status = actual is not null ? "ready" : catalogFailed || _catalogAt == default ? "unavailable" : _choice.Mode == "auto" && _catalog.Count == 0 ? "local" :
                     _choice.Mode == "room" || _choice.Mode == "community" && !_catalog.Any(x => x.Code == _choice.Code)
                         ? "unavailable" : _lastDemand is null || _now() - _lastDemand > TimeSpan.FromSeconds(20) ? "standby" : "loading";
                 var selection = ReadSourceSelection();
                 if (selection is not null) { actual = selection.ActualId; status = selection.Status; }
+                if (WantsFleet && actual is null) status = FleetStatus();
                 return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, revision = _choice.Revision,
-                    mode = _choice.Mode, code = _choice.Code, actualId = actual, status,
+                    mode = _choice.Mode, code = JsonSerializer.SerializeToElement(_choice.Code), actualId = actual, status,
+                    fleet = new { status = FleetStatus(), name = FleetName() },
                     sourceOwnerKey = OverlaySceneChoiceStore.Hash(scope.Owner!),
                     automaticPresetSourceId = ReadPresetTrigger(catalogFailed),
                     presetBindingId = selection?.BindingId, temporarySourceId = selection?.TemporaryId,

@@ -7,6 +7,7 @@ public sealed partial class NativeInformationOverlayRuntime
 {
     private InformationOverlayRoomContent? SafeReadRoom()
     {
+        if (ReadLocalSource() is not null) return null;
         try { return _roomProvider(); }
         catch { return null; }
     }
@@ -34,7 +35,7 @@ public sealed partial class NativeInformationOverlayRuntime
                 LocationText = member.Location,
                 LocationHiddenReason = member.LocationHiddenReason,
                 ShipText = member.Ship,
-                ShardText = ""
+                ShardText = member.ServerShard ?? ""
             }, room.LocalHandle, null) with { SharedEventTypes = 0, RawShip = member.Ship, SharedShip = member.Ship,
                 ServerRegion = member.ServerRegion, AccountId = member.PreferenceKey, RealtimeStateUnknown = member.Presence == "Unknown",
                 ArrivalPendingConfirmation = member.ArrivalPendingConfirmation, ArrivalTargetCode = member.ArrivalTargetCode,

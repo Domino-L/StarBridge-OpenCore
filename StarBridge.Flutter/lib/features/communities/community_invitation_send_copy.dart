@@ -3,6 +3,13 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const invitationSendCopy = <String, (String, String, String)>{
+  'loadingRecords': ('正在读取发送记录…', '正在讀取傳送記錄…', 'Loading delivery records…'),
+  'loadingOrganizations': (
+    '正在读取已加入组织…',
+    '正在讀取已加入組織…',
+    'Loading your organizations…',
+  ),
+  'working': ('正在处理邀请…', '正在處理邀請…', 'Processing invitation…'),
   'sendTitle': ('邀请加入组织', '邀請加入組織', 'Invite to organization'),
   'send': ('发送邀请', '傳送邀請', 'Send invitation'),
   'sendTo': ('发送给：', '傳送給：', 'Send to:'),

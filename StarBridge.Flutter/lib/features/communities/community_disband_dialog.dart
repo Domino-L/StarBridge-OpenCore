@@ -2,8 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../common/social_read_activity.dart';
+
 import '../../design_system/controls/semantic_action_style.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
 import 'community_disband_controller.dart';
 import 'community_disband_copy.dart';
 import 'community_disband_port.dart';
@@ -26,10 +32,21 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
   late final model = CommunityDisbandController(widget.port, widget.targetRef);
   final password = TextEditingController();
   StreamSubscription<void>? _subscription;
+  late final SocialReadActivityBinding _reading, _sending;
   String t(String key) => disbandText(context, key);
   @override
   void initState() {
     super.initState();
+    _reading = SocialReadActivityBinding(
+      model,
+      () => model.loading,
+      initialRead: true,
+    );
+    _sending = SocialReadActivityBinding(
+      model,
+      () => model.sending,
+      initialRead: false,
+    );
     model.addListener(_changed);
     _subscription = widget.contextInvalidations?.listen(
       (_) => model.invalidate(),
@@ -47,12 +64,18 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
     password.clear();
     await model.confirm(credential);
     if (mounted && !model.invalidated && model.outcome?.status == 'accepted') {
-      Navigator.pop(context, true);
+      dismissStarBridgeDialog(
+        context,
+        source: currentStarBridgeActivationSource,
+        result: true,
+      );
     }
   }
 
   @override
   void dispose() {
+    _reading.dispose();
+    _sending.dispose();
     password.clear();
     password.dispose();
     unawaited(_subscription?.cancel());
@@ -63,6 +86,7 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final activity = model.loading ? _reading : _sending;
     final preview = model.preview;
     return PopScope(
       canPop: !model.sending,
@@ -76,7 +100,18 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (model.loading || model.sending)
-                  const LinearProgressIndicator(),
+                  KeyedSubtree(
+                    key: ValueKey((model.loading, activity.revision)),
+                    child: SocialReadActivity(
+                      key: const ValueKey('disband-activity'),
+                      source: activity.source,
+                      opening: activity.opening,
+                      label: t(
+                        model.loading ? 'activityLoading' : 'activitySending',
+                      ),
+                      height: 4,
+                    ),
+                  ),
                 if (preview != null) ...[
                   Text(
                     preview.name,
@@ -100,17 +135,21 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
                   if (preview.isExample)
                     Text(t('example'))
                   else ...[
-                    TextField(
-                      controller: password,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      enabled: !model.sending,
-                      maxLength: 4096,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: t('password'),
-                        counterText: '',
+                    StarBridgeFieldFrame(
+                      builder: (_, focus) => TextField(
+                        key: const Key('community-disband-password'),
+                        focusNode: focus,
+                        controller: password,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        enabled: !model.sending,
+                        maxLength: 4096,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: t('password'),
+                          counterText: '',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -136,10 +175,16 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: model.sending
+          StarBridgeActionButton(
+            controlKey: const Key('community-disband-cancel'),
+            kind: StarBridgeActionKind.quiet,
+            onActivate: model.sending
                 ? null
-                : () => Navigator.pop(context, false),
+                : (source) => dismissStarBridgeDialog(
+                    context,
+                    source: source,
+                    result: false,
+                  ),
             child: Text(
               t(
                 model.outcome == null && !model.invalidated
@@ -151,21 +196,23 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
           if (preview == null &&
               !model.invalidated &&
               model.outcome?.status != 'unknown')
-            TextButton(
-              onPressed: model.loading || model.sending ? null : model.load,
+            StarBridgeActionButton(
+              controlKey: const Key('community-disband-reload'),
+              kind: StarBridgeActionKind.quiet,
+              onActivate: model.loading || model.sending
+                  ? null
+                  : (_) => model.load(),
               child: Text(t('reload')),
             ),
           if (preview != null)
-            FilledButton(
-              style: semanticActionStyle(
-                context,
-                ActionTone.danger,
-                emphasis: ActionEmphasis.filled,
-              ),
-              onPressed:
+            StarBridgeActionButton(
+              controlKey: const Key('community-disband-confirm'),
+              kind: StarBridgeActionKind.primary,
+              tone: ActionTone.danger,
+              onActivate:
                   model.canConfirm &&
                       (preview.isExample || password.text.trim().isNotEmpty)
-                  ? _confirm
+                  ? (_) => _confirm()
                   : null,
               child: Text(t('action')),
             ),

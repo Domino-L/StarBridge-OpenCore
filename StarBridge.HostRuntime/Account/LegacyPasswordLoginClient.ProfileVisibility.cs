@@ -42,6 +42,8 @@ internal sealed partial class ScmAccountBridgeHost
     public async Task<object> ProfileVisibilityAsync(StarBridge.NativeBridge.BridgeAccountContext context,
         JsonElement payload, bool save, CancellationToken token)
     {
+        if (_session is not null)
+            return await ScmProfileVisibilityAsync(context, payload, save, token);
         // This is the still-live S2 profile owner, never a Java-failure fallback.
         var session = RequireRelaySession(context);
         if (session.Legacy is null || _legacyPasswordLogin is null)

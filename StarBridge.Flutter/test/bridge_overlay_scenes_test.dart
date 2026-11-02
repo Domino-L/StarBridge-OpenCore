@@ -7,6 +7,59 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  test('main fleet state is optional, validated and never assumed', () {
+    final base = <String, Object?>{
+      'schemaVersion': 1,
+      'revision': 2,
+      'mode': 'auto',
+      'status': 'ready',
+      'sourceOwnerKey': 'A' * 64,
+      'organizations': [
+        {'code': 'A', 'name': 'Organization A'},
+      ],
+    };
+    expect(BridgeOverlayScenes.parse(base).fleetStatus, isNull);
+    for (final status in ['ready', 'notMember', 'unavailable', 'loading']) {
+      expect(
+        BridgeOverlayScenes.parse({
+          ...base,
+          'fleet': {'status': status},
+        }).fleetStatus,
+        status,
+      );
+    }
+    final fixed = BridgeOverlayScenes.parse({
+      ...base,
+      'mode': 'fleet',
+      'actualId': 'fleet',
+      'presetBindingId': 'fleet',
+      'resolvedSourceIds': {'auto': 'fleet', 'fleet': 'fleet'},
+      'fleet': {'status': 'ready'},
+    });
+    expect(fixed.mode, 'fleet');
+    expect(fixed.preferredId, 'fleet');
+    expect(fixed.actualId, 'fleet');
+    for (final bad in <Map<String, Object?>>[
+      {
+        'fleet': {'status': 'guessing'},
+      },
+      {'fleet': 'ready'},
+      {'mode': 'fleet'},
+      {
+        'mode': 'fleet',
+        'code': 'A',
+        'fleet': {'status': 'ready'},
+      },
+      {'actualId': 'fleet'},
+      {'presetBindingId': 'fleet'},
+    ]) {
+      expect(
+        () => BridgeOverlayScenes.parse({...base, ...bad}),
+        throwsFormatException,
+        reason: '$bad',
+      );
+    }
+  });
   test('preview resolution metadata is scoped, validated and immutable', () {
     final payload = <String, Object?>{
       'schemaVersion': 1,

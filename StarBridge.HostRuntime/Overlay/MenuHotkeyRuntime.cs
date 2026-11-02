@@ -17,7 +17,7 @@ public sealed record MenuHotkeyRegistration(
         other is not null && ReferenceEquals(_sessionIdentity, other._sessionIdentity);
 }
 
-public sealed record MenuHotkeyIntent(string Action, long Request, long TargetWindow, int TargetProcessId);
+public sealed record MenuHotkeyIntent(string Action, long Request, long TargetWindow, int TargetProcessId, int? CommandId = null);
 
 /// <summary>Shares the existing information-overlay raw-input owner. The
 /// primary renderer still owns opening and its request/first-frame protocol.</summary>

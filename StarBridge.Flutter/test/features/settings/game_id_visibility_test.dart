@@ -10,6 +10,7 @@ import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/settings/game_id_visibility_controller.dart';
 import 'package:starbridge_flutter/features/settings/game_id_visibility_setting.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_connection.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
@@ -104,6 +105,25 @@ Future<void> ready(GameIdVisibilityController c) async {
 }
 
 void main() {
+  test('SCM unverified identity stays hidden without adopting legacy public defaults', () async {
+    final h = Fixture();
+    h.snapshot['canConfigure'] = false;
+    h.snapshot['locations'] = 0;
+    final c = GameIdVisibilityController(h.session);
+    await ready(c);
+    expect(c.locations, 0);
+    expect(c.canEdit, isFalse);
+    expect(c.error, isNull);
+    await c.change(4, true);
+    expect(h.writes, isEmpty);
+    expect(
+      () =>
+          GameIdVisibilityController.validate({...h.snapshot, 'locations': 4}),
+      throwsFormatException,
+    );
+    c.dispose();
+    await h.close();
+  });
   test(
     'background refresh allows save and cannot overwrite its receipt',
     () async {
@@ -230,7 +250,14 @@ void main() {
             .every((tile) => tile.onChanged != null),
         isTrue,
       );
-      await tester.tap(find.byKey(const Key('game-id-friends')));
+      await tester.tap(
+        find
+            .ancestor(
+              of: find.byKey(const Key('game-id-friends')),
+              matching: find.byType(StarBridgeSwitch),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       expect(h.writes.single.payload['locations'], 11);
       h.readGate!.complete();

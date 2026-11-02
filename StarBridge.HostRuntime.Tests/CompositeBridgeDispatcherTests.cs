@@ -3,6 +3,42 @@ using StarBridge.NativeBridge;
 
 internal static class CompositeBridgeDispatcherTests
 {
+    internal static async Task RoutesOverlayFleetRequests()
+    {
+        using var host = new RecordingDispatcher(); using var account = new RecordingDispatcher(); using var preferences = new RecordingDispatcher();
+        using var dispatcher = new CompositeBridgeDispatcher(host, account, preferences);
+        foreach (var name in new[] { "overlayScenes.read", "overlayScenes.select", "overlayScenes.focusCommunity", "overlayScenes.focusFleet" })
+        {
+            var request = BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 7, new { schemaVersion = 1 },
+                new BridgeAccountContext("fixture", "scm", "overlay-fleet-owner"));
+            var response = await dispatcher.DispatchAsync(request);
+            Require(response.Response.Status == BridgeResponseStatuses.Ok && ReferenceEquals(account.Requests.Last(), request),
+                "Both transient page focuses reach the account owner through the same existing overlayScenes route.");
+        }
+        Require(host.Requests.Count == 0 && preferences.Requests.Count == 0, "Page focus is never dispatched as persisted application preferences.");
+    }
+
+    internal static async Task RoutesAchievementRequests()
+    {
+        using var host = new RecordingDispatcher(); using var account = new RecordingDispatcher(); using var preferences = new RecordingDispatcher();
+        using var dispatcher = new CompositeBridgeDispatcher(host, account, preferences);
+        var request = BridgeEnvelope.Request("achievements.read", Guid.NewGuid().ToString("N"), 7,
+            new { schemaVersion = 1 }, new BridgeAccountContext("test", "scm", "synthetic-achievement"));
+        var response = await dispatcher.DispatchAsync(request);
+        Require(response.Response.Status == BridgeResponseStatuses.Ok && ReferenceEquals(account.Requests.Single(), request), "Achievement collection reaches account dispatch with its original generation and owner.");
+        // Exercise the composed Native Host router, not only the leaf image bridge.
+        foreach (var name in new[] { "achievementIdeas.pickImage", "account.achievementIdeaSubmit" })
+        {
+            using var cancellation = new CancellationTokenSource();
+            var idea = BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 7,
+                new { schemaVersion = 1 }, request.AccountContext);
+            var result = await dispatcher.DispatchAsync(idea, cancellation.Token);
+            Require(result.Response.Status == BridgeResponseStatuses.Ok && ReferenceEquals(account.Requests.Last(), idea),
+                $"{name} must reach the account owner through the production router; got {result.Response.Error?.Code}.");
+            Require(account.LastToken == cancellation.Token, "Idea requests retain cancellation.");
+        }
+        Require(host.Requests.Count == 0 && preferences.Requests.Count == 0, "Achievements cannot become accountless host or settings operations.");
+    }
     internal static async Task ObservesDirectMessages()
     {
         using var host = new RecordingDispatcher();
@@ -35,7 +71,7 @@ internal static class CompositeBridgeDispatcherTests
         using var preferences = new RecordingDispatcher();
         using var dispatcher = new CompositeBridgeDispatcher(host, account, preferences);
         var context = new BridgeAccountContext("test", "test", "owner");
-        foreach (var name in new[] { "communities.read", "communities.execute", "communities.creationOptions", "communities.create", "communities.pickLogo", "communities.cropLogo", "communities.clearLogo", "communities.workspace", "communities.logs", "communities.deleteLog", "communities.disbandPreview", "communities.disband", "communities.chat", "communities.chatDetail", "communities.markChatRead", "communities.sendChat", "communities.media", "communities.profile", "communities.saveProfile", "communities.previewInvite", "communities.acceptInvite", "communities.admissions", "communities.manageAdmissions", "communities.roles", "communities.saveRoles", "communities.memberRole", "communities.saveMemberRole", "communities.memberRemoval", "communities.removeMember", "communities.ownershipTransfer", "communities.transferOwnership", "communities.ownershipExit", "communities.leaveWithSuccessor" })
+        foreach (var name in new[] { "communities.read", "communities.execute", "communities.creationOptions", "communities.create", "communities.pickLogo", "communities.cropLogo", "communities.clearLogo", "communities.pickWideImage", "communities.cropWideImage", "communities.clearWideImage", "communities.workspace", "communities.logs", "communities.deleteLog", "communities.disbandPreview", "communities.disband", "communities.chat", "communities.chatDetail", "communities.markChatRead", "communities.sendChat", "communities.media", "communities.profile", "communities.saveProfile", "communities.previewInvite", "communities.acceptInvite", "communities.admissions", "communities.manageAdmissions", "communities.roles", "communities.saveRoles", "communities.memberRole", "communities.saveMemberRole", "communities.memberRemoval", "communities.removeMember", "communities.ownershipTransfer", "communities.transferOwnership", "communities.ownershipExit", "communities.leaveWithSuccessor" })
         {
             var request = BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 2, new { schemaVersion = 1 }, context);
             var response = await dispatcher.DispatchAsync(request);
@@ -93,6 +129,22 @@ internal static class CompositeBridgeDispatcherTests
             "Profile requests must not reach lifecycle or settings dispatch.");
     }
 
+    internal static async Task RoutesMarketplaceRequests()
+    {
+        using var host = new RecordingDispatcher(); using var account = new RecordingDispatcher(); using var preferences = new RecordingDispatcher();
+        using var dispatcher = new CompositeBridgeDispatcher(host, account, preferences);
+        var owner = new BridgeAccountContext("test", "scm", "synthetic-market");
+        // Every marketplace capability the account runtime advertises must be reachable through the production router.
+        foreach (var name in new[] { "marketplace.read", "marketplace.preferences", "marketplace.trade", "marketplace.records", "marketplace.chat", "marketplace.notices", "marketplace.warehouse", "marketplace.contracts",
+                     "marketplace.listings", "tradeProfile.read", "tradeProfile.write" })
+        {
+            var request = BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 7, new { schemaVersion = 1 }, owner);
+            var result = await dispatcher.DispatchAsync(request);
+            Require(result.Response.Status == BridgeResponseStatuses.Ok && ReferenceEquals(account.Requests.Last(), request),
+                $"{name} must reach the account owner through the production router; got {result.Response.Error?.Code}.");
+        }
+        Require(host.Requests.Count == 0 && preferences.Requests.Count == 0, "Marketplace requests stay account-owned.");
+    }
     internal static async Task PreservesOtherRoutes()
     {
         using var host = new RecordingDispatcher();

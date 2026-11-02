@@ -35,16 +35,19 @@ void main() {
     },
   );
 
-  test('dirty entry waits for save then evaluates latest source', () async {
+  test('entry waits for a pending save, then switches', () async {
     final f = await fixture();
+    f.port.hold = Completer<void>();
     f.edit();
     await f.source('room:one');
     expect(f.active, 'base');
     expect(f.port.activations, isEmpty);
-    expect(f.workspace.projection.value.dirty, isTrue);
-    expect(await f.workspace.save(), isTrue);
+    expect(f.workspace.projection.value.dirty, isTrue, reason: 'write pending');
+    f.port.hold!.complete();
     await settle();
+    expect(f.workspace.projection.value.dirty, isFalse);
     expect(f.active, 'room');
+    expect(f.port.activations, ['room']);
     expect(
       f.port.savedDraft?.forModule(OverlaySourceModule.chat).mode,
       OverlaySourceMode.room,
@@ -52,13 +55,14 @@ void main() {
   });
 
   test(
-    'entry followed by leave while dirty never replays the old room',
+    'entry followed by leave during a pending save never replays the old room',
     () async {
       final f = await fixture();
+      f.port.hold = Completer<void>();
       f.edit();
       await f.source('room:one');
       await f.source('local');
-      f.workspace.discardChanges();
+      f.port.hold!.complete();
       await settle();
       expect(f.active, 'base');
       expect(f.port.activations, isEmpty);
@@ -66,13 +70,14 @@ void main() {
   );
 
   test(
-    'discard switches to latest valid source, not first pending source',
+    'a pending save settles against the latest source, not the first',
     () async {
       final f = await fixture();
+      f.port.hold = Completer<void>();
       f.edit();
       await f.source('room:one');
       await f.source('org:A');
-      f.workspace.discardChanges();
+      f.port.hold!.complete();
       await settle();
       expect(f.active, 'org');
       expect(f.port.activations, ['org']);
@@ -81,16 +86,22 @@ void main() {
     },
   );
 
-  test('failed save preserves draft and blocks automatic activation', () async {
+  test('a failed save keeps the edit and blocks automatic activation', () async {
     final f = await fixture();
+    f.port.fail = true;
     f.edit();
     await f.source('room:one');
-    f.port.fail = true;
-    expect(await f.workspace.save(), isFalse);
-    await settle();
     expect(f.workspace.projection.value.dirty, isTrue);
+    expect(
+      f.workspace.projection.value.failure,
+      OverlaySettingsFailure.writeFailed,
+    );
     expect(f.active, 'base');
     expect(f.port.activations, isEmpty);
+    f.port.fail = false;
+    expect(await f.workspace.save(), isTrue);
+    await settle();
+    expect(f.active, 'room');
   });
 
   test(
@@ -149,14 +160,16 @@ void main() {
   });
 
   test(
-    'account invalidation cancels deferred source without discarding draft',
+    'account invalidation cancels a deferred source without dropping a failed edit',
     () async {
       final f = await fixture();
+      f.port.fail = true;
       f.edit();
       await f.source('org:A');
       f.scenes.value = const OverlaySceneState();
       await settle();
       expect(f.workspace.projection.value.dirty, isTrue);
+      f.port.fail = false;
       f.workspace.discardChanges();
       await f.source('org:A', owner: 'other', generation: 2);
       expect(f.port.activations, isEmpty);

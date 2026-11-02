@@ -1,3 +1,13 @@
+import 'package:starbridge_flutter/features/common/organization_announcement_management_port.dart';
+import 'package:starbridge_flutter/features/common/organization_announcement_management_session.dart';
+import 'package:starbridge_flutter/features/common/organization_announcement_outcomes_controller.dart';
+import 'package:starbridge_flutter/features/communities/community_announcements_controller.dart';
+
+import '../common/organization_announcement_management_session_test.dart'
+    show FixtureManagementPort;
+import 'community_announcements_test.dart'
+    show announcementRow, announcementAuthor;
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -5,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_menu_anchor.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
@@ -45,6 +56,7 @@ Future<void> openAnnouncements(
   WidgetTester tester,
   CommunityAnnouncementsPort port, {
   String targetRef = target,
+  CommunityAnnouncementsController? controller,
   Locale locale = const Locale('zh', 'CN'),
   double width = 1100,
 }) async {
@@ -71,7 +83,11 @@ Future<void> openAnnouncements(
       home: Scaffold(
         body: Padding(
           padding: const EdgeInsets.all(16),
-          child: CommunityAnnouncementEntry(port: port, targetRef: targetRef),
+          child: CommunityAnnouncementEntry(
+            port: port,
+            targetRef: targetRef,
+            controller: controller,
+          ),
         ),
       ),
     ),
@@ -97,6 +113,203 @@ Future<void> capture(WidgetTester tester, String name) async {
 
 void main() {
   setUpAll(loadFonts);
+  testWidgets(
+    'official typed editor uses the original form for publish edit withdraw',
+    (tester) async {
+      final reads = AnnouncementsFake()
+        ..allowed = false
+        ..revision = 0
+        ..current = null;
+      final port = OfficialAnnouncementFormFixture(reads);
+      final outcomes = OrganizationAnnouncementOutcomesController(port);
+      final session = OrganizationAnnouncementManagementSession(
+        port,
+        'officialFleet:7',
+        outcomes: outcomes,
+      );
+      final model = CommunityAnnouncementsController(
+        reads,
+        target,
+        management: session,
+      );
+      addTearDown(model.dispose);
+      addTearDown(session.dispose);
+      addTearDown(outcomes.dispose);
+      addTearDown(port.close);
+      addTearDown(reads.changes.close);
+      await openAnnouncements(tester, reads, controller: model);
+      expect(model.page!.canManage, isFalse);
+      await tester.tap(find.byKey(const Key('announcement-create')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('announcement-title')),
+        'Original form title',
+      );
+      await tester.enterText(
+        find.byKey(const Key('announcement-content')),
+        'Original form body',
+      );
+      await tester.ensureVisible(find.byKey(const Key('announcement-save')));
+      await tester.tap(find.byKey(const Key('announcement-save')));
+      await tester.pumpAndSettle();
+      expect(port.managed.single.action, 'publish');
+      expect(port.managed.single.title, 'Original form title');
+      await tester.tap(find.byKey(const Key('announcement-refresh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('announcement-edit')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('announcement-title')),
+        'Edited in same form',
+      );
+      await tester.ensureVisible(find.byKey(const Key('announcement-save')));
+      await tester.tap(find.byKey(const Key('announcement-save')));
+      await tester.pumpAndSettle();
+      expect(port.managed.last.action, 'edit');
+      expect(port.managed.last.announcementRef, 'f' * 32);
+      expect(
+        port.managed.last.announcementRef,
+        isNot(model.page!.current!.announcementRef),
+      );
+      await tester.tap(find.byKey(const Key('announcement-refresh')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('announcement-withdraw')),
+      );
+      await tester.tap(find.byKey(const Key('announcement-withdraw')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('announcement-confirm-accept')));
+      await tester.pumpAndSettle();
+      expect(port.managed.map((v) => v.action), [
+        'publish',
+        'edit',
+        'withdraw',
+      ]);
+      expect(
+        reads.writes,
+        isEmpty,
+        reason: 'Official writes never use the community write port',
+      );
+      expect(model.page!.current, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'official unknown refresh and query preserve one immutable operation',
+    (tester) async {
+      final reads = AnnouncementsFake()
+        ..allowed = false
+        ..revision = 0
+        ..current = null;
+      final port = OfficialAnnouncementFormFixture(reads)..failManage = true;
+      final outcomes = OrganizationAnnouncementOutcomesController(port);
+      final session = OrganizationAnnouncementManagementSession(
+        port,
+        'officialFleet:7',
+        outcomes: outcomes,
+      );
+      final model = CommunityAnnouncementsController(
+        reads,
+        target,
+        management: session,
+      );
+      addTearDown(model.dispose);
+      addTearDown(session.dispose);
+      addTearDown(outcomes.dispose);
+      addTearDown(port.close);
+      addTearDown(reads.changes.close);
+      await openAnnouncements(tester, reads, controller: model);
+      await tester.tap(find.byKey(const Key('announcement-create')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('announcement-title')),
+        'Unconfirmed form',
+      );
+      await tester.ensureVisible(find.byKey(const Key('announcement-save')));
+      await tester.tap(find.byKey(const Key('announcement-save')));
+      await tester.pumpAndSettle();
+      final original = port.managed.single;
+      await tester.tap(find.byKey(const Key('announcement-refresh')));
+      await tester.pumpAndSettle();
+      expect(model.uncertain, isTrue);
+      expect(
+        find.byKey(const Key('announcement-review-unknown')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const Key('announcement-query-original')));
+      await tester.pumpAndSettle();
+      expect(model.uncertain, isTrue);
+      expect(session.originalIntent, same(original));
+      expect(port.managed, hasLength(1));
+      await tester.ensureVisible(find.byKey(const Key('announcement-discard')));
+      await tester.tap(find.byKey(const Key('announcement-discard')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('announcement-confirm-accept')));
+      await tester.pumpAndSettle();
+      expect(model.editing, isFalse);
+      final originalQueryRetained = find
+          .byKey(const Key('announcement-query-original'))
+          .evaluate()
+          .isNotEmpty;
+      await tester.tap(find.byKey(const Key('announcement-own-outcomes')));
+      await tester.pumpAndSettle();
+      final ownQuery = find.byKey(
+        ValueKey('announcement-query-${original.requestId}'),
+      );
+      await tester.tap(ownQuery);
+      await tester.pumpAndSettle();
+      expect(outcomes.results[original.requestId]?.status, 'unknown');
+      expect(session.unresolved, isTrue);
+      expect(
+        model.writable,
+        isFalse,
+        reason: 'notFound cannot restore editing authority',
+      );
+      expect(port.managed, hasLength(1));
+      final editorsBeforeKnownResult = port.editorReads;
+      port.queryAccepted = true;
+      await tester.tap(ownQuery);
+      await tester.pumpAndSettle();
+      expect(outcomes.results[original.requestId]?.status, 'accepted');
+      expect(
+        port.editorReads,
+        editorsBeforeKnownResult,
+        reason: 'Own receipt queries do not renew an editor',
+      );
+      await tester.tap(find.byKey(const Key('announcement-outcomes-close')));
+      await tester.pumpAndSettle();
+      expect(
+        session.unresolved,
+        isFalse,
+        reason:
+            'A terminal own result must release the matching current session',
+      );
+      expect(
+        originalQueryRetained,
+        isTrue,
+        reason: 'Discarding a draft must retain the original unknown operation entry',
+      );
+      expect(session.editor, isNull);
+      await tester.tap(find.byKey(const Key('announcement-refresh')));
+      await tester.pumpAndSettle();
+      expect(port.editorReads, editorsBeforeKnownResult + 1);
+      expect(model.uncertain, isFalse);
+      expect(model.success, 'published');
+      expect(session.editor, isNotNull);
+      await tester.tap(find.text('编辑当前公告'));
+      await tester.pumpAndSettle();
+      expect(model.editing, isTrue);
+      expect(find.text('Unconfirmed form'), findsOneWidget);
+      expect(port.queries.every((v) => v.$1 == original.requestId), isTrue);
+      expect(
+        port.managed,
+        hasLength(1),
+        reason: 'No new operation or automatic re-POST',
+      );
+      expect(reads.writes, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('current announcement route polls once and retains the draft', (
     tester,
   ) async {
@@ -296,7 +509,7 @@ void main() {
       expect(find.text('发布者'), findsOneWidget);
       await tester.tap(find.byType(UserAvatarMenu).first);
       await tester.pumpAndSettle();
-      expect(find.byType(MenuAnchor), findsNWidgets(2));
+      expect(find.byType(StarBridgeMenuAnchor), findsNWidgets(2));
       expect(tester.takeException(), isNull);
       await tester.tapAt(const Offset(30, 30));
       await tester.pumpAndSettle();
@@ -462,4 +675,109 @@ void main() {
     expect(find.text('原组织草稿'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+}
+
+// Explicit synthetic typed UI authority; no real Owner, service or durable IO.
+class OfficialAnnouncementFormFixture extends FixtureManagementPort {
+  OfficialAnnouncementFormFixture(this.reads);
+  final AnnouncementsFake reads;
+  OrganizationAnnouncementIntent? unknown;
+  @override
+  Future<OrganizationAnnouncementEditor> readEditor(String sourceRef) async {
+    editorReads++;
+    return OrganizationAnnouncementEditor.parse({
+      'schemaVersion': 1,
+      'state': 'available',
+      'sourceRef': sourceRef,
+      'editRef': 'e' * 32,
+      'revision': reads.revision,
+      'allowedActions': reads.current == null
+          ? ['publish']
+          : ['publish', 'edit', 'withdraw'],
+      'current': reads.current == null
+          ? null
+          : {
+              'announcementRef': 'f' * 32,
+              'title': reads.current!['title'],
+              'content': reads.current!['content'],
+            },
+    }, sourceRef);
+  }
+
+  void _commit(OrganizationAnnouncementIntent intent) {
+    reads.revision++;
+    reads.current = intent.action == 'withdraw'
+        ? null
+        : {
+            ...announcementRow(),
+            'title': intent.title!,
+            'content': intent.content!,
+            'revision': reads.revision,
+            'author': announcementAuthor(hasAvatar: false),
+            'editor': announcementAuthor(hasAvatar: false),
+          };
+  }
+
+  @override
+  Future<OrganizationAnnouncementOutcome> manage(
+    OrganizationAnnouncementIntent intent,
+  ) async {
+    managed.add(intent);
+    if (failManage) {
+      unknown = intent;
+      pending = {
+        'schemaVersion': 1,
+        'kind': 'pending',
+        'offset': 0,
+        'totalCount': 1,
+        'items': [
+          {
+            'requestId': intent.requestId,
+            'sourceRef': intent.sourceRef,
+            'action': intent.action,
+            'requestedAt': '2026-10-17T00:00:00Z',
+            'status': 'unknown',
+          },
+        ],
+      };
+      return OrganizationAnnouncementOutcome.unknown(intent);
+    }
+    _commit(intent);
+    return OrganizationAnnouncementOutcome.parseManage(
+      {...intent.toPayload(), 'status': 'accepted', 'revision': reads.revision}
+        ..remove('title')
+        ..remove('content')
+        ..remove('announcementRef'),
+      intent,
+    );
+  }
+
+  @override
+  Future<OrganizationAnnouncementOutcome> query(
+    String requestId, {
+    String? expectedSourceRef,
+    String? expectedAction,
+  }) async {
+    queries.add((requestId, expectedSourceRef, expectedAction));
+    if (queryAccepted) _commit(unknown!);
+    return OrganizationAnnouncementOutcome.parseQuery(
+      {
+        'schemaVersion': 1,
+        'kind': 'query',
+        'requestId': requestId,
+        if (queryAccepted) ...{
+          'sourceRef': expectedSourceRef,
+          'action': expectedAction,
+          'status': 'accepted',
+          'revision': reads.revision,
+        } else ...{
+          'status': 'unknown',
+          'error': 'notFound',
+        },
+      },
+      requestId,
+      expectedSourceRef: expectedSourceRef,
+      expectedAction: expectedAction,
+    );
+  }
 }

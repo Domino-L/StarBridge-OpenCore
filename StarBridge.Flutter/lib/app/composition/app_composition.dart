@@ -1,9 +1,20 @@
+import '../../features/marketplace/marketplace_chat_controller.dart';
+import '../../features/marketplace/marketplace_port.dart';
+
 import 'dart:async';
 
-import '../../platform/window/menu_attention.dart';
-import 'menu_social_notice_source.dart';
+import '../../shared/remote_image_loader.dart';
+import '../../features/settings/image_cache_maintenance_controller.dart';
+import '../../shared/downloadable_image_cache.dart';
+import 'remote_image_owner.dart';
+import 'app_composition_disposal.dart';
+import '../../platform/bridge/bridge_client_session.dart';
+import '../../platform/bridge/native_remote_image_disk_cache.dart';
 
-import '../localization/app_strings.dart';
+import '../../platform/window/taskbar_attention_binding.dart';
+import 'taskbar_attention_composition.dart';
+import 'friend_request_refresh.dart';
+import 'menu_sources_composition.dart';
 
 import 'app_feature_registry.dart';
 import '../menu_overlay/menu_friends_session.dart';
@@ -18,13 +29,15 @@ import '../../features/gameplay_time/gameplay_time_controller.dart';
 import '../../features/game_log/game_log_controller.dart';
 import '../../features/account/account_module.dart';
 import 'handle_mismatch_module.dart';
-import '../../features/account/handle_mismatch_port.dart';
+import 'handle_mismatch_composition.dart';
+import 'official_fleet_composition.dart';
+import 'official_fleet_self_presence_composition.dart';
 import '../../features/account/account_port.dart';
 import '../../features/account/bridge_account_adapter.dart';
 import '../../features/account/host_unavailable_account_adapter.dart';
 import '../../features/account/in_memory_account_adapter.dart';
 import '../../features/communities/communities_module.dart';
-import '../../features/communities/bridge_communities.dart';
+import 'community_bridge_composition.dart';
 import '../../features/communities/example_communities.dart';
 import '../../features/friends/friends_module.dart';
 import '../../features/friends/bridge_friends_adapter.dart';
@@ -35,8 +48,14 @@ import '../../features/direct_messages/example_direct_messages.dart';
 import '../../features/hangar/bridge_local_hangar.dart';
 import '../../features/notifications/notification_inbox_controller.dart';
 import '../../features/official_fleet/official_fleet_module.dart';
+import '../../features/official_fleet/official_fleet_rally.dart';
+import '../../features/communities/community_ships_port.dart';
+import '../../features/common/organization_hangar_sharing.dart';
+import '../../features/common/organization_communication_port.dart';
 import '../../features/official_fleet/official_fleet_port.dart';
 import '../../features/official_fleet/bridge_official_fleet_adapter.dart';
+import '../../features/official_fleet/bridge_official_fleet_members_adapter.dart';
+import '../../features/official_fleet/bridge_official_fleet_communication_adapter.dart';
 import '../../features/official_fleet/host_unavailable_official_fleet_adapter.dart';
 import '../../features/official_fleet/in_memory_official_fleet_adapter.dart';
 import '../../features/official_fleet/in_memory_official_fleet_members_adapter.dart';
@@ -60,8 +79,7 @@ import '../../features/party_rooms/party_rooms_module.dart';
 import '../../features/party_rooms/bridge_party_rooms_adapter.dart';
 import '../../features/party_rooms/example_party_rooms_adapter.dart';
 import '../../features/personal_profile/in_memory_personal_profile_adapter.dart';
-import '../../features/personal_profile/bridge_personal_profile_adapter.dart';
-import '../../features/personal_profile/bridge_local_personal_profile.dart';
+import 'personal_profile_bridge_composition.dart';
 import '../../features/personal_profile/personal_profile_module.dart';
 import '../../features/personal_profile/personal_profile_port.dart';
 import '../../features/settings/host_unavailable_notification_settings_adapter.dart';
@@ -75,8 +93,7 @@ import '../../features/settings/bridge_continuous_play.dart';
 import '../../features/settings/bridge_notification_settings_adapter.dart';
 import '../../features/settings/notification_settings_port.dart';
 import '../../features/settings/application_support_module.dart';
-import '../../features/settings/bridge_application_support.dart';
-import '../../features/settings/host_unavailable_application_support.dart';
+import 'application_support_composition.dart';
 import '../../features/settings/sync_privacy_module.dart';
 import '../../features/settings/sync_privacy_port.dart';
 import '../../platform/host/native_host_connector.dart';
@@ -95,10 +112,15 @@ import 'social_activity.dart';
 import 'bridge_game_presence.dart';
 import 'social_privacy_composition.dart';
 import 'app_activity_presence.dart';
-import '../../features/settings/bridge_local_privacy.dart';
 import '../../features/settings/local_privacy_controller.dart';
 
 final class AppComposition {
+  TaskbarAttentionBinding createTaskbarAttention(TaskbarAttentionScope scope) =>
+      composeTaskbarAttention(
+        this,
+        scope: scope,
+        activeGeneration: () => _nativeHost?.session.activeGeneration,
+      );
   AppComposition._(
     this._accountShellChrome, {
     required this.features,
@@ -109,11 +131,15 @@ final class AppComposition {
     required this.handleMismatch,
     required this.personalProfile,
     required this.officialFleet,
+    required this.officialFleetSharedShipsPort,
+    required this.officialFleetHangarSharingPort,
     required this.partyRooms,
     required this.communities,
     required this.friends,
     required this.syncPrivacy,
     this.socialPrivacy,
+    this.tradeChat,
+    this.tradeChatPort,
     this.localPrivacy,
     required this.notificationSettings,
     required this.notificationInbox,
@@ -122,6 +148,7 @@ final class AppComposition {
     this.continuousPlay,
     this.desktopNotifications,
     this.directMessageRefresh,
+    this.friendRequestRefresh,
     this.socialActivity,
     this.directMessageRequests,
     this.notificationReminders = const Stream.empty(),
@@ -133,6 +160,9 @@ final class AppComposition {
     this.gameplayTime,
     this.gameLog,
     required this.appActivity,
+    required this.remoteImages,
+    required this.remoteImageOwner,
+    required this.imageMaintenance,
   });
 
   final FeatureRegistry features;
@@ -143,9 +173,12 @@ final class AppComposition {
   final HandleMismatchModule handleMismatch;
   final PersonalProfileModule personalProfile;
   final OfficialFleetModule officialFleet;
+  final CommunityShipsPort officialFleetSharedShipsPort;
+  final OrganizationHangarSharingPort? officialFleetHangarSharingPort;
   final PartyRoomsModule partyRooms;
   final CommunitiesModule communities;
   final FriendsModule friends;
+  final FriendRequestRefresh? friendRequestRefresh;
   final SyncPrivacyModule syncPrivacy;
   final SocialPrivacyComposition? socialPrivacy;
   final LocalPrivacyController? localPrivacy;
@@ -158,14 +191,23 @@ final class AppComposition {
         );
   final NotificationSettingsModule notificationSettings;
   final NotificationInboxController notificationInbox;
-  DirectMessagesPort createWindowMessagesPort() => _nativeHost == null
-      ? UnavailableDirectMessages()
-      : BridgeDirectMessages(
-          _nativeHost.session,
-          ownAvatar: () =>
-              account.projection.value.profile?.avatarImageData ??
-              account.projection.value.profile?.avatarUrl,
-        );
+
+  /// 0.7.2 G9: the app-wide SCM trade chat, shared by the trading hall (its
+  /// count, 私信对方) and the messages page (交易消息). Live for the session.
+  final MarketplaceChatController? tradeChat;
+  final BridgeMarketplacePort? tradeChatPort;
+  DirectMessagesPort _createMessagesPort(String? Function() ownAvatar) {
+    final port = _nativeHost == null
+        ? UnavailableDirectMessages()
+        : BridgeDirectMessages(_nativeHost.session, ownAvatar: ownAvatar);
+    return directMessageRefresh?.borrow(port) ?? port;
+  }
+
+  DirectMessagesPort createWindowMessagesPort() => _createMessagesPort(
+    () =>
+        account.projection.value.profile?.avatarImageData ??
+        account.projection.value.profile?.avatarUrl,
+  );
   final ApplicationSupportModule applicationSupport;
   final NotificationAudioController? notificationAudio;
   final ContinuousPlayController? continuousPlay;
@@ -178,40 +220,23 @@ final class AppComposition {
   final AccountShellChrome _accountShellChrome;
   final bool ownsPreferences;
   final NativeHostLease? _nativeHost;
+  final RemoteImageLoader remoteImages;
+  final RemoteImageOwner remoteImageOwner;
+  final ImageCacheMaintenanceController imageMaintenance;
+  BridgeClientSession? get firstUseSession => _nativeHost?.session;
   MenuFriendsSession createFriendsWindowSession(
     void Function(Map<String, Object?>) publish,
-  ) => MenuFriendsSession(
-    _nativeHost == null
-        ? UnavailableFriendsPort()
-        : BridgeFriendsAdapter(_nativeHost.session),
-    publish,
+  ) => composeMenuFriendsSession(
+    session: _nativeHost?.session,
+    account: account,
+    publish: publish,
     presence: manualPresence?.source.controller,
-    identity: () {
-      final current = account.projection.value;
-      if (current.generation != _nativeHost?.session.activeGeneration ||
-          !(current.isSignedIn ||
-              current.sessionState == AccountSessionState.legacySignedIn)) {
-        return null;
-      }
-      return (
-        name:
-            current.profile?.displayName ??
-            current.identity.authoritativeHandle ??
-            '',
-        handle: current.identity.authoritativeHandle ?? '',
-        avatar: current.profile?.avatarImageData,
-      );
-    },
   );
   late final userInteractions = _nativeHost == null
       ? null
       : BridgeUserInteraction(_nativeHost.session);
-  DirectMessagesPort createUserMessages() => _nativeHost == null
-      ? UnavailableDirectMessages()
-      : BridgeDirectMessages(
-          _nativeHost.session,
-          ownAvatar: () => account.projection.value.profile?.avatarUrl,
-        );
+  DirectMessagesPort createUserMessages() =>
+      _createMessagesPort(() => account.projection.value.profile?.avatarUrl);
   final BridgeGamePresence? gamePresence;
   final ConnectedManualPresence? manualPresence;
   final GameplayTimeController? gameplayTime;
@@ -269,10 +294,9 @@ final class AppComposition {
       preferences: preferences,
       ownsPreferences: false,
       accountPort: BridgeAccountAdapter(nativeHost.session),
-      personalProfilePort: BridgeLocalPersonalProfile(
+      personalProfilePort: createBridgePersonalProfilePort(
         nativeHost.session,
-        remote: BridgePersonalProfileAdapter(nativeHost.session),
-        hangar: () => BridgeLocalHangar(nativeHost.session),
+        inventoryOrigin: HangarReadOrigin.profile,
       ),
       officialFleetPort: BridgeOfficialFleetAdapter(nativeHost.session),
       partyRoomsPort: BridgePartyRoomsAdapter(
@@ -280,7 +304,9 @@ final class AppComposition {
         onReminder: notifications.onRoomReminder,
       ),
       officialFleetOverviewPort: UnavailableOfficialFleetOverviewAdapter(),
-      officialFleetMembersPort: UnavailableOfficialFleetMembersAdapter(),
+      officialFleetMembersPort: BridgeOfficialFleetMembersAdapter(
+        nativeHost.session,
+      ),
       officialFleetShipsPort: UnavailableOfficialFleetShipsAdapter(),
       syncPrivacyPort: HostUnavailableSyncPrivacyAdapter(),
       socialPrivacy: SocialPrivacyComposition.connected(nativeHost.session),
@@ -350,6 +376,8 @@ final class AppComposition {
 
   factory AppComposition.forTest({
     required WindowChromePort windowChrome,
+    MarketplacePort Function()? marketplacePortFactory,
+    RemoteImageLoader? remoteImagesOverride,
     CommunitiesPort Function()? communitiesPortFactory,
     FriendsPort Function()? friendsPortFactory,
     DesktopNotificationPort? desktopNotifications,
@@ -362,6 +390,9 @@ final class AppComposition {
     OfficialFleetOverviewPort? officialFleetOverviewPort,
     OfficialFleetMembersPort? officialFleetMembersPort,
     OfficialFleetShipsPort? officialFleetShipsPort,
+    CommunityShipsPort? officialFleetSharedShipsPort,
+    OrganizationHangarSharingPort? officialFleetHangarSharingPort,
+    OrganizationCommunicationFactory? officialFleetCommunicationFactory,
     SyncPrivacyPort? syncPrivacyPort,
     NotificationSettingsPort? notificationSettingsPort,
     OverlaySettingsPort? overlaySettingsPort,
@@ -369,6 +400,11 @@ final class AppComposition {
   }) {
     return AppComposition._withAdapters(
       windowChrome: windowChrome,
+      officialFleetSharedShipsPort: officialFleetSharedShipsPort,
+      officialFleetHangarSharingPort: officialFleetHangarSharingPort,
+      officialFleetCommunicationFactory: officialFleetCommunicationFactory,
+      marketplacePortFactory: marketplacePortFactory,
+      remoteImagesOverride: remoteImagesOverride,
       communitiesPortFactory: communitiesPortFactory,
       friendsPortFactory: friendsPortFactory,
       desktopNotificationsOverride: desktopNotifications,
@@ -404,6 +440,8 @@ final class AppComposition {
   }
 
   factory AppComposition._withAdapters({
+    MarketplacePort Function()? marketplacePortFactory,
+    RemoteImageLoader? remoteImagesOverride,
     MenuWindowLifetime? menuLifetime,
     DesktopNotificationPort? desktopNotificationsOverride,
     required WindowChromePort windowChrome,
@@ -420,6 +458,9 @@ final class AppComposition {
     required OfficialFleetOverviewPort officialFleetOverviewPort,
     required OfficialFleetMembersPort officialFleetMembersPort,
     required OfficialFleetShipsPort officialFleetShipsPort,
+    CommunityShipsPort? officialFleetSharedShipsPort,
+    OrganizationHangarSharingPort? officialFleetHangarSharingPort,
+    OrganizationCommunicationFactory? officialFleetCommunicationFactory,
     required SyncPrivacyPort syncPrivacyPort,
     SocialPrivacyComposition? socialPrivacy,
     required NotificationSettingsPort notificationSettingsPort,
@@ -428,28 +469,57 @@ final class AppComposition {
     NativeHostLease? nativeHost,
   }) {
     final account = createAccountModule(accountPort);
-    final applicationSupport = createApplicationSupportModule(
-      nativeHost == null ||
-              !nativeHost.session.hostCapabilities.contains(
-                'diagnostics.safeSummary',
-              )
-          ? HostUnavailableApplicationSupport()
-          : BridgeApplicationSupport(nativeHost.session),
-    );
+    unawaited(
+      account.initialize(),
+    ); // Claim the display root before feature reads.
+    final applicationSupport = composeApplicationSupport(nativeHost?.session);
     final partyRooms = PartyRoomsModule(
       partyRoomsPort ?? UnavailablePartyRoomsPort(),
     );
-    final personalProfile = createPersonalProfileModule(personalProfilePort);
+    final personalProfile = createPersonalProfileModule(
+      personalProfilePort,
+      onSaveSettled: () => unawaited(account.refresh()),
+    );
+    // The lazy communication factory runs after composition has connected the
+    // existing mode owner; keep a single owner, never a second mode projection.
+    ConnectedManualPresence? manualPresence;
     final officialFleet = createOfficialFleetModule(
       officialFleetPort,
       officialFleetOverviewPort,
       officialFleetMembersPort,
       officialFleetShipsPort,
+      communicationFactory:
+          officialFleetCommunicationFactory ??
+          (nativeHost == null
+              ? null
+              : (sourceRef) => createOfficialFleetCommunicationAdapter(
+                  nativeHost.session,
+                  sourceRef,
+                  connectionMode: manualPresence?.connectionMode,
+                  ownProfile: () => account.projection.value.profile,
+                )),
+      // Rally reads count this client as online unless it shows invisible or
+      // offline (member board rule: manual offline is offline in the fleet).
+      rally: nativeHost == null
+          ? null
+          : OfficialFleetRallyController(
+              BridgeOfficialFleetRallyPort(
+                nativeHost.session,
+                onlineTrafficAllowed: () =>
+                    manualPresence?.connectionMode.allowsOnlineTraffic ?? true,
+              ),
+              countedOnline: () => !const {
+                'presence.invisible',
+                'presence.offline',
+              }.contains(manualPresence?.source.value.selfKey),
+              hotkeys: officialFleetRallyHotkeys(nativeHost.session),
+            ),
     );
     final syncPrivacy = createSyncPrivacyModule(syncPrivacyPort);
-    final localPrivacy = nativeHost == null
-        ? null
-        : LocalPrivacyController(BridgeLocalPrivacy(nativeHost.session));
+    final localPrivacy = composeLocalPrivacy(
+      nativeHost?.session,
+      officialFleet,
+    );
     final notificationSettings = createNotificationSettingsModule(
       notificationSettingsPort,
     );
@@ -466,7 +536,7 @@ final class AppComposition {
             nativeHost.session.hostCapabilities.contains('playReminder.save')
         ? ContinuousPlayController(BridgeContinuousPlay(nativeHost.session))
         : null;
-    ConnectedManualPresence? manualPresence;
+    late final RemoteImageLoader remoteImages;
     GameLogController? gameLog;
     late final CommunitiesModule communities;
     late final FriendsModule friends;
@@ -479,81 +549,30 @@ final class AppComposition {
       account: account,
       profile: personalProfile,
       rooms: partyRooms,
+      createRemoteImages: () => remoteImages.fork(),
+      applicationPreferences: preferences,
       menuCommunities: () => communities,
       menuNotices:
           notificationSettingsPort is! BridgeNotificationSettingsAdapter
           ? null
-          : () {
-              final generation = account.projection.value.generation;
-              return MenuSocialNoticeSource(
-                events: notificationSettingsPort.reminders,
-                settings: notificationSettings.projection,
-                authorization: account.projection,
-                invalidations: nativeHost?.session.events
-                    .where(
-                      (event) =>
-                          event.name == 'account.changed' ||
-                          event.name == 'bootstrap.invalidated',
-                    )
-                    .map((_) {}),
-                isCurrent: () {
-                  final current = account.projection.value;
-                  return current.generation == generation &&
-                      current.generation ==
-                          nativeHost?.session.activeGeneration &&
-                      (current.isSignedIn ||
-                          current.sessionState ==
-                              AccountSessionState.legacySignedIn);
-                },
-                strings: () => AppStrings.resolve(
-                  preferences.projection.value.effective.locale,
-                ),
-              );
-            },
-      menuAttention: () {
-        final generation = account.projection.value.generation;
-        return MenuAttentionSource(
-          changes: [
-            account.projection,
-            friends.incomingAttention,
-            if (directMessageRefresh != null) directMessageRefresh.unread,
-            partyRooms.activityCount,
-            communities.chatAttention,
-          ],
-          isCurrent: () {
-            final current = account.projection.value;
-            return current.generation == generation &&
-                current.generation == nativeHost?.session.activeGeneration &&
-                (current.isSignedIn ||
-                    current.sessionState == AccountSessionState.legacySignedIn);
-          },
-          invalidations: nativeHost?.session.events
-              .where(
-                (event) =>
-                    event.name == 'account.changed' ||
-                    event.name == 'bootstrap.invalidated',
-              )
-              .map((_) {}),
-          read: () => MenuAttention(
-            friends: friends.incomingAttention.value,
-            comms: directMessageRefresh?.unread.value ?? 0,
-            rooms: partyRooms.activityCount.value,
-            organizations: communities.chatAttention.totalCount,
-          ),
-        );
-      },
+          : () => composeMenuNotices(
+              port: notificationSettingsPort,
+              settings: notificationSettings,
+              account: account,
+              preferences: preferences,
+              session: nativeHost?.session,
+            ),
+      menuAttention: () => composeMenuAttention(
+        account: account,
+        friends: friends,
+        messages: directMessageRefresh,
+        rooms: partyRooms,
+        communities: communities,
+        session: nativeHost?.session,
+      ),
       menuPresence: () => manualPresence?.source.controller,
       menuGame: () => gameLog?.value ?? const GameLogView(),
-      menuLabels: () {
-        final strings = AppStrings.resolve(
-          preferences.projection.value.effective.locale,
-        );
-        return (
-          contextLabel: strings.text('overlay.sections.menu'),
-          returnLabel: strings.text('overlay.menu.return'),
-          settingsLabel: strings.text('overlay.sections.menu'),
-        );
-      },
+      menuLabels: () => composeMenuLabels(preferences),
     );
     final gamePresence = nativeHost == null
         ? null
@@ -569,26 +588,10 @@ final class AppComposition {
             account.projection,
             onIdentityChanged: () => unawaited(account.refresh()),
           );
-    final handleMismatch = HandleMismatchModule(
-      account: account.projection,
-      gameLog: gameLog,
-      port: nativeHost == null
-          ? null
-          : BridgeHandleMismatchPort(nativeHost.session),
-      activeGeneration: nativeHost == null
-          ? null
-          : () => nativeHost.session.activeGeneration,
-      invalidations: nativeHost?.session.events
-          .where(
-            (event) =>
-                event.name == 'account.changed' ||
-                event.name == 'bootstrap.invalidated',
-          )
-          .map((_) {}),
-      refresh: () async {
-        await account.refresh();
-        await gameLog?.run();
-      },
+    final handleMismatch = composeHandleMismatch(
+      account,
+      gameLog,
+      nativeHost?.session,
     );
     final accountShellChrome = AccountShellChrome(
       base: shellChrome,
@@ -596,7 +599,7 @@ final class AppComposition {
       gamePresence: gamePresence,
       gameLog: gameLog,
       appAway: appActivity,
-      scenes: overlaySettings.scenes,
+      overlay: overlaySettings,
     );
     manualPresence = nativeHost == null
         ? null
@@ -605,21 +608,45 @@ final class AppComposition {
             accountShellChrome.projection,
             appAway: appActivity,
           );
+    accountShellChrome.observeConnectionMode(manualPresence?.connectionMode);
+    bindOfficialFleetPresence(
+      officialFleet.members,
+      officialFleetMembersPort,
+      manualPresence,
+      localPrivacy,
+    );
+    final tradeChatPort = nativeHost == null
+        ? null
+        : BridgeMarketplacePort(
+            nativeHost.session,
+            manualPresence?.connectionMode,
+          );
+    final tradeChat = tradeChatPort == null
+        ? null
+        : MarketplaceChatController(tradeChatPort);
+    final (:sharedShips, :ownSharing) = composeOfficialFleetSharing(
+      nativeHost?.session,
+      officialFleet,
+      sharedShipsOverride: officialFleetSharedShipsPort,
+      ownSharingOverride: officialFleetHangarSharingPort,
+      connectionMode: manualPresence?.connectionMode,
+    );
+    remoteImages =
+        remoteImagesOverride ??
+        RemoteImageLoader(
+          diskCache: NativeRemoteImageDiskCache.forSession(nativeHost?.session),
+          mode: manualPresence?.connectionMode,
+          session: nativeHost?.session,
+          reconcileMode: manualPresence?.connectionMode.refresh,
+        );
+    final remoteImageOwner = RemoteImageOwner(account.projection, remoteImages);
     communities = CommunitiesModule(
       (communitiesPortFactory ??
           () => nativeHost != null
-              ? BridgeCommunities(
+              ? composeCommunityBridge(
                   nativeHost.session,
-                  ownAvatar: () {
-                    final current = account.projection.value;
-                    return current.generation ==
-                                nativeHost.session.activeGeneration &&
-                            (current.isSignedIn ||
-                                current.sessionState ==
-                                    AccountSessionState.legacySignedIn)
-                        ? current.profile?.avatarImageData
-                        : null;
-                  },
+                  account.projection,
+                  manualPresence?.connectionMode,
                 )
               : UnavailableCommunities())(),
       onOrganizationRenamed: (code, name) {
@@ -628,6 +655,15 @@ final class AppComposition {
         overlaySettings.scenes?.renameCommunity(code, name);
       },
       onWorkspaceFocused: overlaySettings.scenes?.focusCommunity,
+    );
+    final imageMaintenance = ImageCacheMaintenanceController(
+      nativeHost?.session,
+      caches: [
+        remoteImages,
+        communities,
+        if (overlaySettings.menuPreview case final DownloadableImageOwner owner)
+          owner.downloadableImages,
+      ],
     );
     final friendsPort =
         (friendsPortFactory ??
@@ -638,7 +674,6 @@ final class AppComposition {
       friendsPort,
       isExample: friendsPort is ExampleFriendsAdapter,
     );
-    unawaited(account.initialize());
     unawaited(personalProfile.initialize());
     unawaited(officialFleet.initialize());
     unawaited(syncPrivacy.initialize());
@@ -674,18 +709,29 @@ final class AppComposition {
         gameLog,
         friends,
         communities,
-        directMessagesPortFactory ??
-            () => nativeHost != null
-                ? BridgeDirectMessages(
-                    nativeHost.session,
-                    ownAvatar: () =>
-                        account.projection.value.profile?.avatarImageData ??
-                        account.projection.value.profile?.avatarUrl,
-                  )
-                : UnavailableDirectMessages(),
+        () {
+          final port =
+              (directMessagesPortFactory ??
+              () => nativeHost != null
+                  ? BridgeDirectMessages(
+                      nativeHost.session,
+                      ownAvatar: () =>
+                          account.projection.value.profile?.avatarImageData ??
+                          account.projection.value.profile?.avatarUrl,
+                    )
+                  : UnavailableDirectMessages())();
+          return directMessageRefresh?.borrow(port) ?? port;
+        },
         applicationSupport,
         directMessageRequests,
         directMessageRefresh?.unread,
+        manualPresence?.source.controller,
+        manualPresence?.connectionMode,
+        marketplacePortFactory,
+        sharedShips,
+        ownSharing,
+        imageMaintenance,
+        tradeChat,
       ),
       windowChrome: windowChrome,
       shellChrome: accountShellChrome,
@@ -693,6 +739,8 @@ final class AppComposition {
       account: account,
       personalProfile: personalProfile,
       officialFleet: officialFleet,
+      officialFleetSharedShipsPort: sharedShips,
+      officialFleetHangarSharingPort: ownSharing,
       partyRooms: partyRooms,
       communities: communities,
       friends: friends,
@@ -706,8 +754,16 @@ final class AppComposition {
           ? null
           : SocialActivity(nativeHost.session),
       directMessageRefresh: directMessageRefresh,
+      friendRequestRefresh: nativeHost == null
+          ? null
+          : FriendRequestRefresh(
+              BridgeFriendsAdapter(nativeHost.session),
+              account.projection,
+            ),
       notificationAudio: notificationAudio,
       notificationInbox: notificationInbox,
+      tradeChat: tradeChat,
+      tradeChatPort: tradeChatPort,
       continuousPlay: continuousPlay,
       desktopNotifications:
           desktopNotificationsOverride ??
@@ -724,6 +780,9 @@ final class AppComposition {
       gamePresence: gamePresence,
       manualPresence: manualPresence,
       appActivity: appActivity,
+      remoteImages: remoteImages,
+      remoteImageOwner: remoteImageOwner,
+      imageMaintenance: imageMaintenance,
       gameplayTime: gameplayTime,
       gameLog: gameLog,
       handleMismatch: handleMismatch,
@@ -731,39 +790,11 @@ final class AppComposition {
   }
 
   void dispose() {
-    handleMismatch.dispose();
-    _sharingStatus?.dispose();
-    unawaited(userInteractions?.close());
-    directMessageRequests?.dispose();
-    directMessageRefresh?.dispose();
-    socialActivity?.dispose();
-    manualPresence?.dispose();
-    _accountShellChrome.dispose();
-    appActivity.dispose();
-    gamePresence?.dispose();
-    gameplayTime?.dispose();
-    gameLog?.dispose();
-    account.dispose();
-    personalProfile.dispose();
-    officialFleet.dispose();
-    partyRooms.dispose();
-    communities.dispose();
-    friends.dispose();
-    syncPrivacy.dispose();
-    socialPrivacy?.dispose();
-    localPrivacy?.dispose();
-    notificationSettings.dispose();
-    notificationInbox.dispose();
-    applicationSupport.dispose();
-    notificationAudio?.dispose();
-    continuousPlay?.dispose();
-    overlaySettings.dispose();
-    if (ownsPreferences) {
-      preferences.dispose();
-    }
-    final nativeHost = _nativeHost;
-    if (nativeHost != null) {
-      unawaited(nativeHost.close());
-    }
+    disposeAppComposition(
+      this,
+      releaseSharingStatus: _sharingStatus?.dispose,
+      releaseAccountShellChrome: _accountShellChrome.dispose,
+      closeNativeHost: _nativeHost?.close,
+    );
   }
 }

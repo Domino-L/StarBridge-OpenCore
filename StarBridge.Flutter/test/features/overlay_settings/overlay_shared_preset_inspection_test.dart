@@ -29,7 +29,7 @@ void main() {
     addTearDown(port.changes.close);
     await open(tester, port, importing: true);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+    await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
     // The blocked parent keeps its progress indicator while the modal is open.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
@@ -39,21 +39,21 @@ void main() {
     await tester.tap(find.text('取消').last);
     await tester.pumpAndSettle();
     expect(port.imports, 0);
-    await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+    await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(find.byKey(const Key('overlay-import-confirm')));
     await tester.pumpAndSettle();
     expect(port.inspections, 2);
     expect(port.imports, 1);
-    expect(find.text('已新增预设: Fixture'), findsOneWidget);
+    expect(find.text('已新增方案: Fixture'), findsOneWidget);
   });
   testWidgets('account invalidation rejects late inspection before any write', (tester) async {
     final port = _InspectingPort()..pending = Completer();
     addTearDown(port.changes.close);
     await open(tester, port, importing: true);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+    await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
     await tester.pump();
     port.changes.add(null);
     port.pending!.complete(OverlayPresetTransfer(name: 'Late', settings: settings(), layout: layout));
@@ -66,7 +66,7 @@ void main() {
     addTearDown(port.changes.close);
     await open(tester, port, importing: true);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '导入为新预设'));
+    await tester.tap(find.widgetWithText(FilledButton, '导入为新方案'));
     await tester.pumpAndSettle();
     expect(port.imports, 0);
     expect(find.text('重试'), findsOneWidget);

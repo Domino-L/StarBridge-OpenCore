@@ -15,9 +15,10 @@ public sealed partial class GameplayTimeRuntime
     private async Task<string> ConfirmRemoteHistoryAsync(BridgeAccountContext owner, long generation,
         string id, string handle, CancellationToken token)
     {
-        bool Current() => !_disposed && !token.IsCancellationRequested && _current() == (owner, generation) &&
-            string.Equals(handle, _verifiedHandle(), StringComparison.OrdinalIgnoreCase);
+        bool Current() => OwnerIsCurrent((owner, generation), token) &&
+            string.Equals(handle, _verifiedHandle(), StringComparison.OrdinalIgnoreCase) && OwnerIsCurrent((owner, generation), token);
         var remote = _historyRemote!;
+        if (!Current()) return "accountChanged";
         var state = await remote.ReadAsync(owner, token).ConfigureAwait(false);
         GameplayPendingImport pending;
         lock (_sync)
@@ -45,6 +46,7 @@ public sealed partial class GameplayTimeRuntime
         }
         try
         {
+            if (!Current()) return "accountChanged";
             var accepted = await remote.PublishGameplayStatisticsAsync(owner, pending.Update, token).ConfigureAwait(false);
             if (!accepted)
             {
@@ -67,7 +69,8 @@ public sealed partial class GameplayTimeRuntime
     private async Task<string> ReconcileHistoryImportAsync(BridgeAccountContext owner, long generation,
         IGameplayHistoryRemote remote, CancellationToken token)
     {
-        bool Current() => !_disposed && !token.IsCancellationRequested && _current() == (owner, generation);
+        bool Current() => OwnerIsCurrent((owner, generation), token);
+        if (!Current()) return "accountChanged";
         var state = await remote.ReadAsync(owner, token).ConfigureAwait(false);
         lock (_sync)
         {
@@ -101,18 +104,20 @@ public sealed partial class GameplayTimeRuntime
         }
     }
 
-    public async Task RecoverHistoryImportAsync()
+    public async Task RecoverHistoryImportAsync(CancellationToken cancellation = default)
     {
-        if (_historyRemote is null || !await _historyGate.WaitAsync(0)) return;
+        using var work = _work.Enter(default);
+        if (work is null || _historyRemote is null || !await _historyGate.WaitAsync(0, cancellation)) return;
         try
         {
             (BridgeAccountContext? Context, long Generation) owner;
             lock (_sync)
             {
-                if (_disposed || Resolve()?.Saved?.PendingImport is null) return;
+                if (!work.IsCurrent || Resolve()?.Saved?.PendingImport is null) return;
                 owner = _active;
             }
-            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellation, work.Token);
+            budget.CancelAfter(TimeSpan.FromSeconds(15));
             await ReconcileHistoryImportAsync(owner.Context!, owner.Generation, _historyRemote, budget.Token).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OutOfMemoryException) { }

@@ -1,7 +1,7 @@
 STARBRIDGE OFFICIAL BINARY END USER LICENSE AGREEMENT
 
-Terms version: 2026-07-27-v2
-Effective date: July 27, 2026
+Terms version: 2026-10-31-v4
+Effective date: the date StarBridge 0.7.2 is released
 
 This agreement is between you and Ruiyang Lyu, an individual ("Licensor").
 It governs only the Proprietary Components included in an Official Binary.
@@ -37,18 +37,21 @@ designated by Licensor as official. An Official Binary may contain Open
 Components, Proprietary Components, and Third-Party Components under different
 licenses.
 
-"Commercial Appearance" means an optional proprietary StarBridge appearance,
-including Night Shadow, Verdict, and any later appearance identified as
-commercial.
+"Proprietary Appearance" means an optional StarBridge appearance whose
+implementation and dedicated assets are not Open Components, including Night
+Shadow, Verdict, Haji Citizen, and any later appearance identified as
+proprietary.
 
-2. Current free test release
+2. Free of charge
 
-The Official Binary covered by these terms is currently provided without a
-software license fee for public testing. StarBridge does not currently collect
-payment through the application for Commercial Appearances. A later paid
-offering, if introduced, must present its price, entitlement, refund, and other
-purchase terms separately before purchase. These terms do not create a future
-payment obligation or a right to receive a future paid appearance.
+StarBridge is a non-commercial project. Licensor does not and will not charge
+you for the Official Binary, its features, or its appearances, and does not and
+will not sell any feature, account, qualification, or entitlement. No feature
+or appearance is conditioned on payment. These terms create no payment
+obligation.
+
+Game purchases, third-party services, and third-party marketplaces that you
+choose to use are separate from StarBridge and are governed by their own terms.
 
 3. Personal license grant
 
@@ -64,14 +67,15 @@ This is a license, not a sale or transfer of ownership. Shared, hosted,
 managed-service, institutional, or organization-wide deployment requires
 separate written permission from Licensor.
 
-4. Commercial Appearances and accounts
+4. Proprietary Appearances and accounts
 
-A Commercial Appearance may be used only through the authorized StarBridge
-account to which its valid entitlement is assigned. The entitlement is
-personal to that account. You may not share account credentials, lend or sell
-access, transfer an entitlement without Licensor's authorization, or bypass
-an entitlement or account check. Possession of an executable, preset, backup,
-or source snapshot does not create an entitlement or transfer ownership.
+Some Proprietary Appearances are available only to an authorized StarBridge
+account that holds a valid qualification. Qualifications are not sold. A
+qualification is personal to that account. You may not share account
+credentials, lend or sell access, transfer a qualification without Licensor's
+authorization, or bypass a qualification or account check. Possession of an
+executable, preset, backup, or source snapshot does not create a qualification
+or transfer ownership.
 
 5. Complete package distribution and official links
 
@@ -180,12 +184,23 @@ are included with or referenced by the Official Binary. This agreement neither
 grants rights that Licensor does not have nor reduces rights granted directly
 by a third-party license. You are responsible for complying with those terms.
 
-An Official Binary must omit third-party ship images and system maps unless
-their provenance, redistribution scope, and exact file hashes pass the bundled
-release audit. A media-free build may show placeholders instead. The historical
-StarBridge 0.4.8.2 test build used a limited unverified distribution exception;
-that exception does not apply to later releases and did not assert ownership or
-permission. All rights in third-party media remain with their respective owners.
+An Official Binary may include ship images and system maps provided by the
+maintainer whose sources and redistribution rights have not been fully verified.
+Licensor does not claim ownership of them or permission to use them, and they
+are not sublicensed to you. If a rights holder asks for them to be removed,
+Licensor will remove them. A media-free build may show placeholders instead. The
+historical StarBridge 0.4.8.2 test build used a limited unverified distribution
+exception; that exception does not apply to later releases and did not assert
+ownership or permission. All rights in third-party media remain with their
+respective owners.
+
+An Official Binary may include short looping home-screen videos recorded in
+Star Citizen. All rights in that game footage and the game content it shows
+remain with Cloud Imperium Rights LLC, Cloud Imperium Rights Ltd., and their
+related companies. Those videos are not Open Components, are not licensed under
+the Apache License, Version 2.0 or this agreement, and are not sublicensed to
+you. You may not extract or redistribute them. They are included without charge.
+If a rights holder asks for them to be removed, Licensor will remove them.
 
 13. Termination
 

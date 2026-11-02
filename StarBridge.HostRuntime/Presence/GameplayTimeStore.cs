@@ -26,6 +26,12 @@ public sealed class GameplayTimeException(string code) : Exception(code)
 /// <summary>One writer per account for the Host lifetime. No legacy import or remote IO.</summary>
 public sealed class GameplayTimeStore(string root)
 {
+    internal Func<BridgeAccountContext, BridgeAccountContext>? ResolveOwner { get; set; }
+    private BridgeAccountContext StorageOwner(BridgeAccountContext owner)
+    {
+        try { return ResolveOwner?.Invoke(owner) ?? owner; }
+        catch (Privacy.LocalPrivacyException) { throw new GameplayTimeException("gameplay.account_changed"); }
+    }
     private readonly string _directory = Path.Combine(Path.GetFullPath(root), "gameplay-time-local-v1");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -36,6 +42,8 @@ public sealed class GameplayTimeStore(string root)
 
     public Lease Open(BridgeAccountContext owner)
     {
+        var authentication = owner;
+        owner = StorageOwner(authentication);
         if (owner is null || !owner.IsComplete ||
             new[] { owner.Environment, owner.Authority, owner.Subject }.Any(v => v.Length > 2048 || v.Any(char.IsControl)))
             throw new GameplayTimeException("gameplay.account_changed");
@@ -46,14 +54,22 @@ public sealed class GameplayTimeStore(string root)
             Directory.CreateDirectory(_directory);
             var path = Path.Combine(_directory, hash + ".json");
             Check(path + ".lock", false);
-            return new Lease(path, hash, new FileStream(path + ".lock", FileMode.OpenOrCreate,
-                FileAccess.ReadWrite, FileShare.None));
+            var lease = new Lease(path, hash, new FileStream(path + ".lock", FileMode.OpenOrCreate,
+                FileAccess.ReadWrite, FileShare.None)) {
+                EnsureOwnerCurrent = () => {
+                    if (StorageOwner(authentication) != owner) throw new GameplayTimeException("gameplay.account_changed");
+                }
+            };
+            try { lease.ValidateOwner(); return lease; }
+            catch { lease.Dispose(); throw; }
         }
         catch (Exception e) when (StorageError(e)) { throw new GameplayTimeException("gameplay.storage_unavailable"); }
     }
 
     public sealed class Lease : IDisposable
     {
+        internal Action? EnsureOwnerCurrent { get; init; }
+        internal void ValidateOwner() => EnsureOwnerCurrent?.Invoke();
         private readonly string _path;
         private readonly string _hash;
         private readonly FileStream _lock;
@@ -61,6 +77,13 @@ public sealed class GameplayTimeStore(string root)
         { _path = path; _hash = hash; _lock = writeLock; }
 
         public GameplayTimeSaved Read()
+        {
+            ValidateOwner();
+            var result = ReadCore();
+            ValidateOwner();
+            return result;
+        }
+        private GameplayTimeSaved ReadCore()
         {
             try
             {
@@ -181,6 +204,7 @@ public sealed class GameplayTimeStore(string root)
             {
                 if (Read() != previous) throw new GameplayTimeException("gameplay.conflict");
                 if (!canCommit()) throw new GameplayTimeException("gameplay.account_changed");
+                ValidateOwner();
                 var next = desired with { Revision = previous.Revision + 1 };
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(new FileData(1, _hash, next, Integrity(_hash, next)), Json);
                 temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -190,6 +214,7 @@ public sealed class GameplayTimeStore(string root)
                 Check(Path.GetDirectoryName(_path)!, true);
                 Check(_path, false);
                 if (!canCommit()) throw new GameplayTimeException("gameplay.account_changed");
+                ValidateOwner();
                 if (previous.Revision == 0) File.Move(temporary, _path);
                 else File.Replace(temporary, _path, null);
                 return next;

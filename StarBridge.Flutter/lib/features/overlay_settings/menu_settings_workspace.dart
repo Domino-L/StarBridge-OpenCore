@@ -1,12 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/icons/icon_semantic.dart';
+import '../../design_system/interaction/starbridge_menu_anchor.dart';
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import 'overlay_workspace_frame.dart';
 import 'overlay_workspace_group_navigation.dart';
 import '../../platform/window/menu_display_preferences.dart';
+import '../../platform/window/menu_desktop_widgets.dart';
 import '../../platform/window/menu_toolbar_preferences.dart';
 import '../../platform/window/menu_restore_preferences.dart';
 import '../../platform/window/menu_browser_preferences.dart';
@@ -18,6 +27,7 @@ import 'menu_additional_settings_editors.dart';
 import 'menu_settings_scroll.dart';
 import 'overlay_settings_help.dart';
 import 'overlay_settings_save_bar.dart';
+import 'overlay_settings_save_bar_visibility.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'menu_settings_preview.dart';
 import 'menu_display_editor.dart';
@@ -27,6 +37,7 @@ import 'menu_browser_editor.dart';
 import 'menu_image_editor.dart';
 import 'menu_screenshot_editor.dart';
 import 'menu_social_settings_card.dart';
+import '../tools/exec_hangar_port.dart';
 
 class MenuSettingsWorkspace extends StatefulWidget {
   const MenuSettingsWorkspace({
@@ -35,25 +46,95 @@ class MenuSettingsWorkspace extends StatefulWidget {
     this.shortcuts,
     this.browserResume,
     this.screenshotDirectory,
+    this.execHangar,
   });
   final MenuSettingsDraft draft;
   final Widget? shortcuts, browserResume, screenshotDirectory;
+
+  /// Public hangar schedule for the preview countdown; null shows a sample.
+  final ExecHangarPort? Function()? execHangar;
   @override
   State<MenuSettingsWorkspace> createState() => _WorkspaceState();
 }
 
 class _WorkspaceState extends State<MenuSettingsWorkspace> {
   String section = 'display';
+  String shownSection = 'display';
+  int _selectionEpoch = 0;
+  bool _waitingForPortal = false;
   bool settingsOpen = false;
+  bool _reloading = false;
+  int _reloadEpoch = 0;
+  ValueGetter<InteractionSource> _reloadSource = () =>
+      InteractionSource.programmatic;
   final visited = <String>{'display'};
   final settingsKey = GlobalKey();
   final previewKey = GlobalKey();
 
-  void select(String value) => setState(() {
-    section = value;
-    visited.add(value);
-    settingsOpen = true;
-  });
+  Future<void> _reload(InteractionSource source) async {
+    final owner = widget.draft;
+    if (owner.dirty || owner.busy || _reloading) return;
+    final epoch = ++_reloadEpoch;
+    setState(() => _reloading = true);
+    try {
+      await runStarBridgeActivation(source, () {
+        _reloadSource = captureStarBridgeActivationSource();
+        return owner.reload();
+      });
+    } finally {
+      if (mounted && epoch == _reloadEpoch && identical(widget.draft, owner)) {
+        setState(() => _reloading = false);
+      }
+    }
+  }
+
+  Widget _waiting(String label) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        final source = resolveStarBridgeInitialReadSource(
+          context,
+          _reloadSource(),
+        );
+        return InteractionScope(
+          data: data.copyWith(
+            reduceMotion:
+                data.reduceMotion || source == InteractionSource.keyboard,
+          ),
+          child: Semantics(
+            liveRegion: true,
+            child: SuiteBusyFrame(busy: true, child: SuiteBusyLabel(label)),
+          ),
+        );
+      },
+    ),
+  );
+
+  void select(String value) {
+    final hadMenu = dismissStarBridgeMenus(context);
+    final retiring = hadMenu || _waitingForPortal;
+    final epoch = ++_selectionEpoch;
+    setState(() {
+      section = value;
+      visited.add(value);
+      settingsOpen = true;
+      if (!retiring) shownSection = value;
+    });
+    if (retiring) {
+      _waitingForPortal = true;
+      // The SDK portal removes its render/semantic subtree at a frame
+      // boundary. Keep the old anchor laid out for that removal frame, while
+      // navigation selection already reflects the latest user action.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && epoch == _selectionEpoch) {
+          setState(() {
+            _waitingForPortal = false;
+            shownSection = section;
+          });
+        }
+      });
+    }
+  }
 
   static StarBridgeIconSemantic icon(String id) => switch (id) {
     'display' => StarBridgeIconSemantic.overlay,
@@ -84,7 +165,12 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
   @override
   void didUpdateWidget(MenuSettingsWorkspace old) {
     super.didUpdateWidget(old);
-    if (old.draft != widget.draft) widget.draft.initialize();
+    if (old.draft != widget.draft) {
+      ++_reloadEpoch;
+      _reloading = false;
+      _reloadSource = () => InteractionSource.programmatic;
+      widget.draft.initialize();
+    }
   }
 
   Widget editor(String section) {
@@ -93,39 +179,48 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
     return switch (section) {
       'toolbar' => MenuToolbarEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuToolbarPreferences.parse(data['toolbar'])!,
         onChanged: (v) => change({'toolbar': v.toMap()}),
       ),
       'restore' => MenuRestoreEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuRestorePreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
       ),
       'social' => MenuSocialEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuSocialPreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
       ),
       'browser' => MenuBrowserEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuBrowserPreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
       ),
       'image' => MenuImageEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuImagePreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
       ),
       'screenshot' => MenuScreenshotEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuScreenshotPreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
       ),
       'shortcuts' => const SizedBox.shrink(),
       _ => MenuDisplayEditor(
         showTitle: false,
+        enabled: !widget.draft.busy,
         value: MenuDisplayPreferences.fromSettings(data)!,
         onChanged: (v) => change(v.toSettingsPatch()),
+        widgets: MenuDesktopWidgets.parse(data['widgets'])!,
+        onWidgetsChanged: (v) => change({'widgets': v.toMap()}),
       ),
     };
   }
@@ -150,20 +245,20 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              text(section),
+              text(shownSection),
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
           Expanded(
             child: IndexedStack(
-              index: sections.indexOf(section),
+              index: sections.indexOf(shownSection),
               children: [
                 for (final section in sections)
                   if (!visited.contains(section))
                     const SizedBox.shrink()
                   else
                     ExcludeFocus(
-                      excluding: section != this.section,
+                      excluding: section != shownSection,
                       child: MenuSettingsScroll(
                         key: ValueKey('menu-settings-scroll-$section'),
                         child: Column(
@@ -178,7 +273,7 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
                                 ),
                               ),
                             if (draft.busy && !draft.ready)
-                              const LinearProgressIndicator(),
+                              const SizedBox(height: 4),
                             if (independent(section) case final separate?) ...[
                               const Divider(height: 32),
                               OverlaySettingsHelp(text('independent')),
@@ -198,40 +293,44 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
               ],
             ),
           ),
-          if (draft.failed || !draft.ready)
+          if (draft.failed || !draft.ready || _reloading)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Divider(),
-                  Text(
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: draft.failed
-                          ? Theme.of(context).colorScheme.error
-                          : context.tokens.colors.textSecondary,
+                  if (draft.busy || _reloading)
+                    _waiting(text('loading'))
+                  else
+                    Text(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: draft.failed
+                            ? Theme.of(context).colorScheme.error
+                            : context.tokens.colors.textSecondary,
+                      ),
+                      text(
+                        draft.busy
+                            ? 'loading'
+                            : draft.failed
+                            ? (draft.conflict
+                                  ? 'conflict'
+                                  : draft.dirty
+                                  ? 'failedDirty'
+                                  : 'failed')
+                            : draft.dirty
+                            ? 'dirty'
+                            : 'saved',
+                      ),
                     ),
-                    text(
-                      draft.busy
-                          ? 'loading'
-                          : draft.failed
-                          ? (draft.conflict
-                                ? 'conflict'
-                                : draft.dirty
-                                ? 'failedDirty'
-                                : 'failed')
-                          : draft.dirty
-                          ? 'dirty'
-                          : 'saved',
-                    ),
-                  ),
                   Wrap(
                     spacing: 8,
                     children: [
-                      TextButton(
-                        key: const Key('menu-workspace-reload'),
-                        onPressed: !draft.dirty && !draft.busy
-                            ? draft.reload
+                      StarBridgeActionButton(
+                        controlKey: const Key('menu-workspace-reload'),
+                        kind: StarBridgeActionKind.quiet,
+                        onActivate: !draft.dirty && !draft.busy && !_reloading
+                            ? (source) => unawaited(_reload(source))
                             : null,
                         child: Text(text('reload')),
                       ),
@@ -256,20 +355,35 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
                 icon: icon,
                 title: text('category'),
               ),
-              selector: DropdownButtonFormField<String>(
+              selector: StarBridgeSelectFormField<String>(
                 key: ValueKey('menu-section-$section'),
+                identity: 'menu-workspace-section',
+                controlKey: const Key('menu-workspace-section-command'),
+                semanticLabel: text('category'),
                 initialValue: section,
                 isExpanded: true,
                 decoration: const InputDecoration(isDense: true),
                 items: [
                   for (final id in sections)
-                    DropdownMenuItem(value: id, child: Text(text(id))),
+                    DropdownMenuItem(
+                      value: id,
+                      child: Text(
+                        text(id),
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                      ),
+                    ),
                 ],
                 onChanged: (v) {
                   if (v != null) select(v);
                 },
               ),
-              preview: MenuSettingsPreview(key: previewKey, draft: draft),
+              preview: MenuSettingsPreview(
+                key: previewKey,
+                draft: draft,
+                execHangar: widget.execHangar,
+              ),
               settings: StarBridgeSurface(
                 key: const Key('menu-settings-right'),
                 role: SurfaceRole.panel,
@@ -282,8 +396,10 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
               toggleKey: const Key('menu-settings-expand'),
             ),
           ),
-          if (draft.dirty || draft.canRedo)
-            OverlaySettingsSaveBar(
+          OverlaySettingsSaveBarVisibility(
+            owner: draft,
+            isVisible: () => draft.dirty || draft.canRedo,
+            builder: (context) => OverlaySettingsSaveBar(
               key: const Key('menu-settings-save-bar'),
               busy: draft.busy,
               dirty: draft.dirty,
@@ -296,6 +412,7 @@ class _WorkspaceState extends State<MenuSettingsWorkspace> {
               saveKey: const Key('menu-workspace-save'),
               discardKey: const Key('menu-workspace-discard'),
             ),
+          ),
         ],
       );
     },

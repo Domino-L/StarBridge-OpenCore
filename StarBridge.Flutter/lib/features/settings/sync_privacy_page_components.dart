@@ -1,4 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
+import 'help_support_action.dart';
+import 'help_support_waiting.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -60,8 +68,8 @@ class SyncPrivacyVisibilityMap extends StatelessWidget {
                     statusKey: settings.realtimeSyncEnabled
                         ? 'settings.privacy.map.accountDefault'
                         : 'settings.privacy.map.paused',
-                    color: tokens.colors.accent,
-                    softColor: tokens.colors.accentSoft,
+                    color: tokens.colors.stateAccent,
+                    softColor: tokens.colors.stateAccentSoft,
                   ),
                   _AudienceCard(
                     width: width,
@@ -302,13 +310,17 @@ class SyncPrivacySettingRow extends StatelessWidget {
             ),
           ),
           SizedBox(width: tokens.space.md),
-          Switch(
-            key: settingKey,
+          StarBridgeSwitch(
+            controlKey: settingKey,
+            label: strings.text(titleKey),
             value: value,
             onChanged: enabled
-                ? (next) async {
-                    await onChanged(next);
-                  }
+                ? (next) => runStarBridgeActivation<void>(
+                    currentStarBridgeActivationSource,
+                    () async {
+                      await onChanged(next);
+                    },
+                  )
                 : null,
           ),
         ],
@@ -481,8 +493,13 @@ class SyncPrivacyFailureBanner extends StatelessWidget {
           SizedBox(width: tokens.space.sm),
           Expanded(child: Text(strings.text(messageKey))),
           SizedBox(width: tokens.space.sm),
-          OutlinedButton(
-            onPressed: onRetry,
+          HelpSupportAction(
+            controlKey: const Key('sync-privacy-retry'),
+            kind: StarBridgeActionKind.secondary,
+            onActivate: (source) =>
+                runStarBridgeActivation<void>(source, () async {
+                  await onRetry();
+                }),
             child: Text(strings.text('settings.privacy.retry')),
           ),
         ],
@@ -491,8 +508,65 @@ class SyncPrivacyFailureBanner extends StatelessWidget {
   }
 }
 
+/// Decoration of the owner's pending operation; never starts or finishes it.
+/// Keep the existing scroll body mounted and bounded, with feedback outside it.
+class SyncPrivacyOperationFrame extends StatelessWidget {
+  const SyncPrivacyOperationFrame({
+    required this.operation,
+    required this.source,
+    required this.phase,
+    required this.child,
+    this.failureFeedback,
+    super.key,
+  });
+  final SyncPrivacyOperation operation;
+  final InteractionSource source;
+  final int phase;
+  final Widget child;
+  final Widget? failureFeedback;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final tokens = context.tokens;
+      final feedback = operation == SyncPrivacyOperation.none
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: EdgeInsets.all(tokens.space.md),
+              child: HelpSupportWaiting(
+                key: ValueKey(('sync-privacy-operation', phase)),
+                source: source,
+                label: AppStrings.of(context).text(
+                  operation == SyncPrivacyOperation.saving
+                      ? 'privacy.local.saving'
+                      : 'settings.privacy.loading',
+                ),
+              ),
+            );
+      return Column(
+        mainAxisSize: constraints.hasBoundedHeight
+            ? MainAxisSize.max
+            : MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          feedback,
+          if (failureFeedback case final failure?)
+            Padding(padding: EdgeInsets.all(tokens.space.md), child: failure),
+          if (constraints.hasBoundedHeight) Expanded(child: child) else child,
+        ],
+      );
+    },
+  );
+}
+
 class SyncPrivacyLoadingView extends StatelessWidget {
-  const SyncPrivacyLoadingView({super.key});
+  const SyncPrivacyLoadingView({
+    this.source = InteractionSource.programmatic,
+    this.phase = 0,
+    super.key,
+  });
+  final InteractionSource source;
+  final int phase;
 
   @override
   Widget build(BuildContext context) {
@@ -500,13 +574,10 @@ class SyncPrivacyLoadingView extends StatelessWidget {
     return Center(
       child: Padding(
         padding: EdgeInsets.all(tokens.space.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            SizedBox(height: tokens.space.md),
-            Text(AppStrings.of(context).text('settings.privacy.loading')),
-          ],
+        child: HelpSupportWaiting(
+          key: ValueKey(('sync-privacy-loading', phase)),
+          source: source,
+          label: AppStrings.of(context).text('settings.privacy.loading'),
         ),
       ),
     );
@@ -564,10 +635,15 @@ class SyncPrivacyStateView extends StatelessWidget {
                 ),
                 if (actionKey != null && onAction != null) ...[
                   SizedBox(height: tokens.space.lg),
-                  OutlinedButton.icon(
-                    onPressed: onAction,
-                    icon: const StarBridgeIcon(StarBridgeIconSemantic.refresh),
-                    label: Text(strings.text(actionKey!)),
+                  HelpSupportAction(
+                    controlKey: const Key('sync-privacy-state-action'),
+                    kind: StarBridgeActionKind.secondary,
+                    onActivate: (source) =>
+                        runStarBridgeActivation<void>(source, () async {
+                          await onAction!();
+                        }),
+                    icon: StarBridgeIconSemantic.refresh,
+                    child: Text(strings.text(actionKey!)),
                   ),
                 ],
               ],
@@ -584,8 +660,8 @@ Future<bool> confirmRealtimePause(
   required bool hasActiveCollaboration,
 }) async {
   final strings = AppStrings.of(context);
-  return await showDialog<bool>(
-        context: context,
+  return await showStarBridgeDialog<bool>(
+        context,
         builder: (dialogContext) => AlertDialog(
           title: Text(strings.text('settings.privacy.pauseDialog.title')),
           content: Text(
@@ -596,12 +672,23 @@ Future<bool> confirmRealtimePause(
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+            HelpSupportAction(
+              controlKey: const Key('sync-privacy-pause-cancel'),
+              onActivate: (source) => dismissStarBridgeDialog<bool>(
+                dialogContext,
+                source: source,
+                result: false,
+              ),
               child: Text(strings.text('settings.privacy.pauseDialog.cancel')),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+            HelpSupportAction(
+              controlKey: const Key('sync-privacy-pause-confirm'),
+              kind: StarBridgeActionKind.primary,
+              onActivate: (source) => dismissStarBridgeDialog<bool>(
+                dialogContext,
+                source: source,
+                result: true,
+              ),
               child: Text(strings.text('settings.privacy.pauseDialog.confirm')),
             ),
           ],

@@ -54,7 +54,8 @@ foreach ($rightsBasisType in @(
     "redistribution-license",
     "written-permission",
     "official-policy",
-    "public-domain"
+    "public-domain",
+    "maintainer-recording-no-written-license"
 )) {
     $controlledRightsBasisTypes.Add($rightsBasisType) | Out-Null
 }
@@ -66,7 +67,8 @@ foreach ($rightsBasisType in @(
     "redistribution-license",
     "written-permission",
     "official-policy",
-    "public-domain"
+    "public-domain",
+    "maintainer-recording-no-written-license"
 )) {
     $redistributableRightsBasisTypes.Add($rightsBasisType) | Out-Null
 }

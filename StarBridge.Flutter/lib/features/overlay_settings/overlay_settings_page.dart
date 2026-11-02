@@ -713,6 +713,7 @@ class _FailureBanner extends StatelessWidget {
       OverlaySettingsFailure.writeConflict => 'writeConflict',
       OverlaySettingsFailure.invalidValue => 'invalidValue',
       OverlaySettingsFailure.invalidResponse => 'invalidResponse',
+      OverlaySettingsFailure.versionUnsupported => 'versionUnsupported',
     };
     return Container(
       padding: EdgeInsets.all(tokens.space.md),

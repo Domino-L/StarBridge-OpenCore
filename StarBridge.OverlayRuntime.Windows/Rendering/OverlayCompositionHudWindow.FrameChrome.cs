@@ -15,8 +15,8 @@ internal sealed partial class OverlayCompositionHudWindow
 {
     private void DrawCrosshair(ID2D1RenderTarget target, OverlayCompositionFrameState state)
     {
-        if (!state.ShowCrosshair ||
-            (_lagrangeGlowMaskOnly && state.LagrangeWeaveStyle))
+        if (!state.ShowCrosshair
+            )
         {
             return;
         }
@@ -130,12 +130,6 @@ internal sealed partial class OverlayCompositionHudWindow
         var y = (float)rect.Y;
         var w = (float)rect.Width;
         var h = (float)rect.Height;
-
-        if (state.LagrangeWeaveStyle)
-        {
-            DrawLagrangePanelFrame(target, rect, state, backgroundOpacity, decorationOpacity, moduleKey);
-            return;
-        }
 
 
         var envelope = state.Opacity;

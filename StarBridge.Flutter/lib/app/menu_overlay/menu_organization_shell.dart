@@ -1,9 +1,12 @@
+import 'menu_overlay_text.dart';
+
 import 'dart:async';
 
 import '../../features/communities/communities_module.dart';
 import '../../features/communities/community_workspace_port.dart';
 import 'menu_organization_presentation.dart';
 import 'menu_feature_session.dart';
+import 'menu_organization_images.dart';
 import '../../features/communities/community_overview_reader.dart';
 
 bool sameMenuOrganization(CommunityCard a, CommunityCard b) =>
@@ -102,12 +105,8 @@ final class MenuOrganizationShell {
         'activeTime': workspace.activeTime,
         if (workspace.query.isEmpty && workspace.offset == 0)
           'overview': {
-            'online': workspace.members.where((m) => m.online).length,
-            'gaming': workspace.members
-                .where(
-                  (m) => m.online && m.liveStatus.toLowerCase() == 'ingame',
-                )
-                .length,
+            'online': workspace.members.where((m) => m.publicOnline).length,
+            'gaming': workspace.members.where((m) => m.publicInGame).length,
             'total': workspace.totalCount,
             'scoped': workspace.members.length != workspace.totalCount,
           },
@@ -145,7 +144,7 @@ final class MenuOrganizationShell {
       }
       if (source is CommunityWorkspacePort && session != null) {
         unawaited(
-          _readOverview(source, () => session.currentView, (next) {
+          _readOverview(source, () => session.templateView, (next) {
             if (session.visible && !session.disposed) session.emit(next);
           }),
         );
@@ -282,7 +281,7 @@ final class MenuOrganizationShell {
       'busy': false,
       'refreshing': false,
       'retainedRead': true,
-      'notice': '暂时无法连接，请刷新重试。',
+      'notice': MenuOverlayText('menu.overlay.errors.connectRetry'),
       'organization': {
         ...frame['organization'] as Map,
         'bodyLoading': false,
@@ -302,6 +301,13 @@ final class MenuOrganizationShell {
     _overviewPending = false;
     _overviewRequest++;
     _cards = const [];
+    sectionTransition = reusingDirectory = false;
+  }
+
+  void retireImages() {
+    if (_view != null) _view = MenuOrganizationImages.strip(_view!);
+    _sections.updateAll((_, view) => MenuOrganizationImages.strip(view));
+    _cards = [for (final card in _cards) card.withoutDownloadedLogo()];
     sectionTransition = reusingDirectory = false;
   }
 }

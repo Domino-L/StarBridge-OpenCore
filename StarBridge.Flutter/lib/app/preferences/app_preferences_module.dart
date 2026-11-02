@@ -98,9 +98,17 @@ final class AppPreferencesModule implements AppPreferencesPort {
       _apply(AppPreferencesPatch.motion(preference));
 
   @override
+  Future<bool> setInteractionStyle(InteractionStyle style) =>
+      _apply(AppPreferencesPatch.interaction(style));
+
+  @override
   Future<bool> setApplicationBehavior(
     ApplicationBehaviorPreferences behavior,
   ) => _apply(AppPreferencesPatch.applicationBehavior(behavior.normalize()));
+
+  @override
+  Future<bool> setHolidayAppearance(bool enabled) =>
+      _apply(AppPreferencesPatch.holidayAppearance(enabled));
 
   void updateAccountLocale(Locale? locale) {
     if (_disposed) {
@@ -285,7 +293,9 @@ final class AppPreferencesModule implements AppPreferencesPort {
     appearanceMode: values.appearanceMode,
     designStyleId: AppPreferences.defaults.designStyleId,
     motionPreference: values.motionPreference,
+    interactionStyle: values.interactionStyle,
     applicationBehavior: values.applicationBehavior,
+    holidayAppearance: values.holidayAppearance,
   );
 
   static Locale resolveLocale({

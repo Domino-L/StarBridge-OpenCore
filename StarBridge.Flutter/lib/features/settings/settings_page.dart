@@ -1,5 +1,12 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_activation_origin.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/interaction/starbridge_select_form_field.dart';
 import '../../app/localization/app_strings.dart';
 import '../../app/feature_registry.dart';
 import '../../design_system/icons/starbridge_icon.dart';
@@ -40,6 +47,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late SettingsSection _selected;
   bool _selecting = false;
+  InteractionSource _selectionSource = InteractionSource.programmatic;
+  bool _openingResolved = false;
   final _pickerKey = GlobalKey<FormFieldState<SettingsSection>>();
 
   Future<void> _select(SettingsSection section) async {
@@ -57,7 +66,12 @@ class _SettingsPageState extends State<SettingsPage> {
           !await widget.confirmPrivacyLeave!(context)) {
         return;
       }
-      if (mounted) setState(() => _selected = section);
+      if (mounted) {
+        setState(() {
+          _selectionSource = currentStarBridgeActivationSource;
+          _selected = section;
+        });
+      }
     } finally {
       _selecting = false;
       if (mounted) _pickerKey.currentState?.didChange(_selected);
@@ -69,6 +83,24 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _selected = widget.initialSection;
   }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_openingResolved) {
+      _openingResolved = true;
+      _selectionSource = resolveStarBridgeInitialReadSource(
+        context,
+        InteractionSource.programmatic,
+      );
+    }
+  }
+
+  Widget _viewport() => starBridgeInitialReadViewport(
+    context,
+    source: _selectionSource,
+    child: _content(),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +119,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 child: KeyedSubtree(
                   key: const Key('settings-section-picker'),
-                  child: DropdownButtonFormField<SettingsSection>(
+                  child: StarBridgeSelectFormField<SettingsSection>(
+                    identity: 'settings-section',
+                    controlKey: const Key('settings-section-control'),
                     key: _pickerKey,
                     initialValue: _selected,
                     isExpanded: true,
@@ -113,7 +147,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
-              Expanded(child: _content()),
+              Expanded(child: _viewport()),
             ],
           );
         }
@@ -125,11 +159,14 @@ class _SettingsPageState extends State<SettingsPage> {
               child: _SettingsRail(
                 selected: _selected,
                 compact: constraints.maxWidth < 960,
-                onSelect: _select,
+                changeSource: _selectionSource,
+                onSelect: (section, source) => unawaited(
+                  runStarBridgeActivation<void>(source, () => _select(section)),
+                ),
               ),
             ),
             VerticalDivider(width: tokens.stroke.hairline),
-            Expanded(child: _content()),
+            Expanded(child: _viewport()),
           ],
         );
       },
@@ -166,11 +203,31 @@ class _SettingsRail extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.compact,
+    required this.changeSource,
   });
 
   final SettingsSection selected;
   final bool compact;
-  final ValueChanged<SettingsSection> onSelect;
+  final void Function(SettingsSection, InteractionSource) onSelect;
+  final InteractionSource changeSource;
+
+  void _activate(
+    SettingsSection section,
+    InteractionSource source,
+    SideNavLayout layout,
+  ) {
+    if (source == InteractionSource.keyboard) layout.finishMotion();
+    onSelect(section, source);
+  }
+
+  void _step(SettingsSection current, int delta, SideNavLayout layout) {
+    final index = visibleSettingsSections.indexOf(current);
+    final target = (index + delta).clamp(0, visibleSettingsSections.length - 1);
+    if (index < 0 || index == target) return;
+    final section = visibleSettingsSections[target];
+    layout.focus(section.name);
+    _activate(section, InteractionSource.keyboard, layout);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -178,30 +235,52 @@ class _SettingsRail extends StatelessWidget {
     final tokens = context.tokens;
     return ColoredBox(
       color: tokens.surfaces.navigation.fill,
-      child: ListView(
-        padding: EdgeInsets.all(tokens.space.md),
-        children: [
-          Padding(
-            padding: EdgeInsetsDirectional.only(
-              start: tokens.space.sm,
-              bottom: tokens.space.sm,
-            ),
-            child: Text(
-              strings.text('settings.sections.title'),
-              style: Theme.of(context).textTheme.labelMedium,
+      child: StarBridgeInteractionRegion(
+        child: Builder(
+          builder: (context) => SuiteSideNav.tracked(
+            homeId: '__settings_no_home__',
+            primaryIds: [
+              for (final section in visibleSettingsSections) section.name,
+            ],
+            personalIds: const [],
+            selectedId: selected.name,
+            changeSource: changeSource,
+            layoutBuilder: (context, layout) => ListView(
+              key: layout.viewportKey,
+              controller: layout.scrollController,
+              padding: EdgeInsets.all(tokens.space.md),
+              children: [
+                Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: tokens.space.sm,
+                    bottom: tokens.space.sm,
+                  ),
+                  child: Text(
+                    strings.text('settings.sections.title'),
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+                for (final section in visibleSettingsSections)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: tokens.space.xs),
+                    child: layout.anchor(
+                      section.name,
+                      _SettingsRailItem(
+                        section: section,
+                        selected: selected == section,
+                        compact: compact,
+                        focusNode: layout.focusNode(section.name),
+                        onActivate: (source) =>
+                            _activate(section, source, layout),
+                        onPrevious: () => _step(section, -1, layout),
+                        onNext: () => _step(section, 1, layout),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          for (final section in visibleSettingsSections)
-            Padding(
-              padding: EdgeInsets.only(bottom: tokens.space.xs),
-              child: _SettingsRailItem(
-                section: section,
-                selected: selected == section,
-                compact: compact,
-                onPressed: () => onSelect(section),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
@@ -212,70 +291,90 @@ class _SettingsRailItem extends StatelessWidget {
     required this.section,
     required this.selected,
     required this.compact,
-    required this.onPressed,
+    required this.onActivate,
+    required this.focusNode,
+    required this.onPrevious,
+    required this.onNext,
   });
 
   final SettingsSection section;
   final bool selected;
   final bool compact;
-  final VoidCallback onPressed;
+  final ValueChanged<InteractionSource> onActivate;
+  final FocusNode focusNode;
+  final VoidCallback onPrevious, onNext;
 
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Material(
-      color: selected
-          ? tokens.surfaces.selected.fill
-          : tokens.surfaces.navigation.fill,
-      borderRadius: tokens.shape.small,
-      child: InkWell(
-        key: Key('settings-section-${section.name}'),
-        onTap: onPressed,
+    final native =
+        InteractionScope.of(context).suite == InteractionSuite.standard;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowUp): onPrevious,
+        const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
+      },
+      child: Material(
+        color: selected && native
+            ? tokens.surfaces.selected.fill
+            : native
+            ? tokens.surfaces.navigation.fill
+            : Colors.transparent,
         borderRadius: tokens.shape.small,
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: tokens.space.sm,
-            vertical: tokens.space.sm,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              StarBridgeIcon(
-                section.icon,
-                size: tokens.icons.medium,
-                color: selected
-                    ? tokens.colors.accent
-                    : tokens.colors.textSecondary,
-              ),
-              SizedBox(width: tokens.space.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      strings.text(section.labelKey),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: selected
-                            ? tokens.colors.accent
-                            : tokens.colors.textPrimary,
-                      ),
-                    ),
-                    if (!compact) ...[
-                      SizedBox(height: tokens.space.xxs),
+        child: SuitePressable(
+          key: Key('settings-section-${section.name}'),
+          kind: PressableKind.navItem,
+          baseRadius: tokens.shape.radiusSmall,
+          focusNode: focusNode,
+          semanticLabel: strings.text(section.labelKey),
+          excludeChildSemantics: true,
+          semanticSelected: selected,
+          onActivate: onActivate,
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: tokens.space.sm,
+              vertical: tokens.space.sm,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StarBridgeIcon(
+                  section.icon,
+                  size: tokens.icons.medium,
+                  color: selected
+                      ? tokens.colors.accent
+                      : tokens.colors.textSecondary,
+                ),
+                SizedBox(width: tokens.space.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        strings.text(section.descriptionKey),
+                        strings.text(section.labelKey),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: selected
+                              ? tokens.colors.accent
+                              : tokens.colors.textPrimary,
+                        ),
                       ),
+                      if (!compact) ...[
+                        SizedBox(height: tokens.space.xxs),
+                        Text(
+                          strings.text(section.descriptionKey),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -1,7 +1,11 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_icon_action.dart';
+import '../../design_system/controls/semantic_action_style.dart';
 import 'communities_module.dart';
 import 'community_directory_card.dart';
 import 'community_gameplay_tags.dart';
@@ -45,7 +49,6 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
   Widget build(BuildContext context) {
     final row = widget.row;
     final t = widget.text;
-    final colors = context.tokens.colors;
     final type = Theme.of(context).textTheme;
     final member =
         row != null && const {'owner', 'member'}.contains(row.relationship);
@@ -67,9 +70,10 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
                     Expanded(
                       child: Text(t('details.title'), style: type.titleMedium),
                     ),
-                    IconButton(
-                      tooltip: t('card.close'),
-                      onPressed: widget.onClose,
+                    StarBridgeIconAction(
+                      controlKey: const Key('community-details-close-icon'),
+                      label: t('card.close'),
+                      onActivate: (_) => widget.onClose(),
                       icon: const StandardIcon(StandardIconSemantic.close),
                     ),
                   ],
@@ -106,43 +110,51 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        TextButton(
-                          onPressed: widget.onClose,
+                        StarBridgeActionButton(
+                          kind: StarBridgeActionKind.quiet,
+                          controlKey: const Key('community-details-close'),
+                          onActivate: (_) => widget.onClose(),
                           child: Text(t('card.close')),
                         ),
                         if (row != null)
                           for (final action in row.actions)
                             if (action == 'join' || action == 'apply')
-                              FilledButton(
-                                key: ValueKey(
-                                  'community-details-action-$action',
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minWidth: 126,
+                                  minHeight: 44,
                                 ),
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(126, 44),
+                                child: StarBridgeActionButton(
+                                  kind: StarBridgeActionKind.primary,
+                                  controlKey: ValueKey(
+                                    'community-details-action-$action',
+                                  ),
+                                  onActivate: widget.onAction == null
+                                      ? null
+                                      : (_) => widget.onAction!(action),
+                                  child: Text(t('action.$action')),
                                 ),
-                                onPressed: widget.onAction == null
-                                    ? null
-                                    : () => widget.onAction!(action),
-                                child: Text(t('action.$action')),
                               )
                             else
-                              OutlinedButton(
-                                key: ValueKey(
+                              StarBridgeActionButton(
+                                controlKey: ValueKey(
                                   'community-details-action-$action',
                                 ),
-                                style: action == 'leave'
-                                    ? OutlinedButton.styleFrom(
-                                        foregroundColor: colors.warning,
-                                      )
+                                tone: action == 'leave'
+                                    ? ActionTone.warning
                                     : null,
-                                onPressed: widget.onAction == null
+                                onActivate: widget.onAction == null
                                     ? null
-                                    : () => widget.onAction!(action),
+                                    : (_) => widget.onAction!(action),
                                 child: Text(t('action.$action')),
                               ),
                         if (member)
-                          FilledButton(
-                            onPressed: widget.onEnter,
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.primary,
+                            controlKey: const Key('community-details-enter'),
+                            onActivate: widget.onEnter == null
+                                ? null
+                                : (_) => widget.onEnter!(),
                             child: Text(t('card.enter')),
                           ),
                       ],
@@ -212,7 +224,12 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CommunityLogo(data: row.logo, size: 60, framed: false),
+            CommunityLogo(
+              data: row.logo,
+              size: 60,
+              framed: false,
+              downloadedBy: row,
+            ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -229,7 +246,14 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
                     spacing: 16,
                     runSpacing: 6,
                     children: [
-                      Text(t('relation.${row.relationship}'), style: secondary),
+                      Text(
+                        t(
+                          row.displayOnly
+                              ? 'cachedMembershipUnknown'
+                              : 'relation.${row.relationship}',
+                        ),
+                        style: secondary,
+                      ),
                       if (scale.isNotEmpty)
                         Text(
                           scale,
@@ -248,7 +272,10 @@ class _CommunityDirectoryDetailsState extends State<CommunityDirectoryDetails> {
         LayoutBuilder(
           builder: (context, constraints) {
             final fields = [
-              field(t('filter.join'), t('mode.${row.joinMode}')),
+              field(
+                t('filter.join'),
+                t(row.displayOnly ? 'cachedReadOnly' : 'mode.${row.joinMode}'),
+              ),
               field(
                 t('language'),
                 row.language.isEmpty

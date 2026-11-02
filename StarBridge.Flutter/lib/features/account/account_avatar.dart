@@ -15,6 +15,9 @@ final class AccountAvatarPort implements CommunityLogoPort {
       session.hostCapabilities.contains('account.avatar') &&
       session.hostCapabilities.contains('account.avatarImages');
 
+  bool get canEditScm =>
+      canPickLogo && session.hostCapabilities.contains('account.scmAvatar');
+
   void _current() {
     if (_owner == null || _generation != session.activeGeneration) {
       throw const FormatException('Account changed');
@@ -46,7 +49,8 @@ final class AccountAvatarPort implements CommunityLogoPort {
       'account.getCurrent',
       payload: const {'schemaVersion': 1},
     );
-    if (account.payload['state'] != 'legacySignedIn' ||
+    final state = account.payload['state'];
+    if (!(state == 'legacySignedIn' || (state == 'signedIn' && canEditScm)) ||
         account.accountContext == null ||
         account.sessionGeneration != session.activeGeneration) {
       throw const FormatException();

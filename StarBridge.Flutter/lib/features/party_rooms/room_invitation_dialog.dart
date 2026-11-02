@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
 
 import 'party_rooms_module.dart';
 import 'room_action_dialogs.dart';
@@ -15,8 +18,10 @@ Future<void> showRoomInvitations(
   PartyRoomsModule module, {
   bool host = false,
   String? invitationId,
-}) => showDialog<void>(
-  context: context,
+  InteractionSource? source,
+}) => showStarBridgeDialog<void>(
+  context,
+  source: source,
   useRootNavigator: false,
   barrierDismissible: false,
   builder: (_) =>
@@ -107,8 +112,9 @@ class _InvitationDialogState extends State<_InvitationDialog> {
 
   Future<void> _action(
     RoomOperation operation,
-    Map<String, Object?> data,
-  ) async {
+    Map<String, Object?> data, {
+    InteractionSource source = InteractionSource.pointer,
+  }) async {
     if (!_valid) return;
     final result = await widget.module.execute(
       RoomCommand(operation, data),
@@ -117,26 +123,34 @@ class _InvitationDialogState extends State<_InvitationDialog> {
     if (!mounted) return;
     setState(() => _error = result.error);
     if (result.accepted && operation == RoomOperation.inviteJoin) {
-      Navigator.pop(context);
+      dismissStarBridgeDialog(context, source: source);
     } else if (result.accepted && widget.host && _valid) {
       await _load();
     }
   }
 
-  Future<void> _accept(RoomInvitation item) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
+  Future<void> _accept(RoomInvitation item, InteractionSource source) async {
+    var confirmationSource = source;
+    final confirmed = await showStarBridgeDialog<bool>(
+      context,
+      source: source,
       useRootNavigator: false,
       builder: (context) => AlertDialog(
         title: Text(item.title),
         content: Text(roomActionText(context, 'acceptInvitation')),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.quiet,
+            onActivate: (source) =>
+                dismissStarBridgeDialog(context, source: source, result: false),
             child: Text(roomActionText(context, 'cancel')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+          StarBridgeActionButton(
+            kind: StarBridgeActionKind.primary,
+            onActivate: (source) {
+              confirmationSource = source;
+              dismissStarBridgeDialog(context, source: source, result: true);
+            },
             child: Text(roomActionText(context, 'join')),
           ),
         ],
@@ -146,7 +160,7 @@ class _InvitationDialogState extends State<_InvitationDialog> {
       await _action(RoomOperation.inviteJoin, {
         'roomId': item.roomId,
         'invitationId': item.id,
-      });
+      }, source: confirmationSource);
     }
   }
 
@@ -189,12 +203,13 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(target.name),
-                        trailing: TextButton(
-                          onPressed: module.canInvite && !target.alreadyInvited
-                              ? () => _action(RoomOperation.invite, {
+                        trailing: StarBridgeActionButton(
+                          kind: StarBridgeActionKind.quiet,
+                          onActivate: module.canInvite && !target.alreadyInvited
+                              ? (source) => _action(RoomOperation.invite, {
                                   'roomId': _roomId,
                                   'targetRef': target.reference,
-                                })
+                                }, source: source)
                               : null,
                           child: Text(
                             t(
@@ -239,15 +254,11 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                             ),
                           if (!item.expiresAt.isAfter(DateTime.now()))
                             Text(roomInvitationText(context, 'expired')),
-                          TextButton(
-                            style: widget.host
-                                ? semanticActionStyle(
-                                    context,
-                                    ActionTone.warning,
-                                  )
-                                : null,
-                            onPressed: module.canCommand
-                                ? () => _action(
+                          StarBridgeActionButton(
+                            kind: StarBridgeActionKind.quiet,
+                            tone: widget.host ? ActionTone.warning : null,
+                            onActivate: module.canCommand
+                                ? (source) => _action(
                                     widget.host
                                         ? RoomOperation.inviteRevoke
                                         : RoomOperation.inviteDecline,
@@ -255,17 +266,19 @@ class _InvitationDialogState extends State<_InvitationDialog> {
                                       'roomId': item.roomId,
                                       'invitationId': item.id,
                                     },
+                                    source: source,
                                   )
                                 : null,
                             child: Text(t(widget.host ? 'revoke' : 'decline')),
                           ),
                           if (!widget.host)
-                            FilledButton(
-                              onPressed:
+                            StarBridgeActionButton(
+                              kind: StarBridgeActionKind.primary,
+                              onActivate:
                                   module.canCommand &&
                                       item.expiresAt.isAfter(DateTime.now()) &&
                                       module.directory?.currentRoomId == null
-                                  ? () => _accept(item)
+                                  ? (source) => _accept(item, source)
                                   : null,
                               child: Text(t('join')),
                             ),
@@ -279,14 +292,17 @@ class _InvitationDialogState extends State<_InvitationDialog> {
           ),
           actions: [
             if (widget.host)
-              TextButton(
-                onPressed: module.busy || !_valid ? null : _load,
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate: module.busy || !_valid ? null : (_) => _load(),
                 child: Text(t('refreshList')),
               ),
-            TextButton(
-              onPressed: module.busy || _loading
+            StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              onActivate: module.busy || _loading
                   ? null
-                  : () => Navigator.pop(context),
+                  : (source) =>
+                        dismissStarBridgeDialog(context, source: source),
               child: Text(t('done')),
             ),
           ],

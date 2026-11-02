@@ -56,7 +56,9 @@ class _EmbeddedAvatarState extends State<EmbeddedAvatar> {
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
-      gaplessPlayback: false,
+      // The last frame stays while a re-resolved provider decodes, so a
+      // refreshed list never flashes the fallback (2026-10-29).
+      gaplessPlayback: true,
       frameBuilder: (_, child, frame, synchronous) =>
           synchronous || frame != null ? child : widget.fallback,
       errorBuilder: (_, _, _) => widget.fallback,

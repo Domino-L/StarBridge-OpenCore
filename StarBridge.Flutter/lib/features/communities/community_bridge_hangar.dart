@@ -14,6 +14,8 @@ mixin CommunityBridgeHangar on CommunityBridgeTransport
         CommunityHangarSharingPort,
         CommunityShipImagePort,
         CommunityShipReportPort {
+  CommunityShipsPage parseShipPage(Map<String, Object?> payload) =>
+      CommunityShipsPage.parse(payload);
   @override
   bool get shipsAvailable =>
       !isClosed && session.hostCapabilities.contains('communities.ships');
@@ -96,6 +98,18 @@ mixin CommunityBridgeHangar on CommunityBridgeTransport
     int offset = 0,
     String? revision,
     CommunityShipQuery? query,
+  }) async => (await readShipProjection(
+    targetRef,
+    offset: offset,
+    revision: revision,
+    query: query,
+  )).$1;
+
+  Future<(CommunityShipsPage, Map<String, Object?>)> readShipProjection(
+    String targetRef, {
+    int offset = 0,
+    String? revision,
+    CommunityShipQuery? query,
   }) => workspaceRead(() async {
     if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(targetRef) ||
         offset < 0 ||
@@ -105,21 +119,20 @@ mixin CommunityBridgeHangar on CommunityBridgeTransport
         revision != null && !RegExp(r'^[a-f0-9]{64}$').hasMatch(revision)) {
       throw const FormatException();
     }
-    final page = CommunityShipsPage.parse(
-      await sendRequest('communities.ships', {
-        'targetRef': targetRef,
-        'offset': offset,
-        'revision': revision,
-        if (query != null) 'query': query.toPayload(),
-      }),
-    );
+    final payload = await sendRequest('communities.ships', {
+      'targetRef': targetRef,
+      'offset': offset,
+      'revision': revision,
+      if (query != null) 'query': query.toPayload(),
+    });
+    final page = parseShipPage(payload);
     if (page.targetRef != targetRef ||
         page.offset != offset ||
         revision != null && page.revision != revision ||
         page.query != query) {
       throw const FormatException();
     }
-    return page;
+    return (page, payload);
   });
   @override
   bool get hangarSharingAvailable =>
@@ -137,8 +150,9 @@ mixin CommunityBridgeHangar on CommunityBridgeTransport
   @override
   Future<CommunityHangarSharingOutcome> saveHangarSharing(
     String editRef,
-    List<String> selectedRefs,
-  ) async {
+    List<String> selectedRefs, {
+    bool includeImages = false,
+  }) async {
     final selected = List<String>.of(selectedRefs);
     if (!CommunityHangarSharing.validReference(editRef) ||
         selected.length > CommunityHangarSharing.maximumTargets ||
@@ -160,7 +174,8 @@ mixin CommunityBridgeHangar on CommunityBridgeTransport
         await sendRequest('communities.saveHangarSharing', {
           'editRef': editRef,
           'selectedRefs': selected,
-          'inventoryMode': 'auto',
+          'inventoryMode': includeImages ? 'local' : 'auto',
+          if (includeImages && selected.isNotEmpty) 'includeImages': true,
         }),
       );
     } on BridgeClientException catch (e) {

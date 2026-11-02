@@ -56,8 +56,10 @@ internal static partial class LegacyPasswordLoginTests
                 initialSession: new ScmOAuthSession("scm", "subject", "Synthetic", "token", DateTimeOffset.UtcNow.AddHours(1), [],
                     GameIdentityVerified: true, GameIdentityHandle: "Scm-Pilot"),
                 recentGameIdentity: () => "Pilot-New");
-            Check(scm.ReadCurrentGameIdentityPolicy(scm.CurrentContext!).DetectedHandle is null,
-                "compatibility change does not extend historical identity to SCM sessions");
+            var scmPolicy = scm.ReadCurrentGameIdentityPolicy(scm.CurrentContext!);
+            Check(scmPolicy.DetectedHandle == "Pilot-New" && scmPolicy.State == "mismatch" &&
+                !scmPolicy.SensitiveWritesAllowed && scmPolicy.AuthoritativeHandle == "Scm-Pilot",
+                "recent log mismatch cross-checks SCM without replacing its authoritative Handle");
         } finally { Directory.Delete(root, true); }
     }
 }

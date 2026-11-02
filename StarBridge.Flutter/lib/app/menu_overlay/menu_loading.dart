@@ -1,28 +1,56 @@
+import 'menu_overlay_locale.dart';
+
 import 'package:flutter/material.dart';
 
-import '../../design_system/tokens/starbridge_tokens.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../platform/window/menu_read_feedback.dart';
 
 /// Functional feedback only. Reduced motion keeps a static progress track and
 /// the accompanying status text; cached content remains fully interactive.
 class MenuLoading extends StatelessWidget {
-  const MenuLoading({super.key});
+  const MenuLoading({super.key, this.feedback, this.label});
+  final MenuReadFeedback? feedback;
+  final String? label;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: RepaintBoundary(
-      child: LinearProgressIndicator(
-        minHeight: 2,
-        value:
-            MediaQuery.disableAnimationsOf(context) ||
-                Theme.of(context)
-                        .extension<StarBridgeTokens>()
-                        ?.motion
-                        .surfaceEnter ==
-                    Duration.zero
-            ? .5
-            : null,
-        semanticsLabel: '正在读取',
-      ),
+  Widget build(BuildContext context) => StarBridgeInteractionRegion(
+    child: Builder(
+      builder: (context) {
+        final data = InteractionScope.of(context);
+        final motion =
+            !data.reduceMotion && feedback?.origin == MenuReadOrigin.pointer;
+        return InteractionScope(
+          data: data.copyWith(reduceMotion: !motion),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: RepaintBoundary(
+              child: Semantics(
+                label:
+                    label ?? menuText(context, 'menu.overlay.window.reading'),
+                child: ExcludeSemantics(
+                  // Keep the existing slim footprint, not a blocking panel veil or a
+                  // fabricated percentage. Approved rail/scan frame carries the motion;
+                  // standard/glow retain the existing indeterminate track treatment.
+                  child: SuiteBusyFrame(
+                    busy: true,
+                    radius: 0,
+                    child: LinearProgressIndicator(
+                      minHeight: 2,
+                      value:
+                          motion &&
+                              (data.suite == InteractionSuite.standard ||
+                                  data.suite == InteractionSuite.glow)
+                          ? null
+                          : .5,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     ),
   );
 }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/controls/semantic_action_style.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import 'party_rooms_module.dart';
 import 'room_commands.dart';
 import 'room_action_dialogs.dart';
@@ -27,16 +30,18 @@ String roomRemovalText(BuildContext context, String key) {
 Future<void> removeRoomMember(
   BuildContext context,
   PartyRoomsModule module,
-  RoomMember member,
-) async {
+  RoomMember member, {
+  InteractionSource? source,
+}) async {
   final room = module.selectedRoom;
   final revision = module.contextRevision;
   final token = member.removalToken;
   if (!module.canManage || room == null || !canRemoveRoomMember(room, member)) {
     return;
   }
-  final accepted = await showDialog<bool>(
-    context: context,
+  final accepted = await showStarBridgeDialog<bool>(
+    context,
+    source: source,
     useRootNavigator: false,
     builder: (context) => AlertDialog(
       title: Text(roomRemovalText(context, 'remove')),
@@ -44,17 +49,17 @@ Future<void> removeRoomMember(
         '${member.displayName}\n\n${roomRemovalText(context, 'hint')}',
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.quiet,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: false),
           child: Text(roomActionText(context, 'cancel')),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          style: semanticActionStyle(
-            context,
-            ActionTone.danger,
-            emphasis: ActionEmphasis.filled,
-          ),
+        StarBridgeActionButton(
+          kind: StarBridgeActionKind.primary,
+          tone: ActionTone.danger,
+          onActivate: (source) =>
+              dismissStarBridgeDialog(context, source: source, result: true),
           child: Text(roomRemovalText(context, 'remove')),
         ),
       ],

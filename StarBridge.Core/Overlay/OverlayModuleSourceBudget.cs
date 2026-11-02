@@ -30,6 +30,11 @@ public sealed class OverlayModuleSourceBudget
         lock (_gate) return _scope?.Owner == owner && _scope.Generation == generation &&
             _blocked?.Any(key => key.StartsWith("Community:", StringComparison.Ordinal)) == true;
     }
+    public bool RequiresFleetConfirmation(string owner, long generation)
+    {
+        lock (_gate) return _scope?.Owner == owner && _scope.Generation == generation &&
+            _blocked?.Contains("Fleet:fleet") == true;
+    }
     public bool TryResolve(OverlayPresetSources preset, OverlaySourceResolutionContext context, long evidenceVersion,
         OverlaySourceBinding? temporaryChoice = null, IReadOnlyCollection<OverlaySourceModule>? activeModules = null)
     {
@@ -76,7 +81,7 @@ public sealed class OverlayModuleSourceBudget
         OverlaySourceBinding? temporary, IReadOnlyCollection<OverlaySourceModule>? modules) =>
         new(context.OwnerKey, context.Generation,
             OverlayPresetSourcesCodec.Serialize(new(preset.Binding, modules: preset.Modules, chatSources: preset.ChatSources)), context.AccountChoice,
-            temporary, context.FocusedCommunityCode,
+            temporary, context.FocusedFleet ? "fleet:" : context.FocusedCommunityCode,
             string.Join(",", (modules ?? Enum.GetValues<OverlaySourceModule>()).Distinct().Order()));
 
     private static bool SameIntent(Scope left, Scope right) =>
@@ -113,6 +118,9 @@ public sealed class OverlayModuleSourceBudget
 
     public void RevokeCommunity(string owner, long generation, string code) =>
         RemoveConfirmed(owner, generation, key => key == "Community:" + code);
+
+    public void ConfirmFleet(string owner, long generation, bool member) =>
+        RemoveConfirmed(owner, generation, key => key == "Fleet:fleet" && !member);
 
     private void RemoveConfirmed(string owner, long generation, Predicate<string> removed)
     {

@@ -5,7 +5,10 @@ public sealed record InformationOverlayReminder(Guid Id, int Invitations, int Ap
     string Preview, Func<bool> IsCurrent)
 {
     public Notifications.DirectMessageNotificationContent? DirectMessage { get; init; }
+    public InformationOverlayRallyContent? Rally { get; init; }
 }
+
+public sealed record InformationOverlayRallyContent(string Text, DateTimeOffset ExpiresAt, bool Sample = false);
 
 public interface IInformationOverlayReminderSink
 {
@@ -13,4 +16,14 @@ public interface IInformationOverlayReminderSink
     // Never opens a window, queues for later, plays audio, or changes unread/business state.
     ValueTask<bool> TryPresentAsync(InformationOverlayReminder reminder, CancellationToken cancellationToken);
     void ClearReminder();
+}
+
+// Unread direct messages as a quiet mark, never a notice. Callsign is empty when the
+// preview hides details or more than one conversation is unread.
+public sealed record InformationOverlayDirectUnread(int Conversations, string Callsign);
+
+public interface IInformationOverlayDirectUnreadSink
+{
+    // Null clears the mark: everything read, source muted, signed out or overlay reminders off.
+    void UpdateDirectUnread(InformationOverlayDirectUnread? unread);
 }

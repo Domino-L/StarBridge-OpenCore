@@ -1,19 +1,24 @@
 import '../../design_system/icons/standard_icon.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_select_form_field.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_profile_controller.dart';
+import 'community_profile_activity_windows.dart';
 import 'community_profile_port.dart';
 import 'community_profile_copy.dart';
 import 'community_creation_port.dart';
 import 'community_gameplay_tags.dart';
-import 'community_workspace_copy.dart' show workspaceDay;
 import 'community_workspace_image.dart';
 import 'community_profile_rules.dart';
 import 'community_system_choices.dart';
-import 'community_activity_time.dart';
+import 'community_profile_language_choices.dart';
 
 /// Renders the editable sections; the owning dialog retains draft lifecycle.
 final class CommunityProfileFormSections {
@@ -33,6 +38,8 @@ final class CommunityProfileFormSections {
     required this.pickLogo,
     required this.chooseTags,
     required this.publishContacts,
+    this.logoLoadingIndicator,
+    this.wideImages,
   });
   final BuildContext context;
   final CommunityProfileController model;
@@ -40,6 +47,10 @@ final class CommunityProfileFormSections {
   final int serial;
   final bool busy, canPickLogo, logoLoading, logoFailed;
   final Uint8List? draftLogoBytes, serverLogoBytes;
+  final Widget? logoLoadingIndicator;
+
+  /// Banner/background editor; only shown once the server supports both.
+  final Widget? wideImages;
   final void Function(String, Object?) update;
   final VoidCallback structureChanged, pickLogo, chooseTags, publishContacts;
   String t(String key) => profileText(context, key);
@@ -80,31 +91,36 @@ final class CommunityProfileFormSections {
 
   Widget textField(String key, {int lines = 1}) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
-    child: TextFormField(
-      key: ValueKey('profile-$serial-$key'),
-      initialValue: fields[key] as String? ?? '',
-      style: Theme.of(context).textTheme.bodyMedium,
+    child: StarBridgeFieldFrame(
       enabled: !busy && model.profile!.permits(key),
-      minLines: lines,
-      maxLines: lines,
-      maxLength: communityProfileTextLimits[key],
-      decoration: InputDecoration(
-        labelText: t(key),
-        helperText: key == 'name'
-            ? t('nameHint')
-            : communityProfileEditLimits.containsKey(key) && key != 'websiteUrl'
-            ? t('shortTextHint')
+      builder: (_, focus) => TextFormField(
+        focusNode: focus,
+        key: ValueKey('profile-$serial-$key'),
+        initialValue: fields[key] as String? ?? '',
+        style: Theme.of(context).textTheme.bodyMedium,
+        enabled: !busy && model.profile!.permits(key),
+        minLines: lines,
+        maxLines: lines,
+        maxLength: communityProfileTextLimits[key],
+        decoration: InputDecoration(
+          labelText: t(key),
+          helperText: key == 'name'
+              ? t('nameHint')
+              : communityProfileEditLimits.containsKey(key) &&
+                    key != 'websiteUrl'
+              ? t('shortTextHint')
+              : null,
+          counterText: communityProfileEditLimits.containsKey(key)
+              ? '${key == 'websiteUrl' || key == 'name' ? (fields[key] as String? ?? '').runes.length : communityTextUnits(fields[key] as String? ?? '')}/${communityProfileEditLimits[key]}'
+              : null,
+        ),
+        validator: (value) =>
+            value != model.profile!.fields[key] &&
+                !communityProfileTextFits(key, value ?? '')
+            ? t(key == 'name' ? 'nameInvalid' : 'textTooLong')
             : null,
-        counterText: communityProfileEditLimits.containsKey(key)
-            ? '${key == 'websiteUrl' || key == 'name' ? (fields[key] as String? ?? '').runes.length : communityTextUnits(fields[key] as String? ?? '')}/${communityProfileEditLimits[key]}'
-            : null,
+        onChanged: (v) => update(key, v),
       ),
-      validator: (value) =>
-          value != model.profile!.fields[key] &&
-              !communityProfileTextFits(key, value ?? '')
-          ? t(key == 'name' ? 'nameInvalid' : 'textTooLong')
-          : null,
-      onChanged: (v) => update(key, v),
     ),
   );
   Widget select(String key, Map<String, String> choices) {
@@ -115,7 +131,9 @@ final class CommunityProfileFormSections {
     };
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: DropdownButtonFormField<String>(
+      child: StarBridgeSelectFormField<String>(
+        identity: 'profile-$serial-$key',
+        controlKey: ValueKey('profile-$serial-$key-control'),
         key: ValueKey('profile-$serial-$key'),
         initialValue: value,
         isExpanded: true,
@@ -141,13 +159,14 @@ final class CommunityProfileFormSections {
     );
   }
 
-  Widget toggle(String key) => SwitchListTile.adaptive(
-    contentPadding: EdgeInsets.zero,
-    title: Text(t(key), style: Theme.of(context).textTheme.bodyMedium),
+  Widget toggle(String key) => StarBridgeSwitch.tile(
+    controlKey: ValueKey('profile-toggle-$key'),
+    label: t(key),
+    titleWidget: Text(t(key), style: Theme.of(context).textTheme.bodyMedium),
     value: fields[key] == true,
     subtitle:
         key == 'publicListingEnabled' && fields['recruitingEnabled'] == true
-        ? Text(t('recruitingLock'))
+        ? t('recruitingLock')
         : null,
     onChanged:
         busy ||
@@ -189,13 +208,29 @@ final class CommunityProfileFormSections {
               SizedBox(
                 width: 72,
                 height: 72,
-                child: CommunityWorkspaceImage(
-                  bytes: draftLogoBytes ?? serverLogoBytes,
-                  loading: draftLogoBytes == null && logoLoading,
-                  loadFailed: draftLogoBytes == null && logoFailed,
-                  icon: StandardIconSemantic.groups,
-                  maxWidth: 144,
-                ),
+                child:
+                    draftLogoBytes == null &&
+                        logoLoading &&
+                        logoLoadingIndicator != null
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: context.tokens.surfaces.raised.fill,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Center(
+                          child: SizedBox(
+                            width: 48,
+                            child: logoLoadingIndicator,
+                          ),
+                        ),
+                      )
+                    : CommunityWorkspaceImage(
+                        bytes: draftLogoBytes ?? serverLogoBytes,
+                        loading: draftLogoBytes == null && logoLoading,
+                        loadFailed: draftLogoBytes == null && logoFailed,
+                        icon: StandardIconSemantic.groups,
+                        maxWidth: 144,
+                      ),
               )
             else
               Text(
@@ -211,23 +246,35 @@ final class CommunityProfileFormSections {
               spacing: 8,
               runSpacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: !busy && model.profile!.canEditLogo && canPickLogo
-                      ? pickLogo
+                StarBridgeActionButton(
+                  controlKey: const Key('profile-pick-logo'),
+                  onActivate: !busy && model.profile!.canEditLogo && canPickLogo
+                      ? (_) => pickLogo()
                       : null,
-                  icon: const StandardIcon(StandardIconSemantic.image),
-                  label: Text(t('pickLogo')),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const StandardIcon(StandardIconSemantic.image, size: 18),
+                      const SizedBox(width: 8),
+                      Text(t('pickLogo')),
+                    ],
+                  ),
                 ),
-                TextButton(
-                  onPressed: !busy && model.profile!.canEditLogo
-                      ? () => update('clearLogoImage', true)
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('profile-remove-logo'),
+                  onActivate: !busy && model.profile!.canEditLogo
+                      ? (_) => update('clearLogoImage', true)
                       : null,
                   child: Text(t('removeLogo')),
                 ),
-                if (model.profile!.hasBanner)
-                  TextButton(
-                    onPressed: !busy && model.profile!.canEditBanner
-                        ? () => update('clearBannerImage', true)
+                if (model.profile!.hasBanner &&
+                    !model.profile!.wideImagesSupported)
+                  StarBridgeActionButton(
+                    kind: StarBridgeActionKind.quiet,
+                    controlKey: const Key('profile-remove-banner'),
+                    onActivate: !busy && model.profile!.canEditBanner
+                        ? (_) => update('clearBannerImage', true)
                         : null,
                     child: Text(t('removeBanner')),
                   ),
@@ -239,6 +286,7 @@ final class CommunityProfileFormSections {
           ],
         ),
       ),
+      if (wideImages != null && model.profile!.wideImagesSupported) wideImages!,
       textField('name'),
       textField('logoText'),
     ],
@@ -259,10 +307,11 @@ final class CommunityProfileFormSections {
               options: options,
             ),
             const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed:
+            StarBridgeActionButton(
+              controlKey: const Key('profile-choose-tags'),
+              onActivate:
                   !busy && model.profile!.canEditProfile && options != null
-                  ? chooseTags
+                  ? (_) => chooseTags()
                   : null,
               child: Text(t('chooseTags')),
             ),
@@ -350,12 +399,13 @@ final class CommunityProfileFormSections {
       ),
       const SizedBox(height: 16),
       for (var i = 0; i < rows('activityWindows').length; i++) window(i),
-      OutlinedButton.icon(
-        onPressed:
+      StarBridgeActionButton(
+        controlKey: const Key('profile-add-window'),
+        onActivate:
             !busy &&
                 model.profile!.canEditProfile &&
                 rows('activityWindows').length < 3
-            ? () {
+            ? (_) {
                 structureChanged();
                 update('activityWindows', [
                   ...rows('activityWindows'),
@@ -368,279 +418,35 @@ final class CommunityProfileFormSections {
                 ]);
               }
             : null,
-        icon: const StandardIcon(StandardIconSemantic.add),
-        label: Text(t('addWindow')),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const StandardIcon(StandardIconSemantic.add, size: 18),
+            const SizedBox(width: 8),
+            Text(t('addWindow')),
+          ],
+        ),
       ),
     ],
   );
-  Widget get languageChoices {
-    final chosen = (fields['language'] as String? ?? '')
-        .split(RegExp(r'\s*[/,，;；、]\s*'))
-        .where((v) => v.isNotEmpty)
-        .toSet();
-    final choices = {
-      ...const [
-        '中文',
-        'English',
-        '日本語',
-        '한국어',
-        'Deutsch',
-        'Français',
-        'Español',
-        'Русский',
-        'Português',
-      ],
-      ...chosen,
-    };
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(t('language'), style: Theme.of(context).textTheme.titleMedium),
-          Text(
-            t('languagesHint'),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final value in choices)
-                FilterChip(
-                  key: ValueKey('profile-language-$value'),
-                  label: Text(value),
-                  selected: chosen.contains(value),
-                  onSelected: busy || !model.profile!.canEditProfile
-                      ? null
-                      : (yes) {
-                          yes ? chosen.add(value) : chosen.remove(value);
-                          update('language', chosen.join(' / '));
-                        },
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  Widget get languageChoices => CommunityProfileLanguageChoices(
+    value: fields['language'] as String? ?? '',
+    enabled: !busy && model.profile!.canEditProfile,
+    onChanged: (value) => update('language', value),
+  );
 
-  Widget timeChoices(
-    int index,
-    String field,
-    String value,
-    bool enabled,
-    ValueChanged<String> change,
-  ) {
-    final parts = value.split(':');
-    final twelve = communityUses12Hour(context);
-    final clock = communityClockMinutes(value);
-    final hour = clock < 0 ? 0 : clock ~/ 60;
-    final localizations = MaterialLocalizations.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(t(field == 'startTime' ? 'activeFrom' : 'activeTo')),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            for (var part = 0; part < 2; part++) ...[
-              if (part == 1)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(':'),
-                ),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('profile-window-$serial-$index-$field-$part'),
-                  initialValue: clock >= 0
-                      ? (part == 0 && twelve
-                            ? (hour % 12 == 0 ? 12 : hour % 12)
-                                  .toString()
-                                  .padLeft(2, '0')
-                            : parts[part].padLeft(2, '0'))
-                      : null,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: t(part == 0 ? 'hour' : 'minute'),
-                    isDense: true,
-                  ),
-                  items: [
-                    for (
-                      var n = part == 0 && twelve ? 1 : 0;
-                      n < (part == 0 ? (twelve ? 13 : 24) : 60);
-                      n++
-                    )
-                      DropdownMenuItem(
-                        value: n.toString().padLeft(2, '0'),
-                        child: Text(n.toString().padLeft(2, '0')),
-                      ),
-                  ],
-                  onChanged: !enabled
-                      ? null
-                      : (selected) {
-                          if (selected == null) return;
-                          final next = parts.length == 2
-                              ? [...parts]
-                              : ['00', '00'];
-                          next[part] = part == 0 && twelve
-                              ? ((int.parse(selected) % 12) +
-                                        (hour >= 12 ? 12 : 0))
-                                    .toString()
-                                    .padLeft(2, '0')
-                              : selected;
-                          change(next.join(':'));
-                        },
-                ),
-              ),
-            ],
-            if (twelve) ...[
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('profile-window-$serial-$index-$field-period'),
-                  initialValue: hour >= 12 ? 'pm' : 'am',
-                  isExpanded: true,
-                  decoration: const InputDecoration(isDense: true),
-                  items: [
-                    DropdownMenuItem(
-                      value: 'am',
-                      child: Text(localizations.anteMeridiemAbbreviation),
-                    ),
-                    DropdownMenuItem(
-                      value: 'pm',
-                      child: Text(localizations.postMeridiemAbbreviation),
-                    ),
-                  ],
-                  onChanged: !enabled
-                      ? null
-                      : (period) {
-                          if (period == null) return;
-                          change(
-                            communityClockText(
-                              (hour % 12 + (period == 'pm' ? 12 : 0)) * 60 +
-                                  (clock < 0 ? 0 : clock % 60),
-                            ),
-                          );
-                        },
-                ),
-              ),
-            ],
-          ],
-        ),
-      ],
-    );
-  }
+  CommunityProfileActivityWindows get _activityWindows =>
+      CommunityProfileActivityWindows(
+        context: context,
+        serial: serial,
+        readFields: () => fields,
+        canEdit: () => !busy && model.profile!.canEditProfile,
+        update: update,
+        structureChanged: structureChanged,
+        box: box,
+      );
 
-  Widget window(int index) {
-    final row = rows('activityWindows')[index];
-    final enabled = !busy && model.profile!.canEditProfile;
-    void change(String key, Object value) {
-      final list = rows('activityWindows');
-      list[index] = changeCommunityWindow(list[index], key, value);
-      update('activityWindows', list);
-    }
-
-    return box(
-      Column(
-        children: [
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final day in [
-                'mon',
-                'tue',
-                'wed',
-                'thu',
-                'fri',
-                'sat',
-                'sun',
-              ])
-                FilterChip(
-                  label: Text(workspaceDay(context, day)),
-                  selected: (row['days'] as List).contains(day),
-                  onSelected: !enabled
-                      ? null
-                      : (selected) {
-                          final days = List<String>.from(row['days'] as List);
-                          selected ? days.add(day) : days.remove(day);
-                          change('days', days);
-                        },
-                ),
-            ],
-          ),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final controls = [
-                for (final key in ['startTime', 'endTime'])
-                  Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: timeChoices(
-                      index,
-                      key,
-                      row[key] as String,
-                      enabled,
-                      (value) => change(key, value),
-                    ),
-                  ),
-              ];
-              return constraints.maxWidth < 480
-                  ? Column(children: controls)
-                  : Row(
-                      children: [
-                        for (final control in controls)
-                          Expanded(child: control),
-                      ],
-                    );
-            },
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              t('nextDay'),
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            value: row['endsNextDay'] as bool,
-            subtitle: Text(
-              t(
-                communityClockMinutes(row['startTime'] as String) == 1439
-                    ? 'lastMinuteHint'
-                    : 'nextDayHint',
-              ),
-            ),
-            onChanged:
-                !enabled ||
-                    communityClockMinutes(row['startTime'] as String) == 1439
-                ? null
-                : (v) => change('endsNextDay', v!),
-          ),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              '${communityDisplayClock(context, row['startTime'] as String)} → '
-              '${row['endsNextDay'] == true ? '${t('nextDayShort')} ' : ''}'
-              '${communityDisplayClock(context, row['endTime'] as String)} · '
-              '${communityWindowDuration(row) ~/ 60} ${t('durationHour')} ${communityWindowDuration(row) % 60} ${t('durationMinute')}',
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: !enabled
-                  ? null
-                  : () {
-                      final list = rows('activityWindows')..removeAt(index);
-                      structureChanged();
-                      update('activityWindows', list);
-                    },
-              child: Text(t('remove')),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget window(int index) => _activityWindows.window(index);
 
   Widget get contacts => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -659,22 +465,25 @@ final class CommunityProfileFormSections {
                 ),
               ),
               if (fields['publicShowExternalContacts'] != true)
-                TextButton(
-                  onPressed: busy || !model.profile!.canEditProfile
+                StarBridgeActionButton(
+                  kind: StarBridgeActionKind.quiet,
+                  controlKey: const Key('profile-publish-contacts'),
+                  onActivate: busy || !model.profile!.canEditProfile
                       ? null
-                      : publishContacts,
+                      : (_) => publishContacts(),
                   child: Text(t('publishContacts')),
                 ),
             ],
           ),
         ),
       for (var i = 0; i < rows('externalContacts').length; i++) contact(i),
-      OutlinedButton.icon(
-        onPressed:
+      StarBridgeActionButton(
+        controlKey: const Key('profile-add-contact'),
+        onActivate:
             !busy &&
                 model.profile!.canEditProfile &&
                 rows('externalContacts').length < 5
-            ? () {
+            ? (_) {
                 structureChanged();
                 update('externalContacts', [
                   ...rows('externalContacts'),
@@ -682,8 +491,14 @@ final class CommunityProfileFormSections {
                 ]);
               }
             : null,
-        icon: const StandardIcon(StandardIconSemantic.add),
-        label: Text(t('addContact')),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const StandardIcon(StandardIconSemantic.add, size: 18),
+            const SizedBox(width: 8),
+            Text(t('addContact')),
+          ],
+        ),
       ),
       const SizedBox(height: 16),
       toggle('emailNotificationsEnabled'),
@@ -698,7 +513,11 @@ final class CommunityProfileFormSections {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: key == 'platform'
-                  ? DropdownButtonFormField<String>(
+                  ? StarBridgeSelectFormField<String>(
+                      identity: 'profile-contact-$serial-$index-platform',
+                      controlKey: ValueKey(
+                        'profile-contact-$serial-$index-platform-control',
+                      ),
                       key: ValueKey('profile-contact-$serial-$index-platform'),
                       initialValue: row['platform'] as String,
                       isExpanded: true,
@@ -726,29 +545,36 @@ final class CommunityProfileFormSections {
                               update('externalContacts', list);
                             },
                     )
-                  : TextFormField(
-                      key: ValueKey('profile-contact-$serial-$index-$key'),
-                      initialValue: row[key] as String,
+                  : StarBridgeFieldFrame(
                       enabled: !busy && model.profile!.canEditProfile,
-                      maxLength: key == 'platform' ? 128 : 2048,
-                      decoration: InputDecoration(
-                        labelText: t(key == 'value' ? 'contactValue' : key),
+                      builder: (_, focus) => TextFormField(
+                        focusNode: focus,
+                        key: ValueKey('profile-contact-$serial-$index-$key'),
+                        initialValue: row[key] as String,
+                        enabled: !busy && model.profile!.canEditProfile,
+                        maxLength: key == 'platform' ? 128 : 2048,
+                        decoration: InputDecoration(
+                          labelText: t(key == 'value' ? 'contactValue' : key),
+                        ),
+                        onChanged: (v) {
+                          final list = rows('externalContacts');
+                          list[index][key] = v;
+                          update('externalContacts', list);
+                        },
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? t('required')
+                            : null,
                       ),
-                      onChanged: (v) {
-                        final list = rows('externalContacts');
-                        list[index][key] = v;
-                        update('externalContacts', list);
-                      },
-                      validator: (v) =>
-                          v == null || v.trim().isEmpty ? t('required') : null,
                     ),
             ),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: busy || !model.profile!.canEditProfile
+            child: StarBridgeActionButton(
+              kind: StarBridgeActionKind.quiet,
+              controlKey: ValueKey('profile-contact-$serial-$index-remove'),
+              onActivate: busy || !model.profile!.canEditProfile
                   ? null
-                  : () {
+                  : (_) {
                       final list = rows('externalContacts')..removeAt(index);
                       structureChanged();
                       update('externalContacts', list);

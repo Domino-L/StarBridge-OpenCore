@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/interaction/starbridge_dialog.dart';
+import '../../design_system/interaction/starbridge_dialog_owner.dart';
+
 import '../settings/local_privacy_port.dart';
 import 'communities_module.dart';
 import 'community_invite_dialog.dart';
@@ -20,14 +23,17 @@ Future<void> openCommunityInvitation(
   final privacy = example
       ? port.createAdmissionPrivacy()
       : createPrivacy?.call();
-  await showDialog<CommunityInviteOutcome>(
-    context: context,
+  await showStarBridgeDialog<CommunityInviteOutcome>(
+    context,
     barrierDismissible: false,
-    builder: (_) => CommunityInviteDialog(
-      port: port as CommunityInvitePort,
-      initialCode: code,
-      example: example,
-      privacy: privacy,
+    builder: (_) => StarBridgeDialogOwnerGuard(
+      isCurrent: () => context.mounted && revision == module.accountRevision,
+      child: CommunityInviteDialog(
+        port: port as CommunityInvitePort,
+        initialCode: code,
+        example: example,
+        privacy: privacy,
+      ),
     ),
   );
   if (!context.mounted || revision != module.accountRevision) return;

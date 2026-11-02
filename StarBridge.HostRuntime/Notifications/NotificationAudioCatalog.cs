@@ -7,16 +7,22 @@ internal static class NotificationAudioCueIds
 {
     internal const string Soft = "notify.soft";
     internal const string Action = "notify.action";
+    internal const string Rally = "notify.rally";
+    internal const string Trade = "notify.trade";
     internal const string Operation = "notify.operation";
     internal const string EmergencyBroadcast = "notify.emergency_broadcast";
+    internal const string Achievement = "achievement.unlock";
 
     internal static IReadOnlySet<string> All { get; } =
         new HashSet<string>(StringComparer.Ordinal)
         {
             Soft,
             Action,
+            Rally,
+            Trade,
             Operation,
-            EmergencyBroadcast
+            EmergencyBroadcast,
+            Achievement
         };
 }
 

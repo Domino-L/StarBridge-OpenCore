@@ -21,6 +21,17 @@ internal static class CommunityAdmissionsClientTests
         var reference = entry.GetProperty("entryRef").GetString()!;
         Check(reference.Length == 32 && entry.GetProperty("message").GetString() == "Joining\nmessage", "opaque application references and multiline messages");
         Check(!apps.GetRawText().Contains("server-app-id") && !apps.GetRawText().Contains("secret-owner"), "raw IDs and unexpected account data never cross Bridge");
+        handler.Mode = "scm-minimal";
+        var scmPage = await Read();
+        var scmEntry = scmPage.GetProperty("items")[0];
+        Check(scmEntry.GetProperty("gameName").GetString() == "" && !scmEntry.GetProperty("hasAvatar").GetBoolean() &&
+            scmPage.GetProperty("access").GetProperty("canDecideApplications").GetBoolean() &&
+            !scmPage.GetProperty("access").GetProperty("canReadInvites").GetBoolean() &&
+            scmPage.GetProperty("inviteGenerationVersion").GetInt32() == 0,
+            "SCM minimal application queue needs neither game handle nor invitation capability");
+        Check(scmEntry.GetProperty("entryRef").GetString()!.Length == 32 && !scmPage.GetRawText().Contains("server-app-id"),
+            "SCM queue still issues opaque decision references");
+        handler.Mode = "ok";
         var calls = handler.Calls;
         await Error(() => client.ReadAdmissionsAsync("bearer", Body(), "account:2", () => { }, default), "communities.refreshRequired");
         Check(handler.Calls == calls, "cross-account target fails before network request");
@@ -99,8 +110,8 @@ internal static class CommunityAdmissionsClientTests
             if (int.TryParse(Mode, out var status)) return new((HttpStatusCode)status);
             if (Mode is "bad-json" or "huge") return new(HttpStatusCode.OK) { Content = new StringContent(Mode == "bad-json" ? "{" : new string('x', 1000000)) };
             var section = request.RequestUri.Query.Contains("section=invites") ? "invites" : "applications";
-            object application = new { applicationId = "server-app-id", gameName = "Applicant", callsign = "Callsign", message = "Joining\nmessage",
-                status = Mode == "bad-status" ? "Accepted" : "Pending", createdAt = DateTimeOffset.UtcNow, hasAvatar = true, privateAccount = "secret-owner" };
+            object application = new { applicationId = "server-app-id", gameName = Mode == "scm-minimal" ? "" : "Applicant", callsign = "Callsign", message = "Joining\nmessage",
+                status = Mode == "bad-status" ? "Accepted" : "Pending", createdAt = DateTimeOffset.UtcNow, hasAvatar = Mode != "scm-minimal", privateAccount = "secret-owner" };
             object invitation = new { inviteId = "server-invite-id", code = "VISIBLE-CODE", createdBy = "Owner", createdAt = DateTimeOffset.UtcNow,
                 expiresAt = DateTimeOffset.UtcNow.AddDays(1), maxUses = 3, usedCount = 0, status = "Active", isOwn = true, canRevoke = true };
             var body = new {
@@ -110,7 +121,7 @@ internal static class CommunityAdmissionsClientTests
                 applications = section == "applications" ? Enumerable.Repeat(application, Mode == "duplicate" ? 2 : Mode == "too-many" ? 21 : 1).ToArray() : Array.Empty<object>(),
                 invites = section == "invites" || Mode == "extra-section" ? new[] { invitation } : Array.Empty<object>(),
                 access = new { canReadApplications = Mode != "denied-flags", canDecideApplications = true,
-                    canReadInvites = true, canCreateInvite = true, canSendInvitationCard = true }, fetchedAt = DateTimeOffset.UtcNow };
+                    canReadInvites = Mode != "scm-minimal", canCreateInvite = Mode != "scm-minimal", canSendInvitationCard = Mode != "scm-minimal" }, fetchedAt = DateTimeOffset.UtcNow };
             if (!Mode.StartsWith("current-", StringComparison.Ordinal)) return Reply(body);
             var projected = JsonSerializer.SerializeToNode(body)!;
             var ownNode = JsonSerializer.SerializeToNode(invitation)!;

@@ -88,7 +88,8 @@ class _ProfileTag extends StatelessWidget {
             ? '$label · ${AppStrings.of(context).text('profile.role.primary')}'
             : label,
         maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+        overflow: TextOverflow.fade,
+        softWrap: false,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
           color: colors.foreground,
           fontWeight: isPrimary ? FontWeight.w600 : null,

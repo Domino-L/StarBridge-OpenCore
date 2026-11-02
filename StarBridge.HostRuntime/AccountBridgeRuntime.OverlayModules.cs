@@ -77,7 +77,7 @@ public sealed partial class AccountBridgeRuntime
             var local = new OverlaySourceResolutionContext("anonymous-local", owner.Generation, DateTimeOffset.UtcNow,
                 OverlaySourceBinding.Automatic, null, null, new Dictionary<string, OverlaySourceLease>());
             return InformationOverlayModuleFrame.TryCapture(preset, local, _ => null,
-                () => !_disposed && GameplayOwner() == owner, _ => false, temporaryChoice, activeModules);
+                () => !_disposed && GameplayOwner() == owner, _ => false, temporaryChoice, activeModules, signedOut: true);
         }
         if (_overlayCommunities is null) return new(null, "overlay.identity_unavailable");
         for (var attempt = 0; attempt < 3; attempt++)
@@ -101,16 +101,25 @@ public sealed partial class AccountBridgeRuntime
             {
                 OverlaySourceMode.Room => (_host as ScmAccountBridgeHost)?.CurrentRoomOverlaySource,
                 OverlaySourceMode.Community => _overlayCommunities.ReadModuleSource(owner.Context, owner.Generation, source.Id!),
+                OverlaySourceMode.Fleet => _overlayCommunities.ReadFleetSource(owner.Context, owner.Generation),
                 _ => null
             };
             bool Authorized(InformationOverlaySourceSnapshot snapshot)
             {
                 if (!Current()) return false;
+                if (snapshot.Lease.Mode == OverlaySourceMode.Fleet)
+                    return _overlayCommunities.IsFleetSourceCurrent(owner.Context, owner.Generation, snapshot);
                 if (snapshot.Lease.Mode == OverlaySourceMode.Community)
                     return _overlayCommunities.IsModuleSourceCurrent(owner.Context, owner.Generation, snapshot);
                 return (_host as ScmAccountBridgeHost)?.IsRoomOverlaySourceCurrent(snapshot) == true;
             }
-            return InformationOverlayModuleFrame.TryCapture(preset, context, Read, Current, Authorized, temporaryChoice, activeModules);
+            // Display-only: names an unavailable organization from the current directory.
+            string? CommunityName(string code) => Current()
+                ? _overlayCommunities.PeekCommunityName(owner.Context, owner.Generation, code) : null;
+            // Wording only: "not in a room" needs confirmed absence, not a lapsed lease.
+            var roomAbsent = (_host as ScmAccountBridgeHost)?.ReadOverlayPresetTrigger() is { Known: true, Room: null };
+            return InformationOverlayModuleFrame.TryCapture(preset, context, Read, Current, Authorized, temporaryChoice,
+                activeModules, CommunityName, roomAbsent: roomAbsent);
         }
         return new(null, "overlay.source_unavailable");
     }

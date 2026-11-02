@@ -53,6 +53,21 @@ internal sealed class WindowsNotificationActivity(int parentProcessId)
         return SocialSoundAllowed(true,
             foreground != IntPtr.Zero && GetWindowThreadProcessId(foreground, out _) != 0, _game.ReadCurrentState());
     }
+    // Trade alerts ignore Windows DND/quiet time; the app-foreground and game-state gates stay.
+    internal string TradeSuppressionReason()
+    {
+        string systemReason;
+        try { systemReason = StarBridge.OverlayRuntime.Windows.WindowsInformationOverlayRuntimeFactory.SystemTradeSuppressionReason(); }
+        catch { systemReason = "system-state-unavailable"; }
+        if (systemReason.Length != 0) return systemReason;
+        var foreground = GetForegroundWindow();
+        bool? appForeground = foreground == IntPtr.Zero || GetWindowThreadProcessId(foreground, out var processId) == 0
+            ? null : processId == parentProcessId;
+        return StarBridge.HostRuntime.Notifications.DesktopNotificationVisibility.LocalGateReason(
+            systemReason, appForeground, _game.ReadCurrentState());
+    }
+    internal bool CanNotifyExecHangar() =>
+        StarBridge.OverlayRuntime.Windows.WindowsInformationOverlayRuntimeFactory.SystemAllowsExecHangar(_game.ReadCurrentState());
     internal static bool SocialSoundAllowed(bool systemAllows, bool foregroundKnown, string gameState) =>
         systemAllows && foregroundKnown && gameState is "notRunning" or "running";
     internal bool CanNotifyGameIdentity()

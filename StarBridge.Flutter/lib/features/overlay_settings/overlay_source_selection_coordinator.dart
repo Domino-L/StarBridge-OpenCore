@@ -4,11 +4,12 @@ import 'overlay_scene_controller.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_module.dart';
 
-/// One controller feeds both selectors. The Host owns the temporary intent;
-/// no picker persists a shadow account choice or changes the preset's draft.
+/// One controller feeds every selector. A selection is the remembered account
+/// choice; on an explicit "follow" this releases the active plan's fixed
+/// source (the Host then also drops any session source left on that plan).
 final class OverlaySourceSelectionCoordinator {
   OverlaySourceSelectionCoordinator(this.workspace, this.scenes) {
-    scenes.selectTemporary = _select;
+    scenes.followShared = followShared;
     workspace.projection.addListener(_changed);
   }
   final OverlayWorkspaceModule workspace;
@@ -29,27 +30,33 @@ final class OverlaySourceSelectionCoordinator {
     });
   }
 
-  Future<bool> _select(String id) {
-    final owner = scenes.projection.value.sourceOwnerKey;
-    if (_closed || owner == null) return Future.value(false);
-    final source = switch (id) {
-      'auto' => const OverlaySourceBinding.automatic(),
-      'room' => const OverlaySourceBinding.room(),
-      'resumeBinding' => const OverlaySourceBinding.follow(),
-      _ when id.startsWith('org:') => OverlaySourceBinding.community(
-        id.substring(4),
-        owner,
-      ),
-      _ => null,
-    };
-    return source == null
-        ? Future.value(false)
-        : workspace.selectTemporarySource(source, owner);
+  /// Keeps the plan's name, layout and module sources; only its fixed source
+  /// and automatic use are released. Never called without a user action.
+  Future<bool> followShared() {
+    final snapshot = workspace.projection.value.snapshot;
+    final plan = snapshot?.presets
+        .where((preset) => preset.id == snapshot.activePresetId)
+        .firstOrNull;
+    final sources = plan?.sources;
+    if (_closed ||
+        snapshot?.sourcePresetsEnabled != true ||
+        plan == null ||
+        sources == null ||
+        sources.binding.mode == OverlaySourceMode.none) {
+      return Future.value(false);
+    }
+    return workspace.configurePreset(
+      plan.id,
+      plan.name,
+      const OverlaySourceBinding.follow(),
+      false,
+      expectedRevision: snapshot!.revision,
+    );
   }
 
   void dispose() {
     _closed = true;
-    scenes.selectTemporary = null;
+    scenes.followShared = null;
     workspace.projection.removeListener(_changed);
   }
 }

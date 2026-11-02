@@ -6,6 +6,18 @@ import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../account/account_models.dart';
 
+final class GameplayHistoryScanProgress {
+  const GameplayHistoryScanProgress(
+    this.phase,
+    this.processedFiles,
+    this.totalFiles,
+    this.readBytes,
+    this.totalBytes,
+  );
+  final String phase;
+  final int processedFiles, totalFiles, readBytes, totalBytes;
+}
+
 final class GameplayHistoryPreview {
   const GameplayHistoryPreview(
     this.id,
@@ -40,6 +52,7 @@ final class GameplayTimeView {
     this.operation,
     this.error,
     this.resetState,
+    this.scanProgress,
   });
   final bool visible;
   final bool busy;
@@ -58,6 +71,7 @@ final class GameplayTimeView {
   final String? operation;
   final String? error;
   final String? resetState;
+  final GameplayHistoryScanProgress? scanProgress;
 
   GameplayTimeView copyWith({
     bool? busy,
@@ -71,6 +85,8 @@ final class GameplayTimeView {
     bool clearHistoryError = false,
     String? error,
     String? resetState,
+    GameplayHistoryScanProgress? scanProgress,
+    bool clearScanProgress = false,
   }) => GameplayTimeView(
     visible: visible,
     busy: busy ?? this.busy,
@@ -89,6 +105,7 @@ final class GameplayTimeView {
     operation: busy == false ? null : operation ?? this.operation,
     error: error ?? this.error,
     resetState: resetState ?? this.resetState,
+    scanProgress: clearScanProgress ? null : scanProgress ?? this.scanProgress,
   );
 }
 
@@ -118,6 +135,10 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
   bool _inFlight = false;
   bool? _pendingConsent;
   bool? _pendingVisibility;
+  String? _historyScanId;
+  bool _cancelHistoryRequested = false;
+  bool get historyScanSupported =>
+      _session.hostCapabilities.contains('gameplayTime.historyProgress');
   static const _historyStates = {
     'unchecked',
     'available',
@@ -147,6 +168,8 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     _context = null;
     _pendingConsent = null;
     _pendingVisibility = null;
+    _historyScanId = null;
+    _cancelHistoryRequested = false;
     _inFlight = false;
     _timer?.cancel();
     value = GameplayTimeView(
@@ -403,8 +426,8 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     }
   }
 
-  /// A picker result, preview and confirmation all belong to this account epoch.
-  Future<void> importHistory(Future<String?> Function() pickLog) async {
+  /// Native resolves the bound LIVE log; preview and confirmation belong to this account epoch.
+  Future<void> importHistory() async {
     if (!_canStart ||
         !value.historySupported ||
         value.historyState == 'imported' ||
@@ -414,28 +437,39 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     final epoch = _epoch;
     _inFlight = true;
     _timer?.cancel();
+    _cancelHistoryRequested = false;
     value = value.copyWith(
       busy: true,
       operation: 'checking',
       clearHistoryError: true,
+      scanProgress: historyScanSupported
+          ? const GameplayHistoryScanProgress('checking', 0, 0, 0, 0)
+          : null,
     );
     try {
       final context = _context ?? await _readContext();
       if (!_current(epoch)) return;
       _context = context;
-      final response = await _historyRequest('historyStatus', {}, context);
-      if (!_current(epoch)) return;
-      final state = _historyResult(response, context);
-      _setHistoryResult(state);
-      if (state != 'available') return;
-      value = value.copyWith(operation: 'choosing');
-      final path = await pickLog();
-      if (!_current(epoch) || path == null) return;
+      if (_cancelHistoryRequested) {
+        value = value.copyWith(historyError: 'cancelled');
+        return;
+      }
+      if (!historyScanSupported) {
+        final response = await _historyRequest('historyStatus', {}, context);
+        if (!_current(epoch)) return;
+        final state = _historyResult(response, context);
+        _setHistoryResult(state);
+        if (state != 'available') return;
+      }
       value = value.copyWith(operation: 'previewing');
-      final preview = await _historyRequest('historyPreview', {
-        'path': path,
-      }, context);
+      final preview = historyScanSupported
+          ? await _scanHistory(context, epoch)
+          : await _historyRequest('historyPreview', {}, context);
       if (!_current(epoch)) return;
+      if (_cancelHistoryRequested) {
+        value = value.copyWith(historyError: 'cancelled');
+        return;
+      }
       _validateHistory(preview, context);
       final body = preview.payload;
       if (body['state'] != 'preview') {
@@ -464,7 +498,87 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     } on Object {
       if (_current(epoch)) value = value.copyWith(historyError: 'unavailable');
     } finally {
+      if (_current(epoch)) {
+        _historyScanId = null;
+        value = value.copyWith(clearScanProgress: true);
+      }
       _finishHistory(epoch);
+    }
+  }
+
+  Future<BridgeEnvelope> _scanHistory(
+    BridgeAccountContext context,
+    int epoch,
+  ) async {
+    var response = await _historyRequest('historyScanStart', {}, context);
+    while (_current(epoch)) {
+      _validateHistory(response, context);
+      final body = response.payload;
+      if (body['state'] != 'scanning') return response;
+      final id = body['scanId'];
+      final phase = body['phase'];
+      if (id is! String ||
+          !RegExp(r'^[a-f0-9]{32}$').hasMatch(id) ||
+          (_historyScanId != null && _historyScanId != id) ||
+          !const {
+            'checking',
+            'discovering',
+            'scanning',
+            'cancelling',
+            'complete',
+          }.contains(phase) ||
+          ![
+            'processedFiles',
+            'totalFiles',
+            'readBytes',
+            'totalBytes',
+          ].every((key) => body[key] is int && (body[key] as int) >= 0) ||
+          (body['processedFiles'] as int) > (body['totalFiles'] as int) ||
+          (body['readBytes'] as int) > (body['totalBytes'] as int)) {
+        throw const FormatException('Invalid scan progress');
+      }
+      _historyScanId = id;
+      value = value.copyWith(
+        scanProgress: GameplayHistoryScanProgress(
+          _cancelHistoryRequested ? 'cancelling' : phase as String,
+          body['processedFiles'] as int,
+          body['totalFiles'] as int,
+          body['readBytes'] as int,
+          body['totalBytes'] as int,
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (!_current(epoch)) throw const FormatException('Stale scan');
+      response = await _historyRequest(
+        _cancelHistoryRequested ? 'historyScanCancel' : 'historyScanRead',
+        {'scanId': id},
+        context,
+      );
+    }
+    throw const FormatException('Stale scan');
+  }
+
+  Future<void> cancelHistoryScan() async {
+    if (_disposed || value.scanProgress == null || _cancelHistoryRequested) {
+      return;
+    }
+    _cancelHistoryRequested = true;
+    final scan = value.scanProgress!;
+    value = value.copyWith(
+      scanProgress: GameplayHistoryScanProgress(
+        'cancelling',
+        scan.processedFiles,
+        scan.totalFiles,
+        scan.readBytes,
+        scan.totalBytes,
+      ),
+    );
+    final id = _historyScanId, context = _context;
+    if (id == null || context == null) return;
+    try {
+      await _historyRequest('historyScanCancel', {'scanId': id}, context);
+    } on Object {
+      /* Polling reports failure without committing time. */
     }
   }
 

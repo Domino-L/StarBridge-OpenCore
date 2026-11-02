@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../../shared/diagnostics/loading_metrics.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import 'menu_chrome_hint.dart';
 import 'menu_overlay_frame.dart';
 import 'menu_workspace_controller.dart';
 import 'menu_workspace_viewport.dart';
@@ -57,35 +60,40 @@ class MenuOverlayWorkbench extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
-    builder: (context, _) => ExcludeFocus(
-      excluding: !controller.visible,
-      child: TickerMode(
-        enabled: controller.visible,
-        child: Offstage(
-          offstage: !controller.visible,
-          child: MenuOverlayFrame(
-            contextLabel: contextLabel,
-            returnLabel: returnLabel,
-            settingsLabel: settingsLabel,
-            onReturn: onReturn,
-            onSettings: onSettings,
-            tools: [
-              for (final panel in panels.where((p) => controller.allows(p.id)))
-                MenuOverlayTool(
-                  id: panel.id,
-                  label: panel.title,
-                  icon: panel.icon,
-                  onActivate: () => controller.open(panel.id),
-                  isOpen: controller.isOpen(panel.id),
-                  isActive: controller.activeId == panel.id,
-                ),
-            ],
-            workspace: MenuOverlayWorkspace(
-              controller: controller,
-              panels: panels,
-              closeLabel: closeLabel,
-              moveLabel: moveLabel,
-              resizeLabel: resizeLabel,
+    builder: (context, _) => TooltipVisibility(
+      visible: controller.visible && TooltipVisibility.of(context),
+      child: ExcludeFocus(
+        excluding: !controller.visible,
+        child: TickerMode(
+          enabled: controller.visible,
+          child: Offstage(
+            offstage: !controller.visible,
+            child: MenuOverlayFrame(
+              contextLabel: contextLabel,
+              returnLabel: returnLabel,
+              settingsLabel: settingsLabel,
+              onReturn: onReturn,
+              onSettings: onSettings,
+              tools: [
+                for (final panel in panels.where(
+                  (p) => controller.allows(p.id),
+                ))
+                  MenuOverlayTool(
+                    id: panel.id,
+                    label: panel.title,
+                    icon: panel.icon,
+                    onActivate: () => controller.open(panel.id),
+                    isOpen: controller.isOpen(panel.id),
+                    isActive: controller.activeId == panel.id,
+                  ),
+              ],
+              workspace: MenuOverlayWorkspace(
+                controller: controller,
+                panels: panels,
+                closeLabel: closeLabel,
+                moveLabel: moveLabel,
+                resizeLabel: resizeLabel,
+              ),
             ),
           ),
         ),
@@ -127,33 +135,36 @@ class MenuOverlayWorkspace extends StatelessWidget {
         size: size,
         child: ListenableBuilder(
           listenable: controller,
-          builder: (context, _) => Stack(
-            clipBehavior: Clip.hardEdge,
-            children: [
-              for (final lease in controller.openPanels)
-                if (panels[lease.id] case final panel?)
-                  Positioned.fromRect(
-                    key: ObjectKey(lease),
-                    rect: controller.boundsFor(lease.id, size),
-                    child: MenuPanelIdle(
-                      shown: controller.panelsVisible,
-                      child: _PanelWindow(
-                        controller: controller,
-                        lease: lease,
-                        panel: panel,
-                        viewport: size,
-                        compact: false,
-                        active: controller.activeId == lease.id,
+          builder: (context, _) {
+            LoadingMetrics.current?.menuDragBuilt();
+            return Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                for (final lease in controller.openPanels)
+                  if (panels[lease.id] case final panel?)
+                    Positioned.fromRect(
+                      key: ObjectKey(lease),
+                      rect: controller.boundsFor(lease.id, size),
+                      child: MenuPanelIdle(
                         shown: controller.panelsVisible,
-                        closeLabel: closeLabel,
-                        moveLabel: moveLabel,
-                        resizeLabel: resizeLabel,
-                        bridgeStyle: bridgeStyle,
+                        child: _PanelWindow(
+                          controller: controller,
+                          lease: lease,
+                          panel: panel,
+                          viewport: size,
+                          compact: false,
+                          active: controller.activeId == lease.id,
+                          shown: controller.panelsVisible,
+                          closeLabel: closeLabel,
+                          moveLabel: moveLabel,
+                          resizeLabel: resizeLabel,
+                          bridgeStyle: bridgeStyle,
+                        ),
                       ),
                     ),
-                  ),
-            ],
-          ),
+              ],
+            );
+          },
         ),
       );
     },
@@ -232,6 +243,7 @@ class _PanelWindowState extends State<_PanelWindow> {
   void _update(DragUpdateDetails details, {required bool resize}) {
     final start = _startBounds;
     if (start == null || widget.compact) return;
+    LoadingMetrics.current?.menuDragUpdate(resize: resize);
     _drag += details.delta;
     if (resize) {
       widget.controller.resizeTo(
@@ -300,8 +312,11 @@ class _PanelWindowState extends State<_PanelWindow> {
                 ),
                 child: child,
               )
-            : TextButton(
-                onPressed: () => widget.controller.activate(widget.lease.id),
+            : StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                semanticLabel:
+                    '${resize ? widget.resizeLabel : widget.moveLabel}: ${widget.panel.title}',
+                onActivate: (_) => widget.controller.activate(widget.lease.id),
                 child: child,
               ),
       ),
@@ -322,145 +337,155 @@ class _PanelWindowState extends State<_PanelWindow> {
 
   Widget _window(BuildContext context, bool chromeHidden) {
     final tokens = widget.bridgeStyle ? null : context.tokens;
-    return Offstage(
-      offstage: !widget.shown,
-      child: TickerMode(
-        enabled: widget.shown,
-        child: FocusScope(
-          key: ValueKey('menu-panel-focus-${widget.lease.id}'),
-          node: _focus,
-          autofocus: widget.active && widget.shown,
-          canRequestFocus: widget.active && widget.shown,
-          // Explicitly restore descendants too: a scope first mounted hidden
-          // must not reuse its previous effective false focusability.
-          descendantsAreFocusable: widget.active && widget.shown,
-          child: Listener(
-            onPointerDown: (_) => widget.controller.activate(widget.lease.id),
-            child: RepaintBoundary(
-              child: Material(
-                key: ValueKey('menu-panel-${widget.lease.id}'),
-                type: chromeHidden
-                    ? MaterialType.transparency
-                    : MaterialType.canvas,
-                color: chromeHidden
-                    ? null
-                    : widget.bridgeStyle
-                    ? BridgeInk.window
-                    : tokens!.surfaces.panel.fill,
-                shape: chromeHidden
-                    ? null
-                    : RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                          widget.bridgeStyle ? 0 : tokens!.shape.radiusMedium,
+    return TooltipVisibility(
+      visible: widget.shown && TooltipVisibility.of(context),
+      child: Offstage(
+        offstage: !widget.shown,
+        child: TickerMode(
+          enabled: widget.shown,
+          child: FocusScope(
+            key: ValueKey('menu-panel-focus-${widget.lease.id}'),
+            node: _focus,
+            autofocus: widget.active && widget.shown,
+            canRequestFocus: widget.active && widget.shown,
+            // Explicitly restore descendants too: a scope first mounted hidden
+            // must not reuse its previous effective false focusability.
+            descendantsAreFocusable: widget.active && widget.shown,
+            child: Listener(
+              onPointerDown: (_) => widget.controller.activate(widget.lease.id),
+              child: RepaintBoundary(
+                child: Material(
+                  key: ValueKey('menu-panel-${widget.lease.id}'),
+                  type: chromeHidden
+                      ? MaterialType.transparency
+                      : MaterialType.canvas,
+                  color: chromeHidden
+                      ? null
+                      : widget.bridgeStyle
+                      ? BridgeInk.window
+                      : tokens!.surfaces.panel.fill,
+                  shape: chromeHidden
+                      ? null
+                      : RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            widget.bridgeStyle ? 0 : tokens!.shape.radiusMedium,
+                          ),
+                          side: BorderSide(
+                            color: widget.bridgeStyle
+                                ? (MediaQuery.highContrastOf(context)
+                                      ? BridgeInk.text
+                                      : (widget.active
+                                            ? BridgeInk.muted
+                                            : BridgeInk.line))
+                                : widget.active
+                                ? tokens!.colors.accent
+                                : tokens!.surfaces.panel.border,
+                          ),
                         ),
-                        side: BorderSide(
-                          color: widget.bridgeStyle
-                              ? (MediaQuery.highContrastOf(context)
-                                    ? BridgeInk.text
-                                    : (widget.active
-                                          ? BridgeInk.muted
-                                          : BridgeInk.line))
-                              : widget.active
-                              ? tokens!.colors.accent
-                              : tokens!.surfaces.panel.border,
-                        ),
-                      ),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    Visibility(
-                      visible: !chromeHidden,
-                      maintainState: true,
-                      maintainAnimation: true,
-                      maintainSize: true,
-                      child: SizedBox(
-                        height: 48,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Tooltip(
-                                message: widget.compact
-                                    ? widget.panel.title
-                                    : '${widget.moveLabel}: ${widget.panel.title}',
-                                child: widget.compact
-                                    ? Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: widget.bridgeStyle
-                                              ? 14
-                                              : tokens!.space.sm,
-                                        ),
-                                        child: Text(
-                                          widget.panel.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      )
-                                    : _handle(
-                                        resize: false,
-                                        child: Align(
-                                          alignment:
-                                              AlignmentDirectional.centerStart,
-                                          child: Text(
-                                            widget.panel.title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ),
-                              ),
-                            ),
-                            if (widget.bridgeStyle)
-                              BridgeMenuAction(
-                                key: ValueKey('menu-close-${widget.lease.id}'),
-                                label:
-                                    '${widget.closeLabel}: ${widget.panel.title}',
-                                padding: const EdgeInsets.all(14),
-                                onPressed: () =>
-                                    widget.controller.close(widget.lease.id),
-                                child: const MenuGlyphView(
-                                  MenuGlyph.close,
-                                  size: 16,
-                                ),
-                              )
-                            else
-                              IconButton(
-                                key: ValueKey('menu-close-${widget.lease.id}'),
-                                tooltip: widget.closeLabel,
-                                onPressed: () =>
-                                    widget.controller.close(widget.lease.id),
-                                icon: const StarBridgeIcon(
-                                  StarBridgeIconSemantic.windowClose,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Expanded(child: ClipRect(child: _content)),
-                    if (!widget.compact)
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
                       Visibility(
                         visible: !chromeHidden,
                         maintainState: true,
                         maintainAnimation: true,
                         maintainSize: true,
                         child: SizedBox(
-                          height: widget.bridgeStyle ? 24 : 32,
-                          child: Align(
-                            alignment: AlignmentDirectional.centerEnd,
-                            child: Tooltip(
-                              message: widget.resizeLabel,
-                              child: _handle(
-                                resize: true,
-                                child: const StarBridgeIcon(
-                                  StarBridgeIconSemantic.resize,
-                                  size: 16,
+                          height: 48,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: MenuChromeHint(
+                                  visible: widget.shown && !chromeHidden,
+                                  message: widget.compact
+                                      ? widget.panel.title
+                                      : '${widget.moveLabel}: ${widget.panel.title}',
+                                  child: widget.compact
+                                      ? Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: widget.bridgeStyle
+                                                ? 14
+                                                : tokens!.space.sm,
+                                          ),
+                                          child: Text(
+                                            widget.panel.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        )
+                                      : _handle(
+                                          resize: false,
+                                          child: Align(
+                                            alignment: AlignmentDirectional
+                                                .centerStart,
+                                            child: Text(
+                                              widget.panel.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              if (widget.bridgeStyle)
+                                BridgeMenuAction(
+                                  key: ValueKey(
+                                    'menu-close-${widget.lease.id}',
+                                  ),
+                                  label:
+                                      '${widget.closeLabel}: ${widget.panel.title}',
+                                  padding: const EdgeInsets.all(14),
+                                  onPressed: () =>
+                                      widget.controller.close(widget.lease.id),
+                                  child: const MenuGlyphView(
+                                    MenuGlyph.close,
+                                    size: 16,
+                                  ),
+                                )
+                              else
+                                MenuChromeIconAction(
+                                  visible: widget.shown && !chromeHidden,
+                                  controlKey: ValueKey(
+                                    'menu-close-${widget.lease.id}',
+                                  ),
+                                  label: widget.closeLabel,
+                                  onActivate: (_) =>
+                                      widget.controller.close(widget.lease.id),
+                                  icon: const StarBridgeIcon(
+                                    StarBridgeIconSemantic.windowClose,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Expanded(child: ClipRect(child: _content)),
+                      if (!widget.compact)
+                        Visibility(
+                          visible: !chromeHidden,
+                          maintainState: true,
+                          maintainAnimation: true,
+                          maintainSize: true,
+                          child: SizedBox(
+                            height: widget.bridgeStyle ? 24 : 32,
+                            child: Align(
+                              alignment: AlignmentDirectional.centerEnd,
+                              child: MenuChromeHint(
+                                visible: widget.shown && !chromeHidden,
+                                message: widget.resizeLabel,
+                                child: _handle(
+                                  resize: true,
+                                  child: const StarBridgeIcon(
+                                    StarBridgeIconSemantic.resize,
+                                    size: 16,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

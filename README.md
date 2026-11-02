@@ -31,8 +31,8 @@
 请只从本仓库的 Releases 或 [星海舰桥官网](https://scstarbridge.com/) 下载，并核对
 `SHA256SUMS.txt` 和签名更新清单；证据格式见下方 Release 核验指南。如果 Windows 仍显示“未知发布者”，请停止安装并提交反馈。
 
-官方客户端不包含来源或再分发权尚未核实的第三方舰船图片和星系地图。
-缺少可用图片时会显示应用自带占位图；详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
+0.7.2 官方安装包带有舰船图片、星系地图和首页视频：舰船图片和星系地图的来源待核实，首页视频没有书面许可。
+这些素材不采用 Apache-2.0，也不在公开源码中；从公开源码构建时会显示应用自带占位图。详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
 
 安装与首次使用说明见 [开始使用](docs/GETTING_STARTED.md)。如果下载或更新失败，请先查看 [下载帮助](docs/DOWNLOADS.md)。需要核验精确 Release tag、SHA-256、Windows 签名、SBOM 与构建来源时，请按 [Release 核验指南](docs/RELEASE-VERIFICATION.md) 操作。
 
@@ -219,7 +219,7 @@ CIG/RSI 的用户协议对未获授权的第三方软件、信息收集、客户
 - 核心协作数据契约；
 - 公开算法的回归测试与说明文档。
 
-托管服务、生产部署配置、商业授权实现，以及“夜影”和 Verdict 等可选商业外观源码不在 Apache-2.0 开放范围内。公开客户端在没有这些私有扩展时仍可独立编译和运行。Releases 中提供的是可直接安装的完整桌面应用，其二进制分发边界见 [完整应用与源码许可](BINARY-DISTRIBUTION-NOTICE.md)。
+托管服务、生产部署配置、专有实现，以及“夜影”、Verdict 和“哈基公民”等可选专有外观源码不在 Apache-2.0 开放范围内。公开客户端在没有这些私有扩展时仍可独立编译和运行。Releases 中提供的是可直接安装的完整桌面应用，其二进制分发边界见 [完整应用与源码许可](BINARY-DISTRIBUTION-NOTICE.md)。
 
 开发者可查看 [参与贡献](CONTRIBUTING.md) 和 [Game.log 识别算法](docs/GAME_LOG_LISTENING_ALGORITHM.md)。
 
@@ -267,4 +267,4 @@ NuGet 缓存的该版本，也可通过 CMake `STARBRIDGE_WEBVIEW2_SDK_ROOT` 指
 
 ## 许可与名称
 
-本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。来源未确认的数据不会因进入仓库而自动采用 Apache-2.0。产品名称、标志、应用图标、商业外观、游戏数据和第三方素材适用各自的权利边界，详见 [数据来源与权利](DATA_RIGHTS.md)、[素材与许可边界](ASSET_POLICY.md)、[第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+本仓库中明确发布的开放核心源码采用 [Apache License 2.0](LICENSE)。来源未确认的数据不会因进入仓库而自动采用 Apache-2.0。产品名称、标志、应用图标、专有外观、游戏数据和第三方素材适用各自的权利边界，详见 [数据来源与权利](DATA_RIGHTS.md)、[素材与许可边界](ASSET_POLICY.md)、[第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)、[TRADEMARKS.md](TRADEMARKS.md) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

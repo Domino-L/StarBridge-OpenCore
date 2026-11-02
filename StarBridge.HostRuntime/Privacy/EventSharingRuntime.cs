@@ -5,7 +5,7 @@ using StarBridge.NativeBridge;
 
 namespace StarBridge.HostRuntime.Privacy;
 
-internal sealed class EventSharingRuntime : IDisposable
+internal sealed partial class EventSharingRuntime : IDisposable
 {
     private readonly IEventSharingRemote _settings;
     private readonly IEventFeedRemote _remote;
@@ -14,7 +14,9 @@ internal sealed class EventSharingRuntime : IDisposable
     private readonly SharedActivityEventSource _source;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly ITimer? _timer;
+    private readonly Lifecycle.DeferredWorkTimer _timer;
+    private readonly object _timerLifecycle = new();
+    private bool _liveEventsAttached;
     private EventSharingRemoteSnapshot? _saved;
     private PrivacyPublicationInput? _owner;
     private EventSourceLease? _lease;
@@ -29,12 +31,23 @@ internal sealed class EventSharingRuntime : IDisposable
     internal string State { get; private set; } = "inactive";
 
     internal EventSharingRuntime(IEventSharingRemote settings, IEventFeedRemote remote, LocalGameEventJournal journal,
-        Func<PrivacyPublicationInput?> current, Func<bool> allowed, bool startTimer = true)
+        Func<PrivacyPublicationInput?> current, Func<bool> allowed, bool startTimer = true, TimeProvider? timeProvider = null)
     {
         _settings = settings; _remote = remote; _current = current; _allowed = allowed;
         _source = new(journal);
-        if (startTimer) _source.PendingChanged += WakeLiveEvents;
-        if (startTimer) _timer = TimeProvider.System.CreateTimer(_ => _ = TickAsync(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        _timer = new(timeProvider ?? TimeProvider.System, TickAsync,
+            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        if (startTimer) StartDeferredWork();
+    }
+    internal bool StartDeferredWork()
+    {
+        lock (_timerLifecycle)
+        {
+            if (_disposed) return false;
+            if (!_liveEventsAttached) { _source.PendingChanged += WakeLiveEvents; _liveEventsAttached = true; }
+        }
+        try { return _timer.Start(); }
+        catch { Dispose(); throw; }
     }
     internal void Pause() { Interlocked.Increment(ref _paused); _source.Activate(null); }
     internal void Resume() { Interlocked.Decrement(ref _paused); }
@@ -42,27 +55,39 @@ internal sealed class EventSharingRuntime : IDisposable
         now.Owner == owner.Owner && now.Generation == owner.Generation;
     private void Ensure(PrivacyPublicationInput owner)
     { if (!Same(owner)) throw new AccountBridgeHostException("events.account_changed"); }
+    private bool CanPublish(PrivacyPublicationInput owner) => Same(owner) &&
+        _current()?.IdentityConfirmed == true && _paused == 0 && _allowed() &&
+        (_shutdownOwner is null || !Same(_shutdownOwner));
     internal async Task<EventSharingRemoteSnapshot> ReadAsync(BridgeAccountContext owner, long generation, CancellationToken token)
     {
-        var result = await _settings.ReadEventsAsync(owner, generation, token);
-        if (_disposed || _current() is not { } now || now.Owner != owner || now.Generation != generation)
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) throw new AccountBridgeHostException("events.account_changed");
+        var result = await _settings.ReadEventsAsync(owner, generation, work.Token);
+        if (!work.IsCurrent || _disposed || _current() is not { } now || now.Owner != owner || now.Generation != generation)
             throw new AccountBridgeHostException("events.account_changed");
         return result;
     }
     internal async Task<EventSharingRemoteSnapshot> SaveAsync(BridgeAccountContext owner, long generation, long revision,
         string operation, bool enabled, SharedEventPreferences preferences, CancellationToken token)
     {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) throw new AccountBridgeHostException("events.account_changed");
+        token = work.Token;
         Pause();
         try
         {
             await _gate.WaitAsync(token);
             try
             {
+                token.ThrowIfCancellationRequested();
+                if (_disposed) throw new AccountBridgeHostException("events.account_changed");
                 // A failed or uncertain write must be followed by an authoritative read.
                 _saved = null; _lastRead = default;
                 await StopLocked(token);
+                token.ThrowIfCancellationRequested();
+                if (_disposed) throw new AccountBridgeHostException("events.account_changed");
                 var result = await _settings.SaveEventsAsync(owner, generation, revision, operation, enabled, preferences, token);
-                if (_disposed || _current() is not { } now || now.Owner != owner || now.Generation != generation)
+                if (!work.IsCurrent || _disposed || _current() is not { } now || now.Owner != owner || now.Generation != generation)
                     throw new AccountBridgeHostException("events.account_changed");
                 _saved = null; _lastRead = default;
                 State = "inactive";
@@ -74,16 +99,21 @@ internal sealed class EventSharingRuntime : IDisposable
     }
     internal async Task<bool> StopAsync(CancellationToken token)
     {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) return false;
+        token = work.Token;
         await _gate.WaitAsync(token);
         try { await StopLocked(token); return true; }
         catch { _withdrawPending = true; State = "unconfirmed"; return false; }
         finally { _gate.Release(); }
     }
-    internal Task<bool> StopForShutdownAsync(CancellationToken token)
+    internal async Task<bool> StopForShutdownAsync(CancellationToken token)
     {
+        using var work = _work.Enter(token);
+        if (work is null || _disposed) return false;
         _shutdownOwner = _current();
         _source.Activate(null);
-        return StopAsync(token);
+        return await StopAsync(work.Token).ConfigureAwait(false);
     }
     private async Task StopLocked(CancellationToken token)
     {
@@ -103,7 +133,8 @@ internal sealed class EventSharingRuntime : IDisposable
 
     private async Task TickAsync(bool waitForGate)
     {
-        if (_disposed) return;
+        using var work = _work.Enter(default);
+        if (work is null || _disposed) return;
         if (waitForGate) await _gate.WaitAsync().ConfigureAwait(false);
         else if (!await _gate.WaitAsync(0).ConfigureAwait(false)) return;
         try
@@ -133,15 +164,18 @@ internal sealed class EventSharingRuntime : IDisposable
             if (mask == 0) { await StopLocked(_lifetime.Token); return; }
             if (_session is null)
             {
+                // A settings read can outlive installation admission. Retained
+                // owner equality permits withdrawal, never a fresh feed start.
+                if (!CanPublish(input)) { await StopLocked(_lifetime.Token); return; }
                 var start = await _remote.WriteEventFeedAsync(input.Owner, input.Generation, "start", _saved.Revision, null, 0, [], _lifetime.Token);
                 Ensure(input);
                 _session = start.SessionId; _sequence = 0;
                 _lease = new(input.Owner, input.Generation, _saved.Revision, mask);
                 // Subscribe only AFTER the server has accepted a fresh session.
-                if (_paused == 0 && _allowed()) _source.Activate(_lease);
+                if (CanPublish(input)) _source.Activate(_lease);
             }
             Ensure(input);
-            if (_paused != 0 || !_allowed()) { await StopLocked(_lifetime.Token); return; }
+            if (!CanPublish(input)) { await StopLocked(_lifetime.Token); return; }
             await _remote.WriteEventFeedAsync(input.Owner, input.Generation, "append", _saved.Revision,
                 _session, ++_sequence, _source.Take(_lease!), _lifetime.Token);
             Ensure(input);
@@ -150,6 +184,7 @@ internal sealed class EventSharingRuntime : IDisposable
         catch
         {
             _source.Activate(null);
+            if (_disposed) return;
             _withdrawPending = true;
             // Keep the session only for a withdrawal attempt, never resend events.
             State = "unconfirmed";
@@ -161,9 +196,18 @@ internal sealed class EventSharingRuntime : IDisposable
 
     private void WakeLiveEvents()
     {
-        if (_disposed) return;
+        // Acquire before scheduling: queued Task.Run work is part of the original
+        // exit receipt even if it has not reached TickAsync yet.
+        var work = _work.Enter(default);
+        if (work is null) return;
+        if (_disposed) { work.Dispose(); return; }
         Interlocked.Exchange(ref _liveWakeRequested, 1);
-        if (Interlocked.CompareExchange(ref _liveWakeRunning, 1, 0) == 0) _ = Task.Run(DrainLiveEventsAsync);
+        if (Interlocked.CompareExchange(ref _liveWakeRunning, 1, 0) == 0)
+        {
+            try { _ = Task.Run(async () => { using (work) await DrainLiveEventsAsync().ConfigureAwait(false); }); }
+            catch { work.Dispose(); Interlocked.Exchange(ref _liveWakeRunning, 0); throw; }
+        }
+        else work.Dispose();
     }
 
     private async Task DrainLiveEventsAsync()
@@ -179,12 +223,6 @@ internal sealed class EventSharingRuntime : IDisposable
             Interlocked.Exchange(ref _liveWakeRunning, 0);
             if (!_disposed && Volatile.Read(ref _liveWakeRequested) != 0) WakeLiveEvents();
         }
-    }
-    public void Dispose()
-    {
-        _disposed = true; _timer?.Dispose(); _lifetime.Cancel();
-        _source.PendingChanged -= WakeLiveEvents;
-        _ = DisposeSourceAsync();
     }
     private async Task DisposeSourceAsync()
     {

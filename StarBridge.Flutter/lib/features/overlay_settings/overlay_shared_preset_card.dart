@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart';
+
+import '../../design_system/interaction/starbridge_action_button.dart';
 
 import '../../app/localization/app_strings.dart';
 import 'overlay_preset_transfer.dart';
@@ -8,13 +11,15 @@ import 'overlay_workspace_layout_editor.dart';
 class OverlaySharedPresetCard extends StatelessWidget {
   const OverlaySharedPresetCard({
     required this.name,
-    required this.onInspect,
+    this.onInspect,
+    this.onInspectSource,
     this.preview,
     super.key,
   });
   final String name;
   final OverlayPresetTransfer? preview;
   final VoidCallback? onInspect;
+  final ValueChanged<InteractionSource>? onInspectSource;
 
   @override
   Widget build(BuildContext context) {
@@ -88,8 +93,11 @@ class OverlaySharedPresetCard extends StatelessWidget {
                   style: theme.textTheme.bodySmall,
                 ),
               const SizedBox(height: 4),
-              TextButton(
-                onPressed: onInspect,
+              StarBridgeActionButton(
+                kind: StarBridgeActionKind.quiet,
+                onActivate:
+                    onInspectSource ??
+                    (onInspect == null ? null : (_) => onInspect!()),
                 child: Text(strings.text('overlay.shareCard.inspect')),
               ),
             ],

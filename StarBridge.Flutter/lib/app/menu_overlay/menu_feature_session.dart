@@ -1,11 +1,21 @@
+import 'menu_overlay_text.dart';
+import '../localization/app_strings.dart';
+
+import 'package:flutter/widgets.dart' show Locale;
+
 import 'dart:async';
 
 import '../../platform/window/menu_feature_lease.dart';
+import '../../platform/window/menu_read_feedback.dart';
 
 /// Owns current-window command references, freshness, invalidation and reads.
 /// Only explicitly built presentation rows/buttons leave the primary engine.
 abstract class MenuFeatureSession implements MenuFeatureLease {
-  MenuFeatureSession(this.publish, Stream<void> invalidations) {
+  MenuFeatureSession(
+    this.publish,
+    Stream<void> invalidations, {
+    Locale Function()? locale,
+  }) : locale = locale ?? _defaultLocale {
     _subscription = invalidations.listen((_) {
       generation++;
       accountEpoch++;
@@ -18,6 +28,9 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
       if (visible) unawaited(refresh());
     });
   }
+  static Locale _defaultLocale() => const Locale('zh', 'CN');
+  final Locale Function() locale;
+  AppStrings get strings => AppStrings.resolve(locale());
   final void Function(Map<String, Object?>) publish;
   late final StreamSubscription<void> _subscription;
   Timer? _timer;
@@ -28,7 +41,10 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   String? _rejectedAction;
   final _silentKeys = <String>{};
   bool silentRead = false;
+  int _readSerial = 0;
+  MenuReadFeedback? _readFeedback;
   void changeScope() {
+    _readFeedback = null;
     _scope++;
     _rejectedAction = null;
   }
@@ -39,7 +55,13 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
         ({DateTime expires, Future<void> Function(String) run, bool silent})
       >{};
   Map<String, Object?> _view = const {'state': 'loading'};
-  Map<String, Object?> get currentView => _view;
+  /// Owned phrases kept as templates, for re-publication in the current
+  /// language. Never hand this to a reader or encoder.
+  Map<String, Object?> get templateView => _view;
+
+  /// The published shape: owned phrases resolved, JSON-encodable only.
+  Map<String, Object?> get currentView =>
+      resolveMenuOverlayValue(_view, strings) as Map<String, Object?>;
   void reset();
   Future<Map<String, Object?>> read();
   Future<void> closePort();
@@ -53,10 +75,12 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   Map<String, Object?>? failedWrite() => null;
   Map<String, Object?>? get writingView => null;
   Map<String, Object?> button(
-    String label,
+    Object label,
     Future<void> Function(String) run, {
-    String? confirm,
-    String? input,
+    String? role,
+    bool secret = false,
+    Object? confirm,
+    Object? input,
     int limit = 128,
     bool silent = false,
   }) {
@@ -73,6 +97,8 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     return {
       'key': key,
       'label': label,
+      'role': ?role,
+      'secret': secret,
       'confirm': ?confirm,
       'input': ?input,
       'limit': limit,
@@ -89,16 +115,21 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     // just like local acceptance, until the editor's scope is retired.
     _view = {
       ...view,
+      'readFeedback': _readFeedback?.wire,
       if (_rejectedAction != null) 'rejectedAction': _rejectedAction,
       'scope': 's$_scope',
     };
-    if (visible && !disposed) publish(_view);
+    if (visible && !disposed) {
+      publish(resolveMenuOverlayValue(_view, strings) as Map<String, Object?>);
+    }
   }
 
   @override
   void show(bool value) {
     if (disposed || visible == value) return;
     visible = value;
+    _readFeedback = null;
+    _view = {..._view, 'readFeedback': null};
     generation++;
     _actions.clear();
     _busy = false;
@@ -106,7 +137,13 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     _timer?.cancel();
     if (value) {
       if (_writing) {
-        emit(writingView ?? {'state': 'loading', 'notice': '正在确认上次操作，请稍候。'});
+        emit(
+          writingView ??
+              {
+                'state': 'loading',
+                'notice': MenuOverlayText('menu.overlay.errors.confirming'),
+              },
+        );
       } else {
         unawaited(refresh());
       }
@@ -120,6 +157,9 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     if (disposed || !visible || _busy || _writing) return;
     _busy = true;
     silentRead = silent;
+    _readFeedback = silent
+        ? null
+        : MenuReadFeedback(++_readSerial, currentMenuReadOrigin);
     final epoch = ++generation;
     if (!backgroundReads) _actions.clear();
     _actions.removeWhere(
@@ -133,9 +173,13 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
     }
     try {
       final view = await read().timeout(const Duration(seconds: 12));
-      if (current(epoch)) emit({'state': 'ready', ...view});
+      if (current(epoch)) {
+        _readFeedback = null;
+        emit({'state': 'ready', ...view});
+      }
     } on Object catch (error) {
       if (current(epoch)) {
+        _readFeedback = null;
         generation++;
         _busy = false;
         _actions.clear();
@@ -177,7 +221,7 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
       emit({
         ..._view,
         if (RegExp(r'^a[1-9][0-9]{0,13}$').hasMatch(key)) 'rejectedAction': key,
-        'notice': '内容已更新，请刷新后重试。',
+        'notice': MenuOverlayText('menu.overlay.errors.stale'),
       });
       return;
     }
@@ -194,6 +238,7 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
       return;
     }
     if (_busy) {
+      _readFeedback = null;
       generation++;
       _busy = false;
       cancelRead();
@@ -203,6 +248,7 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
   }
 
   Future<void> _run(Future<void> Function(String) task, String value) async {
+    _readFeedback = null;
     _writing = true;
     final account = accountEpoch;
     emit({..._view, 'busy': true});
@@ -216,7 +262,10 @@ abstract class MenuFeatureSession implements MenuFeatureLease {
         _actions.clear();
         emit(
           failedWrite() ??
-              {'state': 'unavailable', 'notice': '操作结果未确认，请刷新核对，不要重复提交。'},
+              {
+                'state': 'unavailable',
+                'notice': MenuOverlayText('menu.overlay.errors.unconfirmed'),
+              },
         );
       }
     } finally {

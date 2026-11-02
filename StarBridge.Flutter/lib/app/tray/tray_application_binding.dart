@@ -8,6 +8,7 @@ import '../preferences/app_preferences.dart';
 import '../preferences/app_preferences_projection.dart';
 import '../localization/app_strings.dart';
 import '../presence/connected_manual_presence.dart';
+import '../../features/onboarding/connection_mode_port.dart';
 import '../shell/chrome/shell_chrome_projection.dart';
 import 'tray_quick_panel.dart';
 import 'tray_surface_coordinator.dart';
@@ -35,7 +36,10 @@ class TrayApplicationBinding {
     _changed();
     _coordinator = TraySurfaceCoordinator(
       snapshot: _snapshot,
-      refresh: overlay.synchronize,
+      refresh: () async {
+        await presence?.refresh();
+        await overlay.synchronize();
+      },
       openOverlaySettings: openOverlaySettings,
       toggleOverlay: () async {
         final workspace = overlay.workspace;
@@ -69,6 +73,14 @@ class TrayApplicationBinding {
                 throw StateError('Unconfirmed presence');
               }
             },
+      enterOffline: presence == null
+          ? null
+          : () async {
+              if (!await presence!.source.controller.selectOffline()) {
+                throw StateError('Offline mode unconfirmed');
+              }
+            },
+      restoreOnline: presence?.source.controller.restoreOnline,
     );
     _releaseWatch = overlay.watch();
   }
@@ -88,6 +100,7 @@ class TrayApplicationBinding {
   // Stay exactly representable across JSON and native channel number codecs.
   final _scopeIds = Random.secure();
   int _generation = 0;
+  int _projectionRevision = 0;
   void _changed() {
     final p = preferences.value.effective;
     final o = overlay.projection.value;
@@ -107,6 +120,7 @@ class TrayApplicationBinding {
     }
     _snapshot.value = TraySurfaceSnapshot(
       scope: _generation,
+      revision: ++_projectionRevision,
       state: TrayQuickPanelState(
         runtime: TrayRuntimeState.running,
         scene: scene == null
@@ -130,6 +144,15 @@ class TrayApplicationBinding {
             : TrayOverlayState.disabled,
       ),
       presence: manual?.snapshot.confirmedMode,
+      connectionMode: manual?.connectionMode?.busy == true
+          ? ConnectionModeState.switching
+          : manual?.connectionMode?.snapshot.state ??
+                ConnectionModeState.unsupported,
+      canEnterOffline: manual?.canEnterOffline ?? false,
+      // The auxiliary tray's v1 projection admits only completed offline mode.
+      // Pending compatibility recovery remains on the original primary route.
+      canRestoreOnline:
+          manual?.isOffline == true && (manual?.canRestoreOnline ?? false),
       canChangePresence: manual?.canChange ?? false,
       canToggleOverlay: workspace != null
           ? workspace.available &&
@@ -140,6 +163,7 @@ class TrayApplicationBinding {
       dark: p.appearanceMode == AppearanceMode.dark,
       reduceMotion: p.motionPreference == MotionPreference.reduce,
       styleId: p.designStyleId,
+      interactionStyle: p.interactionStyle.name,
       automaticKey: c.displayPresenceKey,
     );
   }

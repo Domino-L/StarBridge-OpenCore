@@ -37,7 +37,12 @@ internal static class CommunityWpfS2Tests
             return new(HttpStatusCode.NotFound);
         });
         using var client = new CommunityClient(new Uri("https://relay.invalid/"), handler);
+        var diagnostics = new List<(string Stage, string Code, int? Status)>();
+        client.ReadDiagnostic = (stage, code, status, _) => diagnostics.Add((stage, code, status));
         var mine = await client.ReadWpfS2Async("test-token", new("mine", "", null, null), "owner-scope", "self-id", default);
+        Check(diagnostics.Contains(("workspace-membership-http", "ok", 200)) &&
+            diagnostics.Contains(("workspace-snapshot-http", "ok", 200)),
+            "Legacy organization reads must be distinguishable without logging URLs or identities");
         Check(mine.Items.Length == 1 && mine.Items[0].Name == "Organization A", "Existing WPF membership appears, not every public organization");
         Check(mine.Items[0].Actions.Length == 0, "Read compatibility does not enable multi-organization writes");
         Check(calls.SequenceEqual(new[] { "/api/fleets/membership", "/api/fleets" }), "Explicit S2 path never probes new directory");
@@ -72,6 +77,9 @@ internal static class CommunityWpfS2Tests
         var logo = JsonSerializer.SerializeToElement(await client.ReadMediaAsync("test-token", JsonSerializer.SerializeToElement(new
         { schemaVersion = 1, targetRef = reference, kind = "logo", offset = 0 }), "owner-scope", default));
         Check(logo.GetProperty("data").GetString() == Pixel.Split(',')[1], "Organization logo uses old snapshot, no new endpoint");
+        var background = JsonSerializer.SerializeToElement(await client.ReadMediaAsync("test-token", JsonSerializer.SerializeToElement(new
+        { schemaVersion = 1, targetRef = reference, kind = "background", offset = 0 }), "owner-scope", default));
+        Check(background.GetProperty("data").GetString() == Pixel.Split(',')[1], "S2 background reads its independent snapshot field");
         await Error(() => client.ReadMediaAsync("test-token", JsonSerializer.SerializeToElement(new
         { schemaVersion = 1, targetRef = reference, kind = "logo", offset = 0, version = new string('a', 64) }), "owner-scope", default), "communities.mediaChanged");
         var filtered = JsonSerializer.SerializeToElement(await client.ReadWorkspaceAsync("test-token", JsonSerializer.SerializeToElement(new
@@ -100,7 +108,7 @@ internal static class CommunityWpfS2Tests
     private static object Fleet(string code) => new
     {
         code, name = "Organization " + code, description = "Existing description", type = "探索", language = "中文",
-        activeTime = "20:00–23:00", totalMembers = 21, lastUpdated = "2026-09-10T00:00:00Z", privateField = "private-only", logoImageData = Pixel,
+        activeTime = "20:00–23:00", totalMembers = 21, lastUpdated = "2026-09-10T00:00:00Z", privateField = "private-only", logoImageData = Pixel, backgroundImageData = Pixel,
         members = Enumerable.Range(0, 21).Select(i => new
         {
             accountId = i == 0 ? "self-id" : "account-" + i, gameName = "", callsign = "Member " + i,

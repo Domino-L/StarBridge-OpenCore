@@ -12,7 +12,8 @@ internal static class GameplayTimeRuntimeTests
         public override DateTimeOffset GetUtcNow() => Now;
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            Require(dueTime == TimeSpan.FromSeconds(5) && period == dueTime, "Independent five-second Host sampling.");
+            Require(dueTime == Timeout.InfiniteTimeSpan && period == dueTime,
+                "Original sampling timer is installed while paused.");
             return Timer = new(callback, state);
         }
         internal void Tick(int seconds) { Now = Now.AddSeconds(seconds); Timer!.Fire(); }
@@ -21,7 +22,12 @@ internal static class GameplayTimeRuntimeTests
     {
         internal bool Disposed;
         internal void Fire() { if (!Disposed) callback(state); }
-        public bool Change(TimeSpan dueTime, TimeSpan period) => !Disposed;
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            Require(dueTime == TimeSpan.FromSeconds(5) && period == dueTime,
+                "Independent five-second Host sampling.");
+            return !Disposed;
+        }
         public void Dispose() => Disposed = true;
         public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }

@@ -1,3 +1,5 @@
+import 'menu_resolved_copy_test_support.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -27,7 +29,7 @@ class RoomPort implements PartyRoomsPort, RoomChatProvider {
   final Chat roomChat = Chat();
   @override
   Future<RoomReadResult> read() async {
-    final result = await source.read();
+    final result = resolvedMenuCopy(await source.read());
     if (selfAvatar == null) return result;
     final d = result.directory!;
     return RoomReadResult(
@@ -134,8 +136,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('复制房间码'));
     await tester.pump();
-      expect(copies, 1);
-      session.dispose();
+    expect(copies, 1);
+    session.dispose();
   });
   for (final memberFallback in [false, true]) {
     test('own room message avatar, member fallback=$memberFallback', () async {
@@ -185,12 +187,12 @@ void main() {
         ),
         isTrue,
       );
-      session.act(view.buttons.firstWhere((b) => b.label == '聊天').key, '');
+      session.act(view.buttons.firstWhere((b) => b.role == 'chat').key, '');
       expect(MenuFeatureView.parse(views.last).room, isNotNull);
       await tester.pump();
       view = MenuFeatureView.parse(views.last);
       expect(view.room!.tab, 'chat');
-      final send = view.buttons.firstWhere((b) => b.label == '发送消息');
+      final send = view.buttons.firstWhere((b) => b.role == 'sendMessage');
       expect(send.limit, 300);
       session.act(send.key, 'x' * 301);
       await tester.pump();
@@ -265,7 +267,7 @@ void main() {
       addTearDown(session.dispose);
       await tester.pump();
       var view = MenuFeatureView.parse(views.last);
-      session.act(view.buttons.firstWhere((b) => b.label == '聊天').key, '');
+      session.act(view.buttons.firstWhere((b) => b.role == 'chat').key, '');
       await tester.pump();
       size(tester, const Size(900, 700));
       Widget page() => app(

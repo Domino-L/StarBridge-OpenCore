@@ -192,18 +192,14 @@ internal sealed partial class CommunityClient
             var group = groups.EnumerateArray().SingleOrDefault(value =>
                 string.Equals(Optional(value, "key", 128), roleKey.GetString(), StringComparison.OrdinalIgnoreCase));
             hasRole = group.ValueKind != JsonValueKind.Undefined;
-            if (hasRole && group.TryGetProperty("permissions", out var permissions) && permissions.ValueKind == JsonValueKind.Array &&
+            if (hasRole && group.TryGetProperty("isEnabled", out var roleEnabled) && roleEnabled.GetBoolean() && group.TryGetProperty("permissions", out var permissions) && permissions.ValueKind == JsonValueKind.Array &&
                 permissions.EnumerateArray().Any(value => string.Equals(value.GetString(), permission, StringComparison.OrdinalIgnoreCase))) return true;
         }
-        if (!hasRole && row.TryGetProperty("extraAllowedPermissions", out var allowed) && allowed.ValueKind == JsonValueKind.Array &&
+        if (row.TryGetProperty("extraAllowedPermissions", out var allowed) && allowed.ValueKind == JsonValueKind.Array &&
             allowed.EnumerateArray().Any(value => string.Equals(value.GetString(), permission, StringComparison.OrdinalIgnoreCase))) return true;
-        return permission switch
-        {
-            "fleet.profile.edit" or "fleet.avatar.edit" or "members.review" or "audit.view" =>
-                row.TryGetProperty("canManageFleetInfo", out var value) && value.GetBoolean(),
-            "members.remove" => row.TryGetProperty("canRemoveMembers", out var value) && value.GetBoolean(),
-            _ => false
-        };
+        return StarBridge.Core.Fleets.FleetPermissionPolicy.LegacyGrants(permission,
+            WpfFlag(row, "canManageFleetInfo"), WpfFlag(row, "canRemoveMembers"),
+            WpfFlag(row, "canPublishTasks"), WpfFlag(row, "canPublishPlans"));
     }
 
     private static bool WpfS2HasManagementAccess(JsonElement fleet, string viewerId, WpfS2Ownership ownership) =>
