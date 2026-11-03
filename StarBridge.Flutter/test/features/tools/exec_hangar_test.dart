@@ -1185,7 +1185,15 @@ void main() {
           await tester.pumpAndSettle();
           final copy = AppStrings.resolve(locale);
           expect(find.text(copy.text('execHangar.title')), findsOneWidget);
-          expect(find.text('01:05:00'), findsOneWidget);
+          // The schedule below prints local clock times, and in UTC one of
+          // them reads the same as this countdown.
+          expect(
+            find.descendant(
+              of: find.byType(ExecHangarOverview),
+              matching: find.text('01:05:00'),
+            ),
+            findsOneWidget,
+          );
           expect(tester.takeException(), isNull);
           if (locale.countryCode == 'CN' || locale.languageCode == 'en') {
             final suffix = width == 1440 && locale.countryCode == 'CN'

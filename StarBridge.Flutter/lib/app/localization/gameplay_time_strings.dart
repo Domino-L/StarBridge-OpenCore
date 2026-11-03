@@ -35,6 +35,8 @@ const gameplayTimeZhCn = <String, String>{
   'gameplay.loading': '正在读取或保存…',
   'gameplay.error': '记录已暂停。请关闭其他应用副本后重试，并检查此电脑的可用空间。',
   'gameplay.readError': '暂时无法读取记录状态，请重试。',
+  'gameplay.identityError':
+      '账号身份暂时未确认，时长没有继续记录，已保存的时长不受影响。请重新登录或重启应用；还不行请反馈。',
   'gameplay.unsaved': '最近一段时长尚未保存，请重试保存。',
   'gameplay.stopError': '停止记录尚未保存，请重试。重启应用后可能恢复原设置。',
   'gameplay.unsupported': '当前版本暂不支持记录，请更新应用。',
@@ -119,6 +121,8 @@ const gameplayTimeZhTw = <String, String>{
   'gameplay.loading': '正在讀取或儲存…',
   'gameplay.error': '記錄已暫停。請關閉其他應用程式副本後重試，並檢查此電腦的可用空間。',
   'gameplay.readError': '暫時無法讀取記錄狀態，請重試。',
+  'gameplay.identityError':
+      '帳號身分暫時未確認，時長沒有繼續記錄，已儲存的時長不受影響。請重新登入或重新啟動應用；還不行請回饋。',
   'gameplay.unsaved': '最近一段時長尚未儲存，請重試儲存。',
   'gameplay.stopError': '停止記錄尚未儲存，請重試。重新啟動後可能恢復原設定。',
   'gameplay.unsupported': '目前版本暫不支援記錄，請更新應用程式。',
@@ -205,6 +209,8 @@ const gameplayTimeEn = <String, String>{
   'gameplay.loading': 'Reading or saving…',
   'gameplay.error': 'Recording paused. Close other copies of the app, check free disk space, then retry.',
   'gameplay.readError': 'Recording status is unavailable. Retry to check it.',
+  'gameplay.identityError':
+      'Your account identity is not confirmed, so playtime is not being recorded. Saved time is safe. Sign in again or restart the app; if this continues, send feedback.',
   'gameplay.unsaved':
       'The latest playtime has not been saved. Retry to save it.',
   'gameplay.stopError': 'The stop setting has not been saved. Retry before restarting, or the previous setting may return.',

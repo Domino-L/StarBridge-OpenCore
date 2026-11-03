@@ -11,8 +11,11 @@ import 'community_image_decoder.dart';
 import 'community_ships_port.dart';
 import 'community_workspace_image.dart';
 
-/// The copy key of the owner's presence.
-String communityShipPresenceKey(CommunitySharedShip ship) => !ship.ownerOnline
+/// The copy key of the owner's presence, null when the source has none.
+String? communityShipPresenceKey(CommunitySharedShip ship) =>
+    !ship.ownerPresenceKnown
+    ? null
+    : !ship.ownerOnline
     ? 'presence.offline'
     : ship.ownerLiveStatus.toLowerCase() == 'ingame'
     ? 'presence.inGame'
@@ -46,24 +49,23 @@ class CommunityShipOwnerAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final presence = communityShipPresenceKey(ship);
-    return StarBridgeTooltip(
-      message: AppStrings.of(context).text(presence),
-      child: SizedBox(
-        width: size + 2,
-        height: size + 2,
-        child: Stack(
-          children: [
-            SizedBox(
-              width: size,
-              height: size,
-              child: CommunityWorkspaceImage(
-                bytes: bytes,
-                decoder: decoder,
-                maxWidth: maxWidth,
-                loading: loading,
-                icon: StandardIconSemantic.person,
-              ),
+    final avatar = SizedBox(
+      width: size + 2,
+      height: size + 2,
+      child: Stack(
+        children: [
+          SizedBox(
+            width: size,
+            height: size,
+            child: CommunityWorkspaceImage(
+              bytes: bytes,
+              decoder: decoder,
+              maxWidth: maxWidth,
+              loading: loading,
+              icon: StandardIconSemantic.person,
             ),
+          ),
+          if (presence != null)
             PositionedDirectional(
               end: 0,
               bottom: 0,
@@ -80,9 +82,14 @@ class CommunityShipOwnerAvatar extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
+    return presence == null
+        ? avatar
+        : StarBridgeTooltip(
+            message: AppStrings.of(context).text(presence),
+            child: avatar,
+          );
   }
 }

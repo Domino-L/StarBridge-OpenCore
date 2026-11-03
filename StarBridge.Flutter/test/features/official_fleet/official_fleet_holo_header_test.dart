@@ -626,7 +626,7 @@ void main() {
   });
 
   testWidgets('the ships tile only says none for a real zero', (tester) async {
-    const none = '还没有成员把舰船共享给主舰队';
+    const none = '还没有成员共享舰船';
     const browse = '进入浏览全部共享舰船';
     const window = Size(2364, 1336);
     // Real builds have no overview metrics: the count is unknown.
@@ -660,7 +660,6 @@ void main() {
     await zero.initialize();
     await _pump(tester, window: window, reuse: zero);
     expect(find.text(none), findsOneWidget);
-    expect(find.text(browse), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

@@ -39,14 +39,15 @@ class CommunityShipsOwnerGroups extends StatelessWidget {
 
   static const _tileMinWidth = 168.0, _tileGap = 8.0;
 
-  static String presenceKey(CommunitySharedShip ship) =>
+  static String? presenceKey(CommunitySharedShip ship) =>
       communityShipPresenceKey(ship);
 
-  static int _presenceRank(CommunitySharedShip ship) => const [
+  static int _presenceRank(CommunitySharedShip ship) => const <String?>[
     'presence.inGame',
     'presence.online',
     'presence.away',
     'presence.offline',
+    null,
   ].indexOf(presenceKey(ship));
 
   /// Owners online first, then by name; ships largest first, then by name.
@@ -146,13 +147,15 @@ class CommunityShipsOwnerGroups extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Text(
-                            AppStrings.of(context).text(presence),
-                            style: text.bodySmall?.copyWith(
-                              color: tokens.colors.textSecondary,
+                          if (presence != null) ...[
+                            const SizedBox(width: 10),
+                            Text(
+                              AppStrings.of(context).text(presence),
+                              style: text.bodySmall?.copyWith(
+                                color: tokens.colors.textSecondary,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),

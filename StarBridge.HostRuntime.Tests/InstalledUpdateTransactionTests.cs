@@ -143,6 +143,172 @@ internal static class InstalledUpdateTransactionTests
             }
             Require(File.ReadAllText(fixture.Executable) == "old" && File.ReadAllText(fixture.UserData) == "do-not-touch", "Archival changed installed or user data.");
         }
+        VerifyAbandonedWorkspace();
+    }
+
+    // A real laptop stayed on "could not be prepared" for weeks over one of these.
+    private static void VerifyAbandonedWorkspace()
+    {
+        static InstalledUpdateRegistration NotRead() => throw new Exception("A cache without a journal read the registration.");
+        InstalledUpdatePlan Plan(string installation, string name) => new(1, installation, "0.7.1",
+            Path.Combine(Path.GetDirectoryName(installation)!, "user-data"), 1, 1, 2, 2, name);
+        var name = "installer-" + new string('a', 32) + ".exe";
+        static void Age(string directory) => Directory.SetCreationTimeUtc(directory, DateTime.UtcNow.AddHours(-2));
+        void Cases(string label, Action<Fixture> arrange, bool removed, Action<Fixture>? after = null, bool quietly = false)
+        {
+            using var fixture = new Fixture();
+            File.WriteAllText(Path.Combine(fixture.Root, name), "cached");
+            Age(fixture.Root);
+            arrange(fixture);
+            try {
+                FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, NotRead);
+                Require(removed || quietly, label + ": should have refused.");
+            } catch (IOException) when (!removed && !quietly) { }
+            after?.Invoke(fixture);
+            Require(Directory.Exists(fixture.Root) != removed, label + ": wrong workspace outcome.");
+            Require(File.ReadAllText(fixture.Executable) == "old" && File.ReadAllText(fixture.UserData) == "do-not-touch",
+                label + ": cleanup escaped the workspace.");
+        }
+        Cases("installer only", _ => { }, true);
+        // The real one: a laptop's interrupted download, one partial installer and nothing else,
+        // with and without helper names to compare against.
+        var interrupted = "installer-3baf47e4" + new string('0', 24) + ".exe";
+        void Partial(Fixture fixture)
+        {
+            File.Delete(Path.Combine(fixture.Root, name));
+            File.WriteAllBytes(Path.Combine(fixture.Root, interrupted), new byte[4096]);
+        }
+        Cases("interrupted download, old", Partial, true);
+        Cases("interrupted download, old, with a helper set", fixture => {
+            Partial(fixture);
+            Directory.CreateDirectory(Path.Combine(fixture.Installation, "native_host", "maintenance"));
+            File.WriteAllText(Path.Combine(fixture.Installation, "native_host", "maintenance", "StarBridge.UpdateHelper.exe"), "helper");
+        }, true);
+        Cases("interrupted download, recent", fixture => {
+            Partial(fixture);
+            Directory.SetCreationTimeUtc(fixture.Root, DateTime.UtcNow.AddMinutes(-29));
+        }, false, fixture => Require(File.Exists(Path.Combine(fixture.Root, interrupted)), "A recent download was deleted."), quietly: true);
+        Cases("interrupted download, just past the limit", fixture => {
+            Partial(fixture);
+            Directory.SetCreationTimeUtc(fixture.Root, DateTime.UtcNow.AddMinutes(-31));
+        }, true);
+        Cases("copied helper, no plan", fixture => {
+            Directory.CreateDirectory(Path.Combine(fixture.Installation, "native_host", "maintenance"));
+            File.WriteAllText(Path.Combine(fixture.Installation, "native_host", "maintenance", "StarBridge.UpdateHelper.exe"), "helper");
+            Directory.CreateDirectory(Path.Combine(fixture.Root, "helper"));
+            File.WriteAllText(Path.Combine(fixture.Root, "helper", "StarBridge.UpdateHelper.exe"), "copy");
+            File.WriteAllText(Path.Combine(fixture.Root, "installer-manifest.json"), "{}");
+        }, true);
+        Cases("plan, helper never journaled", fixture =>
+            InstalledUpdateFiles.Write(Path.Combine(fixture.Root, InstalledUpdatePlan.FileName), Plan(fixture.Installation, name)), true);
+        Cases("journal without a plan", fixture => InstalledUpdateFiles.Write(Path.Combine(fixture.Root, "installed-state.json"),
+            new InstalledUpdateTransaction.State(1, fixture.Installation, "0.7.2", new string('A', 64), "prepared")), false);
+        foreach (var kept in new[] { "previous", "failed" })
+            Cases(kept + " without a journal", fixture => {
+                Directory.CreateDirectory(Path.Combine(fixture.Root, kept));
+                File.WriteAllText(Path.Combine(fixture.Root, kept, "starbridge_flutter.exe"), "backup");
+            }, false, fixture => Require(File.ReadAllText(Path.Combine(fixture.Root, kept, "starbridge_flutter.exe")) == "backup", "Backup was touched."));
+        {
+            using var fixture = new Fixture();
+            var other = Path.Combine(Path.GetDirectoryName(fixture.Installation)!, "other-client");
+            InstalledUpdateFiles.Write(Path.Combine(fixture.Root, InstalledUpdatePlan.FileName), Plan(other, name));
+            File.WriteAllText(Path.Combine(fixture.Root, name), "cached");
+            Age(fixture.Root);
+            FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, NotRead);
+            Require(File.Exists(Path.Combine(fixture.Root, InstalledUpdatePlan.FileName)) && File.Exists(Path.Combine(fixture.Root, name)),
+                "Another installation's workspace was removed.");
+        }
+        // Whatever an update attempt does not create keeps the whole folder, and blocks nothing.
+        foreach (var foreign in new[] { "holiday-photo.jpg", "installer-setup.exe", "installer-" + new string('a', 31) + ".exe", "installed-state.json.tmp", "notes.tmp" })
+            Cases("foreign file " + foreign, fixture => File.WriteAllText(Path.Combine(fixture.Root, foreign), "mine"), false,
+                fixture => Require(File.ReadAllText(Path.Combine(fixture.Root, foreign)) == "mine" && File.Exists(Path.Combine(fixture.Root, name)),
+                    "A folder holding a foreign file lost content."), quietly: true);
+        Cases("foreign file only, no installer", fixture => {
+            File.Delete(Path.Combine(fixture.Root, name));
+            File.WriteAllText(Path.Combine(fixture.Root, "document.txt"), "mine");
+        }, false, fixture => Require(File.ReadAllText(Path.Combine(fixture.Root, "document.txt")) == "mine", "A foreign file was deleted."), quietly: true);
+        Cases("foreign folder", fixture => {
+            Directory.CreateDirectory(Path.Combine(fixture.Root, "photos"));
+            File.WriteAllText(Path.Combine(fixture.Root, "photos", "a.jpg"), "mine");
+        }, false, fixture => Require(File.Exists(Path.Combine(fixture.Root, "photos", "a.jpg")), "A foreign folder was deleted."), quietly: true);
+        Cases("foreign file inside helper", fixture => {
+            Directory.CreateDirectory(Path.Combine(fixture.Root, "helper"));
+            File.WriteAllText(Path.Combine(fixture.Root, "helper", "a.jpg"), "mine");
+        }, false, fixture => Require(File.Exists(Path.Combine(fixture.Root, "helper", "a.jpg")), "A foreign file in helper was deleted."), quietly: true);
+        foreach (var mine in new[] { "personal.json", "my-tool.exe", "my-library.dll" })
+            Cases("own file in helper " + mine, fixture => {
+                Directory.CreateDirectory(Path.Combine(fixture.Installation, "native_host", "maintenance"));
+                File.WriteAllText(Path.Combine(fixture.Installation, "native_host", "maintenance", "StarBridge.UpdateHelper.exe"), "helper");
+                Directory.CreateDirectory(Path.Combine(fixture.Root, "helper"));
+                File.WriteAllText(Path.Combine(fixture.Root, "helper", "StarBridge.UpdateHelper.exe"), "copy");
+                File.WriteAllText(Path.Combine(fixture.Root, "helper", mine), "mine");
+            }, false, fixture => Require(File.ReadAllText(Path.Combine(fixture.Root, "helper", mine)) == "mine", "A user file in helper was deleted."), quietly: true);
+        Cases("folder inside helper", fixture => {
+            Directory.CreateDirectory(Path.Combine(fixture.Root, "helper", "deep"));
+            File.WriteAllText(Path.Combine(fixture.Root, "helper", "deep", "a.dll"), "mine");
+        }, false, fixture => Require(File.Exists(Path.Combine(fixture.Root, "helper", "deep", "a.dll")), "A nested helper file was deleted."), quietly: true);
+        Cases("every record an attempt can leave", fixture => {
+            foreach (var record in new[] { "installer-manifest.json", "registration.json", "installed-transaction.lock",
+                "installed-plan.json." + new string('b', 32) + ".tmp", "installed-state.json." + new string('c', 32) + ".tmp" })
+                File.WriteAllText(Path.Combine(fixture.Root, record), "{}");
+        }, true);
+        FileStream? lease = null;
+        Cases("installer leased by a live Host", fixture => lease = new FileStream(Path.Combine(fixture.Root, name), FileMode.Open, FileAccess.Read, FileShare.Read),
+            false, fixture => { Require(File.Exists(Path.Combine(fixture.Root, name)), "Leased installer was deleted."); lease!.Dispose(); }, quietly: true);
+        // Another Host may be mid-download with no installer yet: it stays and blocks nothing.
+        Cases("recent, nothing written yet", fixture => {
+            File.Delete(Path.Combine(fixture.Root, name));
+            Directory.SetCreationTimeUtc(fixture.Root, DateTime.UtcNow);
+        }, false, quietly: true);
+        Semaphore? helper = null;
+        Cases("live helper", fixture => {
+            var id = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fixture.Installation.ToUpperInvariant())));
+            helper = new Semaphore(1, 1, "Local\\StarBridge.InstalledUpdate." + id);
+            Require(helper.WaitOne(0), "Fixture gate was busy.");
+        }, false, _ => { helper!.Release(); helper.Dispose(); });
+        Cases("read-only file", fixture => {
+            var file = Path.Combine(fixture.Root, "installer-manifest.json");
+            File.WriteAllText(file, "{}");
+            File.SetAttributes(file, FileAttributes.ReadOnly);
+        }, false, fixture => {
+            Require(File.Exists(Path.Combine(fixture.Root, name)), "A read-only workspace was partly deleted.");
+            File.SetAttributes(Path.Combine(fixture.Root, "installer-manifest.json"), FileAttributes.Normal);
+        }, quietly: true);
+        // A file that appears after the check is not on the list: it stays, and so does its folder.
+        {
+            using var fixture = new Fixture();
+            var listed = Path.Combine(fixture.Root, name);
+            File.WriteAllText(listed, "cached");
+            var late = Path.Combine(fixture.Root, "arrived-later.jpg");
+            File.WriteAllText(late, "mine");
+            FlutterInstalledUpdateInstallation.RetireListed(fixture.Root, [listed]);
+            Require(!File.Exists(listed) && File.ReadAllText(late) == "mine", "Deletion went beyond the checked list.");
+            File.Delete(late);
+            FlutterInstalledUpdateInstallation.RetireListed(fixture.Root, []);
+            Require(!Directory.Exists(fixture.Root), "An emptied workspace stayed.");
+        }
+        // A junction inside must refuse before anything goes, and its target must survive.
+        {
+            using var fixture = new Fixture();
+            File.WriteAllText(Path.Combine(fixture.Root, name), "cached");
+            var outside = Path.Combine(Path.GetDirectoryName(fixture.Installation)!, "outside");
+            Directory.CreateDirectory(outside);
+            File.WriteAllText(Path.Combine(outside, "kept.txt"), "kept");
+            var link = Path.Combine(fixture.Root, "helper");
+            Age(fixture.Root);
+            using (var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe") {
+                ArgumentList = { "/c", "mklink", "/J", link, outside }, UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true })!) {
+                make.WaitForExit();
+                Require(make.ExitCode == 0, "Fixture junction was not created.");
+            }
+            try {
+                try { FlutterInstalledUpdateInstallation.PruneCompleted(fixture.Installation, NotRead); throw new Exception("A junction inside was accepted."); }
+                catch (IOException) { }
+                Require(File.ReadAllText(Path.Combine(outside, "kept.txt")) == "kept" && File.Exists(Path.Combine(fixture.Root, name)),
+                    "A refused workspace lost files.");
+            } finally { Directory.Delete(link, false); } // Remove the link alone before the fixture's recursive delete.
+        }
     }
 
     private static void Require(bool value, string error) { if (!value) throw new Exception(error); }

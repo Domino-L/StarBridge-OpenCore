@@ -42,6 +42,7 @@ import '../communities/community_ships_port.dart';
 import '../communities/community_hangar_sharing_dialog.dart';
 import '../communities/community_ships_copy.dart';
 import '../common/organization_hangar_sharing.dart';
+import 'official_fleet_ship_count.dart';
 import 'unavailable_official_fleet_shared_ships.dart';
 import 'official_fleet_ship_owner_access.dart';
 import '../communities/community_ship_avatar_access.dart';
@@ -221,12 +222,15 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
   OfficialFleetWorkspaceSection? _lastVisited;
   double _pan = 0;
   final _openingWebsite = ValueNotifier(false);
+  final _shipCount = OfficialFleetShipCount();
+  late final _railChanges = Listenable.merge([widget.module.rally, _shipCount]);
   StarBridgeDialogRoute<void>? _detailsRoute;
 
   @override
   void dispose() {
     retireStarBridgeDialog(_detailsRoute);
     _openingWebsite.dispose();
+    _shipCount.dispose();
     super.dispose();
   }
 
@@ -437,7 +441,7 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
                   >(
                     valueListenable: widget.module.members.projection,
                     builder: (context, members, _) => ListenableBuilder(
-                      listenable: widget.module.rally,
+                      listenable: _railChanges,
                       builder: (context, _) => _sectionRail(
                         context,
                         overview,
@@ -651,6 +655,8 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
       isOwner: widget.module.rally.eligibility.canStart,
       rally: widget.module.rally,
       chatTileOnScreen: !_detail,
+      shipCount: _shipCount,
+      shipsPort: widget.sharedShipsPort,
     ),
   );
 
@@ -658,15 +664,6 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
   void didUpdateWidget(covariant _FleetWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.section != widget.section) _bodyAtTop = true;
-  }
-
-  // The same RSI count as the bar: the overview's when available, else the
-  // public profile's.
-  int? _officialMemberCount(OfficialFleetSummary fleet) {
-    final overview = widget.module.overview.projection.value;
-    return overview.availability == OfficialFleetOverviewAvailability.available
-        ? overview.metrics?.officialMemberCount ?? fleet.profile?.memberCount
-        : fleet.profile?.memberCount;
   }
 
   void _toMembers() =>
@@ -761,7 +758,7 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
                 sourceRef: fleet.sourceRef,
                 module: widget.module.members,
                 retained: widget.projection.refreshFailed,
-                officialMemberCount: _officialMemberCount(fleet),
+                officialMemberCount: fleetRsiMemberCount(widget.module, fleet),
               ),
               padding: const EdgeInsetsDirectional.only(end: 16),
             ),

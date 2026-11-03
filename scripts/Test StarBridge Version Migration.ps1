@@ -2,7 +2,11 @@
 param(
     [string]$Root = "",
     [string]$ExpectedVersion = "",
-    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3", "0.5.0", "0.5.1")
+    [string[]]$LegacyPublicTestVersions = @("0.4.8.2", "0.4.8.3", "0.5.0", "0.5.1"),
+    # Before signing: version sources and the release record only. The default
+    # full check also needs the download docs and website, so it runs before the
+    # public push, once they carry the signed installer's identity.
+    [switch]$SourceOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +65,9 @@ function Assert-CurrentReleaseSurface {
     }
 
     $text = [IO.File]::ReadAllText($fullPath)
+    if ($text.IndexOf([string][char]0x3010 + [char]0x53D1 + [char]0x5E03 + [char]0x65F6, [StringComparison]::Ordinal) -ge 0) {
+        throw "Current release surface '$RelativePath' still has a value to fill at release."
+    }
     if ($text.IndexOf($CurrentVersion, [StringComparison]::Ordinal) -lt 0) {
         throw "Current release surface '$RelativePath' does not mention version $CurrentVersion."
     }
@@ -77,12 +84,16 @@ $isPrivateProductTree = Test-Path -LiteralPath $privatePublicRoot -PathType Cont
 if ($isPrivateProductTree) {
     $publicBuildPropsPath = Join-Path $privatePublicRoot "Directory.Build.props"
     [xml]$publicBuildProps = Get-Content -LiteralPath $publicBuildPropsPath -Raw -Encoding UTF8
+    $publicVersion = [string]$publicBuildProps.SelectSingleNode("/Project/PropertyGroup/StarBridgeVersion").InnerText
+    if ($publicVersion.Trim() -ne $authoredVersion) {
+        throw "open-core/Directory.Build.props StarBridgeVersion '$publicVersion' does not match $authoredVersion."
+    }
     foreach ($propertyName in @("Version", "FileVersion", "AssemblyVersion")) {
         $propertyNode = $publicBuildProps.SelectSingleNode("/Project/PropertyGroup/$propertyName")
         if ($null -eq $propertyNode) {
             throw "open-core/Directory.Build.props is missing $propertyName."
         }
-        $value = [string]$propertyNode.InnerText
+        $value = ([string]$propertyNode.InnerText).Replace('$(StarBridgeVersion)', $publicVersion)
         if ($value.Trim() -ne $authoredVersion) {
             throw "open-core/Directory.Build.props $propertyName '$value' does not match $authoredVersion."
         }
@@ -109,6 +120,11 @@ else {
         "THIRD-PARTY-MEDIA-NOTICE.md",
         ".github/ISSUE_TEMPLATE/bug-report.yml"
     )
+}
+
+if ($SourceOnly) {
+    Write-Host "Version source checks passed for StarBridge $authoredVersion; download docs and website are checked before the public push."
+    return
 }
 
 foreach ($relativePath in $currentReleaseSurfaces) {

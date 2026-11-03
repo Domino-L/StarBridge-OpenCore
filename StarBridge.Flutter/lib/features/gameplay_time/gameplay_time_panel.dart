@@ -166,6 +166,8 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
           ? 'unsupported'
           : error == 'visibilityUnconfirmed'
           ? 'visibilityError'
+          : error == 'identityUnconfirmed'
+          ? 'identityError'
           : error == 'stopUnconfirmed' ||
                 error != null && state.consent == 'declined'
           ? 'stopError'

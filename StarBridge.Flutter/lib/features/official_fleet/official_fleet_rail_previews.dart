@@ -8,12 +8,17 @@ import 'official_fleet_command_row.dart';
 import 'official_fleet_member_views.dart';
 import 'official_fleet_members_models.dart';
 import 'official_fleet_models.dart';
+import 'official_fleet_module.dart' show OfficialFleetModule;
 import 'official_fleet_overview_models.dart';
 import 'official_fleet_rally.dart';
 import 'official_fleet_section_rail.dart';
 import '../common/organization_communication.dart';
 import '../communities/community_settings_workspace.dart'
     show communitySettingsText;
+import '../communities/community_ships_copy.dart' show communityShipsCulture;
+import '../communities/community_ships_port.dart';
+import '../communities/community_workspace_copy.dart' show workspaceText;
+import 'official_fleet_ship_count.dart';
 
 /// Whether the activity section has anything real to show this viewer.
 bool officialFleetActivityAvailable(
@@ -23,6 +28,15 @@ bool officialFleetActivityAvailable(
     communication.announcementsAvailable ||
     rally.canStart ||
     rally.current?.activeAt(rally.now()) == true;
+
+/// The RSI member count the bar shows: the overview's when available, else
+/// the public profile's.
+int? fleetRsiMemberCount(OfficialFleetModule module, OfficialFleetSummary fleet) {
+  final overview = module.overview.projection.value;
+  return overview.availability == OfficialFleetOverviewAvailability.available
+      ? overview.metrics?.officialMemberCount ?? fleet.profile?.memberCount
+      : fleet.profile?.memberCount;
+}
 
 /// Previews for the top screen's tall section tiles (user decision
 /// 2026-10-22). Only data the page already holds; a section without any
@@ -209,6 +223,8 @@ abstract final class OfficialFleetRailPreviews {
     required bool isOwner,
     required OfficialFleetRallyController rally,
     required bool chatTileOnScreen,
+    required OfficialFleetShipCount shipCount,
+    required CommunityShipsPort? shipsPort,
   }) {
     final strings = AppStrings.of(context);
     String t(String key) => strings.text(key);
@@ -220,6 +236,16 @@ abstract final class OfficialFleetRailPreviews {
         ? rally.current
         : null;
     final owner = isOwner;
+    if (TickerMode.valuesOf(context).enabled) {
+      shipCount.load(
+        shipsPort,
+        communication.verifiedWorkspaceTargetRef,
+        communityShipsCulture(context),
+      );
+    } else {
+      shipCount.left();
+    }
+    final ships = shipCount.count ?? metrics?.sharedRequestableShipCount;
     return [
       OfficialFleetRailItem(
         section: OfficialFleetWorkspaceSection.members,
@@ -262,17 +288,20 @@ abstract final class OfficialFleetRailPreviews {
       OfficialFleetRailItem(
         section: OfficialFleetWorkspaceSection.ships,
         label: t('officialFleet.tab.ships'),
-        summary: metrics == null
-            ? t('officialFleet.rail.shipsNone')
-            : t(
-                'officialFleet.rail.ships',
-              ).replaceAll('{count}', '${metrics.sharedRequestableShipCount}'),
-        // No metrics means the count is unknown, which is not the same as none.
-        note: t(
-          metrics?.sharedRequestableShipCount == 0
-              ? 'officialFleet.tile.shipsNone'
-              : 'officialFleet.tile.shipsNote',
-        ),
+        // The same words as a community tile, in the same order.
+        summary: ships == 0
+            ? workspaceText(context, 'holo.shipsNone')
+            : ships != null
+            ? workspaceText(
+                context,
+                'holo.ships',
+              ).replaceAll('{count}', '$ships')
+            : shipCount.reading
+            ? workspaceText(context, 'holo.shipsLoading')
+            : shipCount.failed
+            ? workspaceText(context, 'holo.shipsFailed')
+            : t('officialFleet.rail.shipsNone'),
+        note: t('officialFleet.tile.shipsNote'),
       ),
       OfficialFleetRailItem(
         section: OfficialFleetWorkspaceSection.broadcasts,

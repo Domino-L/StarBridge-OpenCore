@@ -25,7 +25,10 @@ class CommunityShipStatistics implements CommunityFleetSummary {
           mostValuable = ship;
         }
       }
-      if (!ship.ownerOnline) {
+      if (!ship.ownerPresenceKnown) {
+        // Nothing is known about this owner; not a negative either.
+        availabilityUnknown++;
+      } else if (!ship.ownerOnline) {
         ownerOffline++;
       } else if (flyable(ship) ||
           concept(ship) &&

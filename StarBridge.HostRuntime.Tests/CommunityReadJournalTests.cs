@@ -13,6 +13,10 @@ internal static class CommunityReadJournalTests
             journal.Record("bridge", "secret-token\nprivate-account", 999, -1);
             journal.Record("publication-gate", "cancelled", null, 12000);
             journal.Record("workspace-http", "http-error", 403, 2);
+            journal.Record("official-ships-http", "http-error", 403, 2);
+            journal.Record("official-ships-host", "ships-identity-compare", null, 0);
+            journal.Record("official-ships-host", "communities.dataInvalid", null, 0);
+            journal.Record("official-ships-host", "secret-owner-name", null, 0);
             journal.Record("workspace-media-http", "http-error", 403, 1);
             journal.Record("chat-read-receipt", "cursor-mismatch", 200, 5);
             journal.Record("chat-read-receipt", "secret-channel-and-message", 200, 1);
@@ -35,6 +39,10 @@ internal static class CommunityReadJournalTests
             var content = File.ReadAllText(path);
             foreach (var stage in new[] { "workspace-membership-http", "workspace-snapshot-http", "workspace-session-http" })
                 Check(content.Contains($"stage={stage} code=http-error status=403"), "legacy route diagnostics are allowlisted");
+            Check(content.Contains("stage=official-ships-http code=http-error status=403") &&
+                content.Contains("stage=official-ships-host code=ships-identity-compare") &&
+                content.Contains("stage=official-ships-host code=communities.dataInvalid") &&
+                !content.Contains("secret-owner-name"), "main fleet ship reads record fixed step and error names only");
             Check(content.Contains("stage=workspace-http code=http-error status=403") &&
                 content.Contains("stage=workspace-media-http code=http-error status=403"), "route classes survive strict local filtering");
             Check(content.Contains("stage=relay code=privacy_publication.identity_unavailable status=401"), "HTTP status and mapped error");

@@ -16,7 +16,7 @@ internal sealed class CommunityReadJournal(string root)
         string? mismatchField = null)
     {
         if (stage is not ("bridge" or "relay" or "workspace-http" or "workspace-media-http" or "workspace-membership-http" or "workspace-snapshot-http" or "workspace-session-http" or "publication-gate" or "publication-identity" or "publication-send" or "publication-http" or "account-gate-event-read" or "account-gate-event-write" or "chat-read-receipt" or
-            "official-members" or "official-runtime-members" or "official-hangar-entry" or "official-governance-activation" or
+            "official-ships-http" or "official-ships-host" or "official-members" or "official-runtime-members" or "official-hangar-entry" or "official-governance-activation" or
             "official-announcements" or "official-announcement-detail" or "official-announcement-editor" or
             "official-hangar-current-http" or "official-hangar-current-parse" or "official-hangar-intents-http" or
             "official-hangar-intents-parse" or "official-hangar-project" or "official-hangar-shape" or "publication-receipt" or
@@ -41,6 +41,8 @@ internal sealed class CommunityReadJournal(string root)
                 "notAllowed" or "conflict" or "storageLimitReached" or "operationOutcomeUnknown" or "outcomeUnknown" => code,
             "ok" or "cancelled" or "network" or "http-error" or "account.reauthorization_required" or "parse-failed" or "not-found" => code,
             "communities.dataInvalid" or "communities.refreshRequired" or "communities.unavailable" or "communities.identityUnavailable" => code,
+            "ships-descriptor" or "ships-page" or "ships-lookups" or "ships-identity-read" or "ships-identity-compare" or "ships-binding" or
+            "ships-project" or "ships-timeout" or "communities.notAllowed" or "communities.mediaChanged" => code,
             "accepted" or "reference-expired" or "body-too-large" or "cursor-mismatch" or "invalid-response" or "account-changed" => code,
             "scm_business_identity_unavailable" or "scm_identity_unavailable" or "legacy_account_missing" => code,
             "privacy_publication.account_changed" or "privacy_publication.identity_unavailable" or

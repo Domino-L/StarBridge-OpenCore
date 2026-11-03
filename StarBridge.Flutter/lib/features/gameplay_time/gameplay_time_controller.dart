@@ -139,6 +139,7 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
   bool _cancelHistoryRequested = false;
   bool get historyScanSupported =>
       _session.hostCapabilities.contains('gameplayTime.historyProgress');
+  static const _identityUnconfirmedCode = 'gameplay.account_changed';
   static const _historyStates = {
     'unchecked',
     'available',
@@ -393,9 +394,11 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
             ? 'stopUnconfirmed'
             : _pendingVisibility != null && body['error'] == null
             ? 'visibilityUnconfirmed'
+            : body['error'] == _identityUnconfirmedCode
+            ? 'identityUnconfirmed'
             : body['error'] as String?,
       );
-    } on Object {
+    } on Object catch (failure) {
       if (_current(epoch)) {
         value = value.copyWith(
           recording: false,
@@ -404,6 +407,9 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
               ? 'stopUnconfirmed'
               : _pendingVisibility != null
               ? 'visibilityUnconfirmed'
+              : failure is BridgeRemoteException &&
+                    failure.code == _identityUnconfirmedCode
+              ? 'identityUnconfirmed'
               : 'unavailable',
         );
       }

@@ -87,6 +87,7 @@ internal static class FlutterUpdateBridgeTests
             new { schemaVersion = 1, version = "0.6.7", path = "untrusted" });
         if ((await routed.DispatchAsync(injected)).Response.Status != "error") throw new Exception("Installation accepted UI path.");
         await VerifyProgress();
+        await VerifyHandoffBehindNetworkGate();
         InstalledUpdateVersionMismatchException.RequireMatch("0.7.0.4+4", "0.7.0.4");
         using var mismatched = new FlutterUpdateBridgeDispatcher(null, () => "0.7.0.4", () => 1,
             installation: new FlutterUpdateInstallation((_, _) => {
@@ -99,6 +100,31 @@ internal static class FlutterUpdateBridgeTests
         if (mismatchReply.Status != "error" || mismatchReply.Error?.Code != InstalledUpdateVersionMismatchException.Code ||
             mismatchReply.Error.Retryable || mismatchReply.Error.Message != "Installed version verification failed.")
             throw new Exception("Installation mismatch lost its safe actionable error code.");
+    }
+    // The real Host always passes a network gate. 0.7.1 and 0.7.2 shipped with every
+    // in-app update refused here, because only ungated dispatchers were tested.
+    private static async Task VerifyHandoffBehindNetworkGate()
+    {
+        var allowed = true;
+        var handoffs = 0;
+        var network = new StarBridge.HostRuntime.Lifecycle.DeviceNetworkAdmission(() => allowed);
+        using var gated = new FlutterUpdateBridgeDispatcher(null, () => "0.7.2", () => 1,
+            installation: new FlutterUpdateInstallation(
+                (string version, CancellationToken token) => Task.FromResult("installer.exe"),
+                (string artifact, CancellationToken token) => { handoffs++; return Task.CompletedTask; }),
+            network: network);
+        async Task<BridgeEnvelope> Send(string name, object payload) => (await gated.DispatchAsync(
+            BridgeEnvelope.Request(name, Guid.NewGuid().ToString("N"), 1, payload))).Response;
+        var prepared = await Send(FlutterUpdateBridgeDispatcher.PrepareRequestName, new { schemaVersion = 1, version = "0.7.3" });
+        if (prepared.Status != "ok") throw new Exception("Gated prepare failed.");
+        var ticket = prepared.Payload.GetProperty("ticket").GetString();
+        var handoff = await Send(FlutterUpdateBridgeDispatcher.HandoffRequestName, new { schemaVersion = 1, ticket });
+        if (handoff.Status != "ok" || handoffs != 1) throw new Exception("A prepared update could not hand off behind the network gate.");
+        // Downloading stays gated; only the local handoff outlives the request.
+        allowed = false;
+        var closed = await Send(FlutterUpdateBridgeDispatcher.PrepareRequestName, new { schemaVersion = 1, version = "0.7.3" });
+        if (closed.Status != "error" || handoffs != 1) throw new Exception("Prepare ignored the closed network gate.");
+        Console.WriteLine("SUMMARY UPDATEHANDOFF passed=1 failed=0");
     }
     private static async Task VerifyProgress()
     {

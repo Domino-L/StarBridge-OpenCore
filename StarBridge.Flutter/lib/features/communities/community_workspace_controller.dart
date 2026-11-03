@@ -53,6 +53,7 @@ final class CommunityWorkspaceController extends ChangeNotifier {
     if (_closed ||
         _shipSummaryRead != null ||
         shipSummary != null ||
+        shipSummaryFailed ||
         source is! CommunityShipsPort ||
         !(source as CommunityShipsPort).shipsAvailable) {
       return;
@@ -551,6 +552,8 @@ final class CommunityWorkspaceController extends ChangeNotifier {
       _deferredMedia = prepareMediaOnly && !_mediaRequestedByView;
       _recoveryAttempt = 0;
       busy = false;
+      // A refresh that worked earns the ship summary one more read.
+      shipSummaryFailed = false;
       notifyListeners();
       await _loadImages(result, mediaEpoch, retryImages);
     } catch (e) {

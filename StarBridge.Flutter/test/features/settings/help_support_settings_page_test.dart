@@ -336,6 +336,9 @@ void main() {
       expect(body, contains('Alt+M'));
       expect(body, contains('AttachThreadInput'));
     }
+    expect(helpSupportZhCn['help.legal.safety.body'], contains('程序路径'));
+    expect(helpSupportZhTw['help.legal.safety.body'], contains('程式路徑'));
+    expect(helpSupportEnUs['help.legal.safety.body'], contains('program path'));
   });
 
   testWidgets(

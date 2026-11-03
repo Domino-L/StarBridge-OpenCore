@@ -329,12 +329,13 @@ class CommunitySharedShipRow extends StatelessWidget {
                 '$owner${ship.ownerIsSelf ? ' · ${t('self')}' : ''}',
                 bold: true,
               ),
-              line(
-                ship.ownerGameName.isNotEmpty && ship.ownerGameName != owner
-                    ? ship.ownerGameName
-                    : AppStrings.of(context).text(presenceKey),
-                color: colors.textSecondary,
-              ),
+              if (ship.ownerGameName.isNotEmpty && ship.ownerGameName != owner)
+                line(ship.ownerGameName, color: colors.textSecondary)
+              else if (presenceKey != null)
+                line(
+                  AppStrings.of(context).text(presenceKey),
+                  color: colors.textSecondary,
+                ),
             ],
           ),
         ),

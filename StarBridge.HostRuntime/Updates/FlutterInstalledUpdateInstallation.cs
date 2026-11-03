@@ -18,6 +18,8 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
     private bool _handedOff, _disposed;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _work = new(1, 1);
+    // Three times the ten-minute limit on preparing an update.
+    private static readonly TimeSpan AbandonedAfter = TimeSpan.FromMinutes(30);
     public FlutterUpdateInstallation Installation { get; }
 
     private FlutterInstalledUpdateInstallation(FlutterInstallerUpdateSource source, InstalledUpdateRegistration registration,
@@ -139,10 +141,19 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
         foreach (var directory in Directory.EnumerateDirectories(Path.GetDirectoryName(installation)!, InstalledUpdateFiles.Prefix + "*")) {
             InstalledUpdateFiles.RequireSibling(installation, directory);
             var planPath = Path.Combine(directory, InstalledUpdatePlan.FileName);
-            if (!File.Exists(planPath)) throw new IOException("An incomplete update workspace needs inspection.");
-            var plan = InstalledUpdateFiles.Read<InstalledUpdatePlan>(planPath, 16384); plan.Validate(directory);
-            if (!InstalledUpdateRegistration.Same(plan.Installation, installation)) continue;
-            var state = InstalledUpdateFiles.Read<InstalledUpdateTransaction.State>(Path.Combine(directory, "installed-state.json"), 8192);
+            var statePath = Path.Combine(directory, "installed-state.json");
+            var hasPlan = File.Exists(planPath);
+            if (hasPlan) {
+                InstalledUpdatePlan owner;
+                try { owner = InstalledUpdateFiles.Read<InstalledUpdatePlan>(planPath, 16384); }
+                catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException) { continue; } // Another installation's cleanup got there first.
+                owner.Validate(directory);
+                if (!InstalledUpdateRegistration.Same(owner.Installation, installation)) continue;
+            }
+            if (!File.Exists(statePath)) { RetireAbandoned(installation, directory); continue; }
+            if (!hasPlan) throw new IOException("An incomplete update workspace needs inspection.");
+            var plan = InstalledUpdateFiles.Read<InstalledUpdatePlan>(planPath, 16384);
+            var state = InstalledUpdateFiles.Read<InstalledUpdateTransaction.State>(statePath, 8192);
             var current = (readRegistration ?? InstalledUpdateRegistration.Read)();
             current.RequireShape();
             if (!InstalledUpdateRegistration.Same(current.Directory, installation) ||
@@ -174,6 +185,81 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
             using var idle = AcquireGate(installation, "");
             DeleteOwnedWorkspace(installation, directory);
         }
+    }
+
+    // The helper journals before it touches the installation, so a workspace with no
+    // journal is a download cache a stopped Host left behind. Left in place it would
+    // refuse every later update. Its name and age prove nothing about who owns it, so
+    // anything an update attempt does not create, a recent workspace or a leased
+    // installer keeps it, and blocks nothing. The gate refuses while a helper runs.
+    private static void RetireAbandoned(string installation, string directory)
+    {
+        try {
+            if (Directory.Exists(Path.Combine(directory, "previous")) || Directory.Exists(Path.Combine(directory, "failed")))
+                throw new IOException("An incomplete update workspace needs inspection.");
+            var listed = UpdateCacheFiles(installation, directory);
+            if (listed is null || DateTime.UtcNow - Directory.GetCreationTimeUtc(directory) < AbandonedAfter) return;
+            using var idle = AcquireGate(installation, "");
+            foreach (var file in listed.Where(file => Path.GetFileName(file).StartsWith("installer-", StringComparison.Ordinal) && file.EndsWith(".exe", StringComparison.Ordinal))) {
+                try { using var unleased = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None); }
+                catch (IOException) { return; }
+            }
+            RetireListed(directory, listed);
+        }
+        catch (DirectoryNotFoundException) { } // Another installation's cleanup got there first.
+    }
+
+    // Deletes only what was checked. Anything added since stays, and so does its folder.
+    internal static void RetireListed(string directory, IReadOnlyList<string> listed)
+    {
+        try {
+            foreach (var file in listed)
+                if (File.Exists(file) && (File.GetAttributes(file) & FileAttributes.ReadOnly) != 0) return;
+            foreach (var file in listed) { InstalledUpdateFiles.Plain(file); File.Delete(file); }
+            var helper = Path.Combine(directory, "helper");
+            if (Directory.Exists(helper)) { InstalledUpdateFiles.Plain(helper); Directory.Delete(helper, recursive: false); }
+            Directory.Delete(directory, recursive: false);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static readonly string[] AttemptRecords = [InstalledUpdatePlan.FileName, "installer-manifest.json", "registration.json", "installed-state.json"];
+
+    // Exactly what StageAsync, HandoffAsync and the helper's first steps can leave, or
+    // null if anything else is there. Helper files must carry this installation's own
+    // helper file names. Records go last, so a partial delete is still recognized.
+    private static List<string>? UpdateCacheFiles(string installation, string directory)
+    {
+        static bool Guid32(string value) => Guid.TryParseExact(value, "N", out _);
+        var maintenance = Path.Combine(installation, "native_host", "maintenance");
+        var helperNames = Directory.Exists(maintenance)
+            ? Directory.EnumerateFiles(maintenance).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+        var first = new List<string>();
+        var last = new List<string>();
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory)) {
+            InstalledUpdateFiles.Plain(entry);
+            var name = Path.GetFileName(entry);
+            if (Directory.Exists(entry)) {
+                if (name != "helper") return null;
+                foreach (var item in Directory.GetFileSystemEntries(entry)) {
+                    InstalledUpdateFiles.Plain(item);
+                    if (!File.Exists(item) || !helperNames.Contains(Path.GetFileName(item))) return null;
+                    first.Add(item);
+                }
+                continue;
+            }
+            var installer = name.StartsWith("installer-", StringComparison.Ordinal) && name.EndsWith(".exe", StringComparison.Ordinal) &&
+                Guid32(name["installer-".Length..^".exe".Length]);
+            var temporary = name.EndsWith(".tmp", StringComparison.Ordinal) && name.Length > 37 && name[^37] == '.' &&
+                Guid32(name[^36..^4]) && AttemptRecords.Contains(name[..^37]);
+            if (installer) first.Add(entry);
+            else if (temporary || name == "installed-transaction.lock" || (name != "installed-state.json" && AttemptRecords.Contains(name))) last.Add(entry);
+            else return null;
+        }
+        first.AddRange(last);
+        return first;
     }
 
     internal static void DeleteOwnedWorkspace(string installation, string root)

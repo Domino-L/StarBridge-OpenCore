@@ -244,6 +244,7 @@ internal sealed partial class CommunityClient
             "/api/fleets/membership" => "workspace-membership-http",
             "/api/fleets" => "workspace-snapshot-http",
             "/api/auth/session" => "workspace-session-http",
+            "/api/official-fleets/ships" => "official-ships-http",
             _ => null
         };
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));

@@ -76,12 +76,34 @@ class Harness {
   final holdNames = <String>{};
   final wrongContext = <String, String>{};
   String? error;
+  String? remoteError;
   int seconds = 0;
   bool hold = false;
   bool wrongOwner = false;
   BridgeEnvelope? held;
 
   void respond(BridgeEnvelope r) {
+    if (remoteError != null && r.name.startsWith('gameplayTime.')) {
+      unawaited(
+        pair.host.send(
+          BridgeEnvelope(
+            protocolVersion: 1,
+            messageType: 'response',
+            name: r.name,
+            correlationId: r.correlationId,
+            sessionGeneration: r.sessionGeneration,
+            status: 'error',
+            payload: const {},
+            error: BridgeErrorBody(
+              code: remoteError!,
+              message: 'fixture',
+              retryable: false,
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     if (r.name == 'gameplayTime.setConsent') {
       consent = r.payload['allowed'] == true ? 'allowed' : 'declined';
     }
@@ -516,6 +538,91 @@ void main() {
   );
 
   for (final locale in AppStrings.supportedLocales) {
+    testWidgets(
+      'a lost identity is told apart from a read failure in $locale',
+      (tester) async {
+        final h = Harness();
+        await tester.pump();
+        await tester.binding.setSurfaceSize(const Size(1100, 900));
+        await tester.pumpWidget(
+          app(
+            SizedBox(
+              height: 850,
+              child: GeneralSettingsPage(
+                preferences: InMemoryAppPreferences(),
+                gameplayTime: h.controller,
+              ),
+            ),
+            locale: locale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final copy = AppStrings.resolve(locale);
+        final identity = copy.text('gameplay.identityError');
+        final read = copy.text('gameplay.readError');
+        expect(identity, isNot('gameplay.identityError'));
+        // The Host refuses the request, as the cold identity gate does.
+        h.remoteError = 'gameplay.account_changed';
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(h.controller.value.error, 'identityUnconfirmed');
+        expect(find.text(identity), findsOneWidget);
+        expect(find.text(read), findsNothing);
+        // Reported inside a normal response.
+        h.remoteError = null;
+        h.error = 'gameplay.account_changed';
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(h.controller.value.error, 'identityUnconfirmed');
+        expect(find.text(identity), findsOneWidget);
+        // Any other refusal keeps the read wording.
+        h.error = null;
+        h.remoteError = 'gameplay.read_failed';
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(h.controller.value.error, 'unavailable');
+        expect(find.text(read), findsOneWidget);
+        expect(find.text(identity), findsNothing);
+        expect(tester.takeException(), isNull);
+        h.remoteError = null;
+        await tester.pumpWidget(const SizedBox());
+        await h.close(tester);
+        await tester.binding.setSurfaceSize(null);
+      },
+    );
+    testWidgets('a finished stop is not reported as unsaved in $locale', (
+      tester,
+    ) async {
+      final h = Harness(consent: 'declined');
+      await tester.pump();
+      await tester.binding.setSurfaceSize(const Size(1100, 900));
+      await tester.pumpWidget(
+        app(
+          SizedBox(
+            height: 850,
+            child: GeneralSettingsPage(
+              preferences: InMemoryAppPreferences(),
+              gameplayTime: h.controller,
+            ),
+          ),
+          locale: locale,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final copy = AppStrings.resolve(locale);
+      expect(h.controller.value.consent, 'declined');
+      h.remoteError = 'gameplay.account_changed';
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(h.controller.value.consent, 'declined');
+      expect(find.text(copy.text('gameplay.identityError')), findsOneWidget);
+      expect(find.text(copy.text('gameplay.stopError')), findsNothing);
+      expect(tester.takeException(), isNull);
+      h.remoteError = null;
+      await tester.pumpWidget(const SizedBox());
+      await h.close(tester);
+      await tester.binding.setSurfaceSize(null);
+    });
     for (final width in [360.0, 1100.0]) {
       testWidgets(
         'recording panel respects $locale at width $width and enlarged text',

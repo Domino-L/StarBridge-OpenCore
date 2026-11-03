@@ -664,6 +664,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the ships tile shows the shared total from one read', (
+    tester,
+  ) async {
+    final port = _SharedShips();
+    await _pumpFleetShell(tester, sharedShips: port);
+    await tester.tap(find.byKey(const ValueKey('/fleet')));
+    await tester.pumpAndSettle();
+    expect(find.text('共享 3 艘'), findsOneWidget);
+    expect(find.text('还没有成员共享舰船'), findsNothing);
+    expect(port.targets, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
   for (final width in [760.0, 1280.0]) {
     testWidgets(
       'official ships reuse community fields at $width with actual verified workspace address',

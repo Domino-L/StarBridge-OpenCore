@@ -80,8 +80,10 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
                     }
                     FlutterUpdatePrepared prepared;
                     try {
+                        // This check runs again at handoff, after the request's network lease has
+                        // ended; the handoff itself uses no network. The lease is checked below.
                         prepared = await installation.PrepareAsync(value,
-                            () => !_disposed && request.SessionGeneration == generation() && networkWork?.IsCurrent != false, cancellationToken, Progress);
+                            () => !_disposed && request.SessionGeneration == generation(), cancellationToken, Progress);
                     }
                     finally { active = false; }
                     networkWork?.RequireCurrent();

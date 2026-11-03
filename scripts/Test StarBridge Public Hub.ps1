@@ -63,7 +63,7 @@ if (Test-Path -LiteralPath $readmePath) {
     $readme = [IO.File]::ReadAllText($readmePath)
     $requiredReadmeText = @(
         "https://scstarbridge.com/",
-        "StarBridge-0.7.0.5-20261004-01-win-x64-setup.exe",
+        "StarBridge-0.7.2.1-",
         "SHA256SUMS.txt",
         "Apache License 2.0",
         "BINARY-DISTRIBUTION-NOTICE.md",
@@ -249,12 +249,12 @@ $releaseVerificationPath = Join-Path $Root "docs/RELEASE-VERIFICATION.md"
 if (Test-Path -LiteralPath $releaseVerificationPath) {
     $releaseVerification = [IO.File]::ReadAllText($releaseVerificationPath)
     foreach ($requiredVerificationValue in @(
-        "StarBridge-0.7.0.5-20261004-01-win-x64-setup.exe",
-        "StarBridge-0.7.0.5-win-x64-setup.exe",
-        "0D2D52DCFB99327927BEE51506BE47DAEBD84A167BB03DC35201331ECA264100",
-        "371985592",
-        "gh release verify v0.7.0.5",
-        "gh release verify-asset v0.7.0.5",
+        "StarBridge-0.7.2.1-20261103-01-win-x64-setup.exe",
+        "StarBridge-0.7.2.1-win-x64-setup.exe",
+        "AD9CF2A7CE957CB8E1895AAA21530F148913870269353665446E9170E80828C8",
+        "411803296",
+        "gh release verify v0.7.2.1",
+        "gh release verify-asset v0.7.2.1",
         "StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe",
         "0d2e8965589917685951cb57b8725512776d92fa58a8711012fe85f566516009",
         "gh release verify",

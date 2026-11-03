@@ -133,6 +133,12 @@ final class CommunitySharedShip {
       ownerCallsign,
       ownerLiveStatus;
   final bool ownerOnline, ownerIsSelf, ownerHasAvatar, hasCustomImage;
+
+  /// Main fleet ships carry no owner presence: not online, status Unknown.
+  /// That is not the same as offline. Communities always send a real status.
+  bool get ownerPresenceKnown =>
+      ownerOnline || ownerLiveStatus.toLowerCase() != 'unknown';
+
   final String? imageVersion;
   final String? englishName, manufacturer;
   String? subtitleFor(String languageCode) {

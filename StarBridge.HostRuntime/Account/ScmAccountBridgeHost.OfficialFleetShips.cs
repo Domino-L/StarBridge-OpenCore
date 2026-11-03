@@ -18,7 +18,12 @@ internal sealed partial class ScmAccountBridgeHost
         var descriptor = Volatile.Read(ref _fleetPublicSource);
         var sourceRef = body.GetProperty("sourceRef").GetString();
         if (descriptor is null || descriptor.Owner != context || descriptor.Generation != generation || descriptor.SourceRef != sourceRef)
+        {
+            RecordOfficialDiagnostic("official-ships-host", "ships-descriptor", null, 0);
             throw new AccountBridgeHostException("communities.identityUnavailable");
+        }
+        // Where a failed read stopped, as a fixed name. Nothing from the response is recorded.
+        var step = "ships-page";
         var session = RequireRelaySession(context);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var scope = FriendScope(context, generation) + "|" + sourceRef;
@@ -40,6 +45,7 @@ internal sealed partial class ScmAccountBridgeHost
         async Task<IReadOnlyDictionary<string, CommunityClient.OfficialShipOwner>> Authorize(JsonElement page, CancellationToken ct)
         {
             Current();
+            step = "ships-lookups";
             var lookups = page.GetProperty("ownerLookups");
             if (lookups.ValueKind != JsonValueKind.Array || lookups.GetArrayLength() > 20) throw OfficialFleetMemberIdentity.Invalid();
             var rows = new Dictionary<string, (long Id, string State, string? Callsign, string? Binding)>(StringComparer.Ordinal);
@@ -61,8 +67,10 @@ internal sealed partial class ScmAccountBridgeHost
             }
             var shipOwnerRefs = page.GetProperty("ships").EnumerateArray().Select(row => row.GetProperty("ownerMemberId").GetString()!).ToHashSet(StringComparer.Ordinal);
             if (!shipOwnerRefs.SetEquals(rows.Keys)) throw OfficialFleetMemberIdentity.Invalid();
+            step = "ships-identity-read";
             var fresh = await ReadFleetIdentityObservationsAsync(context, generation, sourceRef!, ids, ct);
             Current();
+            step = "ships-identity-compare";
             var result = new Dictionary<string, CommunityClient.OfficialShipOwner>(StringComparer.Ordinal);
             foreach (var pair in rows)
             {
@@ -76,6 +84,7 @@ internal sealed partial class ScmAccountBridgeHost
                     result.Add(pair.Key, new("restricted", "", null, null, null, pair.Value.Id));
                     continue;
                 }
+                step = "ships-binding";
                 var binding = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                     "StarBridge.OfficialFleet.SharedShipOwner.v1\n" + sourceRef + "\n" + pair.Key + "\n" + identity.BusinessSubjectId))).ToLowerInvariant();
                 if (binding != pair.Value.Binding) throw OfficialFleetMemberIdentity.Invalid();
@@ -89,6 +98,7 @@ internal sealed partial class ScmAccountBridgeHost
                     OfficialFleetMemberReference(generation, sourceRef!, identity.MemberId), identity.AvatarImageData, version, pair.Value.Id));
             }
             Current();
+            step = "ships-page";
             return result;
         }
         try
@@ -97,6 +107,7 @@ internal sealed partial class ScmAccountBridgeHost
             var response = await SendRelayRequestAsync<object>(session,
                 (active, ct) => client.ReadOfficialShipsAsync(active.AccessToken, payload, sourceRef!, scope, Current, Authorize, _oauth.OfficialFleetIdentityObservationClock, ct, value => projectionValidUntilUtc = value), budget.Token);
             Current();
+            step = "ships-project";
             var projected = JsonSerializer.SerializeToElement(response.Result);
             var visible = projected.GetProperty("owners").EnumerateArray()
                 .Select(row => row.GetProperty("profileReference").GetString()).Where(value => value is not null).ToHashSet();
@@ -110,11 +121,15 @@ internal sealed partial class ScmAccountBridgeHost
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
+            RecordOfficialDiagnostic("official-ships-host", step, null, 0);
+            RecordOfficialDiagnostic("official-ships-host", "ships-timeout", null, 0);
             ClearOfficialFleetProfileTargets();
             throw new AccountBridgeHostException("communities.identityUnavailable");
         }
-        catch
+        catch (Exception error)
         {
+            RecordOfficialDiagnostic("official-ships-host", step, null, 0);
+            RecordOfficialDiagnostic("official-ships-host", error is AccountBridgeHostException known ? known.Code : "unclassified", null, 0);
             ClearOfficialFleetProfileTargets();
             throw;
         }
