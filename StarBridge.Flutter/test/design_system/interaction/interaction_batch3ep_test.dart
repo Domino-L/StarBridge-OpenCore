@@ -30,8 +30,8 @@ const _catalog = [
     nameKey: 'achievements.home.name',
     conditionKey: 'achievements.home.condition',
     memoryKey: 'achievements.home.memory',
-    earnedAsset: 'assets/achievements/home-earned.png',
-    lockedAsset: 'assets/achievements/home-locked.png',
+    earnedAsset: 'assets/achievements/home-1-192.webp',
+    lockedAsset: 'assets/achievements/home-locked-192.webp',
   ),
 ];
 

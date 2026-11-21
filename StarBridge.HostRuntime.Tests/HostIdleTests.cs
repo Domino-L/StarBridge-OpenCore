@@ -4,6 +4,9 @@ using System.Collections.Concurrent;
 
 internal static class HostIdleTests
 {
+    // The cache's timing rules below were written for a 500 ms window; the default is longer.
+    private static readonly TimeSpan HalfSecond = TimeSpan.FromMilliseconds(500);
+
     private static void Check(bool value, string message)
     { if (!value) throw new InvalidOperationException(message); }
 
@@ -31,7 +34,7 @@ internal static class HostIdleTests
         Test("access denied is unknown, releases handles and retries after 5 seconds", () =>
         {
             var source = new Source { Denied = true }; var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "unknown", "Denied became absence");
             Check(source.SnapshotDisposed == 1 && source.HandleDisposed == 1, "Denied leaked handles");
             source.Denied = false;
@@ -43,7 +46,7 @@ internal static class HostIdleTests
         Test("a live game is opened once however long it runs", () =>
         {
             var source = new Source(); var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             var session = GameProcessSnapshotCache.Resolve(cache.Observe());
             for (var i = 0; i < 100; i++)
             {
@@ -55,7 +58,7 @@ internal static class HostIdleTests
         Test("a game gone from the snapshot is not running, and its return is a new session", () =>
         {
             var source = new Source(); var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             var first = GameProcessSnapshotCache.Resolve(cache.Observe());
             var entries = source.Entries;
             source.Entries = [];
@@ -69,7 +72,7 @@ internal static class HostIdleTests
         Test("a failed enumeration cannot hide a same-name process taking the PID", () =>
         {
             var source = new Source(); var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             var session = GameProcessSnapshotCache.Resolve(cache.Observe());
             source.Entries = [];
             source.EnumerationFails = true;
@@ -85,7 +88,7 @@ internal static class HostIdleTests
         Test("a gap in watching cannot hide a same-name process taking the PID", () =>
         {
             var source = new Source(); var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             var session = GameProcessSnapshotCache.Resolve(cache.Observe());
             for (var i = 0; i < 20; i++)
             {
@@ -106,7 +109,7 @@ internal static class HostIdleTests
         Test("enumeration failure releases snapshot and retries", () =>
         {
             var source = new Source { EnumerationFails = true }; var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "unknown", "Partial enumeration trusted");
             Check(source.SnapshotDisposed == 1, "Snapshot leaked on enumeration failure");
             for (var i = 0; i < 4; i++)
@@ -129,7 +132,7 @@ internal static class HostIdleTests
         Test("shared observation expires at 500ms; a PID reused by another game name is a new session", () =>
         {
             var source = new Source(); var time = new Clock();
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             var first = cache.Observe();
             var oldSession = GameProcessSnapshotCache.Resolve(first);
             source.Start = source.Start.AddSeconds(1);
@@ -152,7 +155,7 @@ internal static class HostIdleTests
         {
             var source = new Source(); var time = new Clock();
             invalidate(source);
-            var cache = new GameProcessSnapshotCache(source, time);
+            var cache = new GameProcessSnapshotCache(source, time, HalfSecond);
             Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "unknown", "Invalid evidence was trusted");
             source.Executable = @"C:\Game\Bin64\StarCitizen.exe";
             source.MissingStart = source.Uncertain = false;
@@ -163,6 +166,90 @@ internal static class HostIdleTests
             Check(GameProcessSnapshotCache.Resolve(repaired).State == "running" && source.Captures == 3 && source.Opened.Count == 2,
                 "Uncertain evidence stayed after repair");
             Check(ReferenceEquals(repaired, cache.Observe()) && source.Captures == 3, "Repaired observation was not shared");
+        });
+        Test("the default observation is shared for 2.5 seconds", () =>
+        {
+            var source = new Source { Entries = [] }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "notRunning", "Absent game");
+            source.Entries = [new(1, "StarCitizen.exe")];
+            time.Advance(TimeSpan.FromMilliseconds(2499));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "notRunning" && source.Captures == 1, "Listed again too soon");
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "running" && source.Captures == 2, "A launch waited past 2.5 seconds");
+        });
+        Test("a watched game is not listed again, and its exit is seen at once", () =>
+        {
+            var source = new Source { Watchable = true }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            var session = GameProcessSnapshotCache.Resolve(cache.Observe());
+            Check(session.State == "running" && source.HandleDisposed == 0, "The handle was not kept");
+            for (var i = 0; i < 9; i++)
+            {
+                time.Advance(TimeSpan.FromSeconds(1));
+                Check(GameProcessSnapshotCache.Resolve(cache.Observe()) == session && source.Captures == 1, "A watched game was listed again");
+            }
+            time.Advance(TimeSpan.FromSeconds(1));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()) == session && source.Captures == 2 && source.Opened.Count == 1,
+                "The 10 second refresh reopened the game or did not run");
+            source.Gone = true; // Still listed, as a closing process can briefly be.
+            time.Advance(TimeSpan.FromMilliseconds(100));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "notRunning" && source.Captures == 3 &&
+                source.HandleDisposed == 1, "Exit waited for the list to go stale");
+            source.Gone = false; source.Start = source.Start.AddMinutes(1);
+            time.Advance(TimeSpan.FromMilliseconds(2500));
+            var next = GameProcessSnapshotCache.Resolve(cache.Observe());
+            Check(next.State == "running" && next.SessionId != session.SessionId && source.Opened.Count == 2, "A relaunch was not a new session");
+        });
+        Test("a game that exits right after its first read is not running", () =>
+        {
+            var source = new Source { Watchable = true, Gone = true }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "notRunning" && source.HandleDisposed == 1, "A confirmed exit was reported as running");
+            source.Gone = false;
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "notRunning" && source.Captures == 1, "An empty answer was not shared");
+        });
+        Test("a second instance beside a watched game is noticed within 10 seconds", () =>
+        {
+            var source = new Source { Watchable = true }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "running", "First instance");
+            source.Entries = [new(1, "StarCitizen.exe"), new(2, "StarCitizen_PTUR.exe")];
+            time.Advance(TimeSpan.FromSeconds(10));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "unknown", "Second instance hidden");
+        });
+        Test("a watching handle that cannot answer forces a fresh list and a new read", () =>
+        {
+            var source = new Source { Watchable = true }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "running", "First read");
+            source.WatchFails = true;
+            time.Advance(TimeSpan.FromMilliseconds(100));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "running" && source.Captures == 2 &&
+                source.Opened.Count == 2 && source.HandleDisposed == 2, "A failed watch was trusted, or read as an exit");
+        });
+        Test("a watched game is released when watching stops for too long", () =>
+        {
+            var source = new Source { Watchable = true }; var time = new Clock();
+            var cache = new GameProcessSnapshotCache(source, time);
+            cache.Observe();
+            time.Advance(TimeSpan.FromSeconds(31));
+            Check(GameProcessSnapshotCache.Resolve(cache.Observe()).State == "running" && source.HandleDisposed == 1 &&
+                source.Opened.Count == 2, "A gap kept the old handle");
+        });
+        Test("startup and running answers keep names-only meaning", () =>
+        {
+            GameProcessEvidence Known(int pid) => new(pid, @"C:\Game\Bin64\StarCitizen.exe", DateTimeOffset.UnixEpoch.AddDays(pid));
+            GameProcessEvidence Unreadable(int pid) => new(pid, null, null, true);
+            Check(SharedGameProcesses.Startup([]) == new StarBridge.HostRuntime.Overlay.GameStartupSession("notRunning") &&
+                !SharedGameProcesses.IsRunning([]), "Nothing found");
+            Check(SharedGameProcesses.Startup([Known(7)]) == new StarBridge.HostRuntime.Overlay.GameStartupSession("running", 7, DateTimeOffset.UnixEpoch.AddDays(7)) &&
+                SharedGameProcesses.IsRunning([Known(7)]), "One readable game");
+            Check(SharedGameProcesses.Startup([Unreadable(8)]) == new StarBridge.HostRuntime.Overlay.GameStartupSession("running", 8) &&
+                SharedGameProcesses.IsRunning([Unreadable(8)]), "An unreadable game process still counts by name");
+            Check(SharedGameProcesses.Startup([Known(7), Unreadable(8)]).State == "unknown", "Two games");
+            Check(SharedGameProcesses.Startup([Unreadable(0)]).State == "unknown" && !SharedGameProcesses.IsRunning([Unreadable(0)]),
+                "A failed list is unknown for startup and not running, as before");
         });
         Test("concurrent callers share one enumeration", () =>
         {
@@ -194,11 +281,13 @@ internal static class HostIdleTests
                 var source = new WindowsGameProcessSource();
                 using var handle = source.Open(new(child.Id, Path.GetFileName(Environment.ProcessPath!)));
                 Check(handle.Read() is { Uncertain: false }, "Live child was not observed");
+                Check(handle.Exited() == false, "A live child read as exited");
                 child.StandardInput.WriteLine();
                 child.StandardInput.Close();
                 Check(child.WaitForExit(10000), "Exit child timed out; PID=" + child.Id);
                 Check(child.ExitCode == 259, "Exit fixture did not return 259");
                 Check(handle.Read() is null, "Exit code 259 was mistaken for a live process");
+                Check(handle.Exited() == true, "The handle missed the exit");
             }
             finally
             {
@@ -347,6 +436,8 @@ internal static class HostIdleTests
         internal DateTimeOffset Start = DateTimeOffset.UnixEpoch.AddDays(1);
         internal string? Executable = @"C:\Game\Bin64\StarCitizen.exe";
         internal bool Exit, Denied, EnumerationFails, CaptureFails, MissingStart, Uncertain;
+        // Watchable handles answer Exited(); Gone is what they answer. WatchFails throws instead.
+        internal bool Watchable, Gone, WatchFails;
         internal int Captures, SnapshotDisposed, HandleDisposed;
         internal List<int> Opened = [];
         public IGameProcessSnapshot Capture()
@@ -371,6 +462,7 @@ internal static class HostIdleTests
                 if (source.Denied) throw new UnauthorizedAccessException();
                 return source.Exit ? null : new(pid, source.Executable, source.MissingStart ? null : source.Start, source.Uncertain);
             }
+            public bool? Exited() => source.WatchFails ? throw new IOException() : source.Watchable ? source.Gone : null;
             public void Dispose() => source.HandleDisposed++;
         }
     }

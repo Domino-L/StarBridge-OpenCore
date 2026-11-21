@@ -225,28 +225,34 @@ void main() {
     },
   );
 
-  test('a failed save keeps the edit and history until a retry saves it', () async {
-    final port = _Port();
-    final module = OverlayWorkspaceModule(port);
-    addTearDown(module.dispose);
-    await module.initialize();
-    port.failWrites = true;
-    module.updateAppearanceOptions(_options(2));
-    await pumpEventQueue();
-    expect(port.writes.single.appearanceOptions, _options(2));
-    expect(module.projection.value.failure, OverlaySettingsFailure.writeFailed);
-    expect(module.projection.value.dirty, isTrue);
-    expect(module.projection.value.appearanceOptions, _options(2));
-    expect(module.canUndo, isTrue);
-    port.failWrites = false;
-    expect(await module.save(), isTrue);
-    expect(module.projection.value.dirty, isFalse);
-    expect(module.projection.value.failure, isNull);
-    expect(module.projection.value.snapshot!.appearanceOptions, _options(2));
-    module.undo();
-    await pumpEventQueue();
-    expect(port.writes.last.appearanceOptions, _choice);
-  });
+  test(
+    'a failed save keeps the edit and history until a retry saves it',
+    () async {
+      final port = _Port();
+      final module = OverlayWorkspaceModule(port);
+      addTearDown(module.dispose);
+      await module.initialize();
+      port.failWrites = true;
+      module.updateAppearanceOptions(_options(2));
+      await pumpEventQueue();
+      expect(port.writes.single.appearanceOptions, _options(2));
+      expect(
+        module.projection.value.failure,
+        OverlaySettingsFailure.writeFailed,
+      );
+      expect(module.projection.value.dirty, isTrue);
+      expect(module.projection.value.appearanceOptions, _options(2));
+      expect(module.canUndo, isTrue);
+      port.failWrites = false;
+      expect(await module.save(), isTrue);
+      expect(module.projection.value.dirty, isFalse);
+      expect(module.projection.value.failure, isNull);
+      expect(module.projection.value.snapshot!.appearanceOptions, _options(2));
+      module.undo();
+      await pumpEventQueue();
+      expect(port.writes.last.appearanceOptions, _choice);
+    },
+  );
 
   test('plan actions save pending edits first; history lasts until the plan changes', () async {
     final port = _Port();
@@ -663,6 +669,8 @@ void main() {
       expect(module.projection.value.dirty, isFalse);
       expect(tester.takeException(), isNull);
     },
+    // 0.7.3 overlay v2: the Haji Citizen card is put away until v2 (only the visor is offered).
+    skip: true,
   );
   testWidgets(
     'installed described candidate can be configured but never applied',
@@ -776,6 +784,8 @@ void main() {
       expect(port.writes, hasLength(1), reason: 'never applied or saved');
       expect(tester.takeException(), isNull);
     },
+    // 0.7.3 overlay v2: the Haji Citizen card is put away until v2 (only the visor is offered).
+    skip: true,
   );
 }
 

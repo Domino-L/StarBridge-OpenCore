@@ -72,6 +72,7 @@ final class CommunityAuthorProjection {
       version = null,
       observedAt = null,
       validUntil = null;
+
   /// A name this viewer saw before, unconfirmed: grants no profile or avatar
   /// read, and never counts as [visible].
   const CommunityAuthorProjection.lastSeen(this.callsign)
@@ -91,6 +92,9 @@ final class CommunityAuthorProjection {
   final String callsign;
   final String? avatarVersion, version;
   final DateTime? observedAt, validUntil;
+  static const clockGrace = Duration(seconds: 10);
+  // Local display retirement only; original wire timestamps remain unchanged.
+  DateTime? get displayDeadline => validUntil?.add(clockGrace);
   bool get visible => state == CommunityAuthorState.visible;
   bool get hasAvatar => visible && avatarVersion != null;
 
@@ -141,8 +145,8 @@ final class CommunityAuthorProjection {
   }
   CommunityAuthorProjection admit(DateTime now) =>
       visible &&
-          (observedAt!.isAfter(now.toUtc().add(const Duration(seconds: 1))) ||
-              !validUntil!.isAfter(now.toUtc()))
+          (observedAt!.difference(now.toUtc()) > clockGrace ||
+              now.toUtc().difference(validUntil!) >= clockGrace)
       ? const CommunityAuthorProjection.unavailable()
       : this;
   bool sameIdentityAs(CommunityAuthorProjection other) =>

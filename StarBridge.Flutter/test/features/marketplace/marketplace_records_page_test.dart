@@ -18,6 +18,8 @@ import '../../design_system/interaction/interaction_batch3i_test.dart'
 import '../friends/social_layout_test.dart' show size;
 
 class _Port implements MarketplaceRecordsPort {
+  _Port({this.partialReviews = false});
+  final bool partialReviews;
   final calls = <(String, MarketRow)>[];
   final blocked = <String>{'r1', 'r2'};
   @override
@@ -28,48 +30,46 @@ class _Port implements MarketplaceRecordsPort {
     MarketRow input = const {},
   ]) async {
     calls.add((operation, input));
+    if (partialReviews && operation == 'reviews' && input['page'] != 1) {
+      throw const MarketplaceTradeError('marketplace.unavailable');
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     return switch (operation) {
       'reviews' => {
         'rows': [
           {
-            'id': 1,
+            'sourceType': 'trade',
             'reviewer': 'A*****y',
             'rating': 5,
             'content': '发货很快，在新巴贝奇当场交接，沟通顺畅。',
-            'transactionId': 'TX2026101900112',
-            'auditStatus': 1,
             'createTime': now - 7200000,
           },
           {
-            'id': 2,
+            'sourceType': 'trade',
             'reviewer': 'D*********8',
             'rating': 5,
             'content': '价格公道，推荐。',
-            'transactionId': 'TX2026101800054',
-            'auditStatus': 1,
             'createTime': now - 86400000,
           },
           {
-            'id': 3,
+            'sourceType': 'contract',
             'reviewer': 'L****t',
             'rating': 4,
             'content': '护航任务按时到位，中途改线也配合。',
-            'source': '合约',
-            'auditStatus': 1,
+            'contractTitle': '护航任务',
             'createTime': now - 3 * 86400000,
           },
           {
-            'id': 4,
+            'sourceType': 'trade',
             'reviewer': 'K***r',
             'rating': 4,
             'content': '',
-            'transactionId': 'TX2026101500031',
-            'auditStatus': 0,
             'createTime': now - 5 * 86400000,
           },
         ],
-        'total': 4,
+        'total': partialReviews ? 1000 : 4,
+        'tradeTotal': partialReviews ? 999 : 3,
+        'contractTotal': 1,
       },
       'reports' => {
         'rows': [
@@ -166,7 +166,7 @@ void main() {
     if (const String.fromEnvironment('OUT').isNotEmpty) await _fonts();
   });
 
-  testWidgets('reviews: summary over public reviews, pending marked', (
+  testWidgets('reviews: both sources complete, no invented audit state', (
     tester,
   ) async {
     size(tester, const Size(1280, 720));
@@ -175,15 +175,27 @@ void main() {
     await tester.pumpWidget(_app(MarketplaceReviewsView(c)));
     await tester.pumpAndSettle();
     expect(
-      find.text('4.7'),
+      find.text('4.5'),
       findsOneWidget,
-      reason: '(5+5+4)/3, the pending one excluded',
+      reason: '(5+5+4+4)/4; SCM exposes no audit state',
     );
-    expect(find.text('3 条已公开 · 1 条审核中'), findsOneWidget);
-    expect(find.text('审核中'), findsOneWidget);
+    expect(find.text('共 4 条评价'), findsOneWidget);
+    expect(find.text('护航任务'), findsOneWidget);
+    expect(find.text('审核中'), findsNothing);
     expect(find.text('（只打了分，没有写评价）'), findsOneWidget);
     expect(find.text('合约'), findsOneWidget);
     await _render(tester, 'records-reviews');
+  });
+
+  testWidgets('partial combined reviews do not claim an average or distribution', (tester) async {
+    size(tester, const Size(1280, 720));
+    final c = MarketplaceRecordsController(_Port(partialReviews: true));
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_app(MarketplaceReviewsView(c)));
+    await tester.pumpAndSettle();
+    expect(find.text('按已加载的 4 条'), findsOneWidget);
+    expect(find.byKey(const Key('market-reviews-summary')), findsNothing);
+    expect(find.textContaining('审核中'), findsNothing);
   });
 
   testWidgets(
@@ -199,12 +211,12 @@ void main() {
       expect(find.text('处理中'), findsOneWidget);
       await _render(tester, 'records-reports');
 
-      await tester.tap(find.byKey(const ValueKey(('market-records-kind', 1))));
+      await tester.tap(find.byKey(const ValueKey<(String, int)>(('market-records-kind', 1))));
       await tester.pumpAndSettle();
       expect(find.text('原因：多次爽约'), findsOneWidget);
       await _render(tester, 'records-block');
 
-      await tester.tap(find.byKey(const ValueKey(('market-unblock', 'r1'))));
+      await tester.tap(find.byKey(const ValueKey<(String, String)>(('market-unblock', 'r1'))));
       await tester.pumpAndSettle();
       expect(find.text('解除拉黑 D*********8？'), findsOneWidget);
       await _render(tester, 'records-unblock');
@@ -216,7 +228,7 @@ void main() {
         reason: 'Enter lands on 取消',
       );
 
-      await tester.tap(find.byKey(const ValueKey(('market-unblock', 'r1'))));
+      await tester.tap(find.byKey(const ValueKey<(String, String)>(('market-unblock', 'r1'))));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('market-unblock-confirm')));
       await tester.pumpAndSettle();

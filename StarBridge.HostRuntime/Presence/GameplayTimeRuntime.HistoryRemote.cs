@@ -37,7 +37,8 @@ public sealed partial class GameplayTimeRuntime
             if (entry.Error is not null) return "unavailable";
             // Retain the larger known baseline; never lower another device's published total.
             var total = checked(Math.Max(entry.Accumulator.PlayTimeSeconds, state.PlayTimeSeconds) + ticket.Preview.Seconds);
-            pending = new(new(entry.ShowOnProfile, total, 0, 0, ticket.Preview.Seconds,
+            // Published as public like every total (user 11-08): the page's own visibility governs it.
+            pending = new(new(true, total, 0, 0, ticket.Preview.Seconds,
                 ticket.Preview.Sessions, ticket.Preview.IncompleteSessions, _time.GetUtcNow(),
                 state.Revision, state.LastOperationId, ticket.Id, _time.GetUtcNow().AddMinutes(2)));
             entry.Saved = entry.Lease!.BeginImport(entry.Saved!, pending, Current);

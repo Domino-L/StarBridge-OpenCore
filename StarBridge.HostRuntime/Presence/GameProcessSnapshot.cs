@@ -16,6 +16,9 @@ internal interface IGameProcessHandle : IDisposable
 {
     // Null means the process is confirmed to have exited, never access denied.
     GameProcessEvidence? Read();
+    // A handle that can answer this is kept open while the game runs, so exit is seen
+    // without listing every process again. Null: this handle cannot watch.
+    bool? Exited() => null;
 }
 internal interface IGameProcessSource
 {
@@ -24,8 +27,17 @@ internal interface IGameProcessSource
 }
 
 // Shared observations contain only process evidence, never account identity or log contents.
-internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimeProvider? time = null)
+internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimeProvider? time = null,
+    TimeSpan? freshFor = null)
 {
+    // Listing every process costs milliseconds of kernel time on a busy machine, and
+    // "is the game open" never needs sub-second precision.
+    internal static readonly TimeSpan DefaultFreshFor = TimeSpan.FromMilliseconds(2500);
+    // While every running game is watched through its own open handle (which also keeps
+    // its PID from being reused), the list is only refreshed this often, to notice a
+    // second instance. Shorter than MaxWatchGap.
+    internal static readonly TimeSpan WatchedFreshFor = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _freshFor = freshFor ?? DefaultFreshFor;
     private static readonly HashSet<string> Names = new(StringComparer.OrdinalIgnoreCase)
     {
         "StarCitizen", "StarCitizen_LIVE", "StarCitizen_PTUR", "StarCitizen_EPTU",
@@ -40,6 +52,8 @@ internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimePr
     // A live game keeps its path and start time; only a new PID opens a handle.
     private readonly Dictionary<GameProcessEntry, GameProcessEvidence> _known = [];
     private readonly Dictionary<GameProcessEntry, long> _refused = [];
+    // Open handles of known running games; only entries also in _known.
+    private readonly Dictionary<GameProcessEntry, IGameProcessHandle> _held = [];
     private GameProcessEvidence[]? _cached;
     private long _capturedAt;
     private long? _watchedAt;
@@ -49,38 +63,67 @@ internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimePr
         lock (_gate)
         {
             var now = _time.GetTimestamp();
-            if (_cached is not null && _time.GetElapsedTime(_capturedAt, now) is var age &&
-                age >= TimeSpan.Zero && age < TimeSpan.FromMilliseconds(500)) return _cached;
+            if (_cached is not null && _time.GetElapsedTime(_capturedAt, now) is var age && age >= TimeSpan.Zero)
+            {
+                // A watched game that exits is seen at once, not when the list goes stale.
+                var exited = HeldExited();
+                if (!exited && age < _freshFor) return _cached;
+                if (!exited && age < WatchedFreshFor && _cached.Length > 0 &&
+                    _cached.All(item => _held.Keys.Any(entry => entry.Pid == item.Pid)))
+                {
+                    _watchedAt = now;
+                    return _cached;
+                }
+            }
             var evidence = new List<GameProcessEvidence>();
             try
             {
                 // A PID can only be trusted as the same process if it was watched without a gap.
                 if (_watchedAt is { } watched && _time.GetElapsedTime(watched, now) is var gap &&
-                    (gap < TimeSpan.Zero || gap > MaxWatchGap)) _known.Clear();
+                    (gap < TimeSpan.Zero || gap > MaxWatchGap)) Forget();
                 _watchedAt = null;
                 using var snapshot = source.Capture();
                 var live = new HashSet<GameProcessEntry>();
                 foreach (var entry in snapshot.Entries)
                 {
                     if (!Names.Contains(Path.GetFileNameWithoutExtension(entry.Name))) continue;
+                    if (_held.TryGetValue(entry, out var watching) && Watch(watching) is var state && state is not false)
+                    {
+                        var confirmed = state is true;
+                        Release(entry);
+                        if (confirmed) continue; // Confirmed exit: not running, even if still listed.
+                        // A handle that stopped answering proves nothing: read the process again.
+                    }
                     live.Add(entry);
                     if (_known.TryGetValue(entry, out var known)) { evidence.Add(known); continue; }
                     if (_refused.TryGetValue(entry, out var refusedAt) &&
                         _time.GetElapsedTime(refusedAt, now) is var waited && waited >= TimeSpan.Zero && waited < OpenRetry)
                     { evidence.Add(new(entry.Pid, null, null, true)); continue; }
                     GameProcessEvidence? read;
+                    IGameProcessHandle? keep = null;
                     try
                     {
-                        using var process = source.Open(entry);
-                        read = process.Read();
+                        var process = source.Open(entry);
+                        try
+                        {
+                            read = process.Read();
+                            var afterRead = read is null ? null : Watch(process);
+                            if (afterRead is true) read = null; // Exited right after the read.
+                            else if (read is not null && !IsUncertain(read) && afterRead is false) keep = process;
+                        }
+                        finally { if (keep is null) process.Dispose(); }
                     }
                     catch { read = new(entry.Pid, null, null, true); }
                     if (read is null) continue; // Already gone: not remembered, and not running.
                     evidence.Add(read);
                     if (IsUncertain(read)) _refused[entry] = now;
-                    else { _known[entry] = read; _refused.Remove(entry); }
+                    else
+                    {
+                        _known[entry] = read; _refused.Remove(entry);
+                        if (keep is not null) _held[entry] = keep;
+                    }
                 }
-                foreach (var gone in _known.Keys.Where(entry => !live.Contains(entry)).ToArray()) _known.Remove(gone);
+                foreach (var gone in _known.Keys.Where(entry => !live.Contains(entry)).ToArray()) Release(gone);
                 foreach (var gone in _refused.Keys.Where(entry => !live.Contains(entry)).ToArray()) _refused.Remove(gone);
                 _watchedAt = now;
             }
@@ -88,7 +131,7 @@ internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimePr
             {
                 // Continuity is lost, but a repeating failure must not reopen the game each time.
                 foreach (var entry in _known.Keys) _refused[entry] = now;
-                _known.Clear();
+                Forget();
                 evidence.Add(new(0, null, null, true));
             }
             var result = evidence.ToArray();
@@ -97,6 +140,33 @@ internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimePr
             _capturedAt = now;
             return result;
         }
+    }
+
+    private bool HeldExited()
+    {
+        foreach (var handle in _held.Values)
+            if (Watch(handle) is not false) return true;
+        return false;
+    }
+
+    // True: confirmed exit. False: still running. Null: this handle cannot tell.
+    private static bool? Watch(IGameProcessHandle handle)
+    {
+        try { return handle.Exited(); }
+        catch { return null; }
+    }
+
+    private void Release(GameProcessEntry entry)
+    {
+        _known.Remove(entry);
+        if (_held.Remove(entry, out var handle)) handle.Dispose();
+    }
+
+    private void Forget()
+    {
+        _known.Clear();
+        foreach (var handle in _held.Values) handle.Dispose();
+        _held.Clear();
     }
 
     internal static GameProcessSession Resolve(IEnumerable<GameProcessEvidence> evidence)
@@ -122,6 +192,36 @@ internal sealed class GameProcessSnapshotCache(IGameProcessSource source, TimePr
         if (item.Uncertain || item.Executable is null || item.StartedAt is null) return true;
         var bin = Path.GetDirectoryName(item.Executable);
         return bin is null || !Path.GetFileName(bin).Equals("Bin64", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+// The one place in this process that lists processes to answer "is the game open".
+// Every regular caller shares one observation, so the list is taken at most once per
+// freshness window however many timers ask.
+public static class SharedGameProcesses
+{
+    private static readonly GameProcessSnapshotCache Cache = new(new WindowsGameProcessSource());
+
+    public static GameProcessSession Session() => GameProcessSnapshotCache.Resolve(Cache.Observe());
+
+    // Names only, as before: a game process counts even if its path or start time is unreadable.
+    public static bool IsRunning() => IsRunning(Cache.Observe());
+
+    public static StarBridge.HostRuntime.Overlay.GameStartupSession Startup() => Startup(Cache.Observe());
+
+    internal static bool IsRunning(IEnumerable<GameProcessEvidence> evidence) => evidence.Any(item => item.Pid > 0);
+
+    internal static StarBridge.HostRuntime.Overlay.GameStartupSession Startup(IReadOnlyCollection<GameProcessEvidence> evidence)
+    {
+        // Pid 0 is a failed list: unknown, never absence.
+        if (evidence.Any(item => item.Pid <= 0)) return new("unknown");
+        var games = evidence.DistinctBy(item => item.Pid).ToArray();
+        return games.Length switch
+        {
+            0 => new("notRunning"),
+            1 => new("running", games[0].Pid, games[0].StartedAt),
+            _ => new("unknown")
+        };
     }
 }
 
@@ -159,6 +259,20 @@ public static class ProcessSnapshotNames
         }
         catch (Exception error) when (error is Win32Exception or InvalidOperationException) { }
         return null;
+    }
+
+    // The IDs of the running processes whose name matches, from one snapshot; empty when unavailable.
+    public static IReadOnlySet<uint> FindProcessIds(Func<string, bool> match)
+    {
+        var found = new HashSet<uint>();
+        try
+        {
+            using var snapshot = new WindowsGameProcessSource().Capture();
+            foreach (var entry in snapshot.Entries)
+                if (entry.Pid > 0 && match(entry.Name)) found.Add((uint)entry.Pid);
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException) { }
+        return found;
     }
 
     public static bool Any(Func<string, bool> match)
@@ -249,6 +363,9 @@ internal sealed class WindowsGameProcessSource : IGameProcessSource
                 return new(_pid, null, null, true);
             return new(_pid, path.ToString(), new DateTimeOffset(DateTime.FromFileTimeUtc(creation)));
         }
+
+        // WaitForSingleObject with no wait: no process list, no kernel copy of every thread.
+        public bool? Exited() => _handle.IsInvalid ? null : HasExited();
 
         private GameProcessEvidence? FailedQuery(int error)
         {

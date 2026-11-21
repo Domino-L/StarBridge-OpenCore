@@ -10,8 +10,11 @@ import 'local_hangar_presentation.dart';
 import 'local_hangar_summary.dart';
 
 class LocalHangarOverview extends StatelessWidget {
-  const LocalHangarOverview({required this.ships, super.key});
+  const LocalHangarOverview({required this.ships, this.note, super.key});
   final List<LocalHangarPresentation> ships;
+
+  /// One more fact on the same line, such as when the hangar was saved.
+  final String? note;
   @override
   Widget build(BuildContext context) {
     final c = LocalHangarCopy(context), t = context.tokens;
@@ -42,6 +45,9 @@ class LocalHangarOverview extends StatelessWidget {
                 '${c.shipsLabel} ${totals.count}, $value, ${c.priceBasis}, ${statuses.join(', ')}',
             headerBuilder: (context, visual, open) => ListTile(
               contentPadding: EdgeInsets.zero,
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              minVerticalPadding: 0,
               title: Wrap(
                 spacing: 20,
                 runSpacing: 6,
@@ -67,6 +73,8 @@ class LocalHangarOverview extends StatelessWidget {
                   ),
                   for (final status in statuses)
                     Text(status, style: Theme.of(context).textTheme.bodySmall),
+                  if (note != null)
+                    Text(note!, style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
               trailing: Transform.rotate(

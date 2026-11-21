@@ -1,4 +1,3 @@
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
@@ -50,8 +49,42 @@ const marketChecklistArt = 'asset:assets/brand/scm_market_crate.png';
 bool marketIsChecklist(MarketRow row) =>
     row['displayType'] == 2 || row['checklist'] == true;
 
+/// An order's title. SCM names a checklist order after its checklist (the
+/// order's remark); an unnamed one reads "first item 等", never as if it were
+/// that single item.
+String marketOrderTitle(BuildContext context, MarketRow row) {
+  final locale = marketLocale(context);
+  final name = marketName(row, locale).trim();
+  if (name.isNotEmpty) return name;
+  final first = marketName(marketRows(row['items']).firstOrNull ?? {}, locale);
+  if (!marketIsChecklist(row)) return first;
+  if (row['remark'] case final String note when note.trim().isNotEmpty) {
+    return note.trim();
+  }
+  return first.isEmpty
+      ? marketText(context, 'checklist')
+      : marketTextN(context, 'checklistMore', first);
+}
+
+/// Whether the order's first item stands for the whole order, so its picture
+/// and quality may be shown. Not for a checklist, a multi-item barter, or a
+/// buy-side barter (SCM titles that one after the WANTED item while its first
+/// item is the one OFFERED).
+/// A barter counts as one item only when that is known: the full order's item
+/// list, or an explicit itemCount. Lists carry neither, so unknown is not one.
+bool marketShowsItemVisual(MarketRow row) {
+  if (marketIsChecklist(row)) return false;
+  if (row['displayType'] != 3) return true;
+  final count = row['itemsComplete'] == true
+      ? marketRows(row['items']).length
+      : marketNumber(row['itemCount'])?.toInt();
+  return row['creatorType'] == 1 && count == 1;
+}
+
 String? marketThumbnail(MarketRow row) {
-  if (marketIsChecklist(row)) return marketChecklistArt;
+  if (!marketShowsItemVisual(row)) {
+    return marketChecklistArt;
+  }
   if (row['thumbnailUrl'] case final String image when image.isNotEmpty) {
     return image;
   }
@@ -133,13 +166,18 @@ class MarketArt extends StatelessWidget {
             : Stack(
                 fit: StackFit.expand,
                 children: [
-                  ImageFiltered(
+                  // The blur is a 12-pixel decode drawn large with high-quality
+                  // filtering: no image filter layer per card. It matches the
+                  // former sigma-14 blur within about 1/255 per channel in the
+                  // bands (C-lite preview 11-08, user "都按推荐"), and costs
+                  // no offscreen pass, which waits behind every game frame.
+                  KeyedSubtree(
                     key: const ValueKey('market-art-backdrop'),
-                    imageFilter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                     child: RemoteImage(
                       source!,
                       fit: BoxFit.cover,
-                      cacheWidth: 48,
+                      cacheWidth: 12,
+                      filterQuality: FilterQuality.high,
                       excludeFromSemantics: true,
                       errorBuilder: (_, _, _) => const SizedBox.shrink(),
                     ),

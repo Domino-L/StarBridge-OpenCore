@@ -90,6 +90,10 @@ final class AccountSafetySnapshot {
 
 enum AccountSafetyFailure {
   signedOut,
+
+  /// The relay keeps account safety records only for accounts with a linked
+  /// legacy account; a SCM-only account is told so instead of "sign in".
+  scmOnly,
   forbidden,
   unavailable,
   invalid,
@@ -204,6 +208,7 @@ final class AccountSafetyController extends ChangeNotifier {
           ? error.failure
           : AccountSafetyFailure.connection;
       if (failure == AccountSafetyFailure.signedOut ||
+          failure == AccountSafetyFailure.scmOnly ||
           failure == AccountSafetyFailure.forbidden) {
         snapshot = null;
       }

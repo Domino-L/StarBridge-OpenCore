@@ -16,7 +16,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         if (_disposed || generation != Generation || _communities is null || _sharingHangarSource is null)
             return HangarPublicationOutcome.Rejected;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var session = RequireRelaySession(context);
         void Current()
@@ -52,7 +54,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (save) CommunityClient.ParseHangarSharingSave(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()

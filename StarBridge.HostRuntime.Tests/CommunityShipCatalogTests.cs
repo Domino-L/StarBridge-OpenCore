@@ -31,6 +31,58 @@ internal static class CommunityShipCatalogTests
         Check(CommunityShipCatalog.Loaners("source-code", "Flyable", "en-US", matrix, Lookup)!.Length == 0, "flyable source hides concept-only loaners");
         Check(CommunityShipCatalog.Loaners("source-code", "Concept", "en-US", new(null), Lookup) is null, "missing optional matrix is unknown");
         Check(CommunityShipCatalog.Loaners("unknown", "Concept", "en-US", matrix, Lookup) is null, "unknown source is not guessed");
+        foreach (var development in new[] { "开发中", "開發中", "In Development", "in-production" })
+            Check(CommunityShipCatalog.Loaners("source-code", development, "en-US", matrix, Lookup)!.Length == 1,
+                "in-development counts as concept: " + development);
+        Check(CommunityShipCatalog.Loaners("source-code", "可飞", "zh-CN", matrix, Lookup)!.Length == 0, "flight-ready source never shows loaners");
+        BundledMatrixMatchesCatalog();
+    }
+
+    // 2026-11-05: the bundled matrix may only name ships the RSI Ship Matrix still lists as
+    // in-concept (the catalog's 官网状态), and every loaner must resolve to a catalog model.
+    private static void BundledMatrixMatchesCatalog()
+    {
+        var data = FindDataDirectory();
+        if (data is null) return; // Public export carries neither private data file.
+        var catalogRows = File.ReadAllLines(Path.Combine(data, "ship-catalog.tsv"))
+            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'))
+            .Select(line => line.Split('\t')).ToArray();
+        var header = catalogRows[0];
+        int nameColumn = Array.IndexOf(header, "英文飞船名"), statusColumn = Array.IndexOf(header, "官网状态");
+        Check(nameColumn >= 0 && statusColumn >= 0, "catalog header has name and status");
+        var status = catalogRows.Skip(1).Where(row => row.Length > Math.Max(nameColumn, statusColumn))
+            .GroupBy(row => row[nameColumn].Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First()[statusColumn].Trim(), StringComparer.OrdinalIgnoreCase);
+        var tsv = File.ReadAllText(Path.Combine(data, "ship-loaner-matrix.tsv"));
+        var matrix = new ShipLoanerCatalog(tsv);
+        Check(matrix.Available, "bundled matrix is recognized");
+        var rows = tsv.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#') &&
+            !line.StartsWith("源英文飞船名", StringComparison.Ordinal)).Select(line => line.TrimEnd('\r').Split('\t')).ToArray();
+        Check(rows.Length > 0 && rows.All(row => row.Length >= 4), "bundled matrix rows are complete");
+        foreach (var row in rows)
+        {
+            Check(status.TryGetValue(row[0].Trim(), out var value) && value is "概念" or "开发中",
+                "loaner source is still concept in the catalog: " + row[0]);
+            Check(ShipLoanerCatalog.FindLoanerCatalog(row[3].Trim(), candidate => status.ContainsKey(candidate) ? candidate : null) is not null,
+                "loaner resolves to a catalog model: " + row[3]);
+        }
+        string[] Loaners(string source) => matrix.FindForConceptSource(source).Select(entry => entry.LoanerEnglishName).Order().ToArray();
+        Check(Loaners("Kraken").SequenceEqual(["Drake Buccaneer", "Drake Ironclad Assault", "RSI Polaris"]), "Kraken has the three official loaners");
+        Check(Loaners("Kraken Privateer").SequenceEqual(["Drake Buccaneer", "Drake Ironclad", "RSI Polaris"]), "Kraken Privateer has the three official loaners");
+        Check(Loaners("Merchantman").SequenceEqual(["Banu Defender", "Crusader C2 Hercules Starlifter", "MISC Hull C"]), "Merchantman has the three official loaners");
+        Check(Loaners("Javelin").SequenceEqual(["Aegis Idris-P", "Argo MPUV Cargo"]), "Javelin has the two official loaners");
+    }
+
+    private static string? FindDataDirectory()
+    {
+        var roots = new[] { Environment.GetEnvironmentVariable("STARBRIDGE_HOST_TEST_SOURCE_ROOT"), AppContext.BaseDirectory, Environment.CurrentDirectory };
+        foreach (var start in roots.Where(root => !string.IsNullOrWhiteSpace(root)))
+            for (var directory = new DirectoryInfo(start!); directory is not null; directory = directory.Parent)
+            {
+                var data = Path.Combine(directory.FullName, "StarBridge.Desktop", "Data");
+                if (File.Exists(Path.Combine(data, "ship-loaner-matrix.tsv")) && File.Exists(Path.Combine(data, "ship-catalog.tsv"))) return data;
+            }
+        return null;
     }
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 }

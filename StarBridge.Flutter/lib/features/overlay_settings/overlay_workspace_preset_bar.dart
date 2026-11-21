@@ -24,6 +24,7 @@ import 'overlay_scene_controller.dart';
 import 'overlay_preset_settings_dialog.dart';
 import 'overlay_preset_name.dart';
 import 'overlay_workspace_preset_cards.dart';
+import 'overlay_workspace_rules.dart';
 
 class OverlayWorkspacePresetBar extends StatefulWidget {
   const OverlayWorkspacePresetBar({
@@ -179,7 +180,7 @@ class _OverlayWorkspacePresetBarState extends State<OverlayWorkspacePresetBar> {
             : null,
       );
       final appearance = snapshot.appearances
-          .where((a) => a.id == projection.settings!['skin'])
+          .where((a) => a.id == overlayWorkspaceShownSkin(projection.settings!))
           .firstOrNull;
       final name = Localizations.localeOf(context).languageCode == 'en'
           ? appearance?.displayNameEn

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'marketplace_confirm_location_fixture.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_controller.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_port.dart';
@@ -76,21 +77,24 @@ void main() {
             reason: 'Trade dialog buttons must participate in the selected interaction suite.',
           );
           expect(face('确认发起', suite, primary: true), findsOneWidget);
+          // m99 C/D: the quantity row ("可交易 N" / loading / unknown) adds one
+          // line to the centred dialog (+12.5 below it).
+          final locationShift = Offset(0, tester.getSize(find.byKey(const Key('market-confirm-location-row'))).height / 2 + 12.5);
           expect(
             tester.getRect(button('cancel')),
-            const Rect.fromLTRB(492, 647.5, 564, 695.5),
+            const Rect.fromLTRB(492, 647.5, 564, 695.5).shift(locationShift),
           );
           expect(
             tester.getRect(button('submit')),
-            const Rect.fromLTRB(572, 647.5, 660, 695.5),
+            const Rect.fromLTRB(572, 647.5, 660, 695.5).shift(locationShift),
           );
           expect(
             tester.getRect(find.text('取消')),
-            const Rect.fromLTRB(516, 665.5, 540, 677.5),
+            const Rect.fromLTRB(516, 665.5, 540, 677.5).shift(locationShift),
           );
           expect(
             tester.getRect(find.text('确认发起')),
-            const Rect.fromLTRB(592, 665.5, 640, 677.5),
+            const Rect.fromLTRB(592, 665.5, 640, 677.5).shift(locationShift),
           );
           final press = await tester.startGesture(
             tester.getCenter(button('cancel')),
@@ -185,6 +189,7 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(target('quantity-add'));
           await tester.pump();
+          await chooseConfirmLocation(tester);
           focusOf(
             tester,
             face('确认发起', suite, primary: true),
@@ -208,14 +213,14 @@ void main() {
           await tester.pump();
           expect(port.writes, 1);
           expect(find.byType(Dialog), findsOneWidget);
-          expect(find.text('2'), findsOneWidget);
+          expect(find.text('2 件'), findsOneWidget);
           gate.completeError(
             const MarketplaceTradeError('marketplace.trade_rejected'),
           );
           await tester.pumpAndSettle();
           expect(controller.trades.pending, isFalse);
           expect(find.byType(Dialog), findsOneWidget);
-          expect(find.text('2'), findsOneWidget);
+          expect(find.text('2 件'), findsOneWidget);
           expect(find.text('重试'), findsOneWidget);
           gate = Completer<MarketRow>();
           port.writeGate = gate;
@@ -269,6 +274,7 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.text('打开确认'));
           await tester.pumpAndSettle();
+          await chooseConfirmLocation(tester);
           await tester.tap(button('submit'));
           await tester.pump();
           expect(controller.trades.pending, isTrue);

@@ -315,6 +315,7 @@ final class BridgeLocalPrivacy
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     _requireAvailable();
     if (!publicationSupported) {
@@ -350,6 +351,8 @@ final class BridgeLocalPrivacy
         if (action == 'apply' || action == 'applyPreservingPause')
           'expectedRevision': revision,
         if (action == 'applyPreservingPause') 'preservePause': true,
+        if (action == 'applyPreservingPause' && firstOfficialDefault)
+          'firstOfficialDefault': true,
       },
     );
     _requireCurrent(lease.epoch, lease.generation);

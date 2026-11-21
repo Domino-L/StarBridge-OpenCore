@@ -8,6 +8,12 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
     internal static readonly IReadOnlyList<TimeSpan> RereadOffsets = Array.AsReadOnly(new[] {
         TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30) });
     internal static readonly TimeSpan RecentUnlockWindow = TimeSpan.FromMinutes(10);
+    // Build 105 (user 11-21): a celebration must be seen, not absorbed by a load.
+    // A client left open rereads (never triggers) at most this often; the wake
+    // that drives it is the existing five-minute achievement sync, no new timer.
+    internal static readonly TimeSpan OnlineRereadInterval = TimeSpan.FromMinutes(60);
+    // One batch shows at most this many single cards; the rest become one summary.
+    internal const int MaximumIndividualCards = 3;
     // SCM decides "today's holiday" by its server date (Asia/Shanghai), not the player's.
     private static readonly TimeSpan ScmDateOffset = TimeSpan.FromHours(8);
     private readonly object _gate = new(); // Task reservations only: never IO, owner reads or callbacks.
@@ -16,26 +22,33 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
     private readonly Func<BridgeAccountContext, CancellationToken, Task> _trigger;
     private readonly Func<BridgeAccountContext, CancellationToken, Task<ScmAchievementCatalog>> _read;
     private readonly Action<long, ScmAchievementItem, string> _earned;
+    private readonly Action<long, IReadOnlyList<ScmAchievementUnlockStore.PendingUnlock>>? _summary;
     private readonly TimeProvider _time;
     private readonly DateTimeOffset? _trustedStartedAt;
     private readonly DateTimeOffset _wallAnchor;
     private readonly long _monotonicAnchor;
     private bool _clockConsistent = true;
     private CancellationTokenSource? _run;
+    // Only the post-trigger rereads stop early on a found unlock; a page read
+    // during the pre-trigger read must not cancel the day's trigger.
+    private CancellationTokenSource? _rereads;
     private Task _work = Task.CompletedTask, _ioWork = Task.CompletedTask;
     private Task? _retirement;
     private long _epoch;
     private volatile bool _disposed;
-    // Only the serial IO worker can mutate online observation state.
-    private (BridgeAccountContext? Context, long Generation, long Epoch) _observed;
-    private bool _hasOnlineRead;
+    // Background read schedule per account for this process; serial worker only.
+    // A read is reserved before it starts, so a failure also waits (R1 P2), and
+    // an A→B→A switch keeps A's last read time.
+    private readonly Dictionary<BridgeAccountContext, (long At, bool Succeeded)> _reads = new();
+    internal static readonly TimeSpan FailedReadRetry = TimeSpan.FromMinutes(15);
 
     internal ScmAchievementUnlockRuntime(string root, Func<(BridgeAccountContext? Context, long Generation)> owner,
         Func<BridgeAccountContext, CancellationToken, Task> trigger,
         Func<BridgeAccountContext, CancellationToken, Task<ScmAchievementCatalog>> read,
-        Action<long, ScmAchievementItem, string> earned, TimeProvider? time = null, DateTimeOffset? trustedStartedAt = null)
+        Action<long, ScmAchievementItem, string> earned, TimeProvider? time = null, DateTimeOffset? trustedStartedAt = null,
+        Action<long, IReadOnlyList<ScmAchievementUnlockStore.PendingUnlock>>? summary = null)
     {
-        _store = new(root); _owner = owner; _trigger = trigger; _read = read; _earned = earned;
+        _store = new(root); _owner = owner; _trigger = trigger; _read = read; _earned = earned; _summary = summary;
         _time = time ?? TimeProvider.System; _trustedStartedAt = trustedStartedAt;
         _wallAnchor = _time.GetUtcNow(); _monotonicAnchor = _time.GetTimestamp();
     }
@@ -74,8 +87,11 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
     internal async Task<bool> ObserveAsync(BridgeAccountContext context, long generation, ScmAchievementCatalog catalog, bool offline = false)
     {
         catalog.Validate(); var copy = catalog.Copy(); var epoch = Volatile.Read(ref _epoch);
+        // Only a reread batch that existed when this observation began may be
+        // stopped by it; a later batch has not read its trigger's result (R2 P3).
+        CancellationTokenSource? batch; lock (_gate) batch = _epoch == epoch ? _rereads : null;
         var found = await Queue(() => ObserveCore(context, generation, epoch, copy, offline)).ConfigureAwait(false);
-        if (found) CancelRereads(epoch); // No state lock or serial reservation is held here.
+        if (found && batch is not null) CancelRereads(batch); // No state lock or serial reservation is held here.
         return found;
     }
     private bool Recent(ScmAchievementItem item)
@@ -84,7 +100,7 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
         if (elapsed < TimeSpan.Zero || (_time.GetUtcNow() - (_wallAnchor + elapsed)).Duration() > TimeSpan.FromSeconds(2))
             _clockConsistent = false;
         // ReadAtUtc is a client projection, not authenticated server time.
-        // Production has no trusted start anchor, so first sync stays silent.
+        // Production has no trusted start anchor; the stored baseline decides there.
         return _clockConsistent && _trustedStartedAt is { } start &&
             (_wallAnchor - start).Duration() <= TimeSpan.FromSeconds(2) &&
             item.UnlockedAtUtc is { } at && at > start - RecentUnlockWindow && at <= start + elapsed;
@@ -93,71 +109,161 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
     {
         bool IsCurrent() => Current(context, generation, epoch);
         if (!IsCurrent()) return false;
-        var captured = (context, generation, epoch);
-        if (_observed != captured) { _observed = captured; _hasOnlineRead = false; }
         ScmAchievementUnlockStore.State saved;
         List<ScmAchievementUnlockStore.PendingUnlock> pending;
         var found = false;
         using (var lease = _store.Open(context))
         {
             saved = lease.Read(); var confirmed = saved.Confirmed.ToHashSet(StringComparer.Ordinal);
-            pending = (saved.Pending ?? []).ToList();
+            // Only an account's very first sync is silent (so history never floods
+            // in). After it, a new process, an account return or a first read after
+            // a closed client all celebrate what this account has not seen yet.
+            var baseline = ScmAchievementUnlockStore.HasBaseline(saved);
+            pending = ScmAchievementUnlockStore.Unshown(saved).ToList();
             foreach (var item in catalog.Items.Where(i => i.Unlocked).OrderBy(i => i.DisplayOrder))
             {
                 if (!confirmed.Add(item.Id)) continue;
-                if (!offline && (_hasOnlineRead || Recent(item)))
+                if (baseline || !offline && Recent(item))
                 {
-                    var stable = item with { UnlockedAtUtc = item.UnlockedAtUtc ?? _time.GetUtcNow(), ImageUrl = null };
-                    pending.Add(new(saved.OwnerHash + ":" + item.Id, stable)); found = true;
+                    pending.Add(new(saved.OwnerHash + ":" + item.Id, ScmAchievementUnlockStore.ForCard(item, _time.GetUtcNow()))); found |= !offline;
                 }
             }
-            saved = saved with { Confirmed = confirmed.Order(StringComparer.Ordinal).ToArray(), Pending = pending.ToArray() };
+            saved = saved with { Confirmed = confirmed.Order(StringComparer.Ordinal).ToArray(), Pending = pending.ToArray(), Baseline = true };
             lease.Save(saved, IsCurrent);
         }
-        if (!offline) _hasOnlineRead = true;
+        if (!offline) _reads[context] = (_time.GetTimestamp(), true);
         if (offline) return false;
-        // Observation is durable. Consumption requires a per-item receipt.
-        foreach (var entry in pending)
-        {
-            if (!IsCurrent()) break;
-            try { _earned(generation, entry.Item, entry.Receipt); }
-            catch (Exception) { continue; } // Keep failed items and continue their siblings.
-            if (!IsCurrent()) break;
-            using var acknowledgement = _store.Open(context);
-            saved = acknowledgement.Read();
-            saved = saved with { Pending = (saved.Pending ?? []).Where(p => p.Receipt != entry.Receipt).ToArray() };
-            acknowledgement.Save(saved, IsCurrent);
-        }
+        Deliver(generation, pending, IsCurrent);
         return found;
+    }
+    // Pending stays durable until a receiver reports the card's visible dwell
+    // (AchievementCelebration.MarkPresented). Handing a card over is not seeing it.
+    private void Deliver(long generation, IReadOnlyList<ScmAchievementUnlockStore.PendingUnlock> pending, Func<bool> isCurrent)
+    {
+        var single = _summary is null || pending.Count <= MaximumIndividualCards + 1 ? pending.Count : MaximumIndividualCards;
+        for (var i = 0; i < single; i++)
+        {
+            if (!isCurrent()) return;
+            try { _earned(generation, pending[i].Item, pending[i].Receipt); }
+            catch (Exception) { } // Keep failed items pending and continue their siblings.
+        }
+        if (single < pending.Count && isCurrent())
+        {
+            try { _summary!(generation, pending.Skip(single).ToArray()); }
+            catch (Exception) { }
+        }
+    }
+    // Stored cards not yet shown (an earlier process, an account return) go to
+    // the receiver without waiting for an SCM read.
+    private bool DrainCore(BridgeAccountContext context, long generation, long epoch)
+    {
+        bool IsCurrent() => Current(context, generation, epoch);
+        if (!IsCurrent()) return false;
+        ScmAchievementUnlockStore.PendingUnlock[] pending;
+        using (var lease = _store.Open(context)) pending = ScmAchievementUnlockStore.Unshown(lease.Read());
+        if (pending.Length > 0) Deliver(generation, pending, IsCurrent);
+        return true;
+    }
+    // Reserves a background read when due: none yet in this process for this
+    // account, an hour after a good read, or 15 minutes after a failed attempt.
+    private bool ReserveRead(BridgeAccountContext context, long generation, long epoch)
+    {
+        if (!Current(context, generation, epoch)) return false;
+        var now = _time.GetTimestamp();
+        if (_reads.TryGetValue(context, out var last) &&
+            _time.GetElapsedTime(last.At, now) < (last.Succeeded ? OnlineRereadInterval : FailedReadRetry)) return false;
+        _reads[context] = (now, false);
+        return true;
+    }
+    // Whether today's SCM date is still unclaimed, and whether this account has
+    // had its first (silent) sync stored.
+    private (bool Open, bool Baseline) DateState(BridgeAccountContext context, long generation, long epoch)
+    {
+        if (!Current(context, generation, epoch)) return (false, false);
+        using var lease = _store.Open(context); var saved = lease.Read();
+        var date = DateOnly.FromDateTime(_time.GetUtcNow().ToOffset(ScmDateOffset).DateTime);
+        return (!saved.TriggerDates.Contains(date), ScmAchievementUnlockStore.HasBaseline(saved));
     }
     private async Task ProbeAsync(BridgeAccountContext context, long generation, long epoch, CancellationToken token)
     {
         bool IsCurrent() => !token.IsCancellationRequested && Current(context, generation, epoch);
+        async Task ReadOnceAsync()
+        {
+            try
+            {
+                var catalog = await _read(context, token).ConfigureAwait(false);
+                if (IsCurrent()) await ObserveAsync(context, generation, catalog).ConfigureAwait(false);
+            }
+            catch (Exception failure) when (Recoverable(failure) && IsCurrent())
+            {
+                // The 15-minute retry counts from the failure, not the request start (R2 P2).
+                try { await Queue(() => { if (Current(context, generation, epoch)) _reads[context] = (_time.GetTimestamp(), false); return true; }).ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
+        }
         try
         {
+            await Queue(() => DrainCore(context, generation, epoch)).ConfigureAwait(false);
+            if (!IsCurrent()) return;
+            var state = await Queue(() => DateState(context, generation, epoch)).ConfigureAwait(false);
+            if (!IsCurrent()) return;
+            if (!state.Open)
+            {
+                // A new process reads once (catching up on unlocks while the client
+                // was closed); a client left open rereads hourly. Never a trigger.
+                if (await Queue(() => ReserveRead(context, generation, epoch)).ConfigureAwait(false)) await ReadOnceAsync().ConfigureAwait(false);
+                return;
+            }
+            if (!state.Baseline)
+            {
+                // R1 P1: the account's first sync must be stored before the trigger,
+                // or the trigger's unlocks would later be absorbed as history. A
+                // failed read leaves today's date unclaimed for a later attempt.
+                if (!await Queue(() => ReserveRead(context, generation, epoch)).ConfigureAwait(false)) return;
+                await ReadOnceAsync().ConfigureAwait(false);
+                if (!IsCurrent() || !(await Queue(() => DateState(context, generation, epoch)).ConfigureAwait(false)).Baseline) return;
+            }
             var claimed = await Queue(() => {
                 if (!IsCurrent()) return false;
                 using var lease = _store.Open(context); var saved = lease.Read();
                 var date = DateOnly.FromDateTime(_time.GetUtcNow().ToOffset(ScmDateOffset).DateTime);
-                if (saved.TriggerDates.Contains(date)) return false;
+                // The commit point itself enforces the stored first sync (R1 P1, R2).
+                if (saved.TriggerDates.Contains(date) || !ScmAchievementUnlockStore.HasBaseline(saved)) return false;
                 lease.Save(saved with { TriggerDates = [.. saved.TriggerDates, date] }, IsCurrent);
                 return true;
             }).ConfigureAwait(false);
             if (!claimed || !IsCurrent()) return;
+            // With a stored baseline, whatever the trigger unlocks is new to the
+            // rereads below and celebrated (no page needs to be opened).
             await _trigger(context, token).ConfigureAwait(false);
             var triggeredAt = _time.GetTimestamp();
-            foreach (var offset in RereadOffsets.Take(MaximumRereads))
+            CancellationTokenSource rereads;
+            lock (_gate)
             {
-                var remaining = offset - _time.GetElapsedTime(triggeredAt);
-                if (remaining > TimeSpan.Zero) await Task.Delay(remaining, _time, token).ConfigureAwait(false);
-                if (!IsCurrent()) return;
-                try
+                if (_disposed || _epoch != epoch) return;
+                rereads = _rereads = CancellationTokenSource.CreateLinkedTokenSource(token);
+            }
+            try
+            {
+                var rereadToken = rereads.Token;
+                foreach (var offset in RereadOffsets.Take(MaximumRereads))
                 {
-                    var catalog = await _read(context, token).ConfigureAwait(false);
-                    if (!IsCurrent()) return;
-                    if (await ObserveAsync(context, generation, catalog).ConfigureAwait(false)) return;
+                    var remaining = offset - _time.GetElapsedTime(triggeredAt);
+                    if (remaining > TimeSpan.Zero) await Task.Delay(remaining, _time, rereadToken).ConfigureAwait(false);
+                    if (!IsCurrent() || rereadToken.IsCancellationRequested) return;
+                    try
+                    {
+                        var catalog = await _read(context, rereadToken).ConfigureAwait(false);
+                        if (!IsCurrent()) return;
+                        if (await ObserveAsync(context, generation, catalog).ConfigureAwait(false)) return;
+                    }
+                    catch (Exception failure) when (Recoverable(failure) && IsCurrent() && !rereadToken.IsCancellationRequested) { }
                 }
-                catch (Exception failure) when (Recoverable(failure) && IsCurrent()) { }
+            }
+            finally
+            {
+                lock (_gate) if (ReferenceEquals(_rereads, rereads)) _rereads = null;
+                rereads.Dispose();
             }
         }
         catch (Exception failure) when (Recoverable(failure)) { }
@@ -170,7 +276,11 @@ internal sealed class ScmAchievementUnlockRuntime : IDisposable
     {
         try { run?.Cancel(); } catch (ObjectDisposedException) { } catch (AggregateException) { }
     }
-    private void CancelRereads(long epoch) { CancellationTokenSource? run; lock (_gate) run = _epoch == epoch ? _run : null; Cancel(run); }
+    private void CancelRereads(CancellationTokenSource batch)
+    {
+        bool live; lock (_gate) live = ReferenceEquals(_rereads, batch);
+        if (live) Cancel(batch);
+    }
     internal void Invalidate(long generation)
     {
         CancellationTokenSource? run; Task work;

@@ -173,13 +173,21 @@ void main() {
 
   test('mode-specific settings stay visible and explain when they apply', () {
     final list = settings({'showChat': true, 'chatDisplayMode': 'MessageList', 'skin': 'Default'});
-    for (final field in ['chatBarrageFontSize', 'chatBarrageRegion', 'chatDurationSeconds', 'nightShadowBloom']) {
+    for (final field in ['chatBarrageFontSize', 'chatBarrageRegion', 'chatDurationSeconds', 'chatMaxVisibleCount', 'chatShowTimestamp']) {
       expect(overlayWorkspaceFieldVisible(field, list), isTrue, reason: field);
     }
     expect(overlayWorkspaceFieldDisabledReason('chatBarrageRegion', list), 'overlay.workspace.disabled.barrage');
-    expect(overlayWorkspaceFieldDisabledReason('nightShadowBloom', list), 'overlay.workspace.disabled.bloom');
+    // 11-10 user: the visor's message list shows no send time; it applies with the barrage
+    expect(overlayWorkspaceFieldDisabledReason('chatShowTimestamp', list), 'overlay.workspace.disabled.visorListTime');
+    expect(overlayWorkspaceFieldDisabledReason('chatMaxVisibleCount', list), isNull);
+    // 11-10 user: settings the visor has no use for are not shown; bloom only where the appearance has it
+    for (final field in ['nightShadowBloom', 'showSquads', 'memberNameColumnRatio', 'startupTransitionStyle', 'hideMemberOnlineStatus']) {
+      expect(overlayWorkspaceFieldVisible(field, list), isFalse, reason: field);
+    }
     final barrage = settings({'showChat': true, 'chatDisplayMode': 'FullScreenBarrage'});
     expect(overlayWorkspaceFieldDisabledReason('chatBarrageRegion', barrage), isNull);
+    expect(overlayWorkspaceFieldDisabledReason('chatShowTimestamp', barrage), isNull);
+    expect(overlayWorkspaceFieldDisabledReason('chatMaxVisibleCount', barrage), 'overlay.workspace.disabled.messageList');
     expect(overlayWorkspaceFieldVisible('requestedSkin', list), isFalse, reason: 'internal fields stay hidden');
   });
 }

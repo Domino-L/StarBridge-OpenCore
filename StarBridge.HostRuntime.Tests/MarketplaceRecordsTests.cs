@@ -25,8 +25,12 @@ internal static class MarketplaceRecordsTests
             {
                 "/app-api/member/user/get" => new { id = 4242000000000042, nickname = "Self", userMobile = "QQ 1" },
                 "/app-api/sc/order-reviews/page" => new { total = 2, list = new object[] {
-                    new { id = 1, transactionId = "TX1", reviewerId = 77, reviewerName = "Aster", reviewerAvatar = "https://cdn/a.png", rating = 5, content = "快", auditStatus = 1, createTime = 1760000000000 },
-                    new { id = 2, transactionId = "TX2", reviewerId = 78, reviewerName = "K", rating = 4, content = "", auditStatus = 0, createTime = 1760000000001 } } },
+                    new { reviewerId = 77, reviewerType = 0, creator = "fixture", reviewerName = "Aster", reviewerAvatar = "https://fixture.invalid/a.png", rating = 5, content = "快", createTime = 1760000000000 },
+                    new { reviewerId = 78, reviewerType = 1, creator = "fixture", reviewerName = "K", rating = 4, content = "", createTime = 1760000000001 } } },
+                "/app-api/trade/contract/review-page" => new { total = 1, list = new object[] {
+                    new { id = 3, contractId = 4, participantId = 5, reviewerId = 79, revieweeId = 4242000000000042,
+                        reviewerName = "Pilot", rating = 5, comment = "准时", contractTitle = "护航",
+                        sourceType = "contract", sourceLabel = "合约评价", createTime = 1760000000002 } } },
                 "/app-api/trade/order-report/my-list" => new { total = 1, list = new object[] {
                     new { id = 9, transactionNumber = "TX9", reportedUserId = 55, reportedUserNickname = "Raider", reportTypeName = "欺诈", reportContent = "收款后拉黑", reportEvidence = "https://cdn/e.png", handleStatusName = "已处理", handleResult = "已封禁", handler = "admin", createTime = "2026-10-09" } } },
                 "/app-api/member/user-blacklist/my-list" => new { total = 1, list = new object[] {
@@ -62,7 +66,20 @@ internal static class MarketplaceRecordsTests
         var review = reviews.GetProperty("rows")[0];
         Check(review.GetProperty("reviewer").GetString() == "A*****r", "reviewer masked");
         Check(!review.TryGetProperty("reviewerId", out _) && !review.TryGetProperty("reviewerAvatar", out _), "no reviewer id or avatar");
-        Check(reviews.GetProperty("total").GetInt64() == 2, "total kept");
+        Check(reviews.GetProperty("total").GetInt64() == 3, "TR6: both totals summed");
+        Check(reviews.GetProperty("tradeTotal").GetInt64() == 2 && reviews.GetProperty("contractTotal").GetInt64() == 1,
+            "both source totals retained for completeness");
+        Check(!review.TryGetProperty("id", out _) && !review.TryGetProperty("transactionId", out _) &&
+            !review.TryGetProperty("auditStatus", out _) && review.GetProperty("sourceType").GetString() == "trade",
+            "trade review uses actual SCM VO fields");
+        var contract = reviews.GetProperty("rows")[2];
+        Check(contract.GetProperty("sourceType").GetString() == "contract" &&
+            contract.GetProperty("contractTitle").GetString() == "护航" && contract.GetProperty("content").GetString() == "准时",
+            "contract title and comment projected");
+        Check(!contract.TryGetProperty("revieweeId", out _) && !contract.TryGetProperty("participantId", out _),
+            "contract review has no private member fields");
+        Check(handler.Requests.Any(r => r.PathAndQuery.StartsWith("/app-api/trade/contract/review-page?revieweeId=4242000000000042&")),
+            "contract reviews requested about self");
         await Call(new { schemaVersion = 1, operation = "reviews", page = 2 });
         Check(handler.Requests.Count(r => r.PathAndQuery == "/app-api/member/user/get") == 1, "own id read once per owner");
 

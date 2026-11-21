@@ -39,7 +39,7 @@ internal static class OverlayModuleLifecycleTests
         Check(runtime.ModuleDemand is { } demand && ReferenceEquals(demand.Sources, fixture.Policy) && demand.ActiveModules.Count == 5,
             "Actual HWND publishes immutable visible module intent independently of its data leases.");
         var first = await WaitFor(observations, item => item.Window.Notice == "Notice fixture");
-        Check(first.Window.OverviewTitle == "ORGANIZATION OVERVIEW" && first.Window.MembersTitle == "PARTY MEMBERS" &&
+        Check(first.Window.OverviewTitle == "ORGANIZATION OVERVIEW" && first.Window.MembersTitle == "ROOM: Room fixture" &&
             first.Window.Members.Any(member => member.Contains("Room member")) && first.Window.Chat.Count == 0,
             "First HWND model uses mixed sources and does not replay chat history.");
         Check(legacyReads == 0, "Mixed mode must never read or demand the legacy source.");

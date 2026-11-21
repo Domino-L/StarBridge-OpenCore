@@ -53,6 +53,13 @@ internal sealed class WindowsNotificationActivity(int parentProcessId)
         return SocialSoundAllowed(true,
             foreground != IntPtr.Zero && GetWindowThreadProcessId(foreground, out _) != 0, _game.ReadCurrentState());
     }
+    // Continuous play (user 11-14): the system trade rule alone. Locked or switched desktop, presentation mode, an inactive
+    // desktop or an unknown shell state hold it back; StarBridge in front or the game state does not.
+    internal string ContinuousPlaySuppressionReason()
+    {
+        try { return StarBridge.OverlayRuntime.Windows.WindowsInformationOverlayRuntimeFactory.SystemTradeSuppressionReason(); }
+        catch { return "system-state-unavailable"; }
+    }
     // Trade alerts ignore Windows DND/quiet time; the app-foreground and game-state gates stay.
     internal string TradeSuppressionReason()
     {

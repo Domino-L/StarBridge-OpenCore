@@ -70,6 +70,58 @@ void main() {
     port.dispose();
     await session.close();
   });
+  for (final scmOnly in [true, false]) {
+    test(
+      'relay identity refusal reads as ${scmOnly ? 'SCM-only' : 'signed out'}',
+      () async {
+        final connection = _Connection()
+          ..safetyError = 'accountSafety.identity_unavailable';
+        final session = BridgeClientSession(
+          connection: connection,
+          sessionGeneration: 1,
+        )..acceptHostCapabilities(['accountSafety.read']);
+        final port = BridgeAccountSafety(session, scmOnly: () => scmOnly);
+        await expectLater(
+          port.read(),
+          throwsA(
+            isA<AccountSafetyException>().having(
+              (e) => e.failure,
+              'failure',
+              scmOnly
+                  ? AccountSafetyFailure.scmOnly
+                  : AccountSafetyFailure.signedOut,
+            ),
+          ),
+        );
+        port.dispose();
+        await session.close();
+      },
+    );
+  }
+  test(
+    'reauthorization stays signed out even for a SCM-only account',
+    () async {
+      final connection = _Connection()
+        ..safetyError = 'account.reauthorization_required';
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 1,
+      )..acceptHostCapabilities(['accountSafety.read']);
+      final port = BridgeAccountSafety(session, scmOnly: () => true);
+      await expectLater(
+        port.read(),
+        throwsA(
+          isA<AccountSafetyException>().having(
+            (e) => e.failure,
+            'failure',
+            AccountSafetyFailure.signedOut,
+          ),
+        ),
+      );
+      port.dispose();
+      await session.close();
+    },
+  );
   test('malformed response is not empty success and uncertain submit is not repeated', () async {
     final connection = _Connection()..malformed = true;
     final session = BridgeClientSession(
@@ -105,6 +157,7 @@ class _Connection implements BridgeConnection {
   final sent = <BridgeEnvelope>[];
   String state = 'signedIn';
   bool malformed = false;
+  String? safetyError;
   final owner = const BridgeAccountContext(
     environment: 'test',
     authority: 'starbridge-relay-test',
@@ -116,6 +169,25 @@ class _Connection implements BridgeConnection {
   Future<void> send(BridgeEnvelope request) async {
     sent.add(request);
     final account = request.name == 'account.getCurrent';
+    if (!account && safetyError != null) {
+      stream.add(
+        BridgeEnvelope(
+          protocolVersion: 1,
+          messageType: 'response',
+          name: request.name,
+          correlationId: request.correlationId,
+          sessionGeneration: request.sessionGeneration,
+          payload: const {},
+          status: 'error',
+          error: BridgeErrorBody(
+            code: safetyError!,
+            message: 'Synthetic refusal.',
+            retryable: false,
+          ),
+        ),
+      );
+      return;
+    }
     stream.add(
       BridgeEnvelope(
         protocolVersion: 1,

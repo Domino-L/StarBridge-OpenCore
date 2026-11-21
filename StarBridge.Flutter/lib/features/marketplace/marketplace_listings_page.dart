@@ -1,9 +1,12 @@
 import 'marketplace_listing_components.dart';
-import '../../design_system/styles/marketplace_palette.dart';
+import 'marketplace_numbers.dart';
+import 'marketplace_time.dart';
 import '../../design_system/icons/marketplace_icon.dart';
 import 'marketplace_listing_copy.dart';
 import 'marketplace_listing_errors.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_listing_editor.dart';
+import 'marketplace_listing_duplicate.dart';
 import 'marketplace_listing_publish.dart';
 export 'marketplace_listing_publish.dart' show ListingPublishDialog;
 
@@ -12,19 +15,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'marketplace_activity_rail.dart';
 import '../../design_system/interaction/starbridge_activation_origin.dart';
-import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_menu_anchor.dart';
 import '../../design_system/interaction/starbridge_checkbox_tile.dart';
 import '../../design_system/interaction/starbridge_native_icon_action.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_listings_controller.dart';
+import 'marketplace_listings_batch.dart';
 import 'marketplace_port.dart';
 import 'marketplace_surfaces.dart';
 import 'marketplace_widgets.dart';
 import 'marketplace_trade_style.dart';
 import 'marketplace_trade_feedback.dart';
 import 'marketplace_details.dart';
+
 
 /// Explicitly injected data only; production composition does not register a fixture port.
 class MarketplaceListingsPage extends StatefulWidget {
@@ -53,10 +57,12 @@ class MarketplaceListingsPage extends StatefulWidget {
   State<MarketplaceListingsPage> createState() => _ListingsState();
 }
 
-class _ListingsState extends State<MarketplaceListingsPage> {
+class _ListingsState extends State<MarketplaceListingsPage> with MarketListingBatch {
+  @override
   final selected = <Object?>{};
   String side = 'all';
   late bool manifests = widget.initialManifests;
+  @override
   MarketplaceListingsController get c => widget.controller;
   @override
   void initState() {
@@ -64,182 +70,25 @@ class _ListingsState extends State<MarketplaceListingsPage> {
     c.refresh();
   }
 
+  @override
   String name(MarketRow r) =>
       r['name'] as String? ?? listingText(context, '名称待更新');
   Future<void> publish([MarketRow? row]) async {
-    final draft = ListingDraft(
-      item: row == null ? const {} : {'id': row['itemId'], 'name': row['name']},
-      side: row?['side'] as String? ?? 'sell',
-      price: '${row?['price'] ?? ''}',
-      quantity: '${row?['quantity'] ?? 1}',
-      location: row?['location'] as String? ?? '',
-      quality: '${row?['quality'] ?? ''}',
-      wanted: row?['wanted'] as String? ?? '',
-    );
+    if (c.pending || c.writeUncertain || row != null && !listingCanCopy(row, c.fullOrders)) return;
+    final generation = c.fullOrders?.port.generation;
+    final draft = row == null ? ListingDraft() : await duplicateListing(row, c.fullOrders);
+    if (!mounted || generation != c.fullOrders?.port.generation) return;
     await tradeMotionDialog<void>(
       context,
       (_) => ListingPublishDialog(
         c,
         draft,
         initialStep: row == null ? 0 : 2,
+        initialError: row != null && draft.side == 'barter' && draft.wanted.isEmpty
+            ? '没有读到想要的物品，请重新选择' : null,
         editProfile: widget.editProfile,
       ),
     );
-  }
-
-  Future<void> batch(bool visible) async {
-    final result = await c.setVisibility(
-      c.rows.where((r) => selected.contains(r['id'])).toList(),
-      visible,
-    );
-    if (!mounted) return;
-    final ordered = [
-      ...result.where((r) => r['success'] == true),
-      ...result.where((r) => r['success'] != true),
-    ];
-    await tradeMotionDialog<void>(
-      context,
-      (ctx) => Dialog(
-        backgroundColor: ctx.tokens.surfaces.floating.fill,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: ctx.tokens.surfaces.floating.border),
-        ),
-        child: SizedBox(
-          width: 460,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 14, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        visible
-                            ? listingText(context, '批量上架结果')
-                            : listingText(context, '批量下架结果'),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    StarBridgeNativeIconAction(
-                      controlKey: const Key('market-listing-batch-close'),
-                      label: listingText(context, '关闭'),
-                      onActivate: (source) =>
-                          dismissStarBridgeDialog<void>(ctx, source: source),
-                      icon: const MarketplaceIcon(
-                        MarketplaceGlyph.close,
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TradeNoticeBox(
-                        listingText(context, 'batchSummary', {
-                          'ok':
-                              '${result.where((r) => r['success'] == true).length}',
-                          'pending':
-                              '${result.where((r) => r['success'] != true).length}',
-                        }),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          color: ctx.tokens.surfaces.raised.fill,
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: Column(
-                          children: [
-                            for (final (i, r) in ordered.indexed)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 9,
-                                ),
-                                decoration: BoxDecoration(
-                                  border: i == 0
-                                      ? null
-                                      : Border(
-                                          top: BorderSide(
-                                            color: marketLine(ctx),
-                                          ),
-                                        ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    MarketplaceIcon(
-                                      r['success'] == true
-                                          ? MarketplaceGlyph.confirmed
-                                          : MarketplaceGlyph.failed,
-                                      size: 16,
-                                      color: r['success'] == true
-                                          ? MarketplacePalette.success
-                                          : ctx.tokens.colors.danger,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        name(r),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.fade,
-                                        softWrap: false,
-                                        style: const TextStyle(fontSize: 13),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      r['success'] == true
-                                          ? (visible
-                                                ? listingText(context, '已上架')
-                                                : listingText(context, '已下架'))
-                                          : listingText(context, '未确认，请刷新核对'),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: r['success'] == true
-                                            ? ctx.tokens.colors.textSecondary
-                                            : ctx.tokens.colors.danger,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: marketButtonAction(FilledButton(
-                          autofocus: true,
-                          style: tradePrimaryStyle(ctx),
-                          onPressed: () => dismissStarBridgeDialog<void>(
-                            ctx,
-                            source: StarBridgeActivationOrigin.sourceOf(ctx),
-                          ),
-                          child: Text(listingText(context, '知道了')),
-                        ), key: const Key('market-listing-batch-ok')),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    if (mounted) setState(selected.clear);
   }
 
   @override
@@ -251,7 +100,10 @@ class _ListingsState extends State<MarketplaceListingsPage> {
           .toList();
       final sideFilter = ListingSegments<String>(
         selected: side,
-        onSelected: (v) => setState(() => side = v),
+        onSelected: (v) {
+          setState(() => side = v);
+          unawaited(c.loadRemaining());
+        },
         segments: {
           'all': listingText(context, '全部'),
           'sell': listingText(context, '出售'),
@@ -261,7 +113,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
       );
       final publishButton = FilledButton.icon(
         style: tradePrimaryStyle(context),
-        onPressed: c.pending ? null : publish,
+        onPressed: (c.pending || c.writeUncertain) ? null : publish,
         icon: const MarketplaceIcon(MarketplaceGlyph.add, size: 16),
         label: Text(listingText(context, '发布挂单')),
       );
@@ -276,7 +128,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
               filters: [if (!manifests) sideFilter],
               actions: [
                 if (!manifests) ...[
-                  ListingCapacity(used: c.rows.length, limit: c.limit),
+                  ListingCapacity(used: c.activeSingleListingCount, limit: c.limit),
                   publishButton,
                 ],
               ],
@@ -315,7 +167,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    ListingCapacity(used: c.rows.length, limit: c.limit),
+                    ListingCapacity(used: c.activeSingleListingCount, limit: c.limit),
                     const SizedBox(width: 14),
                     publishButton,
                   ],
@@ -331,8 +183,10 @@ class _ListingsState extends State<MarketplaceListingsPage> {
           const SizedBox(height: 12),
           ],
           if (c.error != null) MarketNotice(listingErrorText(context, c.errorCode, c.error!), retry: c.refresh),
+          if (marketplaceNeedsLogin(c.errorCode)) MarketplaceAuthNotice(c.errorCode, login: c.login),
+          if (c.writeUncertain) Text(recoveryText(context, '请先刷新核对上次操作结果，再编辑或发布挂单')),
           if (c.writeUncertain) marketTextAction(key: const Key('market-listings-confirm-readback'),
-            onPressed: c.confirmReadBack,
+            onPressed: c.loading ? null : c.inspectUncertainWrite,
             child: Text(listingText(context, '已核对，继续操作'))),
           if (c.loading) const LinearProgressIndicator(),
           if (selected.isNotEmpty && !manifests)
@@ -355,13 +209,14 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                       rowBuilder: (control) => control,
                       visualDensity: VisualDensity.compact,
                       compactTarget: true,
-                      value: selected.length == list.length,
-                      mixed: selected.isNotEmpty && selected.length != list.length,
-                      onChanged: c.pending
+                      value: list.isNotEmpty && list.every((r) => selected.contains(r['id'])),
+                      mixed: list.any((r) => selected.contains(r['id'])) &&
+                          !list.every((r) => selected.contains(r['id'])),
+                      onChanged: (c.pending || c.writeUncertain || !c.allListingsLoaded)
                           ? null
                           : (_) => setState(() {
-                              if (selected.length == list.length) {
-                                selected.clear();
+                              if (list.every((r) => selected.contains(r['id']))) {
+                                selected.removeAll(list.map((r) => r['id']));
                               } else {
                                 selected.addAll(list.map((r) => r['id']));
                               }
@@ -378,17 +233,17 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                     ListingBatchButton(
                       listingText(context, '上架'),
                       MarketplaceGlyph.visible,
-                      c.pending ? null : () => batch(true),
+                      (c.pending || c.writeUncertain) ? null : () => batch(true),
                     ),
                     ListingBatchButton(
                       listingText(context, '下架'),
                       MarketplaceGlyph.hidden,
-                      c.pending ? null : () => batch(false),
+                      (c.pending || c.writeUncertain) ? null : () => batch(false),
                     ),
-                    ListingBatchButton(
+                    if (!c.rows.any((r) => selected.contains(r['id']) && marketIsChecklist(r))) ListingBatchButton(
                       listingText(context, '复制为新挂单'),
                       MarketplaceGlyph.copy,
-                      c.pending || selected.length != 1
+                      (c.pending || c.writeUncertain) || selected.length != 1
                           ? null
                           : () => publish(
                               c.rows.firstWhere(
@@ -398,7 +253,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                     ),
                     marketTextAction(
                       key: const Key('market-listings-clear-selection'),
-                      onPressed: c.pending
+                      onPressed: (c.pending || c.writeUncertain)
                           ? null
                           : () => setState(selected.clear),
                       child: Text(
@@ -414,7 +269,9 @@ class _ListingsState extends State<MarketplaceListingsPage> {
             ),
           Expanded(
             child: manifests
-                ? GridView.builder(
+                ? c.manifests.isEmpty
+                    ? Center(child: Text(listingText(context, c.loading ? '正在读取清单…' : '还没有清单，请先在 SCM 创建')))
+                    : GridView.builder(
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 340,
@@ -451,7 +308,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                             Text(
                               name(r),
                               maxLines: 1,
-                              overflow: TextOverflow.fade,
+                              overflow: fadeOverflow(context),
                               softWrap: false,
                               style: const TextStyle(
                                 fontSize: 14,
@@ -464,7 +321,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                 listingText(context, 'itemCount', {
                                   'n': '${marketRows(r['items']).length}',
                                 }),
-                                if (r['updated'] != null) '${r['updated']}',
+                                ?scmLocalTime(r['updated']),
                               ].join(' · '),
                               style: TextStyle(
                                 fontSize: 12,
@@ -492,7 +349,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                       fontWeight: FontWeight.w600,
                                     ),
                               ),
-                              onPressed: () {
+                              onPressed: (c.pending || c.writeUncertain) ? null : () {
                                 // Made once: the route may rebuild its builder.
                                 final draft = ListingDraft(
                                   manifestId: r['id'],
@@ -515,6 +372,13 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                       );
                     },
                   )
+                : c.rows.isEmpty && !c.loading && c.error == null
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(listingText(context, '还没有挂单，发布一条试试吧。')),
+                    const SizedBox(height: 12),
+                    FilledButton(onPressed: (c.pending || c.writeUncertain) ? null : publish,
+                      child: Text(listingText(context, '发布挂单'))),
+                  ]))
                 : MarketSurface(
                     corners: false,
                     child: LayoutBuilder(
@@ -531,18 +395,16 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                               return Padding(
                                 padding: const EdgeInsets.all(20),
                                 child: Text(
-                                  c.loading
-                                      ? listingText(context, '正在读取…')
-                                      : listingText(context, 'shownAll', {
-                                          'n': '${list.length}',
-                                        }),
+                                  listingText(context, '已显示 {x} / {y}', {
+                                    'x': '${c.rows.length}', 'y': '${c.total ?? '—'}',
+                                  }),
                                   textAlign: TextAlign.center,
                                 ),
                               );
                             }
                             final r = list[i],
                                 on = selected.contains(list[i]['id']);
-                            final best = marketNumber(r['best']),
+                            final best = c.listingBestPrice(r),
                                 price = marketNumber(r['price']);
                             final optimal =
                                 best != null &&
@@ -577,7 +439,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                     label: name(r),
                                     rowBuilder: (control) => control,
                                     value: on,
-                                    onChanged: c.pending
+                                    onChanged: (c.pending || c.writeUncertain)
                                         ? null
                                         : (v) => setState(() {
                                             v
@@ -588,7 +450,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                   SizedBox.square(
                                     dimension: 44,
                                     child: MarketArt(
-                                      r['thumbnailUrl'] as String?,
+                                      marketListingImage(r),
                                       category: marketCategoryOf(r),
                                     ),
                                   ),
@@ -613,24 +475,23 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                           runSpacing: 4,
                                           children: [
                                             ListingSideTag(r['side'] as String?),
-                                            if (marketQuality(r) != null)
+                                            if (!marketIsChecklist(r) && marketQuality(r) != null)
                                               MarketQualityBadge(
                                                 r,
                                                 prefixed: true,
                                               )
-                                            else if (r['quality'] != null)
+                                            else if (!marketIsChecklist(r) && r['quality'] != null)
                                               MarketQualityBadge({
                                                 'qualityData': {
                                                   'type': 'material',
                                                   'quality': r['quality'],
                                                 },
                                               }, prefixed: true),
-                                            if ((r['ongoing'] as int? ?? 0) > 0)
+                                            if (r['hasOngoingTransactions'] == true)
                                               ListingTag(
                                                 listingText(
                                                   context,
-                                                  'ongoingCount',
-                                                  {'n': '${r['ongoing']}'},
+                                                  '有进行中的交易',
                                                 ),
                                                 context.tokens.colors.accent,
                                               ),
@@ -647,8 +508,13 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                           CrossAxisAlignment.start,
                                       children: [
                                         if (r['side'] == 'barter')
-                                          Text(
-                                            '${listingText(context, '想换')} ${r['wanted'] ?? listingText(context, '待更新')}',
+                                          marketTextAction(
+                                            key: ValueKey<(String, Object?)>(('market-listing-detail', r['id'])),
+                                            onPressed: c.openOrder == null ? null : () async {
+                                              await c.openOrder!(context, r);
+                                              if (mounted) setState(() {});
+                                            },
+                                            child: Text(listingText(context, '以物易物 · 看详情')),
                                           )
                                         else
                                           MarketPrice(price),
@@ -667,7 +533,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                                   : narrow
                                                   ? null
                                                   : '${r['side'] == 'buy' ? listingText(context, '最高收购') : listingText(context, '最低卖价')} ${marketMoney(best)} · ',
-                                              onEdit: c.pending
+                                              onEdit: (c.pending || c.writeUncertain)
                                                   ? null
                                                   : () => editListing(
                                                       context,
@@ -700,7 +566,9 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                               top: 3,
                                             ),
                                             child: Text(
-                                              '${r['expiry']}',
+                                              scmPermanent(r['expiry'])
+                                                  ? listingText(context, '永久')
+                                                  : scmLocalTime(r['expiry']) ?? '—',
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 color: context
@@ -716,7 +584,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                   StarBridgeNativeIconAction(
                                     controlKey: ValueKey(('market-listing-edit', r['id'])),
                                     label: listingText(context, '编辑'),
-                                    onActivate: c.pending
+                                    onActivate: (c.pending || c.writeUncertain)
                                         ? null
                                         : (_) => editListing(context, c, r),
                                     icon: const MarketplaceIcon(
@@ -727,10 +595,10 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                   Semantics(container: true, child: StarBridgeMenuAnchor(
                                     semanticLabel: listingText(context, '更多'),
                                     consumeOutsideTaps: true,
-                                    enabled: !c.pending,
+                                    enabled: !(c.pending || c.writeUncertain),
                                     entries: [
                                       for (final (id, label, run) in [
-                                        ('copy', listingText(context, '复制为新挂单'), () => publish(r)),
+                                        if (listingCanCopy(r, c.fullOrders)) ('copy', listingText(context, '复制为新挂单'), () => publish(r)),
                                         (
                                           'visibility',
                                           r['visible'] == true
@@ -746,7 +614,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                           id: ('market-listing-$id', r['id']),
                                           controlKey: ValueKey(('market-listing-$id', r['id'])),
                                           label: label,
-                                          onActivate: c.pending ? null : (source) => unawaited(
+                                          onActivate: (c.pending || c.writeUncertain) ? null : (source) => unawaited(
                                             runStarBridgeActivation<void>(source, () async => run()),
                                           ),
                                           // Native PopupMenuItem: 112 x 48 with 12 inset.
@@ -766,7 +634,7 @@ class _ListingsState extends State<MarketplaceListingsPage> {
                                           key: ValueKey(('market-listing-more', r['id'])),
                                           label: listingText(context, '更多'),
                                           focusNode: focus,
-                                          onActivate: c.pending ? null : toggle,
+                                          onActivate: (c.pending || c.writeUncertain) ? null : toggle,
                                           icon: MarketplaceIcon(MarketplaceGlyph.more),
                                         ),
                                   )),

@@ -5,7 +5,8 @@ import 'onboarding_port.dart';
 
 /// Device-local bridge contract. No invented account/legacy identity is sent.
 /// Host advertises this capability only after all required owners are connected.
-final class BridgeOnboardingAdapter implements OnboardingPort {
+final class BridgeOnboardingAdapter
+    implements OnboardingPort, OnboardingLogCandidatePort {
   BridgeOnboardingAdapter(this.session, {this.onGenerationAdvanced});
   static const capability = 'onboarding.firstUse.v1';
   final BridgeClientSession session;
@@ -65,6 +66,21 @@ final class BridgeOnboardingAdapter implements OnboardingPort {
   }
 
   @override
+  Future<OnboardingReply> selectLogCandidate(
+    int index,
+    OnboardingCheckpoint checkpoint,
+  ) {
+    if (index < 0 || index >= (_facts?.logCandidates?.length ?? 0)) {
+      throw StateError('Game log candidate is no longer current.');
+    }
+    return _request('onboarding.execute', {
+      ..._expected(checkpoint),
+      'action': 'selectLog',
+      'candidateIndex': index,
+    });
+  }
+
+  @override
   Future<OnboardingReply> save(OnboardingCheckpoint checkpoint) =>
       _request('onboarding.saveProgress', _expected(checkpoint));
 
@@ -111,6 +127,12 @@ final class BridgeOnboardingAdapter implements OnboardingPort {
         response.accountContext != null ||
         response.error != null) {
       if (operation == _operation) _invalidate();
+      if (response.error?.code == 'firstUse.source_invalid') {
+        throw const BridgeClientException('firstUse.source_invalid');
+      }
+      if (response.error?.code == 'firstUse.storage_unavailable') {
+        throw const BridgeClientException('firstUse.storage_unavailable');
+      }
       throw StateError('Onboarding request was not confirmed.');
     }
     try {
@@ -173,29 +195,43 @@ abstract final class OnboardingWire {
     final state = _token(payload['stateKey']);
     if (state == null) _bad();
     final raw = _map(payload['facts']);
-    _shape(raw, const {
-      'eligibility',
-      'available',
-      'canSave',
-      'sourceKey',
-      'evidenceKey',
-      'version',
-      'logReady',
-      'evidence',
-      'origin',
-      'handle',
-      'observedAt',
-      'scopeChecked',
-      'requiresFreshEvidence',
-      'localIdentityConfirmed',
-      'localSettingsReady',
-      'signedIn',
-      'onlineIdentityMatched',
-      'onlineChoicesReviewed',
-      'activeMode',
-      'publicationSuspended',
-      'onlineSetupPending',
-    });
+    final deferred = raw['logDeferred'] ?? false;
+    if (deferred is! bool) _bad();
+    final blocked = raw['logSearchBlocked'] ?? false;
+    if (blocked is! bool) _bad();
+    final pending = raw.containsKey('logSetupPending')
+        ? _bool(raw, 'logSetupPending')
+        : false;
+    _shape(
+      {...raw}
+        ..remove('logDeferred')
+        ..remove('logSearchBlocked')
+        ..remove('logSetupPending')
+        ..remove('logCandidates'),
+      const {
+        'eligibility',
+        'available',
+        'canSave',
+        'sourceKey',
+        'evidenceKey',
+        'version',
+        'logReady',
+        'evidence',
+        'origin',
+        'handle',
+        'observedAt',
+        'scopeChecked',
+        'requiresFreshEvidence',
+        'localIdentityConfirmed',
+        'localSettingsReady',
+        'signedIn',
+        'onlineIdentityMatched',
+        'onlineChoicesReviewed',
+        'activeMode',
+        'publicationSuspended',
+        'onlineSetupPending',
+      },
+    );
     final facts = OnboardingFacts(
       eligibility: _enum(raw['eligibility'], OnboardingEligibility.values),
       available: _bool(raw, 'available'),
@@ -204,6 +240,9 @@ abstract final class OnboardingWire {
       evidenceKey: _token(raw['evidenceKey']),
       version: _version(raw['version']),
       logReady: _bool(raw, 'logReady'),
+      logDeferred: deferred,
+      logSearchBlocked: blocked,
+      logCandidates: _candidates(raw['logCandidates']),
       evidence: _enum(raw['evidence'], OnboardingEvidence.values),
       origin: raw['origin'] == null
           ? null
@@ -213,6 +252,7 @@ abstract final class OnboardingWire {
       scopeChecked: _bool(raw, 'scopeChecked'),
       requiresFreshEvidence: _bool(raw, 'requiresFreshEvidence'),
       localIdentityConfirmed: _bool(raw, 'localIdentityConfirmed'),
+      logSetupPending: pending,
       localSettingsReady: _bool(raw, 'localSettingsReady'),
       signedIn: _bool(raw, 'signedIn'),
       onlineIdentityMatched: _bool(raw, 'onlineIdentityMatched'),
@@ -223,7 +263,12 @@ abstract final class OnboardingWire {
       publicationSuspended: _bool(raw, 'publicationSuspended'),
       onlineSetupPending: _bool(raw, 'onlineSetupPending'),
     );
-    if (facts.evidenceKey != null && facts.sourceKey == null ||
+    if (facts.logSetupPending && !facts.localIdentityConfirmed ||
+        facts.logDeferred &&
+            (facts.logReady ||
+                facts.sourceKey != null ||
+                facts.localIdentityConfirmed) ||
+        facts.evidenceKey != null && facts.sourceKey == null ||
         facts.logReady && (facts.sourceKey == null || facts.version == null) ||
         facts.evidence == OnboardingEvidence.candidate && !facts.hasCandidate ||
         facts.evidence != OnboardingEvidence.candidate &&
@@ -250,6 +295,46 @@ abstract final class OnboardingWire {
     );
   }
 
+  static List<OnboardingLogCandidate>? _candidates(Object? value) {
+    if (value == null) return null;
+    if (value is! List || value.length > 8) _bad();
+    final seen = <String>{};
+    return List.unmodifiable(
+      value.map((item) {
+        final raw = _map(item);
+        _shape(raw, const {'path', 'version'});
+        final path = raw['path'], version = _version(raw['version']);
+        if (path is! String ||
+            path.length > 1024 ||
+            RegExp(r'[\x00-\x1f\x7f]').hasMatch(path) ||
+            !RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path) ||
+            version == null ||
+            !RegExp(r'^[A-Z0-9_-]{2,32}$').hasMatch(version) ||
+            !seen.add(path.toLowerCase())) {
+          _bad();
+        }
+        final parts = path.replaceAll('\\', '/').split('/');
+        if (parts.length < 3 ||
+            parts.last.toLowerCase() != 'game.log' ||
+            parts[parts.length - 2].toUpperCase() != version ||
+            parts
+                .skip(1)
+                .any(
+                  (p) =>
+                      p.isEmpty ||
+                      p == '.' ||
+                      p == '..' ||
+                      p.endsWith('.') ||
+                      p.endsWith(' ') ||
+                      RegExp(r'[:*?"<>|]').hasMatch(p),
+                )) {
+          _bad();
+        }
+        return OnboardingLogCandidate(path, version);
+      }),
+    );
+  }
+
   static OnboardingCheckpoint? _checkpoint(Object? value) {
     if (value == null) return null;
     final raw = _map(value);
@@ -260,7 +345,9 @@ abstract final class OnboardingWire {
         : _enum(raw['mode'], OnboardingMode.values);
     final source = _token(raw['sourceKey']);
     final evidence = _token(raw['evidenceKey']);
-    if (step.index > OnboardingStep.mode.index && mode == null ||
+    if (step != OnboardingStep.welcome &&
+            step != OnboardingStep.mode &&
+            mode == null ||
         step == OnboardingStep.online && mode != OnboardingMode.online ||
         evidence != null && source == null) {
       _bad();

@@ -17,7 +17,9 @@ internal sealed partial class ScmAccountBridgeHost
         void Current() {
             token.ThrowIfCancellationRequested();
             if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
-            if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+            if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+                throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
                 throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
             _ = RequireSession(context);
             RequireSameRelaySession(RequireRelaySession(context), session);

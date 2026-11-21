@@ -43,7 +43,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
     {
         NotificationAudioCatalog? catalog = null;
         try { catalog = NotificationAudioCatalog.Load(assetRoot); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException) { }
         return new(dataRoot, catalog, new WindowsWaveAudioOutput(), generation, canNotify, canPlaySocial: canPlaySocial, menuVisible: menuVisible);
     }
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
@@ -101,7 +101,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
             catch (AudioConflictException) { return ReplyError(request, "write_conflict"); }
             catch (NotificationAudioCatalogException) { StopOrdinaryPlayback(); return ReplyError(request, "integrity_failed"); }
             catch (Exception e) when (e is InvalidOperationException or ArgumentException or KeyNotFoundException or FormatException or OverflowException) { return ReplyError(request, "invalid_request"); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException) {
                 return ReplyError(request, request.Name == "notificationAudio.save" ? "write_failed" : "read_failed");
             }
         }
@@ -110,7 +110,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
     {
         var available = false;
         try { available = _catalog?.Resolve(NotificationAudioCueIds.Soft) != null; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotificationAudioCatalogException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or NotificationAudioCatalogException) { }
         return new { value.SchemaVersion, value.Revision, value.Enabled, value.Volume, value.DoNotDisturb, previewAvailable = available };
     }
     // Device-local scheduled notice; reuses the verified cue, output and one global playback gain.
@@ -133,7 +133,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
                 if (played) { _achievementSound = true; _lastPlayback = _time.GetTimestamp(); }
                 return played;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException)
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException)
             { return false; }
         }
     }
@@ -177,7 +177,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
                     played ? "acceptedUnverified" : "rejected");
                 if (played) _lastPlayback = _time.GetTimestamp();
                 return played;
-            } catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
+            } catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
                 RecordHangar(NotificationDeliveryStage.Failed);
                 return false;
             }
@@ -190,27 +190,32 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
         lock (_gate) {
             try {
                 if (_disposed || !notice.IsCurrent() ||
-                    notice.Kind is not (NotificationEventKind.OrganizationManagement or NotificationEventKind.OrganizationChat) ||
+                    notice.Kind is not (NotificationEventKind.OrganizationManagement or NotificationEventKind.OrganizationChat or NotificationEventKind.OrganizationAnnouncement) ||
                     string.IsNullOrWhiteSpace(notice.Source.PolicyKey) ||
-                    (notice.Kind == NotificationEventKind.OrganizationManagement ? !notice.Source.ManagementAvailable : !notice.Source.ChatAvailable)) return false;
+                    (notice.Kind == NotificationEventKind.OrganizationAnnouncement ? notice.Source.Announcements == null :
+                        notice.Kind == NotificationEventKind.OrganizationManagement ? !notice.Source.ManagementAvailable : !notice.Source.ChatAvailable)) return false;
                 var official = notice.Source.SourceKind == OrganizationNotificationSourceKind.OfficialFleet;
                 if (!Enum.IsDefined(notice.Source.SourceKind) || official != NotificationPolicyStore.IsOfficialFleetKey(notice.Source.PolicyKey) ||
                     official && (notice.Source.ManagementAvailable || notice.Source.Tasks.Length != 0 || notice.Source.JoinedAt != null)) return false;
-                if (!NotificationSourcePolicy.Allows(_policies.Read(notice.Owner).For(notice.Source.PolicyKey), notice.Kind)) return false;
+                var policy = _policies.Read(notice.Owner);
+                var admittedAt = _time.GetUtcNow(); var zone = NotificationOrganizationPolicy.LocalZone(_time);
+                if (!NotificationOrganizationPolicy.AllowsEvent(policy.Rule(notice.Source.PolicyKey), notice.Kind, notice.OccurredAt, admittedAt, zone)) return false;
                 var settings = _store.Read();
                 if (!settings.Enabled || settings.Volume == 0 || !_canPlaySocial() ||
                     _menuVisible() && !MenuSoundEnabled()) return false;
-                if (Defer(() => TryPlayCommunity(notice), notice.Owner, notice.Source.PolicyKey)) return false;
+                if (Defer(() => TryPlayCommunity(notice), notice.Owner, notice.Source.PolicyKey, notice.Kind,
+                    notice.Kind == NotificationEventKind.OrganizationAnnouncement ? notice.Revalidate : null)) return false;
                 if (AutomaticThrottled(1)) return false;
                 var asset = _catalog?.Resolve(NotificationAudioCueIds.Soft);
                 if (asset == null) return false;
                 var wave = ReadVerifiedWave(asset, settings.Volume);
-                if (!notice.IsCurrent()) return false;
+                if (!notice.IsCurrent() || !NotificationOrganizationPolicy.Current(_policies, notice.Owner, notice.Source.PolicyKey,
+                    notice.Kind, policy.SuppressionRevision(notice.Source.PolicyKey), admittedAt, zone, _time)) return false;
                 var played = _output.TryPlay(wave);
                 if (played) AudioAccepted(wave);
                 if (played) _lastPlayback = _time.GetTimestamp();
                 return played;
-            } catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
+            } catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
                 return false;
             }
         }
@@ -253,7 +258,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
                 if (played) _lastPlayback = _time.GetTimestamp();
                 return played;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException)
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException)
             { RecordPlayback(NotificationDeliveryStage.Failed); return false; }
         }
     }
@@ -313,7 +318,7 @@ public sealed partial class NotificationAudioBridgeDispatcher : IBridgeRequestDi
             Record(played ? NotificationDeliveryStage.NativeAccepted : NotificationDeliveryStage.NativeRejected,
                 played ? "acceptedUnverified" : "rejected");
             if (played) _lastPlayback = _time.GetTimestamp();
-        } catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
+        } catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or NotificationAudioCatalogException or InvalidOperationException) {
             StopOrdinaryPlayback(); // Ordinary failures cannot retire the achievement owner's output.
             Record(NotificationDeliveryStage.Failed);
         }

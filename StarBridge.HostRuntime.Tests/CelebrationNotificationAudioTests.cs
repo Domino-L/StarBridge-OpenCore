@@ -87,7 +87,7 @@ internal static class CelebrationNotificationAudioTests
             activity.Report(true);
             Check(audio.TryPlayAchievement(() => true), "R6 soundtrack starts before injected policy failure");
             var stopsBeforeFault = output.Stops;
-            var policyFile = Directory.GetFiles(Path.Combine(root, "notification-policies-v1"), "*.json").Single();
+            var policyFile = Directory.GetFiles(Path.Combine(root, "notification-policies-v2"), "*.json").Single();
             File.WriteAllText(policyFile, "{");
             Direct(4);
             Check(output.Stops == stopsBeforeFault, "R6 PolicyReadFailureDuringCelebration must not stop the achievement soundtrack");

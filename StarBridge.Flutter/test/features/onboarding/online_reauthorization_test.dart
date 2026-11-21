@@ -186,7 +186,7 @@ void main() {
         );
         await pumpSetup(
           tester,
-          step: OnboardingStep.identity,
+          step: OnboardingStep.mode,
           mode: OnboardingMode.online,
           observation: facts(confirmed: true, onlineSetupPending: true),
           onlineReview: controller,

@@ -21,6 +21,8 @@ enum BridgePreviewPanel {
   image,
   browser,
   execHangar,
+  marketplace,
+  officialFleet,
 }
 
 /// One brand-bearing rail. Open and foreground are independent window states.
@@ -37,6 +39,7 @@ class BridgePreviewDock extends StatelessWidget {
     this.attention = const MenuAttention(),
     this.hudBusy = false,
     this.execHangarEnabled = false,
+    this.relayPages = const {},
     this.recoveryIdentities = const {},
   });
   final BridgePreviewPanel? selected;
@@ -49,6 +52,13 @@ class BridgePreviewDock extends StatelessWidget {
   final MenuAttention attention;
   final bool hudBusy;
   final bool execHangarEnabled;
+
+  /// Client pages the menu can show now (they need the page relay).
+  final Set<BridgePreviewPanel> relayPages;
+  static const _relayPanels = {
+    BridgePreviewPanel.marketplace,
+    BridgePreviewPanel.officialFleet,
+  };
 
   /// Opaque current panel leases, supplied by the workspace; never persisted.
   final Map<BridgePreviewPanel, Object> recoveryIdentities;
@@ -64,6 +74,7 @@ class BridgePreviewDock extends StatelessWidget {
 
   bool _canOpen(BridgePreviewPanel panel) =>
       !(panel == BridgePreviewPanel.execHangar && !execHangarEnabled) &&
+      !(_relayPanels.contains(panel) && !relayPages.contains(panel)) &&
       !(!featuresEnabled &&
           const {
             BridgePreviewPanel.organizations,
@@ -91,6 +102,16 @@ class BridgePreviewDock extends StatelessWidget {
     (MenuGlyph.image, 'menu.tools.image', BridgePreviewPanel.image),
     (MenuGlyph.browser, 'menu.tools.browser', BridgePreviewPanel.browser),
     (MenuGlyph.ship, '行政机库', BridgePreviewPanel.execHangar),
+    (
+      MenuGlyph.market,
+      'menu.tools.marketplace',
+      BridgePreviewPanel.marketplace,
+    ),
+    (
+      MenuGlyph.fleet,
+      'menu.tools.officialFleet',
+      BridgePreviewPanel.officialFleet,
+    ),
   ];
 
   @override
@@ -153,12 +174,17 @@ class BridgePreviewDock extends StatelessWidget {
                             panel != BridgePreviewPanel.hud &&
                             openPanels.contains(panel) &&
                             onRecover != null,
-                        label: AppStrings.of(context).text('menu.overlay.window.recover'),
+                        label: AppStrings.of(context)
+                            .text('menu.overlay.window.recover'),
                         entries: [
                           StarBridgeMenuEntry(
                             id: 'recover',
-                            label: AppStrings.of(context).text('menu.overlay.window.recover'),
-                            child: Text(AppStrings.of(context).text('menu.overlay.window.recover')),
+                            label: AppStrings.of(context)
+                                .text('menu.overlay.window.recover'),
+                            child: Text(
+                              AppStrings.of(context)
+                                  .text('menu.overlay.window.recover'),
+                            ),
                             onActivate: (_) {
                               if (context.mounted &&
                                   panel != BridgePreviewPanel.hud &&
@@ -287,7 +313,10 @@ class BridgePreviewDock extends StatelessWidget {
 
   Iterable<(MenuGlyph, String, BridgePreviewPanel)> get orderedTools sync* {
     for (final id in preferences.order) {
-      if (!preferences.hidden.contains(id)) {
+      if (!preferences.hidden.contains(id) &&
+          !_relayPanels.any(
+            (panel) => panel.name == id && !relayPages.contains(panel),
+          )) {
         yield tools.firstWhere((tool) => tool.$3.name == id);
       }
     }

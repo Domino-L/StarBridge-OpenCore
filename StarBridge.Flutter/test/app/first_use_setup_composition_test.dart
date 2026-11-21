@@ -34,7 +34,7 @@ import '../features/onboarding/bridge_onboarding_adapter_test.dart' show wire;
 import '../features/overlay_settings/overlay_appearance_center_entry_test.dart'
     show EntryPort;
 import '../features/overlay_settings/overlay_appearance_preview_page_test.dart'
-    show Window;
+    show Window, appearance;
 
 class EditorsFixture {
   final preferences = InMemoryAppPreferences();
@@ -86,7 +86,11 @@ void main() {
     (tester) async {
       final f = EditorsFixture();
       addTearDown(f.close);
-      final port = EntryPort(configurations: const []);
+      // the Host lists the visor; 0.7.3 previews a saved hidden appearance as the visor
+      final port = EntryPort(
+        configurations: const [],
+        extraAppearances: [appearance('Visor')],
+      );
       final window = Window();
       final overlay = OverlaySettingsModule(
         InMemoryOverlaySettingsAdapter(),
@@ -119,7 +123,8 @@ void main() {
       );
       expect(identical(page.module, overlay.workspace), true);
       expect(page.readOnly, true);
-      expect(page.appearanceId, port.storage.snapshot.settings!['skin']);
+      expect(port.storage.snapshot.settings!['skin'], isNot('Visor'));
+      expect(page.appearanceId, 'Visor');
       expect(port.live.opens, hasLength(1));
       expect(port.oldCarrierOpens, 0);
       expect(port.storage.mutations, isEmpty);
@@ -168,10 +173,9 @@ void main() {
       await expectLater(editor.openNativePreview(context), throwsStateError);
       expect(overlay.workspace!.projection.value.dirty, true);
       expect(port.storage.runtimeActions, actionsBefore);
-      expect(
-        port.storage.mutations.map((m) => m.kind).toSet(),
-        {OverlayWorkspaceMutationKind.saveActive},
-      );
+      expect(port.storage.mutations.map((m) => m.kind).toSet(), {
+        OverlayWorkspaceMutationKind.saveActive,
+      });
       expect(port.live.opens, isEmpty);
       expect(window.enters, 0);
       await expectLater(f.editors.openNativePreview(context), throwsStateError);
@@ -219,12 +223,21 @@ void main() {
       expect(page.nativeOverlay!.port, isA<BridgeNativeOverlayObservation>());
       expect(page.onlineReview!.port, isA<BridgeOnlineReviewAdapter>());
       expect(page.openNativePreview, isNotNull);
-      // A first-use user's opening step is recorded as UI progress only.
+      // Existing log evidence resumes at identity in the log-first order.
+      // Record that opening UI checkpoint without login or domain writes.
       expect(bridge.requests.map((request) => request.name), [
         'onboarding.read',
         'onboarding.saveProgress',
       ]);
       expect(bridge.requests.every((r) => r.accountContext == null), true);
+      expect(
+        (bridge.requests.last.payload['checkpoint']! as Map)['step'],
+        'identity',
+      );
+      expect(
+        (bridge.requests.last.payload['checkpoint']! as Map)['mode'],
+        'local',
+      );
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     },

@@ -154,6 +154,12 @@ class _HangarReaderResultsState extends State<HangarReaderResults> {
                               legacyCombatSize: combatSize,
                               elapsed: arrivals.elapsed(rowId),
                               active: arrivals.active,
+                              // The Host's exact catalog key first: RSI titles
+                              // ("w/C8X", "Mk I") often miss the silhouette keys.
+                              names: [
+                                if (ship['catalogId'] case final String id) id,
+                                original,
+                              ],
                               fallback: StarBridgeIcon(
                                 StarBridgeIconSemantic.hangar,
                                 size: 24,

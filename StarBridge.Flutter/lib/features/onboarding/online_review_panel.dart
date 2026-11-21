@@ -20,17 +20,25 @@ class OnlineReviewPanel extends StatefulWidget {
     required this.copy,
     required this.enabled,
     this.onChanged,
+    this.accountCard = false,
+    this.autoReview = false,
+    this.onContinue,
+    this.retainedAccountCard = false,
     super.key,
   });
   final OnlineReviewController controller;
   final OnboardingCopy copy;
   final bool enabled;
   final Future<void> Function()? onChanged;
+  final bool accountCard, autoReview;
+  final bool retainedAccountCard;
+  final Future<void> Function()? onContinue;
   @override
   State<OnlineReviewPanel> createState() => _OnlineReviewPanelState();
 }
 
 class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
+  bool _autoAttempted = false;
   @override
   void initState() {
     super.initState();
@@ -45,11 +53,36 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
     }
   }
 
-  void _read() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (mounted && widget.enabled) widget.controller.refresh();
+  void _read() => WidgetsBinding.instance.addPostFrameCallback((_) async {
+    if (!mounted || !widget.enabled) return;
+    await widget.controller.refresh();
+    if (mounted && widget.enabled && widget.autoReview && !_autoAttempted) {
+      _autoAttempted = true;
+      final snapshot = widget.controller.value.snapshot;
+      if (snapshot.canReview &&
+          const {
+            OnlineReviewState.identityCheckRequired,
+            OnlineReviewState.needsLocalIdentity,
+            OnlineReviewState.reviewExpired,
+          }.contains(snapshot.state)) {
+        await _run(() => widget.controller.execute(OnlineReviewAction.review));
+      }
+    }
   });
   Future<void> _run(Future<void> Function() work) async {
     await work();
+    if (mounted &&
+        widget.enabled &&
+        widget.autoReview &&
+        !widget.controller.value.error &&
+        const {
+          OnlineReviewState.identityCheckRequired,
+          OnlineReviewState.needsLocalIdentity,
+          OnlineReviewState.reviewExpired,
+        }.contains(widget.controller.value.snapshot.state) &&
+        widget.controller.value.snapshot.canReview) {
+      await widget.controller.execute(OnlineReviewAction.review);
+    }
     if (mounted) await widget.onChanged?.call();
   }
 
@@ -59,11 +92,19 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
     if (port is! OnlineReviewGameIdentitySource) return null;
     final verification = (port as OnlineReviewGameIdentitySource).gameIdentity;
     return verification.supportsGameIdentityVerification &&
-            const {
-              OnlineReviewState.verificationRequired,
-              OnlineReviewState.reverifyRequired,
-              OnlineReviewState.revoked,
-            }.contains(widget.controller.value.snapshot.state)
+            (const {
+                  OnlineReviewState.verificationRequired,
+                  OnlineReviewState.reverifyRequired,
+                  OnlineReviewState.revoked,
+                }.contains(widget.controller.value.snapshot.state) ||
+                !widget.autoReview &&
+                    widget.accountCard &&
+                    !widget
+                        .controller
+                        .value
+                        .snapshot
+                        .accountGameIdentityVerified &&
+                    widget.controller.value.snapshot.accountDisplayName != null)
         ? verification
         : null;
   }
@@ -126,22 +167,137 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
             _ => snapshot.state.name,
           };
     final editable = widget.enabled && !view.busy && !view.error;
+    final mismatch =
+        snapshot.localHandle != null &&
+        snapshot.authoritativeHandle != null &&
+        snapshot.localHandle!.toLowerCase() !=
+            snapshot.authoritativeHandle!.toLowerCase();
+    Widget? card;
+    if (widget.accountCard &&
+        (!snapshot.retainsSession || widget.retainedAccountCard) &&
+        !view.error &&
+        (snapshot.accountDisplayName != null ||
+            snapshot.authoritativeHandle != null)) {
+      card = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            copy.text('accountCard.title'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          Text(copy.text('accountCard.confirm')),
+          SizedBox(height: t.space.md),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (snapshot.accountGameIdentityVerified &&
+                        !(widget.autoReview && mismatch))
+                      Text(
+                        snapshot.authoritativeHandle!,
+                        key: const Key('online-account-name'),
+                      )
+                    else if (!widget.autoReview)
+                      Text(
+                        copy.text('accountCard.identityPending'),
+                        key: const Key('online-account-name'),
+                      ),
+                    Text(
+                      copy.text(
+                        snapshot.accountGameIdentityVerified
+                            ? 'accountCard.verified'
+                            : 'accountCard.unverified',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: t.space.md),
+          Wrap(
+            spacing: t.space.md,
+            runSpacing: t.space.sm,
+            children: [
+              if (!widget.autoReview || snapshot.identityConfirmed)
+                StarBridgeActionButton(
+                  controlKey: const Key('online-account-continue'),
+                  kind: StarBridgeActionKind.primary,
+                  onActivate: _tap(editable ? widget.onContinue : null),
+                  child: Text(copy.text('accountCard.continue')),
+                ),
+              if (!snapshot.retainsSession)
+                StarBridgeActionButton(
+                  controlKey: const Key('online-account-change'),
+                  kind: StarBridgeActionKind.secondary,
+                  onActivate: _tap(
+                    editable && snapshot.canCancel
+                        ? () => _run(() async {
+                            await widget.controller.execute(
+                              OnlineReviewAction.cancel,
+                            );
+                            if (!widget.controller.value.error) {
+                              await widget.controller.signIn();
+                            }
+                          })
+                        : null,
+                  ),
+                  child: Text(copy.text('accountCard.change')),
+                ),
+              if (!widget.autoReview && _verification != null)
+                StarBridgeActionButton(
+                  controlKey: const Key('online-review-verify'),
+                  onActivate: editable
+                      ? (source) => _verify(_verification!, source)
+                      : null,
+                  child: Text(copy.text('onlineReview.verifyGameIdentity')),
+                ),
+            ],
+          ),
+          // Beside "Use another account": old-account data migrates only to
+          // the SCM account it was linked to.
+          if (!snapshot.retainsSession) ...[
+            SizedBox(height: t.space.sm),
+            Text(
+              copy.text('accountCard.migrationHint'),
+              key: const Key('online-account-migration-hint'),
+            ),
+          ],
+        ],
+      );
+    }
+    if (card != null && !widget.autoReview) return card;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          copy.text('onlineReview.title'),
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        SizedBox(height: t.space.sm),
+        if (card != null) ...[card, SizedBox(height: t.space.lg)],
+        if (!widget.autoReview) ...[
+          Text(
+            copy.text('onlineReview.title'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          SizedBox(height: t.space.sm),
+        ],
         Semantics(
           liveRegion: true,
           child: Text(
-            copy.text('onlineReview.$status'),
+            copy.text(
+              snapshot.canConfirm &&
+                      snapshot.localHandle != null &&
+                      snapshot.localHandle!.toLowerCase() ==
+                          snapshot.authoritativeHandle?.toLowerCase()
+                  ? 'onlineReview.namesMatch'
+                  : 'onlineReview.$status',
+            ),
             style: TextStyle(color: t.colors.textSecondary),
           ),
         ),
-        if (!view.busy && !view.error && snapshot.localHandle != null) ...[
+        if (!view.busy &&
+            !view.error &&
+            (!widget.autoReview || mismatch) &&
+            snapshot.localHandle != null) ...[
           SizedBox(height: t.space.md),
           Text(
             copy.text('onlineReview.localHandle'),
@@ -151,6 +307,7 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
         ],
         if (!view.busy &&
             !view.error &&
+            (!widget.autoReview || mismatch) &&
             snapshot.authoritativeHandle != null) ...[
           SizedBox(height: t.space.md),
           Text(
@@ -158,8 +315,6 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
             style: Theme.of(context).textTheme.labelLarge,
           ),
           SelectableText(snapshot.authoritativeHandle!),
-          if (snapshot.accountDisplayName != null)
-            Text(snapshot.accountDisplayName!),
         ],
         SizedBox(height: t.space.md),
         Wrap(
@@ -196,6 +351,8 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
                   copy.text(
                     snapshot.state == OnlineReviewState.accountReviewRequired
                         ? 'onlineReview.confirmAccount'
+                        : widget.autoReview && !mismatch
+                        ? 'onlineReview.confirmOne'
                         : 'onlineReview.confirm',
                   ),
                 ),
@@ -222,7 +379,9 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
                 onActivate: editable ? (source) => _verify(port, source) : null,
                 child: Text(copy.text('onlineReview.verifyGameIdentity')),
               ),
-            if (snapshot.canReview &&
+            if (!widget.accountCard &&
+                !widget.autoReview &&
+                snapshot.canReview &&
                 !snapshot.canConfirm &&
                 !snapshot.identityConfirmed)
               StarBridgeActionButton(
@@ -267,7 +426,15 @@ class _OnlineReviewPanelState extends State<OnlineReviewPanel> {
               kind: StarBridgeActionKind.quiet,
               onActivate: _tap(
                 widget.enabled && !view.busy
-                    ? () => _run(widget.controller.refresh)
+                    ? () => _run(() async {
+                        await widget.controller.refresh();
+                        if (widget.autoReview &&
+                            widget.controller.value.snapshot.canReview) {
+                          await widget.controller.execute(
+                            OnlineReviewAction.review,
+                          );
+                        }
+                      })
                     : null,
               ),
               child: Text(copy.text('retry')),

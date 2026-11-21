@@ -9,7 +9,9 @@ internal enum LegacyRelayAccessState
     Unavailable,
     AuthorizationRequired,
     AccountMismatch,
-    NotEstablished
+    NotEstablished,
+    /// <summary>The relay migrated this legacy account into the SCM identity (MIGRATION-INTERFACE-073 §3).</summary>
+    Migrated
 }
 
 internal sealed record LegacyRelayProfileReadResult(

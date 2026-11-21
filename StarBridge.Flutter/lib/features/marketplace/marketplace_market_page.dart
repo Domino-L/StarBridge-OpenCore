@@ -12,6 +12,11 @@ import 'marketplace_banner.dart' show MarketplaceSurfaceColors;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'marketplace_display_copy.dart';
+import 'marketplace_display_rules.dart';
+import 'marketplace_filter_empty.dart';
+
+import '../../app/runtime/frame_governor.dart';
 
 import '../../design_system/interaction/starbridge_compact_select.dart';
 import '../../design_system/interaction/starbridge_native_icon_action.dart';
@@ -23,6 +28,7 @@ import 'marketplace_hall_drawers.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_hall_reads.dart';
 import 'marketplace_port.dart';
+import 'marketplace_dialog_scope.dart';
 import 'marketplace_widgets.dart';
 
 class MarketplaceMarketPage extends StatefulWidget {
@@ -69,10 +75,26 @@ class _MarketState extends State<MarketplaceMarketPage> {
     final theme = Theme.of(context);
     await showGeneralDialog<void>(
       context: context,
-      transitionBuilder: (_, animation, _, child) => FadeTransition(
-        opacity: animation,
-        child: Theme(data: theme, child: child),
-      ),
+      transitionBuilder: (_, animation, _, child) =>
+          ValueListenableBuilder<bool>(
+            valueListenable: lightVisuals(),
+            builder: (context, lightOnly, _) => AnimatedBuilder(
+              animation: animation,
+              child: Theme(data: theme, child: child),
+              builder: (context, child) => FadeTransition(
+                opacity: lightOnly
+                    ? AlwaysStoppedAnimation(
+                        animation.status == AnimationStatus.reverse ||
+                                animation.status == AnimationStatus.dismissed
+                            ? 0.0
+                            : 1.0,
+                      )
+                    : animation,
+                child: child,
+              ),
+            ),
+          ),
+      useRootNavigator: MarketplaceDialogScope.useRootNavigator(context),
       barrierDismissible: true,
       barrierLabel: marketBrowserText(context, '关闭分类与筛选', 'Close filters'),
       barrierColor: Colors.black54,
@@ -185,12 +207,12 @@ class _MarketState extends State<MarketplaceMarketPage> {
           MarketplaceSurfaceColors.gold,
         ),
         stat(
-          marketText(context, 'sell'),
+          marketText(context, 'singleSell'),
           b.overview['sell'],
           context.tokens.colors.accent,
         ),
         stat(
-          marketText(context, 'buy'),
+          marketText(context, 'singleBuy'),
           b.overview['buy'],
           MarketplacePalette.buyer,
         ),
@@ -209,10 +231,12 @@ class _MarketState extends State<MarketplaceMarketPage> {
       : child;
   Widget _content(bool narrow) {
     final data = b.result;
+    final rows = b.visibleRows;
     final sorts = <String, String>{
       if (b.kind == 'orders') ...{
         'time': marketBrowserText(context, '最新发布', 'Newest'),
-        'price': marketBrowserText(context, '单价', 'Unit price'),
+        if (!marketBundleType(b.options))
+          'price': '${marketBrowserText(context, '单价', 'Unit price')}${b.options['displayType'] == null ? ' · ${marketDisplayText(context, 'singleOnly')}' : ''}',
       } else ...{
         'totalOrderCount': marketBrowserText(context, '挂单最多', 'Most listings'),
         'sellOrderCount': marketBrowserText(
@@ -477,7 +501,7 @@ class _MarketState extends State<MarketplaceMarketPage> {
                             Expanded(
                               flex: 2,
                               child: Text(
-                                marketBrowserText(context, '卖家', 'Seller'),
+                                marketText(context, 'tradingParty'),
                               ),
                             ),
                             if (!narrow) ...[
@@ -527,6 +551,7 @@ class _MarketState extends State<MarketplaceMarketPage> {
                   child: data == null
                       ? const SizedBox()
                       : MarketPrefetch(
+                          enabled: !b.localQualityFilter,
                           read: data,
                           loading: b.loading,
                           failed: b.failed,
@@ -535,15 +560,20 @@ class _MarketState extends State<MarketplaceMarketPage> {
                             key: const ValueKey('market-results'),
                             controller: _scroll,
                             slivers: [
-                              if (data.rows.isEmpty)
+                              if (rows.isEmpty)
                                 SliverToBoxAdapter(
-                                  child: MarketNotice(
-                                    marketText(context, 'empty'),
-                                  ),
+                                  child: b.category != 0 || b.keyword.isNotEmpty ||
+                                      b.kind == 'items' && b.listed ||
+                                      b.options.keys.any((k) => !k.startsWith('sort'))
+                                    ? MarketFilterEmpty(action: 'clearFiltersEmpty', clear: () {
+                                        b.category = 0;
+                                        _reset(b.clear());
+                                      })
+                                    : MarketNotice(marketText(context, 'empty')),
                                 ),
                               if (b.layout == 'cards')
                                 SliverGrid.builder(
-                                  itemCount: data.rows.length,
+                                  itemCount: rows.length,
                                   gridDelegate:
                                       const SliverGridDelegateWithMaxCrossAxisExtent(
                                         maxCrossAxisExtent: 250,
@@ -553,23 +583,24 @@ class _MarketState extends State<MarketplaceMarketPage> {
                                         mainAxisSpacing: 14,
                                       ),
                                   itemBuilder: (_, i) => b.kind == 'items'
-                                      ? _item(data.rows[i], true)
-                                      : _orderCard(data.rows[i], i),
+                                      ? _item(rows[i], true)
+                                      : _orderCard(rows[i], i),
                                 )
                               else
                                 SliverList.builder(
-                                  itemCount: data.rows.length,
+                                  itemCount: rows.length,
                                   itemBuilder: (_, i) => b.kind == 'items'
                                       ? Padding(
                                           padding: const EdgeInsets.only(
                                             bottom: 8,
                                           ),
-                                          child: _item(data.rows[i], false),
+                                          child: _item(rows[i], false),
                                         )
-                                      : _orderRow(data.rows[i], narrow),
+                                      : _orderRow(rows[i], narrow),
                                 ),
                               SliverToBoxAdapter(
                                 child: MarketPageStatus(
+                                  visibleCount: b.localQualityFilter ? rows.length : null,
                                   read: data,
                                   loading: b.loading,
                                   failed: b.failed,
@@ -611,9 +642,11 @@ class _MarketState extends State<MarketplaceMarketPage> {
       return marketText(context, value == '0' ? 'buy' : 'sell');
     }
     if (key == 'displayType') {
-      return value == '3'
-          ? marketText(context, 'barter')
-          : marketBrowserText(context, '定价', 'Fixed price');
+      return switch (value) {
+        '3' => marketText(context, 'barter'),
+        '2' => marketBrowserText(context, '清单', 'Checklist'),
+        _ => marketBrowserText(context, '单件', 'Single'),
+      };
     }
     if (key == 'creatorStatus') {
       return value == '2'
@@ -632,6 +665,9 @@ class _MarketState extends State<MarketplaceMarketPage> {
       if (key.endsWith(':${f['jsonPath']}')) {
         return '${marketBrowserLabel(context, f)}: ${marketRows(f['options']).where((o) => value.split(',').contains(o['value'])).map((o) => marketBrowserLabel(context, o)).join(', ')}${f['type'] == 'range' ? value : ''}';
       }
+    }
+    if (key == 'minQuality' && b.options['creatorType'] == '0') {
+      return marketDisplayText(context, 'buyCeiling', n: value);
     }
     return '${{'minPrice': marketBrowserText(context, '最低价', 'Min price'), 'maxPrice': marketBrowserText(context, '最高价', 'Max price'), 'minQuality': marketBrowserText(context, '最低品质', 'Min quality')}[key] ?? ''}: $value';
   }

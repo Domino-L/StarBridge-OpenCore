@@ -13,6 +13,123 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
+  test('the sign-in choice is read and written by native, which owns it; '
+      'writing it ends the current view', () async {
+    final calls = <MethodCall>[];
+    var remembered = false;
+    var failSave = false;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'open') return 42;
+      if (call.method == 'readChoice') {
+        return {
+          'remember': remembered,
+          'uncleared': !remembered,
+          'unknown': false,
+        };
+      }
+      if (call.method == 'setChoice') {
+        final value = (call.arguments as Map)['remember'] as bool;
+        if (failSave) throw PlatformException(code: 'choice_failed');
+        remembered = value;
+      }
+      return null;
+    });
+    final browser = MethodChannelHangarBrowser();
+    expect(await browser.readSignIn(), (
+      remember: false,
+      uncleared: true,
+      unknown: false,
+    ));
+    await browser.open(profileKey: profileKey);
+    // A choice that could not be saved leaves the view open and closable.
+    failSave = true;
+    await expectLater(
+      browser.setRemember(true),
+      throwsA(isA<HangarReaderFailure>()),
+    );
+    await browser.close();
+    expect(calls.last.method, 'close');
+    expect(calls.last.arguments, {'viewId': 42});
+    failSave = false;
+    await browser.open(profileKey: profileKey);
+    await browser.setRemember(true);
+    expect(calls.last.method, 'setChoice');
+    expect(calls.last.arguments, {'remember': true});
+    expect(await browser.readSignIn(), (
+      remember: true,
+      uncleared: false,
+      unknown: false,
+    ));
+    // Native already closed the view while saving the choice.
+    final closes = calls.where((call) => call.method == 'close').length;
+    await browser.close();
+    expect(calls.where((call) => call.method == 'close').length, closes);
+  });
+
+  test(
+    'clearData sends no path and resets the view; native failures propagate',
+    () async {
+      final calls = <MethodCall>[];
+      var fail = false;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'open') return 42;
+        if (call.method == 'clearData' && fail) {
+          throw PlatformException(code: 'clear_busy');
+        }
+        return null;
+      });
+      final browser = MethodChannelHangarBrowser();
+      await browser.open(profileKey: profileKey);
+      await browser.clearData();
+      expect(calls.last.method, 'clearData');
+      expect(calls.last.arguments, isEmpty);
+      await browser.close();
+      expect(calls.where((call) => call.method == 'close'), isEmpty);
+      fail = true;
+      await expectLater(
+        browser.clearData(),
+        throwsA(
+          isA<HangarReaderFailure>().having(
+            (error) => error.code,
+            'code',
+            'clear_busy',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('clearing calls wait for native to finish deleting, beyond the '
+      'ordinary timeout', () async {
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      if (call.method == 'open') return 42;
+      if (['clearData', 'close', 'setChoice'].contains(call.method)) {
+        // Native replies only once the deletion on its worker thread is done.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+      }
+      return null;
+    });
+    final browser = MethodChannelHangarBrowser(
+      timeout: const Duration(milliseconds: 10),
+      clearTimeout: const Duration(seconds: 5),
+    );
+    await browser.clearData();
+    await browser.open(profileKey: profileKey);
+    // close swallows failures, so check that it really waited for the reply.
+    final closing = Stopwatch()..start();
+    await browser.close();
+    expect(
+      closing.elapsed,
+      greaterThanOrEqualTo(const Duration(milliseconds: 50)),
+    );
+    await browser.setRemember(false);
+    expect(calls, ['clearData', 'open', 'close', 'setChoice']);
+  });
+
   test(
     'all operations use the native view ID and close is idempotent',
     () async {

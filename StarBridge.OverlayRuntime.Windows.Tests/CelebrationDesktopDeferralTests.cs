@@ -26,7 +26,32 @@ internal static class CelebrationDesktopDeferralTests
         DesktopCelebrationDeferral.Enqueue(pending, Notice(), now); current = false;
         DesktopCelebrationDeferral.Prune(pending, now);
         Require(pending.Count == 0, "Changed-account notifications never reappear after celebration");
+        AnnouncementDequeue().GetAwaiter().GetResult();
         Console.WriteLine("PASS CX-ACHCEL desktop: 1 group, 0 failed (trade/private FIFO, limit, expiry and account invalidation)");
     }
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }
+    private static async Task AnnouncementDequeue()
+    {
+        var celebration = new AchievementCelebrationActivity();
+        var pending = new Queue<DesktopNotification>();
+        var current = true; var canRead = true; var reads = 0;
+        var notice = new DesktopNotification(Guid.NewGuid(), false, 0, 0, "sourceOnly", "bottomRight", "zh-CN", "dark", () => current) {
+            Community = new("Fixture A", "", "", false, Announcement: true),
+            RevalidateBeforePresent = _ => { reads++; return Task.FromResult(canRead); }
+        };
+        celebration.Report(true);
+        Require(DesktopCelebrationDeferral.Enqueue(pending, notice, DateTimeOffset.UtcNow), "A announcement waits behind celebration");
+        current = false; // Confirmed membership change, with no notification poll.
+        celebration.Report(false);
+        DesktopCelebrationDeferral.Prune(pending, DateTimeOffset.UtcNow);
+        Require(pending.Count == 0 && reads == 0, "A membership revocation removes the queued announcement before celebration drain");
+        current = true; celebration.Report(true);
+        DesktopCelebrationDeferral.Enqueue(pending, notice, DateTimeOffset.UtcNow);
+        canRead = false; celebration.Report(false);
+        Require(DesktopCelebrationDeferral.CanDrain(celebration, 0, true) && pending.TryDequeue(out var queued) &&
+            !await queued.CanPresentAsync(default) && reads == 1, "Actual native pre-show seam reauthorizes at dequeue and drops unreadable announcements");
+        canRead = true;
+        Require(await notice.CanPresentAsync(default) && reads == 2, "A still-authorized announcement can present after dequeue");
+        Console.WriteLine("PASS CX-ANNOUNCE-F2 native queue: 4 assertions, 0 failed");
+    }
 }

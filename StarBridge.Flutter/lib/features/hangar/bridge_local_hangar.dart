@@ -3,6 +3,7 @@ import 'dart:math';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
+import 'local_hangar_cloud.dart';
 import 'local_hangar_port.dart';
 import 'local_hangar_reconciliation.dart';
 import 'ship_specifications_port.dart';
@@ -26,7 +27,8 @@ final class BridgeLocalHangar
         LocalHangarPersonalDataPort,
         LocalHangarReadScopeSource,
         LocalHangarReconciliationPort,
-        LocalHangarReadFailures {
+        LocalHangarReadFailures,
+        LocalHangarCloudPort {
   BridgeLocalHangar(
     this._session, {
     this.diagnosticCapture = HangarReadDiagnostics.enabled,
@@ -127,6 +129,31 @@ final class BridgeLocalHangar
       _offlineRevision == null &&
       _retainedReadId == null &&
       _session.hostCapabilities.contains('hangar.localFavorites');
+
+  /// The account copy is SCM-only; offline/local modes never call it.
+  bool get _cloudAvailable =>
+      !_readOnly && _session.hostCapabilities.contains('hangar.cloud');
+
+  Future<LocalHangarCloudState> _cloud(
+    String name,
+    Map<String, Object?> body,
+  ) async {
+    if (!_cloudAvailable) {
+      return const LocalHangarCloudState(available: false);
+    }
+    final state = LocalHangarCloudState.parse(await _request(name, body));
+    if (state == null) {
+      throw const LocalHangarFailure('hangar.invalid_response');
+    }
+    return state;
+  }
+
+  @override
+  Future<LocalHangarCloudState> readCloud() => _cloud('cloudRead', const {});
+
+  @override
+  Future<LocalHangarCloudState> acknowledgeCloud(String notice) =>
+      _cloud('cloudAcknowledge', {'notice': notice});
 
   @override
   Future<LocalHangarSnapshot> setFavorite(
@@ -530,10 +557,12 @@ final class BridgeLocalHangar
             nickname: row['nickname'] as String?,
             notes: row['notes'] as String?,
             liner: row['liner'] as String?,
+            manufacturer: row['manufacturer'] as String?,
             cn: names['zhHans'] as String?,
             tw: names['zhHant'] as String?,
             size: row['combatSize'] as String?,
             addedAt: DateTime.tryParse(row['addedAt'] as String? ?? ''),
+            acquiredOn: parseAcquiredOn(row['acquiredOn']),
             removedAt: DateTime.tryParse(row['removedAt'] as String? ?? ''),
             catalogId: row['catalogId'] as String?,
             display: ShipReviewedDisplay.parse(row['display']),

@@ -14,8 +14,9 @@ class TraySurfaceSnapshot {
     this.locale = 'zh-CN',
     this.dark = true,
     this.reduceMotion = false,
+    this.performanceMode = false,
     this.styleId = 'future_restraint_a',
-    this.interactionStyle = 'standard',
+    this.interactionStyle = 'scan',
     this.automaticKey = 'presence.unknown',
     this.opening = 0,
     this.keyboard = false,
@@ -32,6 +33,7 @@ class TraySurfaceSnapshot {
   final bool canEnterOffline;
   final bool canRestoreOnline;
   final bool canChangePresence, canToggleOverlay, dark, reduceMotion, keyboard;
+  final bool performanceMode;
   final String locale, styleId, automaticKey, interactionStyle;
   Map<String, Object?> toMap() => {
     'schemaVersion': 1,
@@ -50,6 +52,7 @@ class TraySurfaceSnapshot {
     'locale': locale,
     'dark': dark,
     'reduceMotion': reduceMotion,
+    'performanceMode': performanceMode,
     'styleId': styleId,
     'interactionStyle': interactionStyle,
     'automaticKey': automaticKey,
@@ -129,8 +132,10 @@ class TraySurfaceSnapshot {
       locale: text('locale') ?? 'zh-CN',
       dark: flag('dark'),
       reduceMotion: flag('reduceMotion'),
+      // Lenient: a snapshot without it keeps the full look.
+      performanceMode: input['performanceMode'] == true,
       styleId: text('styleId') ?? 'future_restraint_a',
-      interactionStyle: text('interactionStyle') ?? 'standard',
+      interactionStyle: text('interactionStyle') ?? 'scan',
       automaticKey: text('automaticKey') ?? 'presence.unknown',
       opening: input['opening'] is int ? input['opening'] as int : 0,
       keyboard: input['keyboard'] == true,

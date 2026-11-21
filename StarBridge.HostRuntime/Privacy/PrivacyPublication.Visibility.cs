@@ -76,6 +76,13 @@ internal sealed partial class PrivacyPublication
         lock (_observationGate) return SamePauseOwner(input, _observedPause);
     }
 
+    // Audience selection never resumes sharing. The first-default grant uses
+    // this same check again inside the consent write, after waiting for admission.
+    private bool IsApplySuspended(PrivacyPublicationInput input, PublicationVisibilitySnapshot visibility) =>
+        visibility.Mode is not (PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame) ||
+        _manualPause || _store.IsPublicationPaused(input.Owner) || _store.IsPublicationRevoked(input.Owner) ||
+        HasObservedPause(input);
+
     private static bool SamePauseOwner(PrivacyPublicationInput input, PrivacyPublicationInput? other) =>
         other is not null && input.Owner == other.Owner && input.Generation == other.Generation;
 

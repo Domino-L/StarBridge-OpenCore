@@ -11,8 +11,10 @@ import 'marketplace_diagonal.dart';
 import 'marketplace_hall_drawers.dart';
 import 'marketplace_hover.dart';
 import 'marketplace_port.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_publish_entry.dart';
 import 'marketplace_widgets.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 const _gold = MarketplacePalette.gold;
 
@@ -43,7 +45,7 @@ class _StripState extends State<MarketMyListingsStrip> {
   void _askBestPrices(List<MarketRow> rows) {
     final wanted = [
       for (final r in rows)
-        if (marketNumber(r['itemId']) != null && r['side'] != 'barter')
+        if (marketNumber(r['itemId']) != null && r['side'] != 'barter' && !marketIsChecklist(r))
           (marketNumber(r['itemId'])!.toInt(), r['side'] == 'buy' ? 0 : 1),
     ];
     if (wanted.isEmpty) return;
@@ -54,6 +56,16 @@ class _StripState extends State<MarketMyListingsStrip> {
 
   @override
   Widget build(BuildContext context) {
+    if (c.myListingsError != null) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(recoveryText(context, c.myListingsError == 'marketplace.sign_in_required'
+            ? '登录 SCM 后可以发布和管理挂单' : '暂时读不到我的挂单')),
+        if (marketplaceNeedsLogin(c.myListingsError))
+          MarketplaceAuthNotice(c.myListingsError, login: c.login)
+        else
+          marketTextAction(onPressed: c.refreshMyOrders, child: Text(marketText(context, 'retry'))),
+      ]);
+    }
     if (!c.myListingsLoaded) {
       return const SizedBox(height: 2, child: LinearProgressIndicator());
     }
@@ -109,7 +121,7 @@ class _MineCard extends StatelessWidget {
     Widget? hint;
     if (hidden) {
       hint = Text(marketText(context, 'listingHidden'), style: TextStyle(color: t.colors.textSecondary));
-    } else if (known && price != null && best != null) {
+    } else if (!marketIsChecklist(row) && known && price != null && best != null) {
       final leading = buy ? price >= best : price <= best;
       hint = leading
           ? Text('● ${marketText(context, buy ? 'mineTopBid' : 'mineLowest')}', style: TextStyle(color: t.colors.success))
@@ -128,7 +140,9 @@ class _MineCard extends StatelessWidget {
         inheritContentStyle: true,
         hoverFace: false,
         baseRadius: 0,
-        onActivate: itemId == null ? null : (_, _) => c.openItem(itemId),
+        onActivate: marketIsChecklist(row) || side == 'barter'
+            ? (_, _) => c.openMyListings()
+            : itemId == null ? null : (_, _) => c.openItem(itemId),
         child: CustomPaint(
           painter: hidden ? MarketHatchPainter(t.colors.textSecondary.withValues(alpha: .07)) : null,
           child: Container(
@@ -168,7 +182,7 @@ class _MineCard extends StatelessWidget {
                         Text(
                           '${row['name'] ?? ''}',
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                         ),
@@ -179,7 +193,7 @@ class _MineCard extends StatelessWidget {
                           DefaultTextStyle.merge(
                             style: const TextStyle(fontSize: 11),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             child: hint,
                           ),
@@ -276,7 +290,7 @@ class MarketVerbPrice extends StatelessWidget {
               ),
               semanticsLabel: '¤ ${marketMoney(price)}',
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(
                 fontFamily: t.typography.monoFamily,

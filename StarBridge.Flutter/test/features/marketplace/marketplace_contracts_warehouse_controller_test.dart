@@ -38,7 +38,7 @@ class _Port implements MarketplaceContractsPort, MarketplaceWarehousePort {
               }
             : {
                 'rows': [
-                  {'id': 17, 'status': 1, 'applications': applicants},
+                  {'id': 17, 'status': 1, 'attention': true, 'attentionComplete': true},
                   {'id': 18, 'status': 3},
                 ],
                 'total': 2,
@@ -53,7 +53,7 @@ class _Port implements MarketplaceContractsPort, MarketplaceWarehousePort {
         if (refuseApply) {
           throw const MarketplaceTradeError('marketplace.trade_rejected');
         }
-        return {'confirmed': true, 'participantId': 6};
+        return {'confirmed': true};
       default:
         return {'confirmed': true};
     }
@@ -109,7 +109,7 @@ void main() {
 
       await c.loadMine('created');
       await c.loadMine('participated');
-      expect(c.attention, 1, reason: 'recruiting with applicants');
+      expect(c.attention, 1, reason: 'publisher can start contract');
 
       await c.open(17);
       expect((c.detail!['contract'] as Map)['id'], 17);

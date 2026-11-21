@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../shared/ships/catalog_vehicle_icon.dart';
 import '../../shared/ships/ship_reviewed_display.dart';
+import '../../shared/ships/ship_vehicle_icon.dart';
 import 'hangar_combat_icon.dart';
 import 'hangar_combat_motion.dart';
 import 'hangar_catalog_icon.dart';
@@ -15,6 +16,7 @@ class HangarShipIcon extends StatelessWidget {
     required this.elapsed,
     this.active = true,
     this.fallback = const SizedBox.shrink(),
+    this.names = const [],
     super.key,
   });
 
@@ -24,8 +26,26 @@ class HangarShipIcon extends StatelessWidget {
   final bool active;
   final Widget fallback;
 
+  /// Ship identities for the silhouette, most exact first.
+  final List<String?> names;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ShipSilhouetteSwitch(
+    names: names,
+    fallback: _categoryArtwork(),
+    builder: (context, ship, grid) => ExcludeSemantics(
+      child: HangarCatalogIcon(
+        iconKey: names.whereType<String>().join('|'),
+        elapsed: elapsed,
+        active: active,
+        duration: shipSilhouetteReveal,
+        builder: (context, motion) =>
+            ShipSilhouetteIcon(ship: ship, grid: grid, motion: motion),
+      ),
+    ),
+  );
+
+  Widget _categoryArtwork() {
     final reviewed = display;
     if (reviewed != null &&
         CatalogVehicleIcon.motionDuration(reviewed.iconKey ?? '') != null) {

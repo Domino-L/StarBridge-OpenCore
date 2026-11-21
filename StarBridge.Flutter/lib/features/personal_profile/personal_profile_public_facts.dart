@@ -74,55 +74,169 @@ ProfileFact? _bans(BuildContext context, PersonalProfilePublicFacts facts) {
       : null;
 }
 
+bool personalProfileHasAccountFacts(PersonalProfilePublicFacts facts) =>
+    facts.lastOnlineDay != null ||
+    facts.siteRegisteredDay != null ||
+    facts.gameRegisteredDay != null ||
+    facts.language != null ||
+    facts.utcOffsetMinutes != null ||
+    facts.banned == true ||
+    (facts.banCount ?? 0) > 0 ||
+    facts.banned == false && facts.banCount == 0;
+
+bool personalProfileHasTradeFacts(PersonalProfilePublicFacts facts) =>
+    facts.reputation != null ||
+    facts.completedTrades != null ||
+    facts.sellOrders != null ||
+    facts.buyOrders != null;
+
 /// The trade and account facts on a page whose owner never chose a visibility.
 /// Anything unknown is left out, and a section with nothing to show disappears.
 class PersonalProfilePublicFactsBlock extends StatelessWidget {
   const PersonalProfilePublicFactsBlock({
     required this.facts,
     this.window,
+    this.showAccount = true,
+    this.showTrade = true,
+    this.skipReputation = false,
+    this.skipCompletedTrades = false,
     super.key,
   });
 
   final PersonalProfilePublicFacts facts;
   final ProfileTradeStripData? window;
+  final bool showAccount;
+  final bool showTrade;
+  final bool skipReputation;
+  final bool skipCompletedTrades;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     ProfileFact? number(String key, int? value) =>
         value == null ? null : ProfileFact(_copy(context, key), '$value');
-    ProfileFact? day(String key, String? value) =>
-        value == null ? null : ProfileFact(_copy(context, key), _date(context, value));
+    ProfileFact? day(String key, String? value) => value == null
+        ? null
+        : ProfileFact(_copy(context, key), _date(context, value));
     final trade = [
-      if (facts.reputation case final reputation?)
-        ProfileFact(_copy(context, 'reputation'), '★ $reputation'),
-      ?number('completedTrades', facts.completedTrades),
+      if (!skipReputation && facts.reputation != null)
+        ProfileFact(_copy(context, 'reputation'), '★ ${facts.reputation}'),
+      if (!skipCompletedTrades)
+        ?number('completedTrades', facts.completedTrades),
       ?number('sellOrders', facts.sellOrders),
       ?number('buyOrders', facts.buyOrders),
     ];
-    final account = [
-      ?day('lastOnline', facts.lastOnlineDay),
-      ?day('siteRegistered', facts.siteRegisteredDay),
-      ?day('gameRegistered', facts.gameRegisteredDay),
-      if (facts.language case final language?)
-        ProfileFact(_copy(context, 'language'), _copy(context, language)),
-      if (facts.utcOffsetMinutes case final offset?)
-        ProfileFact(
-          _copy(context, 'timeZone'),
-          PersonalProfilePublicTradeWindow.utcLabel(offset),
-        ),
-      ?_bans(context, facts),
-    ];
-    final showTrade = window != null || trade.isNotEmpty;
+    final account = showAccount
+        ? [
+            ?day('lastOnline', facts.lastOnlineDay),
+            ?day('siteRegistered', facts.siteRegisteredDay),
+            ?day('gameRegistered', facts.gameRegisteredDay),
+            if (facts.language case final language?)
+              ProfileFact(_copy(context, 'language'), _copy(context, language)),
+            if (facts.utcOffsetMinutes case final offset?)
+              ProfileFact(
+                _copy(context, 'timeZone'),
+                PersonalProfilePublicTradeWindow.utcLabel(offset),
+              ),
+            ?_bans(context, facts),
+          ]
+        : <ProfileFact>[];
+    final hasTrade = showTrade && (window != null || trade.isNotEmpty);
     return Column(
       key: const Key('profile-public-facts'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showTrade) ProfileFactSection(window: window, facts: trade),
-        if (showTrade && account.isNotEmpty) SizedBox(height: t.space.lg),
+        if (hasTrade) ProfileFactSection(window: window, facts: trade),
+        if (hasTrade && account.isNotEmpty) SizedBox(height: t.space.lg),
         if (account.isNotEmpty)
           ProfileFactSection(title: _copy(context, 'account'), facts: account),
       ],
     );
   }
 }
+
+/// The trade band's body on every profile page, the owner's included: the
+/// trade days, window and numbers first, then the account facts (user 11-08:
+/// the owner's page must look exactly like what visitors see).
+Widget personalProfileTradeThenAccount(
+  BuildContext context, {
+  Widget? trade,
+  Widget? account,
+}) {
+  if (trade == null || account == null) {
+    return trade ?? account ?? const SizedBox.shrink();
+  }
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [trade, SizedBox(height: context.tokens.space.lg), account],
+  );
+}
+
+/// Joins optional owner numbers to the existing asynchronously loaded trade
+/// strip. The composition layer reports which summary it already rendered.
+class ProfileOwnerTradeFactsScope extends InheritedWidget {
+  const ProfileOwnerTradeFactsScope({
+    required this.facts,
+    required super.child,
+    super.key,
+  });
+  final PersonalProfilePublicFacts facts;
+
+  /// The facts this scope supplies, or null outside one.
+  static PersonalProfilePublicFacts? factsOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<ProfileOwnerTradeFactsScope>()
+      ?.facts;
+
+  static Widget supplement(
+    BuildContext context, {
+    bool hasReputation = false,
+    bool hasCompletedTrades = false,
+  }) {
+    final facts = context
+        .dependOnInheritedWidgetOfExactType<ProfileOwnerTradeFactsScope>()
+        ?.facts;
+    return facts == null
+        ? const SizedBox.shrink()
+        : PersonalProfilePublicFactsBlock(
+            facts: facts,
+            showAccount: false,
+            skipReputation: hasReputation,
+            skipCompletedTrades: hasCompletedTrades,
+          );
+  }
+
+  @override
+  bool updateShouldNotify(ProfileOwnerTradeFactsScope oldWidget) =>
+      facts != oldWidget.facts;
+}
+
+/// Labels of the trade card numbers, shared with the Steam-style showcase.
+({
+  String reputation,
+  String completedTrades,
+  String sellOrders,
+  String buyOrders,
+})
+personalProfilePublicFactLabels(BuildContext context) => (
+  reputation: _copy(context, 'reputation'),
+  completedTrades: _copy(context, 'completedTrades'),
+  sellOrders: _copy(context, 'sellOrders'),
+  buyOrders: _copy(context, 'buyOrders'),
+);
+
+/// The trade card's date line: SCM and game registration and the ban state.
+/// Unknown values are left out, as in [PersonalProfilePublicFactsBlock].
+List<(String, String)> personalProfilePublicFactDates(
+  BuildContext context,
+  PersonalProfilePublicFacts facts,
+) => [
+  if (facts.siteRegisteredDay case final day?)
+    (_copy(context, 'siteRegistered'), _date(context, day)),
+  if (facts.gameRegisteredDay case final day?)
+    (_copy(context, 'gameRegistered'), _date(context, day)),
+  if (_bans(context, facts) case final bans?) (bans.label, bans.value),
+];
+
+/// "2026 年 11 月 2 日" for an ISO day, as on the public facts.
+String personalProfileFactDate(BuildContext context, String iso) =>
+    _date(context, iso);

@@ -1,6 +1,8 @@
 import 'overlay_appearance_live_session.dart';
 import 'overlay_appearance_progress.dart';
 import 'overlay_preview_guide_port.dart';
+import 'overlay_visor_editor_content.dart';
+import 'overlay_visor_switch_notice.dart';
 import 'overlay_workspace_port.dart';
 
 /// Optional capabilities a workspace port may also implement. Each is null
@@ -29,4 +31,13 @@ extension OverlayWorkspacePortCapabilities on OverlayWorkspacePort {
       this is OverlayAppearancePreviewPort
       ? this as OverlayAppearancePreviewPort
       : null;
+
+  OverlayVisorEditorContentPort? get visorEditorContent =>
+      this is OverlayVisorEditorContentPort &&
+          (this as OverlayVisorEditorContentPort).supportsVisorEditorContent
+      ? this as OverlayVisorEditorContentPort
+      : null;
+
+  OverlayVisorNoticePort? get visorNotice =>
+      this is OverlayVisorNoticePort ? this as OverlayVisorNoticePort : null;
 }

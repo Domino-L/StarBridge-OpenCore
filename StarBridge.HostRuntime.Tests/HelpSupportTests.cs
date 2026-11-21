@@ -66,6 +66,56 @@ internal static class HelpSupportTests
             Check((await offlineProfile.DispatchAsync(BridgeEnvelope.Request("helpSupport.openRsiProfileSettings", Guid.NewGuid().ToString(), 2,
                 new { schemaVersion = 1 }))).Response.Status == "error" && profilePages.Count == 1, "explicit offline does not open RSI");
         Check(HelpSupportBridgeDispatcher.Capabilities.Contains("helpSupport.openRsiProfileSettings"), "RSI profile settings is advertised");
+        // Our GitHub and website (user 11-16): fixed addresses, never a caller URL.
+        var publicPages = new List<Uri>();
+        using (var pages = new HelpSupportBridgeDispatcher(null, () => 2, openPublicPage: publicPages.Add))
+        {
+            BridgeEnvelope Open(string name, object payload, long epoch = 2) => BridgeEnvelope.Request(
+                name, Guid.NewGuid().ToString(), epoch, payload);
+            var github = (await pages.DispatchAsync(Open("helpSupport.openGitHub", new { schemaVersion = 1 }))).Response;
+            var site = (await pages.DispatchAsync(Open("helpSupport.openWebsite", new { schemaVersion = 1 }))).Response;
+            Check(github.Status == "ok" && site.Status == "ok" && github.Payload.GetProperty("opened").GetBoolean() &&
+                site.Payload.GetProperty("opened").GetBoolean() &&
+                publicPages.Select(page => page.AbsoluteUri).SequenceEqual(
+                    ["https://github.com/Domino-L/StarBridge-OpenCore", "https://scstarbridge.com/"]),
+                "GitHub and website open their fixed public addresses");
+            foreach (var name in new[] { "helpSupport.openGitHub", "helpSupport.openWebsite" })
+            {
+                async Task<string?> Code(BridgeEnvelope request, CancellationToken token = default) =>
+                    (await pages.DispatchAsync(request, token)).Response.Error?.Code;
+                Check(await Code(Open(name, new { schemaVersion = 1, url = "https://evil.example" })) == "helpSupport.invalid",
+                    "public page ignores caller URL");
+                Check(await Code(Open(name, new { schemaVersion = 2 })) == "helpSupport.invalid", "public page needs schema 1");
+                Check(await Code(Open(name, new { schemaVersion = 1 }) with
+                    { AccountContext = new BridgeAccountContext("synthetic", "test", "viewer") }) == "helpSupport.invalid",
+                    "public page refuses account context");
+                Check(await Code(Open(name, new { schemaVersion = 1 }, 1)) == "helpSupport.unavailable",
+                    "stale public page request stays closed");
+                using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+                Check(await Code(Open(name, new { schemaVersion = 1 }), cancelled.Token) == "helpSupport.unavailable",
+                    "cancelled public page request stays closed");
+            }
+            foreach (var variant in new[] { "helpSupport.opengithub", "helpSupport.OpenWebsite", " helpSupport.openWebsite",
+                "helpSupport.openWebsite ", "helpSupport.openGitHub/x" })
+                Check((await pages.DispatchAsync(Open(variant, new { schemaVersion = 1 }))).Response.Status == "error",
+                    "command name variants are not public pages");
+            Check(publicPages.Count == 2, "rejected public page requests open nothing");
+        }
+        foreach (var name in new[] { "helpSupport.openGitHub", "helpSupport.openWebsite" })
+        {
+            using (var offlinePages = new HelpSupportBridgeDispatcher(null, () => 2,
+                network: new StarBridge.HostRuntime.Lifecycle.DeviceNetworkAdmission(() => false), openPublicPage: publicPages.Add))
+                Check((await offlinePages.DispatchAsync(BridgeEnvelope.Request(name, Guid.NewGuid().ToString(), 2,
+                    new { schemaVersion = 1 }))).Response.Error?.Code == "helpSupport.offline" && publicPages.Count == 2,
+                    "explicit offline does not open our pages");
+            var disposedPages = new HelpSupportBridgeDispatcher(null, () => 2, openPublicPage: publicPages.Add);
+            disposedPages.Dispose();
+            Check((await disposedPages.DispatchAsync(BridgeEnvelope.Request(name, Guid.NewGuid().ToString(), 2,
+                new { schemaVersion = 1 }))).Response.Error?.Code == "helpSupport.unavailable" && publicPages.Count == 2,
+                "disposed dispatcher does not open our pages");
+        }
+        Check(HelpSupportBridgeDispatcher.Capabilities.Contains("helpSupport.openGitHub") &&
+            HelpSupportBridgeDispatcher.Capabilities.Contains("helpSupport.openWebsite"), "GitHub and website are advertised");
         var handler = new Transport();
         long generation = 2;
         var capability = new AppStatsHeartbeatRuntime.RelayCapability();
@@ -108,7 +158,22 @@ internal static class HelpSupportTests
             var hasCount = result.Payload.TryGetProperty("registeredAccountCount", out var value) && value.ValueKind != JsonValueKind.Null;
             Check(expected.HasValue ? hasCount && value.GetInt64() == expected : !hasCount,
                 "missing or invalid count is unknown, valid zero remains zero");
+            handler.ScmUserCountJson = raw;
+            result = (await dispatcher.DispatchAsync(Request("helpSupport.stats"))).Response;
+            var hasUsers = result.Payload.TryGetProperty("scmUserCount", out var users) && users.ValueKind != JsonValueKind.Null;
+            Check(result.Status == "ok" && (expected.HasValue ? hasUsers && users.GetInt64() == expected : !hasUsers),
+                "SCM user count follows the same unknown/zero rule");
+            handler.ScmUserCountJson = null;
         }
+        foreach (var (accounts, users) in new (string?, string?)[] { ("5", "9"), (null, "9"), ("5", null) })
+        {
+            handler.AccountCountJson = accounts; handler.ScmUserCountJson = users;
+            var both = (await dispatcher.DispatchAsync(Request("helpSupport.stats"))).Response.Payload;
+            long? Read(string key) => both.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : null;
+            Check(Read("registeredAccountCount") == (accounts is null ? null : 5) && Read("scmUserCount") == (users is null ? null : 9),
+                "account and SCM user counts are read from their own fields");
+        }
+        handler.AccountCountJson = null; handler.ScmUserCountJson = null;
         Check(capability.Protocol == 1, "old GET records legacy capability");
         handler.ProtocolJson = "2";
         await dispatcher.DispatchAsync(Request("helpSupport.stats"));
@@ -126,6 +191,7 @@ internal static class HelpSupportTests
         internal HttpMethod? LastMethod;
         internal string? LastBody;
         internal string? AccountCountJson;
+        internal string? ScmUserCountJson;
         internal string? ProtocolJson;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
@@ -135,7 +201,7 @@ internal static class HelpSupportTests
             if (Fail) throw new HttpRequestException("synthetic transport loss");
             return new(HttpStatusCode.OK) { Content = new StringContent(request.Method == HttpMethod.Get
                 ? "{\"downloadCount\":5,\"onlineUserCount\":2,\"fleetCount\":3,\"overlayUsageSeconds\":3600,\"updatedAt\":\"2026-09-15T12:00:00Z\"" +
-                    (AccountCountJson is null ? "" : ",\"registeredAccountCount\":" + AccountCountJson) + (ProtocolJson is null ? "" : ",\"heartbeatProtocol\":" + ProtocolJson) + "}" : "{}") };
+                    (AccountCountJson is null ? "" : ",\"registeredAccountCount\":" + AccountCountJson) + (ScmUserCountJson is null ? "" : ",\"scmUserCount\":" + ScmUserCountJson) + (ProtocolJson is null ? "" : ",\"heartbeatProtocol\":" + ProtocolJson) + "}" : "{}") };
         }
     }
 }

@@ -4,9 +4,10 @@ import 'package:starbridge_flutter/app/routing/exit_application_intent.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_activation_origin.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_switch.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart'
-    show InteractionSource;
+    show InteractionSource, SuitePressable;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/bootstrap/shell_review_configuration.dart';
@@ -118,6 +119,21 @@ void main() {
     'saved legal receipt unlocks the shell only after explicit acceptance',
     (tester) async {
       _startupViewport(tester);
+      const receiptChannel = MethodChannel('starbridge/rsi-tool-notice');
+      final receipts = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        receiptChannel,
+        (call) async {
+          receipts.add(call);
+          return call.method == 'read' ? false : null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          receiptChannel,
+          null,
+        ),
+      );
       final requests = <BridgeEnvelope>[];
       final lease = _createSignedOutLease(
         startupChoiceMade: true,
@@ -135,6 +151,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('usage-terms-pending')), findsOneWidget);
+      expect(receipts, isEmpty);
+      expect(find.byKey(const Key('rsi-tool-notice')), findsNothing);
       for (
         var i = 0;
         i < 30 && find.byKey(const Key('test-build-notice')).evaluate().isEmpty;
@@ -158,6 +176,58 @@ void main() {
       );
       expect(find.byKey(const Key('usage-terms-pending')), findsNothing);
       expect(find.byKey(const Key('test-build-notice')), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('rsi-tool-notice')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('rsi-tool-notice-got-it')));
+      await tester.pumpAndSettle();
+      expect(receipts.map((call) => call.method), ['read', 'markSeen']);
+      expect(find.byKey(const Key('rsi-tool-notice')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'upgraded user with accepted terms still sees the device notice',
+    (tester) async {
+      _startupViewport(tester);
+      const channel = MethodChannel('starbridge/rsi-tool-notice');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'read' ? false : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      final legal = <BridgeEnvelope>[];
+      final lease = _createSignedOutLease(
+        startupChoiceMade: true,
+        legalRequests: legal,
+        legalAlreadyAccepted: true,
+      );
+      lease.session.acceptHostCapabilities(['legal.testBuildNotice']);
+      await tester.pumpWidget(
+        StarBridgeRuntimeHost(
+          environment: const {},
+          windowChrome: InMemoryWindowChrome(),
+          nativeHostConnector: _CallbackNativeHostConnector(() async => lease),
+          applicationLifecycle: InMemoryApplicationLifecycle(),
+          reconnectDelay: const Duration(hours: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('test-build-notice')), findsNothing);
+      expect(find.byKey(const Key('rsi-tool-notice')), findsOneWidget);
+      expect(
+        legal.where((r) => r.name == 'legal.acceptTestBuildNotice'),
+        isEmpty,
+      );
+      await tester.tap(find.byKey(const Key('rsi-tool-notice-got-it')));
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -188,7 +258,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(requests.map((r) => r.name), ['applicationUpdates.check']);
       expect(find.text('发现新版本'), findsOneWidget);
-      expect(find.text('下载更新'), findsOneWidget);
+      expect(find.text('更新并重启'), findsOneWidget);
       await tester.tap(find.text('稍后'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 10));
@@ -869,11 +939,10 @@ void main() {
         findsNothing,
       );
       expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const Key('app-behavior-prompt-save')),
-            )
-            .onPressed,
+        _pressHandler(
+          tester,
+          find.byKey(const Key('app-behavior-prompt-save')),
+        ),
         isNull,
         reason: 'nothing is preselected',
       );
@@ -1043,6 +1112,7 @@ _TestNativeHostLease _createSignedOutLease({
   List<BridgeEnvelope>? menuStartupRequests,
   List<String>? startupEvents,
   List<BridgeEnvelope>? legalRequests,
+  bool legalAlreadyAccepted = false,
 }) {
   final pair = InMemoryBridgeConnection.createPair();
   final preferenceState = _TestPreferenceState(
@@ -1059,7 +1129,7 @@ _TestNativeHostLease _createSignedOutLease({
   var accountReads = 0;
   var migrationReads = 0;
   var migrationAcks = 0;
-  var legalAcknowledged = false;
+  var legalAcknowledged = legalAlreadyAccepted;
   unawaited(
     pair.host.incoming.forEach((request) async {
       startupEvents?.add(request.name);
@@ -1085,7 +1155,7 @@ _TestNativeHostLease _createSignedOutLease({
                   }
                 : {
                     'schemaVersion': 1,
-                    'termsVersion': '2026-10-31-v4',
+                    'termsVersion': '2026-11-05-v5',
                     'acknowledged': legalAcknowledged,
                   },
           ),
@@ -1359,3 +1429,11 @@ final class _TestPreferenceState {
   Map<String, Object?> applicationBehavior;
   int updateCount = 0;
 }
+
+// Button enabled state whatever the interaction suite (default is scan since 0.7.3).
+Object? _pressHandler(WidgetTester tester, Finder finder) =>
+    switch (tester.widget(finder)) {
+      final ButtonStyleButton button => button.onPressed,
+      final SuitePressable pressable => pressable.onActivate,
+      final other => throw StateError('Unexpected button ${other.runtimeType}'),
+    };

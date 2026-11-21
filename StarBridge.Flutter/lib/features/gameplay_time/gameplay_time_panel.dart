@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/localization/account_card_title.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -15,6 +18,7 @@ import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/interaction/starbridge_switch.dart';
 import 'gameplay_time_controller.dart';
+import 'gameplay_account_total.dart';
 
 String gameplayDuration(AppStrings strings, int seconds) => strings
     .text('gameplay.duration')
@@ -22,8 +26,16 @@ String gameplayDuration(AppStrings strings, int seconds) => strings
     .replaceAll('{minutes}', '${seconds ~/ 60 % 60}');
 
 class GameplayTimePanel extends StatefulWidget {
-  const GameplayTimePanel({required this.controller, super.key});
+  const GameplayTimePanel({
+    required this.controller,
+    this.onConfirmIdentity,
+    super.key,
+  });
   final GameplayTimeController controller;
+
+  /// Opens the existing installed game identity review (Usage mode). Without
+  /// it the identity error would only ask the user to wait.
+  final Future<void> Function(BuildContext)? onConfirmIdentity;
 
   @override
   State<GameplayTimePanel> createState() => _GameplayTimePanelState();
@@ -166,6 +178,8 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
           ? 'unsupported'
           : error == 'visibilityUnconfirmed'
           ? 'visibilityError'
+          : state.connectionUnavailable
+          ? state.pauseReason!
           : error == 'identityUnconfirmed'
           ? 'identityError'
           : error == 'stopUnconfirmed' ||
@@ -175,6 +189,8 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
           ? 'readError'
           : error != null
           ? 'error'
+          : state.consent == 'unknown' && state.consentPending == 'identity'
+          ? 'consentPendingIdentity'
           : state.consent != 'allowed'
           ? 'stopped'
           : state.recording
@@ -256,18 +272,8 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
                     }
                   : null,
             ),
-            if (state.historySupported)
-              _GameplaySwitch(
-                label: text('profileSwitch'),
-                value: state.showOnProfile,
-                controlKey: const Key('gameplay-time-profile-switch'),
-                onChanged: enabled
-                    ? (value) {
-                        _source = currentStarBridgeActivationSource;
-                        controller.setVisibility(value);
-                      }
-                    : null,
-              ),
+            // No separate "show on my profile" switch (user 11-08): the
+            // profile's own visibility and layout govern the playtime there.
             if (state.busy && state.operation != 'resetConfirmation') ...[
               SizedBox(height: tokens.space.sm),
               _GameplayWaiting(
@@ -284,11 +290,35 @@ class _GameplayTimePanelState extends State<GameplayTimePanel> {
             Text(
               text(status),
               key: const Key('gameplay-time-status'),
-              style: TextStyle(
-                color: error != null
-                    ? tokens.colors.warning
-                    : tokens.colors.textSecondary,
+              style: status == 'consentPendingIdentity'
+                  ? Theme.of(context).textTheme.bodyMedium
+                  : TextStyle(
+                      color: error != null
+                          ? tokens.colors.warning
+                          : tokens.colors.textSecondary,
+                    ),
+            ),
+            if (status == 'identityError' && widget.onConfirmIdentity != null)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: StarBridgeActionButton(
+                  kind: StarBridgeActionKind.secondary,
+                  controlKey: const Key('gameplay-time-confirm-identity'),
+                  onActivate: (_) =>
+                      unawaited(widget.onConfirmIdentity!(context)),
+                  child: Text(text('confirmIdentity')),
+                ),
               ),
+            Text(
+              text('deviceStorage'),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            Text(
+              withAccountCardTitle(
+                context,
+                gameplayAccountTotal(strings, state),
+              ),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
             if (state.seconds != null) ...[
               SizedBox(height: tokens.space.sm),

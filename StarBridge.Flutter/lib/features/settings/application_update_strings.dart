@@ -1,0 +1,98 @@
+/// 更新弹窗的文字，顺序是简体、繁体、英文。
+const applicationUpdateStrings = <String, List<String>>{
+  'title': ['检查更新', '檢查更新', 'Check for updates'],
+  'announcement': ['发现新版本', '發現新版本', 'A new version is available'],
+  'later': ['稍后', '稍後', 'Later'],
+  'checking': ['正在检查更新…', '正在檢查更新…', 'Checking for updates…'],
+  'channel-unconfigured': [
+    '此版本尚未提供在线更新。你可以继续使用当前客户端。',
+    '此版本尚未提供線上更新。你可以繼續使用目前的用戶端。',
+    'Online updates are not available for this build. You can keep using the current client.',
+  ],
+  'up-to-date': ['当前已是最新版本。', '目前已是最新版本。', 'You are up to date.'],
+  'configuration-invalid': [
+    '此版本的更新服务暂不可用。你可以继续使用当前客户端。',
+    '此版本的更新服務暫不可用。你可以繼續使用目前的用戶端。',
+    'The update service is unavailable for this build. You can keep using the current client.',
+  ],
+  'channel-unavailable': [
+    '暂时无法获取更新信息，请稍后重试。',
+    '暫時無法取得更新資訊，請稍後重試。',
+    'Update information is unavailable. Try again later.',
+  ],
+  'verification-failed': [
+    '更新信息未通过安全验证，已停止更新。当前版本保持不变。',
+    '更新資訊未通過安全驗證，已停止更新。目前版本保持不變。',
+    'Update information failed security verification. The update was stopped; your current version is unchanged.',
+  ],
+  'check-failed': [
+    '暂时无法检查更新。请检查网络后重试，或继续使用当前客户端。',
+    '暫時無法檢查更新。請檢查網路後重試，或繼續使用目前的用戶端。',
+    'Unable to check for updates. Check your connection and try again, or keep using the current client.',
+  ],
+  'retry': ['重新检查', '重新檢查', 'Check again'],
+  'available': [
+    '此安装暂时无法在应用内更新。请从官网下载最新版安装器（scstarbridge.com），保留现有资料完成升级。',
+    '此安裝暫時無法在應用程式內更新。請從官網下載最新版安裝程式（scstarbridge.com），保留現有資料完成升級。',
+    'In-app installation is unavailable for this installation. Use the latest installer from the official website (scstarbridge.com), keeping your existing data.',
+  ],
+  'available-installable': [
+    '下载好后会再问你一次才重启。',
+    '下載好後會再問你一次才重新啟動。',
+    'You will be asked once more before the client restarts.',
+  ],
+  'download': ['更新并重启', '更新並重新啟動', 'Update and restart'],
+  'download-again': ['重新下载', '重新下載', 'Download again'],
+  'retry-download': ['重试', '重試', 'Try again'],
+  'test-version': ['测试版', '測試版', 'Test version'],
+  'full-notes': ['查看完整更新内容', '查看完整更新內容', 'View full update notes'],
+  'collapse-notes': ['收起', '收起', 'Collapse'],
+  'step-download': ['下载', '下載', 'Download'],
+  'step-verify': ['校验', '校驗', 'Verify'],
+  'step-ready': ['准备好', '準備好', 'Ready'],
+  'step-install': ['安装', '安裝', 'Install'],
+  'downloading': [
+    '正在下载更新。你可以随时取消，当前版本不会改变。',
+    '正在下載更新。你可以隨時取消，目前版本不會改變。',
+    'Downloading the update. You can cancel at any time; your current version will not change.',
+  ],
+  'verifying': [
+    '下载完成，正在验证更新…',
+    '下載完成，正在驗證更新…',
+    'Download complete. Verifying the update…',
+  ],
+  'cancel-download': ['取消下载', '取消下載', 'Cancel download'],
+  'cancelled': [
+    '下载已取消，当前版本保持不变。',
+    '下載已取消，目前版本保持不變。',
+    'Download cancelled. Your current version is unchanged.',
+  ],
+  'ready': [
+    '更新已准备好。安装将关闭并重新打开客户端，请先保存未完成的更改。',
+    '更新已準備好。安裝將關閉並重新開啟用戶端，請先儲存未完成的變更。',
+    'The update is ready. Installation will restart the client. Save your changes first.',
+  ],
+  'install': ['重启并安装', '重新啟動並安裝', 'Restart and install'],
+  'prepare-failed': [
+    '更新未准备完成，当前版本保持不变。请重试；若仍失败，请从官网下载正式安装包（scstarbridge.com），关闭客户端后安装到原目录。无需先卸载或删除个人资料。',
+    '更新未準備完成，目前版本保持不變。請重試；若仍失敗，請從官網下載正式安裝程式（scstarbridge.com），關閉用戶端後安裝至原目錄。無需先解除安裝或刪除個人資料。',
+    'The update could not be prepared. Your current version is unchanged. Try again. If it still fails, download the official installer (scstarbridge.com), close the client, and install to the same location. Do not uninstall or delete personal data first.',
+  ],
+  'installation-version-mismatch': [
+    '安装登记与程序版本不一致，已停止更新。当前版本和个人资料未更改。请保存未完成的内容并关闭客户端，从官网下载正式安装包（scstarbridge.com），安装到原目录。无需先卸载、删除个人资料或手动修改登记信息。',
+    '安裝登記與程式版本不一致，已停止更新。目前版本與個人資料未變更。請儲存未完成的內容並關閉用戶端，從官網下載正式安裝程式（scstarbridge.com），安裝至原目錄。無需先解除安裝、刪除個人資料或手動修改登記資訊。',
+    'The installation registration does not match the program version. The update was stopped; your current version and personal data are unchanged. Save your work and close the client, then download the official installer (scstarbridge.com) and install to the same location. Do not uninstall, delete personal data, or manually edit the registration first.',
+  ],
+  'retrying': [
+    '暂时无法检查更新，正在自动重试。',
+    '暫時無法檢查更新，正在自動重試。',
+    'Unable to check for updates. Retrying automatically.',
+  ],
+  'unsupported': [
+    '当前客户端暂不支持检查更新。',
+    '目前的用戶端暫不支援檢查更新。',
+    'This client does not support update checks yet.',
+  ],
+  'current': ['当前版本', '目前版本', 'Current version'],
+  'close': ['关闭', '關閉', 'Close'],
+};

@@ -4,7 +4,7 @@ using StarBridge.Core.Events;
 
 namespace StarBridge.Core.Parsing;
 
-public sealed class RegexLogEventParser : ILogEventParser
+public sealed partial class RegexLogEventParser : ILogEventParser
 {
     private static readonly RegexOptions Options =
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
@@ -62,6 +62,8 @@ public sealed class RegexLogEventParser : ILogEventParser
             return null;
         }
 
+        // Contract rules require an actual log timestamp and precede generic HUD rules.
+        if (TryParseContract(line) is { } contract) return contract;
         var timestamp = ParseTimestamp(line) ?? DateTimeOffset.Now;
         var trackedStatusEvent = TrackRespawnEvidence(line, timestamp);
         if (trackedStatusEvent is not null)

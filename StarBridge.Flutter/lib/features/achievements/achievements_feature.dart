@@ -1,6 +1,8 @@
 import '../../app/feature_registry.dart';
 import '../account/account_module.dart';
 import 'achievements_page.dart';
+import 'swift_leaderboard.dart';
+import 'swift_leaderboard_page.dart';
 import 'achievement_collection_port.dart';
 import 'achievement_collection_session.dart';
 import 'achievement_ideas_port.dart';
@@ -12,13 +14,19 @@ FeatureDescriptor createAchievementsFeature(
   AchievementCollectionPort? scmPort,
   AchievementIdeasPort ideas = const UnavailableAchievementIdeas(),
   ConnectionModeControl? mode,
+  // Shared with the personal profile's achievement showcase; this feature
+  // still owns and disposes it.
+  AchievementCollectionSession? session,
+  // The SCM half, shared with the personal profile the same way.
+  AchievementCollectionSession? scmSession,
+  SwiftLeaderboardController? leaderboard,
 }) {
-  final session = AchievementCollectionSession(
+  session ??= AchievementCollectionSession(
     account: account.projection,
     port: port,
     mode: mode,
   );
-  final scmSession = scmPort == null
+  scmSession ??= scmPort == null
       ? null
       : AchievementCollectionSession(
           account: account.projection,
@@ -28,6 +36,9 @@ FeatureDescriptor createAchievementsFeature(
         );
   return FeatureDescriptor(
     id: 'achievements',
+    runtimePromptBuilder: leaderboard == null
+        ? null
+        : (child) => SwiftAwardPrompt(controller: leaderboard, child: child),
     route: '/achievements',
     labelKey: 'navigation.achievements',
     descriptionKey: 'navigation.achievements.description',
@@ -35,17 +46,19 @@ FeatureDescriptor createAchievementsFeature(
     navigationRegion: NavigationRegion.accountMenu,
     order: 15,
     onDispose: () {
-      session.dispose();
+      leaderboard?.dispose();
+      session!.dispose();
       scmSession?.dispose();
     },
     prefetch: () async {
       await Future.wait([
-        session.activate(),
+        session!.activate(),
         if (scmSession != null) scmSession.activate(),
       ]);
     },
     buildDestination: (_) => AchievementsPage(
-      session: session,
+      session: session!,
+      leaderboard: leaderboard,
       scmSession: scmSession,
       scmPort: scmPort,
       account: account.projection,

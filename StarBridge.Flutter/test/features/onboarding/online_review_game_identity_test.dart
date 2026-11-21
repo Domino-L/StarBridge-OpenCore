@@ -85,7 +85,7 @@ Future<OnlineReviewController> _pump(
   addTearDown(port.fake.close);
   await pumpSetup(
     tester,
-    step: OnboardingStep.identity,
+    step: OnboardingStep.mode,
     mode: OnboardingMode.online,
     observation: facts(confirmed: true, onlineSetupPending: true),
     onlineReview: online,
@@ -107,6 +107,50 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null);
   });
+
+  for (final locale in const [
+    Locale('zh', 'CN'),
+    Locale('zh', 'TW'),
+    Locale('en'),
+  ]) {
+    testWidgets(
+      'account card hides SCM name and retains verification: $locale',
+      (tester) async {
+        final port = _Port(_Verification());
+        port.fake.snapshot = const OnlineReviewSnapshot(
+          revision: 3,
+          modeState: OnlineReviewModeState.signInRequired,
+          state: OnlineReviewState.verificationRequired,
+          accountDisplayName: 'synthetic@example.com',
+        );
+        final online = OnlineReviewController(port);
+        addTearDown(online.dispose);
+        addTearDown(port.fake.close);
+        await pumpSetup(
+          tester,
+          step: OnboardingStep.mode,
+          mode: OnboardingMode.online,
+          observation: facts(confirmed: true, onlineSetupPending: true),
+          onlineReview: online,
+          locale: locale,
+        );
+        final copy = OnboardingCopy(locale);
+        expect(
+          find.text(copy.text('accountCard.identityPending')),
+          findsNothing,
+        );
+        expect(find.textContaining('example.com'), findsNothing);
+        expect(find.text(copy.text('accountCard.unverified')), findsOneWidget);
+        expect(
+          find.text(copy.text('onlineReview.verifyGameIdentity')),
+          findsOneWidget,
+        );
+        expect(find.byKey(_verify), findsOneWidget);
+        expect(find.byType(CircleAvatar), findsNothing);
+        expect(port.fake.actions, isEmpty);
+      },
+    );
+  }
 
   for (final state in const [
     'verificationRequired',

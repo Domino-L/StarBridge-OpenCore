@@ -31,7 +31,7 @@ internal static partial class FirstUseModeTests
         Require((await Read(0)).Status == "ok", "actual original first media chunk");
         handler.Hold = true;
         var pending = Read(192 * 1024);
-        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await handler.Entered.Task.WaitAsync(FirstUseTestWait.Bound);
         try
         {
             using var support = new ApplicationSupportBridgeDispatcher(f.Root, null,

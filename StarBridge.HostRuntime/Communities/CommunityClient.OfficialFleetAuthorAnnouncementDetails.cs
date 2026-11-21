@@ -37,7 +37,7 @@ internal sealed partial class CommunityClient
         var identities = hintValid ? AuthorIdentities(root, ids, detail: true) : new Dictionary<string, OfficialAuthorObservation>();
         var first = identities.GetValueOrDefault(detail.Author.AccountId) ?? new OfficialAuthorObservation("unavailable");
         var second = identities.GetValueOrDefault(detail.Editor.AccountId) ?? new OfficialAuthorObservation("unavailable");
-        refresh = refresh || !first.Current(_targetClock.GetUtcNow()) || !second.Current(_targetClock.GetUtcNow()) ||
+        refresh = refresh || !first.Current(_identityClock.GetUtcNow()) || !second.Current(_identityClock.GetUtcNow()) ||
             first.IdentityVersion != expectedAuthor || second.IdentityVersion != expectedEditor;
         if (first.IdentityVersion != expectedAuthor) first = new("unavailable"); if (second.IdentityVersion != expectedEditor) second = new("unavailable");
         var captured = new Dictionary<string, OfficialAuthorObservation>(StringComparer.Ordinal);
@@ -45,7 +45,7 @@ internal sealed partial class CommunityClient
         if (OfficialBid(detail.Editor.AccountId)) captured[detail.Editor.AccountId] = second;
         JsonObject Person(AnnouncementPerson person, OfficialAuthorObservation observation)
         {
-            var memberRef = observation.Current(_targetClock.GetUtcNow())
+            var memberRef = observation.Current(_identityClock.GetUtcNow())
                 ? MemberReferenceFor("account:" + person.AccountId, target.Code, scope, create: false) : null;
             var result = new JsonObject { ["memberRef"] = memberRef }; ApplyOfficialPerson(result, observation); return result;
         }
@@ -53,7 +53,7 @@ internal sealed partial class CommunityClient
         {
             var author = retired.Contains(detail.Author.AccountId) ? new OfficialAuthorObservation("unavailable") : first;
             var editor = retired.Contains(detail.Editor.AccountId) ? new OfficialAuthorObservation("unavailable") : second;
-            var authorVisible = author.Current(_targetClock.GetUtcNow()); var editorVisible = editor.Current(_targetClock.GetUtcNow());
+            var authorVisible = author.Current(_identityClock.GetUtcNow()); var editorVisible = editor.Current(_identityClock.GetUtcNow());
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 authorAvatarImageData = authorVisible ? author.Avatar : null,

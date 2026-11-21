@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_activation_origin.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_field_frame.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_global_group.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_schema.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
@@ -88,9 +89,8 @@ void main() {
           await t.pumpWidget(
             scopedApp(
               SingleChildScrollView(
-                child: OverlayWorkspaceSettingsGroup(
-                  group: 'startup',
-                  fields: const [],
+                // the experience presets sit in the global group (11-11)
+                child: OverlayWorkspaceGlobalGroup(
                   settings: draft,
                   onChanged: (_, _) =>
                       fail('Preset must not bypass original owner'),

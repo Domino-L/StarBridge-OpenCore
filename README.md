@@ -1,4 +1,4 @@
-# 星海舰桥 StarBridge
+# SCM 星海舰桥（SCM StarBridge）
 
 面向《星际公民》玩家社区的 Windows 桌面工具，把主舰队、社区组织、交易大厅、好友、房间和游戏浮层放在同一个应用里。当前为公开测试版。
 
@@ -14,21 +14,21 @@
 
 ## 下载与安装
 
-支持 Windows 10 / 11 x64。当前版本：**0.7.2.1（测试版）**。
+支持 Windows 10 / 11 x64。当前版本：**0.7.3（测试版）**。
 
 | 下载方式 | 说明 |
 | --- | --- |
 | [官网下载](https://scstarbridge.com/) | 查看当前版本、更新公告和文件校验信息。 |
-| [0.7.2.1 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.2.1-20261103-01-win-x64-setup.exe) | 下载后先核验，可离线安装。 |
+| [0.7.3 完整安装包](https://api.scstarbridge.com/downloads/StarBridge-0.7.3-20261121-03-win-x64-setup.exe) | 下载后先核验，可离线安装。 |
 | [查看全部版本](https://github.com/Domino-L/StarBridge-OpenCore/releases) | 更新说明、历史版本和 SHA-256 校验文件。 |
 
-0.7.2.1 完整安装包大小 **411803296 字节**，SHA-256：
+0.7.3 完整安装包大小 **396265088 字节**，SHA-256：
 
-`AD9CF2A7CE957CB8E1895AAA21530F148913870269353665446E9170E80828C8`
+`C42837C38FA96367C57DE5D304B0852DD75487D1D85D9374B9133DCE6EE92D41`
 
 每个正式版本都附带 `SHA256SUMS.txt`。完整核验步骤（精确版本标签、SHA-256、Windows 签名）见 [Release 核验指南](docs/RELEASE-VERIFICATION.md)，下载问题见 [下载帮助](docs/DOWNLOADS.md)。请只从官网或本仓库的 Releases 下载。安装程序要求可信的 Windows 数字签名和时间戳；如果 Windows 显示“未知发布者”，请停止安装并提交反馈。
 
-版本发布状态以官网公告和正式 GitHub Release 为准，源码更新不等于更新渠道已切换。0.7.2.1 的更新内容见[版本说明](https://github.com/Domino-L/StarBridge-OpenCore/releases/tag/v0.7.2.1)。
+版本发布状态以官网公告和正式 GitHub Release 为准，源码更新不等于更新渠道已切换。0.7.3 的更新内容见[版本说明](https://github.com/Domino-L/StarBridge-OpenCore/releases/tag/v0.7.3)。
 
 ### 从旧版本升级
 
@@ -36,9 +36,7 @@
 | --- | --- |
 | 0.7.2、0.7.1 | **要手动安装。** 这两个版本的应用内更新有缺陷，下载后会提示“更新未能启动”，不会损坏现有版本。请下载上面的完整安装包，退出客户端后运行，安装到原目录。不用卸载，也不用删除个人数据。 |
 | 0.7.0.x | 可以在客户端内更新。这些版本没有上面的缺陷，但我们没有实际测试过从 0.7.0.x 直接升级。如果失败，请按上一行手动安装。 |
-| 0.7.2.1 及以后 | 更新启动问题已修复并通过自动测试；真实客户端的按钮、下载、安装和重启整条流程尚未完成验收，维护者决定在发布后补测。 |
-
-本版尚未完成从 0.7.1、0.7.2 手动安装升级的真实设备验收。维护者决定先发布，再补测升级、本地数据保留与旧下载残留处理；这些项目不计为已通过。
+| 0.7.2.1 及以后 | 可在客户端内更新，也可以下载完整安装包手动安装。 |
 
 如果点更新时提示“更新未准备完成”，当前版本不受影响，同样可以手动安装。
 
@@ -210,7 +208,7 @@ pwsh -NoProfile -File "scripts/Test StarBridge Public Client.ps1" -MenuOverlay
 **验证状态：**
 
 - 公开 CI 运行上面的入口。0.7.2 的公开 CI 没有全部通过：Core、Host 通过，Flutter 有 12 项失败（测试在 UTC 时区下的问题，0.7.2.1 已修），Windows 构建步骤没跑到。维护者当时决定不等 CI 通过就发布。
-- 0.7.2.1 的实际 CI 结果见[公开 CI](https://github.com/Domino-L/StarBridge-OpenCore/actions/workflows/validate.yml)。本版须整轮通过后才激活更新通道或转为正式 Release；本地校验不等于公开 CI 通过。
+- 0.7.3 的 CI 状态见[公开 CI](https://github.com/Domino-L/StarBridge-OpenCore/actions/workflows/validate.yml)。本版须整轮通过后才激活更新通道或转为正式 Release；本地校验不等于公开 CI 通过。
 - 公开版的浮层动画测试在机器负载高时可能不稳定。
 
 公开源码不带游戏截图、背景媒体和专有素材的视觉基线，公开测试模式会跳过这些截图比较。缺少可选媒体时使用中性占位，不需要从其他仓库复制素材。少量由控件和合成数据生成的测试图见 [测试图说明](docs/UI_TEST_FIXTURES.md)，不含真实聊天或账号截图。

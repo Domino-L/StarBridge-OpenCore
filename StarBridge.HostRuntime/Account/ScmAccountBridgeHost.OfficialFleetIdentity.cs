@@ -34,18 +34,20 @@ internal sealed partial class ScmAccountBridgeHost
     }
 
     private async Task<IReadOnlyDictionary<long, OfficialFleetMemberIdentity>> ReadFleetIdentitiesAsync(
-        BridgeAccountContext owner, long generation, string sourceRef, IReadOnlyCollection<long> ids, CancellationToken token)
+        BridgeAccountContext owner, long generation, string sourceRef, IReadOnlyCollection<long> ids, CancellationToken token, Action? current = null)
     {
         try
         {
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
             RequireFleetReadOwner(owner, generation);
+            current?.Invoke();
             if (ids.Count == 0) return new Dictionary<long, OfficialFleetMemberIdentity>();
             var session = RequireSession(owner);
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.G1Read);
-            var result = await _oauth.ReadOfficialFleetMemberIdentitiesAsync(session, sourceRef, ids, token);
+            var result = await _oauth.ReadOfficialFleetMemberIdentitiesAsync(session, sourceRef, ids, token, current);
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
             RequireFleetReadOwner(owner, generation);
+            current?.Invoke();
             RequireSameSession(session, result.ActiveSession);
             _session = result.ActiveSession;
             return result.Result;

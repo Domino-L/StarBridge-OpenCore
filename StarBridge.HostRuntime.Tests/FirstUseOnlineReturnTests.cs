@@ -74,19 +74,19 @@ internal static class FirstUseOnlineReturnTests
         var reentered = false;
         var observer = Task.Factory.StartNew(() =>
         {
-            if (!entered.Wait(TimeSpan.FromSeconds(3))) throw new InvalidOperationException("Cancellation was not observed.");
+            if (!entered.Wait(FirstUseTestWait.Bound)) throw new InvalidOperationException("Cancellation was not observed.");
             var exit = candidate.RetireFirstUseOnlineCandidateAsync();
             observed.Set(); return exit;
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         using var callback = lease.Token.Register(() =>
         {
-            entered.Set(); reentered = observed.Wait(TimeSpan.FromSeconds(3));
+            entered.Set(); reentered = observed.Wait(FirstUseTestWait.Bound);
         });
         Task<bool>? retirement = null;
         try
         {
             retirement = candidate.RetireFirstUseOnlineCandidateAsync();
-            var second = await observer.WaitAsync(TimeSpan.FromSeconds(3));
+            var second = await observer.WaitAsync(FirstUseTestWait.Bound);
             Check(reentered && ReferenceEquals(retirement, second),
                 "Candidate retirement holds its reservation lock during cancellation callbacks.");
             Check(!retirement.IsCompleted && work.IsClosed,
@@ -95,8 +95,8 @@ internal static class FirstUseOnlineReturnTests
         finally
         {
             entered.Set(); lease.Dispose();
-            if (retirement is not null) await retirement.WaitAsync(TimeSpan.FromSeconds(3));
-            await observer.WaitAsync(TimeSpan.FromSeconds(3));
+            if (retirement is not null) await retirement.WaitAsync(FirstUseTestWait.Bound);
+            await observer.WaitAsync(FirstUseTestWait.Bound);
         }
         Check(await retirement! && (await f.Cancel()).State == "local" && f.Clock.Timers == 0,
             "Only actual candidate exit permits local return without business activation.");
@@ -127,6 +127,10 @@ internal static class FirstUseOnlineReturnTests
         // request boundary. Achievement-specific cases explicitly enable success.
         internal bool FailAchievementTrigger = true;
         internal bool HoldAchievementTrigger;
+        // Build 105: a new account's first SCM catalog read must be stored before
+        // the daily trigger. Cases that exercise the background trigger serve an
+        // empty catalog; others keep the unavailable business boundary.
+        internal bool AllowScmCatalogRead;
         internal readonly TaskCompletionSource AchievementEntered = Signal(), ReleaseAchievement = Signal();
         internal readonly TaskCompletionSource IdentityEntered = Signal(), ReleaseIdentity = Signal();
         internal CancellationToken IdentityToken;
@@ -159,6 +163,8 @@ internal static class FirstUseOnlineReturnTests
             if (path.EndsWith("/revoke", StringComparison.Ordinal)) { Revokes++; return new(HttpStatusCode.OK); }
             if (GameIdentityRequest is { } gameIdentity && path.Contains("/game-identity/", StringComparison.Ordinal))
                 return await gameIdentity(request, token);
+            if (AllowScmCatalogRead && request.Method == HttpMethod.Get && path.EndsWith("/achievements/scm", StringComparison.Ordinal))
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { schemaVersion = 1, readAtUtc = DateTimeOffset.UtcNow, items = Array.Empty<object>() }) };
             if (request.Method == HttpMethod.Get && path.EndsWith("/member/user/get", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref AchievementTriggers); AchievementEntered.TrySetResult();
@@ -246,9 +252,10 @@ internal static class FirstUseOnlineReturnTests
         internal bool HoldBuild, FailBuild, FailCancellationCallback;
         internal int BrowserOpens;
         internal Action<Uri>? ProfileOpened;
-        internal Fixture(long initialGeneration = 0)
+        internal Fixture(long initialGeneration = 0) : this(initialGeneration, null, true) { }
+        internal Fixture(long initialGeneration, string? sharedRoot, bool initializeLocalState)
         {
-            Local = new(sampling: true, initialGeneration: initialGeneration);
+            Local = new(sampling: true, initialGeneration: initialGeneration, sharedRoot: sharedRoot, initializeLocalState: initializeLocalState);
             VaultPath = Path.Combine(Local.Root, "candidate", "scm-token-vault.json"); Vault = new(VaultPath);
         }
         internal async Task Prepare(TimeProvider? modeTime = null)
@@ -312,7 +319,7 @@ internal static class FirstUseOnlineReturnTests
         {
             var result = await Candidate!.DispatchAsync(BridgeEnvelope.Request("account.login", Id(), Candidate.Generation,
                 new { schemaVersion = 1 }));
-            if (Callback is not null) await Callback.WaitAsync(TimeSpan.FromSeconds(3));
+            if (Callback is not null) await Callback.WaitAsync(FirstUseTestWait.Bound);
             return result;
         }
         public void Dispose()
@@ -385,24 +392,24 @@ internal static class FirstUseOnlineReturnTests
     private static async Task SlowConstruction()
     {
         using var f = new Fixture(); await f.Prepare(); f.HoldBuild = true; f.Mode.RequestOnline(2, Id());
-        var staging = f.Stage(); await f.BuildEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var staging = f.Stage(); await f.BuildEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var cancel = f.Cancel();
         Check(!cancel.IsCompleted && f.Store.Read().Phase == "onlinePending" && f.Mode.LocalMode().Active,
             "Requested cancellation cannot acknowledge an unfinished factory.");
         f.ReleaseBuild.TrySetResult();
-        Check((await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local" && f.Clock.Timers == 0,
+        Check((await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local" && f.Clock.Timers == 0,
             "Actual staged owner retirement precedes local return.");
         await Expect("firstUse.context_changed", () => staging);
     }
     private static async Task CancelledWait()
     {
         using var f = new Fixture(); await f.Prepare(); f.HoldBuild = true; f.Mode.RequestOnline(2, Id());
-        var staging = f.Stage(); await f.BuildEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var staging = f.Stage(); await f.BuildEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         using var token = new CancellationTokenSource(); var cancel = f.Cancel(token.Token); token.Cancel();
         try { await cancel; throw new InvalidOperationException("Expected cancelled UI wait."); } catch (OperationCanceledException) { }
         Check(f.Mode.LocalMode().Active && f.Store.Read().Phase == "onlinePending", "Abandoned wait preserves pending ownership.");
         f.ReleaseBuild.TrySetResult();
-        Check((await f.Cancel().WaitAsync(TimeSpan.FromSeconds(3))).State == "local", "Retry awaits the same original cleanup task.");
+        Check((await f.Cancel().WaitAsync(FirstUseTestWait.Bound)).State == "local", "Retry awaits the same original cleanup task.");
         await Expect("firstUse.context_changed", () => staging);
     }
     private static async Task LoginDrain()
@@ -410,25 +417,25 @@ internal static class FirstUseOnlineReturnTests
         using var f = new Fixture(); await f.Prepare(); f.Mode.RequestOnline(2, Id()); await f.Stage();
         f.Vault.SaveRefreshToken("synthetic-old:other", "synthetic-old-refresh"); var bytes = File.ReadAllBytes(f.VaultPath);
         f.Transport.HoldToken = true;
-        var login = f.Login(); await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var login = f.Login(); await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var cancel = f.Cancel();
         Check(!cancel.IsCompleted && f.Transport.Token.IsCancellationRequested && f.Mode.LocalMode().Active &&
             f.Store.Read().Phase == "onlinePending" && File.ReadAllBytes(f.VaultPath).SequenceEqual(bytes),
             "Actual ignored token work must exit, and old cached credential is not the candidate's credential.");
         f.Transport.ReleaseToken.TrySetResult();
-        Check((await login.WaitAsync(TimeSpan.FromSeconds(3))).Response.Status == BridgeResponseStatuses.Cancelled &&
-            (await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local" &&
+        Check((await login.WaitAsync(FirstUseTestWait.Bound)).Response.Status == BridgeResponseStatuses.Cancelled &&
+            (await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local" &&
             File.ReadAllBytes(f.VaultPath).SequenceEqual(bytes) && f.Transport.Revokes == 0,
             "Late authorization cannot commit or publish after retirement.");
     }
     private static async Task CompletedLogin()
     {
         using var f = new Fixture(); await f.Prepare(); f.Mode.RequestOnline(2, Id()); await f.Stage();
-        var login = await f.Login().WaitAsync(TimeSpan.FromSeconds(3));
+        var login = await f.Login().WaitAsync(FirstUseTestWait.Bound);
         Check(login.Response.Status == BridgeResponseStatuses.Ok && f.Host!.CurrentContext is not null &&
             f.Vault.LoadActiveAccountKey() == "synthetic-scm:synthetic-subject" && f.Clock.Timers == 0,
             "The real callback, token, identity and DPAPI writer complete while business work remains staged.");
-        Check((await f.Cancel().WaitAsync(TimeSpan.FromSeconds(3))).State == "local" && f.Vault.LoadActiveAccountKey() is null &&
+        Check((await f.Cancel().WaitAsync(FirstUseTestWait.Bound)).State == "local" && f.Vault.LoadActiveAccountKey() is null &&
             f.Vault.LoadRefreshToken("synthetic-scm:synthetic-subject") is null && f.Transport.Revokes == 1,
             "Original OAuth writer clears precisely its credential before acknowledging return.");
         f.Local.RequireLocalStateUnchanged();
@@ -440,7 +447,7 @@ internal static class FirstUseOnlineReturnTests
             using var f = new Fixture(); await f.Prepare(); f.Mode.RequestOnline(2, Id()); await f.Stage(); await f.Login();
             f.Vault.SaveRefreshToken(newerKey, "synthetic-newer-refresh");
             var bytes = File.ReadAllBytes(f.VaultPath);
-            Check((await f.Cancel().WaitAsync(TimeSpan.FromSeconds(3))).State == "recoveryRequired" &&
+            Check((await f.Cancel().WaitAsync(FirstUseTestWait.Bound)).State == "recoveryRequired" &&
                 f.Store.Read().Phase == "onlinePending" && f.Mode.LocalMode().Active &&
                 File.ReadAllBytes(f.VaultPath).SequenceEqual(bytes) && f.Transport.Revokes == 0,
                 "Cancellation never adopts a newer same/different-account credential or falsely completes.");
@@ -477,21 +484,21 @@ internal static class FirstUseOnlineReturnTests
     private static async Task CloseConstruction()
     {
         using var f = new Fixture(); await f.Prepare(); f.HoldBuild = true; f.Mode.RequestOnline(2, Id());
-        var stage = f.Stage(); await f.BuildEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var stage = f.Stage(); await f.BuildEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         f.Mode.Close(); f.ReleaseBuild.TrySetResult();
         await Expect("firstUse.context_changed", () => stage);
-        Check(await f.Candidate!.RetireFirstUseOnlineCandidateAsync().WaitAsync(TimeSpan.FromSeconds(3)) &&
+        Check(await f.Candidate!.RetireFirstUseOnlineCandidateAsync().WaitAsync(FirstUseTestWait.Bound) &&
             !f.Mode.LocalMode().Active && f.Store.Read().Phase == "onlinePending" && f.Transport.Requests == 0,
             "Late candidate is truly retired, while close is not an implicit completed local-mode receipt.");
     }
     private static async Task CancellationCallback()
     {
         using var f = new Fixture(); await f.Prepare(); f.HoldBuild = true; f.FailCancellationCallback = true;
-        f.Mode.RequestOnline(2, Id()); var stage = f.Stage(); await f.BuildEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        f.Mode.RequestOnline(2, Id()); var stage = f.Stage(); await f.BuildEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var cancel = f.Cancel();
         Check(!cancel.IsCompleted && f.Mode.LocalMode().Active, "A throwing callback neither abandons cleanup nor acknowledges exit.");
         f.ReleaseBuild.TrySetResult();
-        Check((await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local", "Actual factory exit still controls the result.");
+        Check((await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local", "Actual factory exit still controls the result.");
         await Expect("firstUse.context_changed", () => stage);
     }
     private static async Task StrictOrigin()

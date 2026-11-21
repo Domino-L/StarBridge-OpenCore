@@ -1,6 +1,7 @@
 import '../../platform/bridge/bridge_client_session.dart';
 import 'achievement_collection_port.dart';
 import 'achievement_catalog.dart';
+import 'achievement_extras.dart';
 import 'scm_achievement_wire.dart';
 import '../onboarding/connection_mode_port.dart';
 import '../account/account_models.dart';
@@ -356,6 +357,9 @@ final class BridgeAchievementCollection
       status: AchievementCollectionStatus.ready,
       earnedAt: earned,
       progress: progress,
+      percentages: parseAchievementRarity(payload['rarity']),
+      tiers: parseAchievementTiers(payload['rarity']),
+      contractRecords: parseContractRecords(payload['contractRecords']),
       cachedAtUtc: cachedAtUtc,
       synchronizedAtUtc: _syncTime(payload['synchronizedAtUtc']),
       refreshFailed: payload['refreshFailed'] == true,

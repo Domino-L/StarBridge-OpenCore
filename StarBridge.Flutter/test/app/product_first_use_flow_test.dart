@@ -138,9 +138,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('first-use-recovery-dialog')), findsNothing);
       expect(find.byType(OnboardingPage), findsOneWidget);
-      expect(find.textContaining('1 of 6 · Mode'), findsOneWidget);
+      expect(find.textContaining('Step 2 · Game identity'), findsOneWidget);
       expect(find.text('Get your StarBridge ready'), findsNothing);
-      expect(find.byKey(const Key('onboarding-back')), findsNothing);
+      expect(find.byKey(const Key('onboarding-back')), findsOneWidget);
       expect(
         host.requests.where(
           (r) => ['onboarding.execute', 'onboarding.finish'].contains(r.name),
@@ -152,7 +152,22 @@ void main() {
           .where((r) => r.name == 'onboarding.saveProgress')
           .toList();
       expect(opening, hasLength(1));
-      expect((opening.single.payload['checkpoint']! as Map)['step'], 'mode');
+      expect(
+        (opening.single.payload['checkpoint']! as Map)['step'],
+        'identity',
+      );
+      expect((opening.single.payload['checkpoint']! as Map)['mode'], 'local');
+      // Returning to the first visible step does not grant identity or consent.
+      await tester.tap(find.byKey(const Key('onboarding-back')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Step 1 · Game log'), findsOneWidget);
+      expect(find.byKey(const Key('onboarding-back')), findsNothing);
+      expect(
+        host.requests
+            .where((r) => r.name == 'onboarding.execute')
+            .map((r) => r.payload['action']),
+        ['locateLogs'],
+      );
       await tester.pumpWidget(const SizedBox());
       flow.dispose();
       queue.dispose();
@@ -207,12 +222,17 @@ void main() {
         expect(
           host.requests.where(
             (r) => [
-              'onboarding.execute',
               'onboarding.finish',
               'onboarding.saveProgress',
             ].contains(r.name),
           ),
           isEmpty,
+        );
+        expect(
+          host.requests
+              .where((r) => r.name == 'onboarding.execute')
+              .map((r) => r.payload['action']),
+          choice == 'open' ? ['locateLogs'] : isEmpty,
         );
         // No second offer and no implicit completed marker after keeping/rechecking.
         flow.wake();

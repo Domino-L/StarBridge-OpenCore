@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'achievement_catalog.dart';
+import 'achievement_extras.dart';
 
 enum AchievementCollectionStatus { signedOut, loading, unavailable, ready }
 
@@ -14,12 +15,30 @@ final class AchievementCollection {
     List<AchievementDefinition> catalog = const [],
     Set<String> ownedIds = const {},
     Set<String> unknownIds = const {},
+    Map<String, int> percentages = const {},
+    Map<String, String> tiers = const {},
+    Map<String, ContractRecordText> contractRecords = const {},
     this.cachedAtUtc,
     this.isRefreshing = false,
     this.refreshFailed = false,
     this.synchronizedAtUtc,
     this.transientFailure = false,
-  }) : catalog = List.unmodifiable(
+  }) : tiers = Map.unmodifiable(
+         status == AchievementCollectionStatus.ready
+             ? tiers
+             : const <String, String>{},
+       ),
+       percentages = Map.unmodifiable(
+         status == AchievementCollectionStatus.ready
+             ? percentages
+             : const <String, int>{},
+       ),
+       contractRecords = Map.unmodifiable(
+         status == AchievementCollectionStatus.ready
+             ? contractRecords
+             : const <String, ContractRecordText>{},
+       ),
+       catalog = List.unmodifiable(
          status == AchievementCollectionStatus.ready
              ? catalog
              : const <AchievementDefinition>[],
@@ -48,6 +67,9 @@ final class AchievementCollection {
   final AchievementCollectionStatus status;
   final Map<String, DateTime> earnedAt;
   final Map<String, num>? progress;
+  final Map<String, int> percentages;
+  final Map<String, String> tiers;
+  final Map<String, ContractRecordText> contractRecords;
 
   /// Present only for a retained server-confirmed, read-only offline snapshot.
   final DateTime? cachedAtUtc;

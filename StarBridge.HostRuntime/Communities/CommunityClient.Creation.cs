@@ -103,7 +103,8 @@ internal sealed partial class CommunityClient
             current();
             if (!response.IsSuccessStatusCode)
             {
-                var result = response.StatusCode switch
+                var refusal = await CommunityRelayRefusal.ReasonAsync(response, token);
+                var result = refusal is not null ? new CommunityCreationResult("rejected", refusal) : response.StatusCode switch
                 {
                     HttpStatusCode.Conflict => new CommunityCreationResult("rejected", "codeUnavailable"),
                     HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed => new("rejected", "upgradeRequired"),

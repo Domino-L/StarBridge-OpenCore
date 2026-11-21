@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_category_roots.dart';
@@ -162,6 +163,12 @@ void main() {
       ),
       findsOneWidget,
     );
+    // C-lite (user 11-08): the backdrop blur is a tiny decode drawn large,
+    // never an image filter layer per card.
+    expect(images.first.cacheWidth, 12);
+    expect(images.first.filterQuality, FilterQuality.high);
+    expect(find.byType(ImageFiltered), findsNothing);
+    expect(tester.layers.whereType<ImageFilterLayer>(), isEmpty);
     expect(tester.takeException(), isNull);
   });
 

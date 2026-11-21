@@ -12,9 +12,9 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_models.dart';
 
 /// The opacities calm display actually uses; mirrors OverlayCalmDisplayLevels.
-/// An unset (0) idle or lit level follows the overlay opacity: resting never
-/// darkens a module below what the user already set, and lighting lifts a low
-/// setting to a readable 85%. Nothing goes below 15%; idle never exceeds lit.
+/// An unset (0) idle or lit level takes the default: resting at 35%, lit at
+/// full (the overall opacity is retired, 11-12, so a saved one no longer
+/// counts). Nothing goes below 15%; idle never exceeds lit.
 final class OverlayCalmLevels {
   const OverlayCalmLevels._(
     this.enabled,
@@ -30,7 +30,7 @@ final class OverlayCalmLevels {
 
   factory OverlayCalmLevels.of(OverlayWorkspaceSettings settings) {
     double read(String field) => (settings[field] as num?)?.toDouble() ?? 0;
-    final base = read('opacity').clamp(minimum, 1.0);
+    const base = 1.0;
     final idleSetting = read('calmIdleOpacity');
     final litSetting = read('calmLitOpacity');
     final idle = idleSetting > 0

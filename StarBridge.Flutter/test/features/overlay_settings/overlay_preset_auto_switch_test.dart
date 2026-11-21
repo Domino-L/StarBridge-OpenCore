@@ -86,23 +86,26 @@ void main() {
     },
   );
 
-  test('a failed save keeps the edit and blocks automatic activation', () async {
-    final f = await fixture();
-    f.port.fail = true;
-    f.edit();
-    await f.source('room:one');
-    expect(f.workspace.projection.value.dirty, isTrue);
-    expect(
-      f.workspace.projection.value.failure,
-      OverlaySettingsFailure.writeFailed,
-    );
-    expect(f.active, 'base');
-    expect(f.port.activations, isEmpty);
-    f.port.fail = false;
-    expect(await f.workspace.save(), isTrue);
-    await settle();
-    expect(f.active, 'room');
-  });
+  test(
+    'a failed save keeps the edit and blocks automatic activation',
+    () async {
+      final f = await fixture();
+      f.port.fail = true;
+      f.edit();
+      await f.source('room:one');
+      expect(f.workspace.projection.value.dirty, isTrue);
+      expect(
+        f.workspace.projection.value.failure,
+        OverlaySettingsFailure.writeFailed,
+      );
+      expect(f.active, 'base');
+      expect(f.port.activations, isEmpty);
+      f.port.fail = false;
+      expect(await f.workspace.save(), isTrue);
+      await settle();
+      expect(f.active, 'room');
+    },
+  );
 
   test(
     'temporary unknown never restores or releases a deferred switch',
@@ -137,6 +140,45 @@ void main() {
     },
   );
 
+  test(
+    'turning automatic use on switches now, even after a manual choice',
+    () async {
+      // 11-13 user: "开启浮层自动切换应该立刻切换，不再等待"
+      final f = await fixture();
+      f.port.policies['room'] = OverlayPresetSources(
+        binding: const OverlaySourceBinding.room(),
+      );
+      await f.workspace.refresh();
+      await f.source('room:one');
+      expect(await f.workspace.activatePreset('manual'), isTrue);
+      await settle();
+      expect(f.active, 'manual');
+      expect(
+        await f.workspace.configurePreset(
+          'room',
+          'room',
+          const OverlaySourceBinding.room(),
+          true,
+        ),
+        isTrue,
+      );
+      await settle();
+      expect(f.active, 'room');
+      await f.source('local');
+      expect(f.active, 'manual', reason: 'leaving restores the earlier plan');
+    },
+  );
+
+  test('a save that keeps the same automatic plans stays paused', () async {
+    final f = await fixture();
+    await f.source('room:one');
+    expect(await f.workspace.activatePreset('manual'), isTrue);
+    f.edit();
+    expect(await f.workspace.save(), isTrue);
+    await settle();
+    expect(f.active, 'manual');
+  });
+
   test('same-preset manual selection also pauses restoration', () async {
     final f = await fixture();
     await f.source('room:one');
@@ -159,23 +201,20 @@ void main() {
     expect(f.active, 'room');
   });
 
-  test(
-    'account invalidation cancels a deferred source without dropping a failed edit',
-    () async {
-      final f = await fixture();
-      f.port.fail = true;
-      f.edit();
-      await f.source('org:A');
-      f.scenes.value = const OverlaySceneState();
-      await settle();
-      expect(f.workspace.projection.value.dirty, isTrue);
-      f.port.fail = false;
-      f.workspace.discardChanges();
-      await f.source('org:A', owner: 'other', generation: 2);
-      expect(f.port.activations, isEmpty);
-      expect(f.active, 'base');
-    },
-  );
+  test('account invalidation cancels a deferred source without dropping a failed edit', () async {
+    final f = await fixture();
+    f.port.fail = true;
+    f.edit();
+    await f.source('org:A');
+    f.scenes.value = const OverlaySceneState();
+    await settle();
+    expect(f.workspace.projection.value.dirty, isTrue);
+    f.port.fail = false;
+    f.workspace.discardChanges();
+    await f.source('org:A', owner: 'other', generation: 2);
+    expect(f.port.activations, isEmpty);
+    expect(f.active, 'base');
+  });
 
   test('failed activation is not replayed by repeated source polls', () async {
     final f = await fixture();
@@ -316,6 +355,9 @@ final class _Port implements OverlayWorkspacePort {
     }
     if (mutation.kind == OverlayWorkspaceMutationKind.activatePreset) {
       active = mutation.presetId!;
+    }
+    if (mutation.kind == OverlayWorkspaceMutationKind.configurePresetSources) {
+      policies[mutation.presetId!] = mutation.sources!;
     }
     if (mutation.kind == OverlayWorkspaceMutationKind.saveActive) {
       savedDraft = mutation.sources;

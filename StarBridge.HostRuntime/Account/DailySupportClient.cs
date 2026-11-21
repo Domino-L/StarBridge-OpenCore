@@ -21,6 +21,7 @@ internal sealed class DailySupportClient : IDisposable
         endpoint = new Uri(origin, "/api/support/daily");
         http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
             { Timeout = TimeSpan.FromSeconds(15) };
+        Support.RelayClientVersion.Apply(http);
     }
     internal async Task<DailySupportView> SendAsync(string bearer, int? offsetMinutes, CancellationToken token)
     {

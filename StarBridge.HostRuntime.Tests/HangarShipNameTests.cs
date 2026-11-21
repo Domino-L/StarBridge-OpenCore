@@ -56,9 +56,16 @@ internal static class HangarShipNameTests
             var catalog = new StarBridge.Core.Ships.ShipPresentationCatalog(null, tsv);
             var rows = tsv.Split('\n').Skip(1).Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
             if (rows.Length < 200) throw new Exception("Original catalog unexpectedly incomplete");
+            var missingMakers = new List<string>();
             foreach (var row in rows)
+            {
                 if (string.IsNullOrWhiteSpace(catalog.Find(row.Split('\t')[1]).ChineseName))
                     throw new Exception($"Original catalog name not covered: {row.Split('\t')[1]}");
+                if (string.IsNullOrWhiteSpace(StarBridge.HostRuntime.Hangar.HangarShipNames.Lookup(row.Split('\t')[1]).Manufacturer))
+                    missingMakers.Add(row.Split('\t')[1]);
+            }
+            if (missingMakers.Count > 0)
+                throw new Exception($"Catalog ships without a maker: {string.Join(", ", missingMakers)}");
             Console.WriteLine($"PASS Original catalog display coverage {rows.Length}/{rows.Length}");
         }
         Console.WriteLine($"PASS Full RSI title projection; optional catalog={fullCatalog}");
@@ -79,6 +86,9 @@ internal static class HangarShipNameTests
                 !scan.TryGetProperty("catalogId", out var catalogId) ||
                 catalogId.GetString() != expected.CatalogId)
                 throw new Exception("Live scan omitted the saved hangar's exact catalog presentation");
+            var maker = scan.TryGetProperty("manufacturer", out var named) ? named.GetString() : null;
+            if (maker != expected.Manufacturer)
+                throw new Exception("Live scan omitted the catalog's manufacturer");
         }
         using var test = new HangarLockedScanTests.Harness();
         test.Send("verify", test.Initial());

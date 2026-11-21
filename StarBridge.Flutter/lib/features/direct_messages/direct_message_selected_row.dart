@@ -23,6 +23,7 @@ Conversation? refreshSelectedFromDirectory(
         conversationKey: row.conversationKey,
         gameId: row.gameId,
         presence: row.presence,
+        lastOnlineDays: row.lastOnlineDays,
       );
     }
   }

@@ -6,10 +6,12 @@ import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_favorite_dialog.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_favorite_modules.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_layout.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_showcases.dart';
 
 import 'local_personal_profile_test.dart' show Harness, edit, shipA, shipB;
 
@@ -26,7 +28,10 @@ void main() {
     ], ids);
     expect(ProfileFavoriteModules.selections(layout), ids);
     expect(ProfileFavoriteModules.valid(layout), isTrue);
-    expect(layout.where((e) => e.isVisible), hasLength(5));
+    expect(
+      PersonalProfileShowcases.modulesOf(layout).where((e) => e.isVisible),
+      hasLength(5),
+    );
     expect(layout.lastWhere((e) => e.isVisible).position, greaterThan(8));
     expect(
       ProfileFavoriteModules.materialize(layout, ids).map((e) => e.moduleId),
@@ -65,13 +70,61 @@ void main() {
         shipA,
         shipB,
       });
+      // The hidden module is restored first; then one more fits the cap of 3.
       for (var i = 0; i < 20; i++) {
         layout = ProfileFavoriteModules.add(layout);
       }
-      expect(layout.where((e) => e.isVisible), hasLength(21));
-      final occupied = PersonalProfileLayout.occupiedCells(layout);
-      expect(occupied.where((cell) => cell), hasLength(63));
+      expect(ProfileFavoriteModules.count(layout), 3);
+      expect(
+        layout.where(
+          (e) => e.isVisible && PersonalProfileModuleIds.isFavorite(e.moduleId),
+        ),
+        hasLength(3),
+      );
+      expect(ProfileFavoriteModules.canAdd(layout), isFalse);
+      expect(ProfileFavoriteModules.selections(layout), [shipA, shipB]);
       expect(layout.map((e) => e.moduleId).toSet().length, layout.length);
+    },
+  );
+  test(
+    'favorite modules stop at three; larger old layouts keep every module',
+    () {
+      var layout = ProfileFavoriteModules.materialize(const [], const []);
+      for (var i = 0; i < 10; i++) {
+        layout = ProfileFavoriteModules.add(layout);
+      }
+      expect(ProfileFavoriteModules.count(layout), 3);
+      expect(
+        ProfileFavoriteModules.add(layout).map((e) => e.moduleId),
+        layout.map((e) => e.moduleId),
+      );
+
+      // Old selections partitioned before the cap: all twelve modules stay,
+      // with every reference; adding another one is simply not offered.
+      final ids = List.generate(36, (i) => 'ship-$i');
+      final old = ProfileFavoriteModules.materialize(const [
+        PersonalProfileModuleLayoutItem(
+          moduleId: 'favorite-ships',
+          size: PersonalProfileModuleSize.three,
+          isVisible: true,
+          position: 0,
+        ),
+      ], ids);
+      expect(ProfileFavoriteModules.count(old), 12);
+      expect(ProfileFavoriteModules.valid(old), isTrue);
+      expect(ProfileFavoriteModules.canAdd(old), isFalse);
+      final after = ProfileFavoriteModules.add(old);
+      expect(after.map((e) => e.moduleId), old.map((e) => e.moduleId));
+      expect(ProfileFavoriteModules.selections(after), ids);
+
+      // A hidden module of an over-cap layout can still be shown again.
+      final hidden = PersonalProfileLayout.hide(old, 'favorite-ships-5').layout;
+      final restored = ProfileFavoriteModules.add(hidden);
+      expect(
+        restored.singleWhere((e) => e.moduleId == 'favorite-ships-5').isVisible,
+        isTrue,
+      );
+      expect(ProfileFavoriteModules.count(restored), 12);
     },
   );
   test(
@@ -79,6 +132,14 @@ void main() {
     () async {
       final h = Harness();
       addTearDown(h.close);
+      // Two models: one model shows once per page (user 11-07).
+      h.hangar.snapshot = const LocalHangarSnapshot(
+        revision: 1,
+        ships: [
+          LocalHangarShip(id: shipA, title: 'Carrack', liner: 'Anvil'),
+          LocalHangarShip(id: shipB, title: 'Idris-P', liner: 'Aegis'),
+        ],
+      );
       await h.port.save(edit(await h.port.read(), ids: [shipA, shipB]));
       final snapshot = await h.port.read();
       var layout = ProfileFavoriteModules.add(snapshot.moduleLayout);

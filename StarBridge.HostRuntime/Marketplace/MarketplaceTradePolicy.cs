@@ -14,7 +14,7 @@ internal static class MarketplaceTradePolicy
         if (state != 3 && Number(row, "transactionStatus") != 1) return null;
         if (state == 0 && role == "buyer" && Number(row, "creatorType") == 0) return "approve";
         if (state == 1 && role == "seller") return "ship";
-        if (state == 2 && role == "buyer") return "receive";
+        if (state == 2 && role == "buyer" && !MarketplaceTradeDetails.ReceiptExpired(row)) return "receive";
         if (state == 3 && Number(row, "transactionStatus") == 2 &&
             !Has(row, role + "CommentId")) return "review";
         return null;
@@ -22,7 +22,7 @@ internal static class MarketplaceTradePolicy
     internal static bool Allows(JsonElement row, string action) =>
         Text(row, "actorRole") is "buyer" or "seller" &&
         (action == Action(row) || action == "cancel" && Number(row, "transactionStatus") == 1 && Number(row, "deliveryStatus") is 0 or 1 ||
-         action == "report" && Number(row, "transactionStatus") == 2 && Number(row, "deliveryStatus") == 3 &&
+         action == "report" && MarketplaceTradeDetails.ReportWithinWindow(row) &&
          !(row.TryGetProperty("hasReported", out var reported) && reported.ValueKind == JsonValueKind.True));
 
     /// <param name="chat">Mints the opaque trade-chat reference for the counterparty (0.7.2 G9
@@ -32,13 +32,14 @@ internal static class MarketplaceTradePolicy
         var result = new Dictionary<string, object?>();
         foreach (var key in new[] { "transactionNumber", "orderId", "creatorType", "actorRole", "actorTradeType", "orderType",
             "itemsId", "itemsName", "thumbnailUrl", "displayType", "number", "amount", "transactionStatus", "deliveryStatus",
-            "locationName", "transactionLocationName", "receiptDeadline", "shipmentDeadline", "createTime", "shippedTime", "approvalTime",
-            "completionTime", "cancellationTime", "cancellationReason", "deliveryProof", "deliveryMethod", "shippingFee", "qualityData",
+            "locationName", "transactionLocationName", "receiptDeadline", "createTime",
+            "completionTime", "cancellationTime", "deliveryProof", "deliveryMethod", "shippingFee", "qualityData",
             "buyerCommentId", "buyerRating", "buyerContent", "buyerCommentTime", "sellerCommentId", "sellerRating",
-            "sellerContent", "sellerCommentTime", "hasReported" })
+            "sellerContent", "sellerCommentTime", "hasReported", "reportHandleStatus", "itemCount" })
             if (row.TryGetProperty(key, out var value)) result[key] = value.Clone();
         if (Text(row, "itemsName") is { } name)
             result["itemsNameHant"] = ScmMarketplaceReader.Traditional(name);
+        MarketplaceTradeDetails.ProjectItems(row, result);
         // Names are display data; role is supplied by SCM, never inferred from a name.
         var ownerIsBuyer = Number(row, "creatorType") == 0;
         var actorIsBuyer = Text(row, "actorRole") == "buyer";

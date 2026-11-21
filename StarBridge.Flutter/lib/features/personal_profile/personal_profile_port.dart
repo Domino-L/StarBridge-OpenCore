@@ -1,4 +1,5 @@
 import 'personal_profile_models.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_presentation.dart';
 
 abstract interface class PersonalProfilePresentationWriter {
@@ -20,4 +21,14 @@ abstract interface class PersonalProfilePort {
 /// Same-owner display changes. These do not revoke a currently open editor.
 abstract interface class PersonalProfileContentChanges {
   Stream<void> get changes;
+}
+
+/// Optional owner read. A port without it remains compatible with older Hosts.
+abstract interface class PersonalProfileAccountFactsReader {
+  Future<PersonalProfilePublicFacts?> readAccountFacts();
+}
+
+/// A read-only owner surface can show the local fallback while import runs.
+abstract interface class PersonalProfileDisplayReader {
+  Future<PersonalProfileSnapshot> readForDisplay();
 }

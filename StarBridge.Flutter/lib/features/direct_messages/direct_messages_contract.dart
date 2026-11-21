@@ -21,17 +21,19 @@ final class Conversation {
     this.conversationKey,
     this.gameId = '',
     this.presence,
+    this.lastOnlineDays,
   });
   final String ref, name, preview, state;
   final String? avatar;
   final String? conversationKey;
   final String gameId;
   final String? presence;
+  final int? lastOnlineDays;
   final DateTime time;
   final int unread;
   bool get request =>
       state == 'request_incoming' || state == 'request_outgoing';
-  Conversation withoutPresence() => presence == null
+  Conversation withoutPresence() => presence == null && lastOnlineDays == null
       ? this
       : Conversation(
           ref,

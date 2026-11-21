@@ -147,7 +147,8 @@ internal static partial class AccountSessionRestoreTests
             }
             return JsonResponse(HttpStatusCode.OK, ReviewToken);
         });
-        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+        var clock = new CredentialClock();
+        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
         using var cancellation = new CancellationTokenSource();
         var first = oauth.TryRestoreSessionAsync(cancellation.Token);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -158,6 +159,7 @@ internal static partial class AccountSessionRestoreTests
         release.TrySetResult();
         try { await observer; throw new InvalidOperationException("Expected shared transient failure"); }
         catch (HttpRequestException) { }
+        clock.Now = clock.Now.AddMinutes(5);
         AssertEqual(true, await oauth.TryRestoreSessionAsync(default) is not null, "failed abandoned flight does not poison retry");
         AssertEqual(2, refreshes, "later independent failure retry rotates once");
         AssertEqual(0, vault.Deletes, "cancellation and failure retain refresh");

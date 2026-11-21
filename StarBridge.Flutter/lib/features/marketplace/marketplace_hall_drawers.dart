@@ -5,14 +5,23 @@ import '../../design_system/interaction/starbridge_action_row.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_banner.dart' show MarketplaceSurfaceColors;
+import 'marketplace_buy_value.dart';
 import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_details.dart';
 import 'marketplace_hall_mine.dart' show marketSideColor;
 import 'marketplace_hover.dart';
+import 'marketplace_listing_copy.dart';
+import 'marketplace_listing_duplicate.dart';
+import 'marketplace_time.dart';
 import 'marketplace_port.dart';
+import 'marketplace_order_sheet.dart';
+import 'marketplace_bundle_copy.dart';
 import 'marketplace_publish_entry.dart';
 import 'marketplace_quality_copy.dart';
+import 'marketplace_display_rules.dart';
+import 'marketplace_display_copy.dart';
+import 'marketplace_quality.dart';
 import 'marketplace_quality_widgets.dart' show MarketTierLadder;
 import 'marketplace_trade_confirm.dart';
 import 'marketplace_trade_copy.dart' show tradeItemName;
@@ -39,21 +48,28 @@ Widget marketListingDrawer(
 }) {
   final t = context.tokens;
   final barter = row['displayType'] == 3;
-  final buy = row['creatorType'] == 0;
+  // Same reading of the side as the card it opens from.
+  final buy = marketOrderSide(row) == 'buy';
   final price = marketNumber(row['unitPrice']);
   final itemId = marketItemId(row);
+  final quality = marketQualityValue(row);
+  if (quality != null) {
+    best = marketTierLowest(row,
+        itemId == null ? null : c.qualityTiers.of(itemId));
+  }
   final open = marketTradeOpenNow(row);
   final mine = marketIsMine(row);
   Widget? compare;
-  if (!barter && best != null && best > 0 && price != null) {
+  if (!barter && !marketIsChecklist(row) && best != null && best > 0 && price != null) {
     final leading = buy ? price >= best : price <= best;
     compare = MarketDrawerRow(
-      marketText(context, buy ? 'drawerVsHighest' : 'drawerVsLowest'),
-      leading
+      quality != null ? marketDisplayText(context, 'tierLowest')
+          : marketText(context, buy ? 'drawerVsHighest' : 'drawerVsLowest'),
+      leading && quality == null
           ? marketText(context, buy ? 'drawerIsHighest' : 'drawerIsLowest')
           : _percent((price - best) / best * 100),
       color: leading ? t.colors.success : MarketplaceSurfaceColors.gold,
-      mono: !leading,
+      mono: quality != null || !leading,
     );
   }
   final window = marketTradeTime(context, row);
@@ -62,6 +78,12 @@ Widget marketListingDrawer(
     mainAxisSize: MainAxisSize.min,
     children: [
       ?compare,
+      // Seen from the seller: is selling to this order better than listing?
+      if (buy && !barter && !marketIsChecklist(row))
+        Align(
+          alignment: Alignment.centerRight,
+          child: MarketBidValueLine(c, row),
+        ),
       MarketDrawerRow(
         marketText(context, 'drawerWindow'),
         Text.rich(
@@ -102,10 +124,12 @@ Widget marketListingDrawer(
             color: marketSideColor(context, buy ? 'buy' : 'sell'),
             onTap: () => unawaited(confirmMarketTrade(host, c, row)),
           ),
-        if (itemId != null)
+        if (itemId != null || marketIsChecklist(row) || barter)
           MarketSlantButton(
-            marketText(context, 'drawerItem'),
-            onTap: () => c.openItem(itemId),
+            marketIsChecklist(row) ? bundleText(context, '看清单')
+                : barter ? bundleText(context, '看详情') : marketText(context, 'drawerItem'),
+            onTap: () => marketIsChecklist(row) || barter
+                ? showMarketOrder(host, c, row) : c.openItem(itemId!),
           ),
       ]),
     ],
@@ -227,17 +251,20 @@ Widget marketCatalogDrawer(
 ) {
   final id = marketItemId(row);
   String count(Object? v) => marketNumber(v) == null ? '—' : marketMoney(v);
-  final checklist =
-      (marketNumber(row['checklistSellCount']) ?? 0) +
-      (marketNumber(row['checklistBuyCount']) ?? 0);
+  // The Host writes null for keys SCM left out, so test values, not keys.
+  // Search rows carry no checklist counts and their sell/buy already include
+  // checklists; an item read carries single-only counts plus the checklist ones.
+  final sellList = marketNumber(row['checklistSellCount']),
+      buyList = marketNumber(row['checklistBuyCount']);
+  final split = sellList != null || buyList != null;
   return Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     mainAxisSize: MainAxisSize.min,
     children: [
-      MarketDrawerRow(marketText(context, 'sell'), count(row['sellOrderCount']), mono: true),
-      MarketDrawerRow(marketText(context, 'buy'), count(row['buyOrderCount']), mono: true),
-      if (row.containsKey('checklistSellCount') || row.containsKey('checklistBuyCount'))
-        MarketDrawerRow(marketText(context, 'drawerChecklist'), marketMoney(checklist), mono: true),
+      MarketDrawerRow(marketText(context, split ? 'sell' : 'sellInclChecklist'), count(row['sellOrderCount']), mono: true),
+      MarketDrawerRow(marketText(context, split ? 'buy' : 'buyInclChecklist'), count(row['buyOrderCount']), mono: true),
+      if (split)
+        MarketDrawerRow(marketText(context, 'drawerChecklist'), marketMoney((sellList ?? 0) + (buyList ?? 0)), mono: true),
       _gap(),
       if (id != null)
         MarketDrawerActions([
@@ -274,7 +301,7 @@ Widget marketCategoryDrawer(
           baseRadius: 2,
           onActivate: (_, _) {
             final id = marketNumber(row['id'])?.toInt();
-            if (id != null) unawaited(c.browse(category: id));
+            if (id != null) unawaited(c.marketCategory(id));
           },
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
@@ -319,7 +346,12 @@ Widget marketMineDrawer(
     mainAxisSize: MainAxisSize.min,
     children: [
       if (row['expiry'] != null)
-        MarketDrawerRow(marketText(context, 'drawerExpiry'), _expiry(row['expiry'])),
+        MarketDrawerRow(
+          marketText(context, 'drawerExpiry'),
+          scmPermanent(row['expiry'])
+              ? listingText(context, '永久')
+              : _expiry(row['expiry']),
+        ),
       MarketDrawerRow(
         marketText(context, 'drawerOngoing'),
         marketText(context, ongoing ? 'drawerYes' : 'drawerNo'),
@@ -339,7 +371,7 @@ Widget marketMineDrawer(
           key: const ValueKey('drawer-visibility'),
           onTap: () => unawaited(openMarketListingAction(host, c, row, 'visibility')),
         ),
-        MarketSlantButton(
+        if (listingCanCopy(row, c.fullOrders)) MarketSlantButton(
           marketText(context, 'drawerCopy'),
           onTap: () => unawaited(openMarketListingAction(host, c, row, 'copy')),
         ),
@@ -351,7 +383,7 @@ Widget marketMineDrawer(
 /// 发布挂单: listing quota and the trade window from the trade profile.
 Widget marketPublishDrawer(BuildContext context, MarketplaceController c) {
   final profile = c.tradeProfile;
-  final live = c.myListings.where((r) => r['visible'] == true && r['checklist'] != true).length;
+  final live = c.activeSingleListingCount;
   final lists = c.myListings.where((r) => r['checklist'] == true).length;
   final limit = marketNumber(profile?['orderLimit'])?.toInt();
   return Column(
@@ -360,7 +392,7 @@ Widget marketPublishDrawer(BuildContext context, MarketplaceController c) {
     children: [
       MarketDrawerRow(
         marketText(context, 'drawerSingle'),
-        limit == null ? '$live' : '$live / $limit',
+        limit == null ? '${live ?? '—'}' : '${live ?? '—'} / $limit',
         mono: true,
       ),
       MarketDrawerRow(marketText(context, 'drawerChecklists'), '$lists / 5', mono: true),
@@ -385,11 +417,11 @@ Widget marketTradesDrawer(BuildContext context, MarketplaceController c) {
     children: [
       MarketDrawerRow(
         marketText(context, 'drawerTodo'),
-        '${c.trades.todo.length}',
+        c.trades.todoCountLabel,
         mono: true,
         color: c.trades.todo.isEmpty ? null : MarketplaceSurfaceColors.gold,
       ),
-      MarketDrawerRow(marketText(context, 'drawerActive'), '${c.activeTradeCount}', mono: true),
+      MarketDrawerRow(marketText(context, 'drawerActive'), c.trades.activeCountLabel, mono: true),
       if (latest != null)
         MarketDrawerRow(
           marketText(context, 'drawerLatest'),

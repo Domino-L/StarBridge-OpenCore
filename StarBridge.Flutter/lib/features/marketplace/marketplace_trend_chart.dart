@@ -7,11 +7,14 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
+
 import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_copy.dart' show marketLocale;
 import 'marketplace_trend_copy.dart';
 import 'marketplace_widgets.dart' show marketMoney;
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// Axis and tag label for a price: 万 in Chinese, k/M in English.
 String marketTrendAxis(BuildContext context, num value, {int digits = 0}) {
@@ -46,7 +49,11 @@ class _MarketTrendChartState extends State<MarketTrendChart> {
   int? hover;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
     final colors = (
       sell: t.colors.accent,
@@ -73,6 +80,7 @@ class _MarketTrendChartState extends State<MarketTrendChart> {
                 key: const Key('market-trend-chart'),
                 size: Size(box.maxWidth, widget.height),
                 painter: _TrendPainter(
+                  lightOnly,
                   widget,
                   geometry,
                   hover,
@@ -129,6 +137,7 @@ class _Geometry {
 
 class _TrendPainter extends CustomPainter {
   _TrendPainter(
+    this.lightOnly,
     this.chart,
     this.g,
     this.hover,
@@ -136,6 +145,7 @@ class _TrendPainter extends CustomPainter {
     this.label,
     this.style,
   );
+  final bool lightOnly;
   final MarketTrendChart chart;
   final _Geometry g;
   final int? hover;
@@ -229,14 +239,16 @@ class _TrendPainter extends CustomPainter {
               ],
             ),
         );
-        canvas.drawPath(
-          line,
-          Paint()
-            ..color = colors.sell.withValues(alpha: .35)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 5
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-        );
+        if (!lightOnly) {
+          canvas.drawPath(
+            line,
+            Paint()
+              ..color = colors.sell.withValues(alpha: .35)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 5
+              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+          );
+        }
         canvas.drawPath(
           line,
           Paint()
@@ -394,6 +406,7 @@ class _TrendPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TrendPainter old) =>
+      old.lightOnly != lightOnly ||
       old.chart != chart ||
       old.hover != hover ||
       old.colors != colors ||
@@ -406,7 +419,11 @@ class _TrendTip extends StatelessWidget {
   final int i;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
     Widget row(Color color, String name, num? value, String missing) => Padding(
       padding: const EdgeInsets.only(top: 3),
@@ -419,7 +436,7 @@ class _TrendTip extends StatelessWidget {
             child: Text(
               name,
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(fontSize: 11.5, color: t.colors.textSecondary),
             ),
@@ -454,13 +471,15 @@ class _TrendTip extends StatelessWidget {
           color: t.surfaces.panel.fill.withValues(alpha: .97),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: t.surfaces.panel.border),
-          boxShadow: const [
-            BoxShadow(
-              blurRadius: 18,
-              color: MarketplacePalette.trendShadow,
-              offset: Offset(0, 8),
-            ),
-          ],
+          boxShadow: lightOnly
+              ? const []
+              : const [
+                  BoxShadow(
+                    blurRadius: 18,
+                    color: MarketplacePalette.trendShadow,
+                    offset: Offset(0, 8),
+                  ),
+                ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

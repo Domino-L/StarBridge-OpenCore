@@ -31,12 +31,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       expect(find.textContaining('安装登记与程序版本不一致'), findsOneWidget);
       expect(find.textContaining('无需先卸载'), findsOneWidget);
       expect(find.byKey(const Key('update-failure-code')), findsOneWidget);
-      expect(find.text('下载更新'), findsNothing);
+      expect(find.text('更新并重启'), findsNothing);
       expect(find.text('重启并安装'), findsNothing);
     },
   );
@@ -130,7 +130,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       final prepare = requests.lastWhere(
         (r) => r.name == 'applicationUpdates.prepare',
@@ -298,7 +298,7 @@ void main() {
       await tester.pump(const Duration(minutes: 2));
       expect(reads, 1);
       expect(find.text('当前已是最新版本。'), findsNothing);
-      expect(find.text('下载更新'), findsNothing);
+      expect(find.text('更新并重启'), findsNothing);
       expect(find.text('重启并安装'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -391,7 +391,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       expect(find.byType(LinearProgressIndicator), findsNothing);
       events.add(progress('downloading', 1048576, 2097152));
@@ -446,7 +446,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('下载更新'));
+    await tester.tap(find.text('更新并重启'));
     await tester.pumpAndSettle();
     events.add(progress('downloading', 1048576, null));
     await tester.pumpAndSettle();
@@ -456,7 +456,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(cancels, 1);
     expect(find.text('下载已取消，当前版本保持不变。'), findsOneWidget);
-    await tester.tap(find.text('下载更新'));
+    await tester.tap(find.text('重新下载'));
     await tester.pumpAndSettle();
     first.complete({
       'schemaVersion': 1,
@@ -468,7 +468,7 @@ void main() {
     expect(find.text('取消下载'), findsOneWidget);
     second.completeError(StateError('fixture failure'));
     await tester.pumpAndSettle();
-    expect(find.text('下载更新'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     expect(events.hasListener, isFalse);
   });
@@ -494,10 +494,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('重启并安装'), findsNothing);
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       expect(prepares, 1);
-      expect(find.text('下载更新'), findsNothing);
+      expect(find.text('更新并重启'), findsNothing);
       expect(find.text('重启并安装'), findsNothing);
       pending.complete({
         'schemaVersion': 1,
@@ -532,7 +532,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 40));
       expect(prepares, 1);
@@ -558,7 +558,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('下载更新'));
+      await tester.tap(find.text('更新并重启'));
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
       pending.complete({

@@ -1,10 +1,11 @@
+import '../../_support/hangar_test_actions.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:starbridge_flutter/design_system/interaction/starbridge_tooltip.dart';
 import 'package:starbridge_flutter/design_system/styles/future_restraint_style.dart';
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
@@ -14,6 +15,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_page.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_detail.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_ship_row.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_wall_card.dart';
 import 'package:starbridge_flutter/features/hangar/bridge_local_hangar.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 
@@ -28,6 +30,20 @@ import '../../app/presence/direct_online_restore_flow_test.dart'
     show RetainedAccount;
 
 void main() {
+  for (final saved in [false, true]) {
+    testWidgets('device storage notice with saved hangar=$saved', (
+      tester,
+    ) async {
+      final port = _LocalPort();
+      await tester.pumpWidget(_app(port));
+      port.reads.single.complete(
+        saved ? _saved() : const LocalHangarSnapshot(revision: 0, ships: []),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('机库只保存在这台电脑上。'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
   testWidgets(
     'cold offline hangar mounts read-only and clears on owner mode change',
     (tester) async {
@@ -184,7 +200,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     await _reveal(tester, 'crop-test');
-    await tester.tap(find.byKey(const ValueKey('local-hangar-ship-crop-test')));
+    await openHangarDetails(
+      tester,
+      find.byKey(const ValueKey('local-hangar-ship-crop-test')),
+    );
     await tester.pumpAndSettle();
     final image = tester.widget<LocalHangarShipImage>(
       find.descendant(
@@ -211,13 +230,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('读取不完整'), findsNothing);
     expect(find.byKey(const Key('hangar-partial-warning')), findsOneWidget);
+    expect(find.text('部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。'), findsOneWidget);
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is StarBridgeTooltip &&
-            widget.message == '部分物品类别待核对，已识别舰船已保存；原有舰船暂不移除。',
-      ),
-      findsOneWidget,
+      tester
+          .widget<Semantics>(
+            find
+                .ancestor(
+                  of: find.byKey(const Key('hangar-partial-warning')),
+                  matching: find.byType(Semantics),
+                )
+                .first,
+          )
+          .properties
+          .liveRegion,
+      isTrue,
     );
   });
   testWidgets('history shows each instance with its own removal time', (
@@ -250,9 +276,18 @@ void main() {
       find.byKey(const ValueKey('local-hangar-ship-former-a')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('local-hangar-ship-former-b')));
+    await openHangarDetails(
+      tester,
+      find.byKey(const ValueKey('local-hangar-ship-former-b')),
+    );
     await tester.pumpAndSettle();
-    expect(find.textContaining('最后移出机库'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(LocalHangarDetail),
+        matching: find.textContaining('最后移出机库'),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('2026'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
@@ -275,7 +310,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Prospector'), findsOneWidget);
-    expect(find.text('MISC'), findsOneWidget);
+    expect(find.text('武藏', findRichText: true), findsOneWidget);
     expect(find.text('未分类'), findsNothing);
     expect(find.byType(HangarCombatIcon), findsNothing);
   });
@@ -366,8 +401,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
       expect(tester.hasRunningAnimations, isFalse);
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await activateHangarWithKeyboard(
+        tester,
+        find.byKey(const Key('local-hangar-read')),
+      );
       expect(opened, isTrue);
       await tester.tap(find.byKey(const Key('local-hangar-search')));
       var cardFocused = false;
@@ -387,6 +424,11 @@ void main() {
       expect(cardFocused, isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('hangar-stage')), findsOneWidget);
+      await activateHangarWithKeyboard(
+        tester,
+        find.byKey(const Key('hangar-stage-details')),
+      );
       expect(find.byType(LocalHangarDetail), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
@@ -430,7 +472,8 @@ void main() {
           )
           .first,
     );
-    await tester.tap(
+    await openHangarDetails(
+      tester,
       find.byKey(const ValueKey('local-hangar-ship-instance-59')),
     );
     await tester.pumpAndSettle();
@@ -445,7 +488,7 @@ void main() {
     await tester.pumpWidget(_app(previous));
     previous.reads.single.complete(_saved());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('F8C 闪电'));
+    await openHangarDetails(tester, find.text('F8C 闪电'));
     await tester.pumpAndSettle();
     expect(find.byType(LocalHangarDetail), findsOneWidget);
 
@@ -460,7 +503,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Current ship'));
+    await openHangarDetails(tester, find.text('Current ship'));
     await tester.pumpAndSettle();
     final dialogContext = tester.element(find.byType(LocalHangarDetail));
     unawaited(
@@ -561,7 +604,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.text('F8C 闪电'));
+    await openHangarDetails(tester, find.text('F8C 闪电'));
     await tester.pumpAndSettle();
     final dialog = find.byType(LocalHangarDetail);
     expect(dialog, findsOneWidget);
@@ -580,24 +623,44 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: dialog, matching: find.textContaining('加入时间')),
+      find.descendant(of: dialog, matching: find.textContaining('入库时间')),
       findsOneWidget,
+    );
+    // The official pledge date, not the client import time.
+    expect(
+      find.descendant(
+        of: dialog,
+        matching: find.textContaining(RegExp(r'入库时间  2026\D0?8\D20')),
+      ),
+      findsOneWidget,
+    );
+    final importDay = MaterialLocalizations.of(tester.element(dialog))
+        .formatCompactDate(DateTime(2026, 11, 1));
+    expect(
+      find.descendant(of: dialog, matching: find.textContaining(importDay)),
+      findsNothing,
     );
     expect(find.textContaining('USD'), findsNothing);
     await tester.tap(find.byKey(const Key('hangar-detail-close')));
     await tester.pumpAndSettle();
     expect(dialog, findsNothing);
+    await backToHangarWall(tester);
     await _reveal(tester, 'synthetic-ironclad');
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('local-hangar-ship-synthetic-ironclad')),
-        matching: find.byType(HangarCombatIcon),
+        matching: find.byType(LocalHangarWallIcon),
       ),
       findsOneWidget,
     );
-    await tester.tap(find.text('铁甲 突袭'));
+    await openHangarDetails(tester, find.text('铁甲 突袭'));
     await tester.pumpAndSettle();
-    expect(find.text('加入时间'), findsNothing);
+    // No official date: "入库时间 未知", never the import time.
+    final undated = find.byType(LocalHangarDetail);
+    expect(
+      find.descendant(of: undated, matching: find.textContaining('入库时间  未知')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('search matches original CN TW and manufacturer', (tester) async {
@@ -719,15 +782,17 @@ LocalHangarSnapshot _saved({bool partial = false}) => LocalHangarSnapshot(
       tw: 'F8C 閃電',
       liner: 'Anvil Aerospace',
       size: 'small',
-      addedAt: DateTime(2026, 8, 20),
+      addedAt: DateTime(2026, 11, 1),
+      acquiredOn: DateTime(2026, 8, 20),
     ),
-    const LocalHangarShip(
+    LocalHangarShip(
       id: 'synthetic-ironclad',
       title: 'Ironclad Assault',
       cn: '铁甲 突袭',
       tw: '鐵甲 突襲',
       liner: 'Drake Interplanetary',
       size: 'large',
+      addedAt: DateTime(2026, 11, 2),
     ),
   ],
 );

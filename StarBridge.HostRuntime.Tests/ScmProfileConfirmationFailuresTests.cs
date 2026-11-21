@@ -17,7 +17,7 @@ internal static partial class LegacyPasswordLoginTests
         using var dispatcher = new AccountBridgeDispatcher(host);
         var generation = host.Generation;
         var request = BridgeEnvelope.Request("account.updateCallSign", "confirmation-401", generation,
-            new { schemaVersion = 1, expectedCallSign = "Inherited", callSign = "Unconfirmed" }, host.CurrentContext);
+            new { schemaVersion = 1, expectedCallSign = "Inherited", callSign = "Unconfirm" }, host.CurrentContext);
         var result = await dispatcher.DispatchAsync(request);
         Check(result.Response.Error?.Code == "account.callsign_unconfirmed" && transport.Writes == 1,
             "post-write 401 cannot claim a confirmed mutation or replay it");

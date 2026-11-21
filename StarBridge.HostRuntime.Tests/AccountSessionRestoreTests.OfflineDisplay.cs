@@ -29,8 +29,9 @@ internal static partial class AccountSessionRestoreTests
             var handler = new ScriptedHandler(_ => rejected
                 ? JsonResponse(HttpStatusCode.BadRequest, "{\"error\":\"invalid_grant\"}")
                 : throw new HttpRequestException("Synthetic network outage"));
+            var clock = new CredentialClock();
             using var account = new StarBridge.HostRuntime.AccountBridgeRuntime(new StarBridge.HostRuntime.Account.ScmAccountBridgeHost(
-                new OAuthPkceClient(new ScmHttpClient(handler), vault, options),
+                new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock },
                 new ScmProfileCacheStore(System.IO.Path.Combine(root, "profile")), settings.EnvironmentName, () => null));
             account.InitializeOfflineAccount(root);
             await using var native = new StarBridge.HostRuntime.NativeAccountRuntimeBinding(account);
@@ -102,6 +103,9 @@ internal static partial class AccountSessionRestoreTests
             AssertEqual(false, (await ReadCurrent(account, "synthetic-manual-offline")).Response.Payload.TryGetProperty("retainedDisplay", out _), "network route adopted a manual-offline revision");
             cache.Observe(owner, "Retained Pilot", () => true);
             rejected = true;
+            // The outage reads above opened a backoff window; the rejection must
+            // come from a real token request after it (11-15 backoff).
+            clock.Now = clock.Now.AddMinutes(6);
             response = (await ReadCurrent(account, "synthetic-rejected")).Response;
             AssertEqual("reauthorizationRequired", response.Payload.GetProperty("state").GetString(), "rejection state");
             AssertEqual(false, response.Payload.TryGetProperty("retainedDisplay", out _), "rejected credential inherited display");
@@ -203,12 +207,14 @@ internal static partial class AccountSessionRestoreTests
                         "{\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-rotated\",\"token_type\":\"Bearer\",\"expires_in\":3600}");
                 throw new HttpRequestException("Synthetic outage");
             });
-            oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             var rejectedCredentials = new List<(string Authority, string Subject)>();
             oauth.StoredCredentialRejected += (authority, subject) => rejectedCredentials.Add((authority, subject));
             AssertEqual<ScmOfflineDisplayOwner?>(null, oauth.ReadOfflineDisplayOwner(), "no attempted restore must select a cached account");
             async Task Outage()
             {
+                clock.Now = clock.Now.AddMinutes(5);
                 try { await oauth.TryRestoreSessionAsync(default); throw new Exception("Expected simulated network failure"); }
                 catch (HttpRequestException) { }
             }
@@ -228,6 +234,7 @@ internal static partial class AccountSessionRestoreTests
             await Outage();
             AssertEqual("synthetic-owner", oauth.ReadOfflineDisplayOwner()?.Subject, "profile outage after token rotation retains original owner");
             AssertEqual("synthetic-rotated", vault.LoadRefreshToken(key), "rotation uses actual committed credential");
+            clock.Now = clock.Now.AddMinutes(5);
             phase = "cancel";
             try { await oauth.TryRestoreSessionAsync(cancellation.Token); throw new Exception("Expected cancellation"); }
             catch (OperationCanceledException) { }
@@ -237,6 +244,7 @@ internal static partial class AccountSessionRestoreTests
             // (2026-10-21); a replaced credential drops it, so the rejection
             // below still comes from the token endpoint.
             vault.SaveRefreshToken(key, "synthetic-after-outage");
+            clock.Now = clock.Now.AddMinutes(5);
             phase = "reject";
             await oauth.TryRestoreSessionAsync(default);
             AssertEqual<ScmOfflineDisplayOwner?>(null, oauth.ReadOfflineDisplayOwner(), "explicit rejection cannot select offline display by credential");

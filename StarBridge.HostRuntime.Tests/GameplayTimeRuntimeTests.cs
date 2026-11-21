@@ -176,6 +176,175 @@ internal static class GameplayTimeRuntimeTests
         Require(h.Call().GetProperty("recording").GetBoolean(), "A successful visibility save also applies its persisted pending consent.");
         return Task.CompletedTask;
     }
+    // Build 71 (11-06): one failed read left recording stopped with no diagnostics
+    // until a manual retry or restart. Failures now name a reason code (never
+    // contents or account ids) and reload on a backoff without overwriting the file.
+    internal static Task FailuresLogAndRecoverOnBackoff()
+    {
+        var journal = new List<string>();
+        using var capture = StarBridge.HostRuntime.Support.IdentityGateJournal.Capture((stage, value) => journal.Add(stage + " " + value));
+        using var h = new Harness();
+        h.Call("setConsent", true); h.Time.Tick(5); h.Time.Tick(5);
+        var path = Directory.GetFiles(h.Root, "*.json", SearchOption.AllDirectories).Single();
+        var prefix = Path.GetFileNameWithoutExtension(path)[..8];
+        var valid = File.ReadAllText(path);
+        var saved = JsonDocument.Parse(valid).RootElement.GetProperty("snapshot").GetProperty("seconds").GetInt64();
+
+        // A field this version does not know (a newer or branch build wrote it).
+        var foreign = valid.Replace("\"snapshot\":{", "\"snapshot\":{\"futureField\":1,", StringComparison.Ordinal);
+        Require(foreign != valid, "Fixture adds an unknown snapshot field.");
+        File.WriteAllText(path, foreign);
+        h.Runtime.Dispose(); h.Runtime = h.Create();
+        Require(h.Call().GetProperty("error").GetString() == "gameplay.read_failed", "Unknown field is a read failure.");
+        Require(journal.Contains($"gameplay-store code=read_failed file={prefix} reason=unknown-field"),
+            "Store names the failed check and the file prefix: " + string.Join(" | ", journal));
+        Require(journal.Any(e => e.StartsWith("gameplay-runtime code=read_failed exception=none retry=30", StringComparison.Ordinal)),
+            "Runtime logs the reason code and its retry delay.");
+        Require(journal.All(e => !e.Contains(Owner.Subject, StringComparison.Ordinal) && !e.Contains(h.Root, StringComparison.Ordinal)),
+            "No account id or path in the journal.");
+        Require(File.ReadAllText(path) == foreign, "An unreadable file is never rewritten.");
+
+        // Still failing at the first retry: backoff doubles, file untouched.
+        h.Time.Tick(31);
+        Require(h.Call().GetProperty("error").GetString() == "gameplay.read_failed", "Still unreadable after the first retry.");
+        Require(File.ReadAllText(path) == foreign, "Retries never rewrite the file.");
+        // Same reason again: no second full line, only a count.
+        Require(journal.Count(e => e == $"gameplay-store code=read_failed file={prefix} reason=unknown-field") == 1 &&
+            journal.Contains($"gameplay-store code=read_failed file={prefix} reason=unknown-field count=2") &&
+            journal.Count(e => e.StartsWith("gameplay-runtime code=read_failed exception=", StringComparison.Ordinal)) == 1 &&
+            journal.Contains("gameplay-runtime code=read_failed count=2"),
+            "Repeats are counted, not logged in full: " + string.Join(" | ", journal));
+        // Many more failures stay bounded: counts only at powers of two.
+        for (var i = 0; i < 12; i++) { h.Time.Tick(601); h.Call(); }
+        Require(journal.Count(e => e.StartsWith("gameplay-store code=read_failed", StringComparison.Ordinal)) <= 5,
+            "Fourteen failures write at most five store lines.");
+        Require(File.ReadAllText(path) == foreign, "Repeated retries never rewrite the file.");
+
+        // The file becomes readable again: the next backoff reloads by itself, no retry button.
+        File.WriteAllText(path, valid);
+        h.Time.Tick(30);
+        Require(h.Call().GetProperty("error").GetString() == "gameplay.read_failed", "No reload before the backoff passes.");
+        h.Time.Tick((int)GameplayTimeRuntime.MaximumRetryDelay.TotalSeconds + 1);
+        var recovered = h.Call();
+        Require(!recovered.TryGetProperty("error", out _),
+            "Reloads after the backoff without a manual retry.");
+        Require(recovered.GetProperty("seconds").GetInt64() == saved, "Saved time is intact.");
+        Require(journal.Contains("gameplay-runtime code=recovered"), "Recovery is logged.");
+        h.Time.Tick(5); h.Time.Tick(5);
+        var resumed = h.Seconds();
+        Require(resumed > saved, "Recording continues after recovery.");
+
+        // Another process holds the lock: storage_unavailable, then recovers once it is released.
+        h.Runtime.Dispose();
+        var holder = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        h.Runtime = h.Create();
+        Require(h.Call().GetProperty("error").GetString() == "gameplay.storage_unavailable", "Held lock is storage_unavailable.");
+        Require(journal.Any(e => e.StartsWith($"gameplay-store code=storage_unavailable file={prefix} exception=IOException", StringComparison.Ordinal)),
+            "Held lock is logged with the file prefix.");
+        holder.Dispose();
+        h.Time.Tick(31);
+        var freed = h.Call();
+        Require(!freed.TryGetProperty("error", out _) && freed.GetProperty("seconds").GetInt64() == resumed,
+            "Recovers once the lock is free.");
+        return Task.CompletedTask;
+    }
+
+    // CX-GAMEPLAY-DIAG-073-R #1: a page that loaded before, its lease released by an
+    // account switch, then a reopen that fails: no disk access until the backoff passes.
+    internal static Task SuspendedReopenWaitsForBackoff()
+    {
+        var journal = new List<string>();
+        using var capture = StarBridge.HostRuntime.Support.IdentityGateJournal.Capture((stage, value) => journal.Add(stage + " " + value));
+        using var h = new Harness();
+        h.Call("setConsent", true); h.Time.Tick(5); h.Time.Tick(5);
+        var saved = h.Seconds();
+        var path = Directory.GetFiles(h.Root, "*.json", SearchOption.AllDirectories).Single();
+        h.Current = (new BridgeAccountContext("test", "scm", "synthetic-other"), 2);
+        h.Call(); // Switch away: the first owner's lease is released (Suspend).
+        using (var holder = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            h.Current = (Owner, 3);
+            Require(h.Call().GetProperty("error").GetString() == "gameplay.storage_unavailable", "Reopen fails while the lock is held.");
+            // Samples every 5 s and reads inside the 30 s backoff must not reopen the file.
+            for (var i = 0; i < 5; i++) { h.Time.Tick(5); h.Call(); }
+            Require(!journal.Any(e => e.StartsWith("gameplay-store code=storage_unavailable", StringComparison.Ordinal) &&
+                    e.Contains(" count=", StringComparison.Ordinal)),
+                "No second open inside the backoff: " + string.Join(" | ", journal));
+        }
+        h.Time.Tick(6); // 31 s since the failure, lock released.
+        var back = h.Call();
+        Require(!back.TryGetProperty("error", out _) && back.GetProperty("seconds").GetInt64() == saved,
+            "Reopens once the backoff passes, saved time intact: " + back.GetRawText());
+        return Task.CompletedTask;
+    }
+
+    // CX-GAMEPLAY-DIAG-073-R #2: a recording-owner gate that keeps flipping.
+    internal static Task OwnerGateFlipsDoNotFlood()
+    {
+        var journal = new List<string>();
+        using var capture = StarBridge.HostRuntime.Support.IdentityGateJournal.Capture((stage, value) => journal.Add(stage + " " + value));
+        var owner = new GameplayFailureJournal();
+        const string none = "code=none reason=game-identity-not-ready";
+        for (var i = 0; i < 20; i++)
+        {
+            owner.RecordChange("gameplay-owner", none);
+            owner.RecordChange("gameplay-owner", none); // Same state on the next sample: nothing.
+            owner.RecordChange("gameplay-owner", "code=ok");
+        }
+        Require(journal.Count(e => e == "gameplay-owner " + none) == 1 && journal.Count(e => e == "gameplay-owner code=ok") == 1,
+            "Each reason is written in full once: " + string.Join(" | ", journal));
+        Require(journal.Where(e => e.StartsWith("gameplay-owner " + none + " count=", StringComparison.Ordinal))
+                .SequenceEqual(new[] { 2, 4, 8, 16 }.Select(n => "gameplay-owner " + none + " count=" + n)),
+            "Repeats only at 2, 4, 8, 16: " + string.Join(" | ", journal));
+        Require(journal.Count <= 10, "Forty flips write at most ten lines.");
+        return Task.CompletedTask;
+    }
+
+    // Build 71 restart (11-06 22:50Z): the local owner was "no-binding" for about two
+    // seconds after start, then ok. Recording must resume with the file's own consent.
+    internal static Task EarlyOwnerGapResumesWithSavedConsent()
+    {
+        using var h = new Harness();
+        h.Call("setConsent", true); h.Time.Tick(5); h.Time.Tick(5);
+        var saved = h.Seconds();
+        var path = Directory.GetFiles(h.Root, "*.json", SearchOption.AllDirectories).Single();
+        var before = File.ReadAllBytes(path);
+        h.Runtime.Dispose();
+        var ownerReady = false;
+        var store = new GameplayTimeStore(h.Root)
+        {
+            ResolveOwner = owner => ownerReady ? owner
+                : throw new StarBridge.HostRuntime.Privacy.LocalPrivacyOwnerUnavailableException()
+        };
+        h.Runtime = new GameplayTimeRuntime(store, () => h.Current, () => h.Presence, h.Time);
+        var gap = h.Runtime.Dispatch(h.Request()).Response;
+        Require(gap.Status != "ok" || gap.Payload.TryGetProperty("error", out _), "The gap reports an error.");
+        h.Time.Tick(1);
+        Require(File.ReadAllBytes(path).SequenceEqual(before), "The gap never writes the file (consent stays as saved).");
+        ownerReady = true;
+        h.Time.Tick(5);
+        var resumed = h.Call();
+        Require(!resumed.TryGetProperty("error", out _), "Owner back: no error. " + resumed.GetRawText());
+        Require(resumed.GetProperty("consent").GetString() == "allowed", "Saved consent is used again.");
+        Require(resumed.GetProperty("seconds").GetInt64() == saved, "Saved time intact.");
+        h.Time.Tick(5); h.Time.Tick(5);
+        Require(h.Seconds() > saved, "Recording resumes without a retry.");
+
+        // No recording owner at all (the front check): named once, then only counted.
+        var journal = new List<string>();
+        using var capture = StarBridge.HostRuntime.Support.IdentityGateJournal.Capture((stage, value) => journal.Add(stage + " " + value));
+        var noOwner = new GameplayTimeRuntime(new GameplayTimeStore(h.Root), () => (null, 1), () => h.Presence, h.Time, startTimer: false);
+        for (var i = 0; i < 3; i++)
+            Require(noOwner.Dispatch(h.Request()).Response.Status != "ok", "No owner is refused.");
+        noOwner.Dispose();
+        Require(journal.Count(e => e == "gameplay-runtime code=refused reason=no-owner") == 1 &&
+            journal.Contains("gameplay-runtime code=refused reason=no-owner count=2") &&
+            journal.All(e => !e.Contains(Owner.Subject, StringComparison.Ordinal)),
+            "Refusal names its check once, then counts: " + string.Join(" | ", journal));
+        Require(File.ReadAllBytes(path).Length > 0, "Refusals never touch the file.");
+        return Task.CompletedTask;
+    }
+
     private static void Require(bool condition, string message)
     { if (!condition) throw new InvalidOperationException(message); }
 }

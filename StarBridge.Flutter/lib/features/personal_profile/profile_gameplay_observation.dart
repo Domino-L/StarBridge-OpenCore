@@ -12,3 +12,13 @@ int? profileGameplayMinutes(Map<String, Object?>? statistics) {
   }
   return seconds ~/ 60;
 }
+
+// Hong Kong's absent-record sentinel is revision zero AND Instant.EPOCH.
+// Missing/invalid dates never establish absence.
+bool profileNeverSaved(Map<String, Object?> profile) {
+  final updatedAt = profile['updatedAt'];
+  return profile['revision'] == 0 &&
+      updatedAt is String &&
+      DateTime.tryParse(updatedAt)?.toUtc() ==
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+}

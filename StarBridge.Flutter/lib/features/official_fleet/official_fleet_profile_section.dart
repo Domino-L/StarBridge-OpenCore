@@ -261,7 +261,9 @@ class _OfficialRankLine extends StatelessWidget {
         SizedBox(width: tokens.space.sm),
         Flexible(
           child: Text(
-            '$rankName · ${rank == null ? '—' : '$rank★'}',
+            rank == null
+                ? strings.text('officialFleet.rank.unavailable')
+                : '$rankName · $rank★',
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.labelMedium
                 ?.copyWith(color: tokens.domainColors.command.foreground),

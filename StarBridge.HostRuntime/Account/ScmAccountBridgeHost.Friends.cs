@@ -18,7 +18,9 @@ internal sealed partial class ScmAccountBridgeHost
         FriendsReader.ParseActivity(payload);
         var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("friends.read_unavailable");
         // The snapshot can recover a previously committed refresh. The wait
@@ -35,7 +37,9 @@ internal sealed partial class ScmAccountBridgeHost
         var query = FriendsReader.ParseQuery(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("friends.read_unavailable");
         var observe = query is null && ObservePlayerActivity();
@@ -86,7 +90,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         FriendsReader.ParseChatRead(payload);
         var session = RequireRelaySession(context); var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("directMessages.unavailable");
         try {
@@ -103,7 +109,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         FriendsReader.ParseChatMarkRead(payload);
         var session = RequireRelaySession(context); var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("directMessages.unavailable");
         void Current() {
@@ -123,7 +131,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         FriendsReader.ParseChatSend(payload);
         var session = RequireRelaySession(context); var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("directMessages.unavailable");
         void Current() {
@@ -144,7 +154,9 @@ internal sealed partial class ScmAccountBridgeHost
         FriendsReader.ParseCommand(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("friends.read_unavailable");
         OfflineFriendsReadLease? displayLease;

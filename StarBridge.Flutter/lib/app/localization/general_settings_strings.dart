@@ -44,9 +44,39 @@ const simplifiedGeneralSettingsStrings = <String, String>{
   'settings.general.motion.reduce': '减少动态效果',
   'settings.general.motion.reduceDescription':
       '收敛页面切换、水波和非必要位移；系统已要求减少动画时仍会优先遵循系统。',
+  'settings.general.performance.title': '性能模式',
+  'settings.general.performance.description':
+      '开启后，检测到游戏运行时自动减少特效；没有游戏时保持完整效果。',
   'settings.general.holiday.title': '节日外观',
   'settings.general.holiday.description':
       '节日期间自动换上特别版的图标、主色和背景印花，过了节日自动改回。只是换装饰，布局和功能都不变。',
+  'settings.screenReading': '屏幕读取',
+  'settings.screenReading.description': '只在你打开时才读取，读到的内容只留在这台电脑上。',
+  'settings.general.ownHealth.title': '读取自己的血量（实验版）',
+  'settings.general.ownHealth.summary.off': '读取画面左下角自己的血量，显示在面罩里。开启前需要阅读并同意风险说明。',
+  'settings.general.ownHealth.summary.on': '正在读取画面左下角自己的血量，显示在面罩里。关掉开关会立刻停止读取。',
+  'settings.general.ownHealth.viewNotes': '查看说明',
+  'settings.general.ownHealth.dialog.title': '开启“读取自己的血量（实验版）”',
+  'settings.general.ownHealth.what.title': '会读什么',
+  'settings.general.ownHealth.what':
+      '游戏运行、并且游戏窗口在最前面时，读取画面左下角头盔 HUD 里你自己的血量数字和圆环，显示在面罩里你自己那一行。满血时游戏会收起血量格子，圆环继续显示满血；游戏日志显示阵亡、倒地或换服务器时取消。',
+  'settings.general.ownHealth.how.title': '怎么读',
+  'settings.general.ownHealth.how':
+      '用 Windows 图形捕获，只读游戏窗口本身的画面，只取左下角一小块；再用一个很小的识别模型在这台电脑上识别。截到的画面不保存，读数只留在本机，不上传，也不分享给任何人。',
+  'settings.general.ownHealth.never.title': '不做的事',
+  'settings.general.ownHealth.never': '不读游戏内存，不注入游戏，不模拟任何按键或鼠标。',
+  'settings.general.ownHealth.note.title': '还要知道',
+  'settings.general.ownHealth.note':
+      '这是实验版：分辨率、界面缩放或 HUD 颜色和常见设置不同时，可能读不准。默认关闭，没打开时面罩里不显示你的血量圆环；随时可以关掉，关掉开关或退出游戏会立刻停止读取。较早的 Windows 10 上，游戏窗口四周可能出现一圈黄框，这是系统在提示正在捕获。',
+  'settings.general.ownHealth.risk.title': '风险说明',
+  'settings.general.ownHealth.risk': '自动读取游戏画面可能不符合游戏的使用条款，请自行判断是否开启。',
+  'settings.general.ownHealth.dialog.agree': '点“同意并开启”，表示你已经看过上面的说明，了解可能的风险，自己决定开启。',
+  'settings.general.ownHealth.dialog.cancel': '取消',
+  'settings.general.ownHealth.dialog.confirm': '同意并开启',
+  'settings.general.ownHealth.dialog.close': '关闭',
+  'settings.general.ownHealth.background.title': '游戏在后台时也读取',
+  'settings.general.ownHealth.background.what':
+      '游戏窗口不在最前面时（比如切到星海舰桥，或在另一块屏幕上操作）也继续读取，面罩里的圆环保持更新。游戏最小化后没有画面，读不到，圆环会隐藏。开销很小。',
   'settings.general.behavior.title': '启动与后台',
   'settings.general.behavior.description': '控制登录 Windows 后的启动方式，以及关闭主窗口后的应用行为。',
   'settings.general.behavior.closeSummary.tray': '关闭窗口后：继续在系统托盘运行',
@@ -142,9 +172,39 @@ const traditionalGeneralSettingsStrings = <String, String>{
   'settings.general.motion.reduce': '減少動態效果',
   'settings.general.motion.reduceDescription':
       '收斂頁面切換、水波和非必要位移；系統已要求減少動畫時仍會優先遵循系統。',
+  'settings.general.performance.title': '效能模式',
+  'settings.general.performance.description':
+      '開啟後，偵測到遊戲執行時自動減少特效；沒有遊戲時保持完整效果。',
   'settings.general.holiday.title': '節日外觀',
   'settings.general.holiday.description':
       '節日期間自動換上特別版的圖示、主色和背景印花，過了節日自動改回。只是換裝飾，版面和功能都不變。',
+  'settings.screenReading': '螢幕讀取',
+  'settings.screenReading.description': '只在你打開時才讀取，讀到的內容只留在這台電腦上。',
+  'settings.general.ownHealth.title': '讀取自己的血量（實驗版）',
+  'settings.general.ownHealth.summary.off': '讀取畫面左下角自己的血量，顯示在面罩裡。開啟前需要閱讀並同意風險說明。',
+  'settings.general.ownHealth.summary.on': '正在讀取畫面左下角自己的血量，顯示在面罩裡。關掉開關會立刻停止讀取。',
+  'settings.general.ownHealth.viewNotes': '查看說明',
+  'settings.general.ownHealth.dialog.title': '開啟“讀取自己的血量（實驗版）”',
+  'settings.general.ownHealth.what.title': '會讀什麼',
+  'settings.general.ownHealth.what':
+      '遊戲執行、並且遊戲視窗在最前面時，讀取畫面左下角頭盔 HUD 裡你自己的血量數字和圓環，顯示在面罩裡你自己那一行。滿血時遊戲會收起血量格子，圓環繼續顯示滿血；遊戲日誌顯示陣亡、倒地或換伺服器時取消。',
+  'settings.general.ownHealth.how.title': '怎麼讀',
+  'settings.general.ownHealth.how':
+      '用 Windows 圖形擷取，只讀遊戲視窗本身的畫面，只取左下角一小塊；再用一個很小的辨識模型在這台電腦上辨識。截到的畫面不儲存，讀數只留在本機，不上傳，也不分享給任何人。',
+  'settings.general.ownHealth.never.title': '不做的事',
+  'settings.general.ownHealth.never': '不讀遊戲記憶體，不注入遊戲，不模擬任何按鍵或滑鼠。',
+  'settings.general.ownHealth.note.title': '還要知道',
+  'settings.general.ownHealth.note':
+      '這是實驗版：解析度、介面縮放或 HUD 顏色和常見設定不同時，可能讀不準。預設關閉，沒打開時面罩裡不顯示你的血量圓環；隨時可以關掉，關掉開關或退出遊戲會立刻停止讀取。較早的 Windows 10 上，遊戲視窗四周可能出現一圈黃框，這是系統在提示正在擷取。',
+  'settings.general.ownHealth.risk.title': '風險說明',
+  'settings.general.ownHealth.risk': '自動讀取遊戲畫面可能不符合遊戲的使用條款，請自行判斷是否開啟。',
+  'settings.general.ownHealth.dialog.agree': '點“同意並開啟”，表示你已經看過上面的說明，了解可能的風險，自己決定開啟。',
+  'settings.general.ownHealth.dialog.cancel': '取消',
+  'settings.general.ownHealth.dialog.confirm': '同意並開啟',
+  'settings.general.ownHealth.dialog.close': '關閉',
+  'settings.general.ownHealth.background.title': '遊戲在背景時也讀取',
+  'settings.general.ownHealth.background.what':
+      '遊戲視窗不在最前面時（比如切到星海艦橋，或在另一個螢幕上操作）也繼續讀取，面罩裡的圓環保持更新。遊戲最小化後沒有畫面，讀不到，圓環會隱藏。開銷很小。',
   'settings.general.behavior.title': '啟動與背景執行',
   'settings.general.behavior.description':
       '控制登入 Windows 後的啟動方式，以及關閉主視窗後的應用程式行為。',
@@ -249,8 +309,40 @@ const englishGeneralSettingsStrings = <String, String>{
   'settings.general.motion.description': 'Reduce non-essential transitions while preserving state changes and outcomes.',
   'settings.general.motion.reduce': 'Reduce motion',
   'settings.general.motion.reduceDescription': 'Limits page movement, ripples, and non-essential transitions. A system reduce-motion request still takes priority.',
+  'settings.general.performance.title': 'Performance mode',
+  'settings.general.performance.description': 'When on, effects are reduced automatically while a game is running; without a game the full look stays.',
   'settings.general.holiday.title': 'Holiday look',
   'settings.general.holiday.description': 'During a holiday the icon, accent colour and background print change on their own and switch back afterwards. Decoration only: layout and features stay the same.',
+  'settings.screenReading': 'Screen reading',
+  'settings.screenReading.description': 'Only while you turn it on; what is read stays on this computer.',
+  'settings.general.ownHealth.title': 'Read my own health (experimental)',
+  'settings.general.ownHealth.summary.off':
+      'Reads your own health from the bottom left of the screen and shows it in the visor. Before turning it on you need to read and agree to the risk notes.',
+  'settings.general.ownHealth.summary.on':
+      'Reading your own health from the bottom left of the screen and showing it in the visor. Turning it off stops reading immediately.',
+  'settings.general.ownHealth.viewNotes': 'View notes',
+  'settings.general.ownHealth.dialog.title': 'Turn on “Read my own health (experimental)”',
+  'settings.general.ownHealth.what.title': 'What it reads',
+  'settings.general.ownHealth.what':
+      'While the game is running and its window is in front, it reads your own health number and ring from the helmet HUD at the bottom left of the screen and shows them on your own row in the visor. At full health the game folds the health tile away and the ring keeps showing full; when the game log shows a death, being downed or a server change, that is dropped.',
+  'settings.general.ownHealth.how.title': 'How it reads',
+  'settings.general.ownHealth.how':
+      'Windows Graphics Capture reads only the game window itself and takes only a small area at the bottom left; a very small recognition model reads it on this computer. Captured images are not saved, and the reading stays on this computer: it is never uploaded or shared with anyone.',
+  'settings.general.ownHealth.never.title': 'What it never does',
+  'settings.general.ownHealth.never': 'It does not read game memory, inject into the game, or simulate any key or mouse input.',
+  'settings.general.ownHealth.note.title': 'Also good to know',
+  'settings.general.ownHealth.note':
+      'This is experimental: with an unusual resolution, interface scale or HUD colour it may read wrongly. It is off by default, and while it is off the visor shows no health ring for you; you can turn it off at any time, and turning it off or closing the game stops reading immediately. On older Windows 10 versions a yellow border may appear around the game window: that is Windows showing that capture is running.',
+  'settings.general.ownHealth.risk.title': 'Risk',
+  'settings.general.ownHealth.risk': 'Automatically reading the game screen may not comply with the terms of use of the game. Decide for yourself whether to turn it on.',
+  'settings.general.ownHealth.dialog.agree':
+      'By choosing “Agree and turn on” you confirm that you have read the notes above, understand the possible risk and decide to turn it on yourself.',
+  'settings.general.ownHealth.dialog.cancel': 'Cancel',
+  'settings.general.ownHealth.dialog.confirm': 'Agree and turn on',
+  'settings.general.ownHealth.dialog.close': 'Close',
+  'settings.general.ownHealth.background.title': 'Also read while the game is in the background',
+  'settings.general.ownHealth.background.what':
+      'Keeps reading when the game window is not in front (for example while you switch to StarBridge or work on another screen), so the ring in the visor stays up to date. A minimized game shows nothing, so it cannot be read and the ring is hidden. It costs very little.',
   'settings.general.behavior.title': 'Startup & background',
   'settings.general.behavior.description': 'Control what happens after Windows sign-in and when the main window closes.',
   'settings.general.behavior.closeSummary.tray':

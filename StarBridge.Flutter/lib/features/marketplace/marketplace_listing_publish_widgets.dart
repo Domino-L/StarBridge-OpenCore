@@ -7,6 +7,12 @@ import 'marketplace_widgets.dart';
 import 'marketplace_details.dart';
 import 'marketplace_listing_copy.dart';
 import 'marketplace_listings_controller.dart';
+import 'marketplace_listing_manifest.dart';
+import 'marketplace_display_copy.dart';
+import 'marketplace_display_rules.dart';
+import 'marketplace_trade_style.dart';
+import 'marketplace_surfaces.dart' show marketLine;
+import '../../design_system/surfaces/light_visual_text.dart';
 const listingStepNames = ['类型', '物品', '价格与数量', '确认'];
 
 /// The review step's label and value rows, in the reader's language.
@@ -18,24 +24,25 @@ List<(String, String)> listingConfirmRows(
 ) {
   String l(String key, [Map<String, String> args = const {}]) =>
       listingText(context, key, args);
-  final price = d.amount;
+  final price = c.priceFor(d);
   final qty = int.tryParse(d.quantity);
   final location = c.locations
       .where((r) => '${r['id']}' == d.location)
       .firstOrNull?['name'];
-  final wanted = c.items.where((r) => '${r['id']}' == d.wanted).firstOrNull;
+  final wanted = d.wantedItem;
   final side = {'sell': '出售', 'buy': '求购', 'barter': '以物易物'}[d.side]!;
   return [
     (l('类型'), '${l(side)} · ${l(d.manifestId == null ? '单件物品' : '清单')}'),
     (
       l('物品'),
-      '$itemName${d.quality.isEmpty ? '' : ' · ${l('品质 {n}', {'n': d.quality})}'}',
+      '$itemName${d.manifestId != null || d.quality.isEmpty ? '' : ' · ${l('品质 {n}', {'n': d.quality})}'}',
     ),
     if (d.side == 'barter') ...[
-      (l('想换'), '${wanted?['name'] ?? d.wanted}'),
-      (l('数量'), d.quantity),
+      (l('想换'), '${wanted['name'] ?? l('未选择')} × ${d.wantedQuantity}'),
+      if (d.manifestId == null) (l('每次给出'), d.offeredQuantity),
+      (l('可以交易几次'), d.quantity),
     ] else ...[
-      (l('单价 × 数量'), '${marketMoney(price)} × ${d.quantity}'),
+      (l(d.manifestId == null ? '单价 × 数量' : '每套价格 × 份数'), '${marketMoney(price)} × ${d.quantity}'),
       if (price != null && qty != null)
         (l('合计'), '${marketMoney(price * qty)} UEC'),
     ],
@@ -275,7 +282,8 @@ class ListingOptionCard extends StatelessWidget {
           )),
       );
     return onTap == null
-        ? Semantics(selected: selected, button: true, child: card)
+        ? Semantics(selected: selected, button: true, enabled: false,
+            child: Opacity(opacity: .45, child: card))
         : card;
   }
 }
@@ -289,12 +297,16 @@ class ListingPickTile extends StatelessWidget {
     required this.selected,
     this.onTap,
     this.quality,
+    this.side,
   });
   final String? art;
   final String title, subtitle;
   final bool selected;
   final VoidCallback? onTap;
   final num? quality;
+
+  /// The draft's side: a buy draft's quality is a requirement (需要 ≥).
+  final String? side;
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -321,7 +333,7 @@ class ListingPickTile extends StatelessWidget {
                       Text(
                         title,
                         maxLines: 1,
-                        overflow: TextOverflow.fade,
+                        overflow: fadeOverflow(context),
                         softWrap: false,
                         style: const TextStyle(
                           fontSize: 13,
@@ -331,7 +343,7 @@ class ListingPickTile extends StatelessWidget {
                       Text(
                         subtitle,
                         maxLines: 1,
-                        overflow: TextOverflow.fade,
+                        overflow: fadeOverflow(context),
                         softWrap: false,
                         style: TextStyle(
                           fontSize: 12,
@@ -340,6 +352,7 @@ class ListingPickTile extends StatelessWidget {
                       ),
                       if (quality != null)
                         MarketQualityBadge({
+                          'side': ?side,
                           'qualityData': {
                             'type': 'material',
                             'quality': quality,
@@ -372,3 +385,63 @@ Widget _target(VoidCallback? onTap, bool selected, Widget content) =>
             onActivate: (_, _) => onTap(),
             child: content,
           );
+
+List<Widget> listingPublishReview(BuildContext context, MarketplaceListingsController c, ListingDraft d, String itemName) {
+  final rows = listingConfirmRows(context, c, d, itemName);
+  return [
+    Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: marketLine(context)),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        children: [
+          for (final (i, (label, value)) in rows.indexed)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                border: i == 0
+                    ? null
+                    : Border(top: BorderSide(color: marketLine(context))),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.tokens.colors.textSecondary,
+                    ),
+                  ),
+                  const Spacer(),
+                  Flexible(
+                    child: Text(
+                      value,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ),
+    if (d.side != 'barter' && d.manifestId != null &&
+        marketChecklistHasMultiples(c.manifests
+            .where((r) => r['id'] == d.manifestId).firstOrNull?['items']))
+      Padding(
+        key: const Key('listing-bundle-sum-hint'),
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          marketDisplayText(context, 'bundlePublishHint'),
+          style: TextStyle(fontSize: 12, color: context.tokens.colors.textSecondary),
+        ),
+      ),
+    if (c.error == null) ...[
+      const SizedBox(height: 12),
+      TradeNoticeBox(listingPublishNotice(context, d)),
+    ],
+  ];
+}

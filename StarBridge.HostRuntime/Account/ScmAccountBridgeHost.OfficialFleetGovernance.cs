@@ -19,7 +19,9 @@ internal sealed partial class ScmAccountBridgeHost
         _ = RequireSession(context);
         var session = await ReadDirectRelaySessionAsync(context, deadline.Token).ConfigureAwait(false);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -74,7 +76,9 @@ internal sealed partial class ScmAccountBridgeHost
             if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             {
                 activationCode = _reauthorizationRequired ? "reauthorization-required" : "credential-unavailable";
-                throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+                throw new AccountBridgeHostException(_reauthorizationRequired
+                    ? AccountBridgeStableErrors.ReauthorizationRequired
+                    : AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: !_reauthorizationRequired);
             }
             activationCode = "communities-unavailable";
             var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");

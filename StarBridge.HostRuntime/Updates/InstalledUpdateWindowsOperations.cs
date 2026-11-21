@@ -8,6 +8,8 @@ internal sealed class InstalledUpdateWindowsOperations : IInstalledUpdateOperati
     private readonly InstalledUpdatePlan _plan;
     private readonly string _root, _installer;
     private readonly FlutterInstallerUpdateSource.Manifest _manifest;
+    private readonly long? _expectedBytes;
+    internal string Version => _manifest.Version;
     private readonly Process? _client, _host;
     private readonly FlutterUpdateProcessActivation _activation = new();
     private readonly bool _recovery;
@@ -20,8 +22,11 @@ internal sealed class InstalledUpdateWindowsOperations : IInstalledUpdateOperati
         _plan = plan; _root = root; _recovery = recovery;
         plan.Validate(root);
         _installer = Path.Combine(root, plan.InstallerName);
-        _manifest = InstalledUpdateFiles.Read<FlutterInstallerUpdateSource.Manifest>(Path.Combine(root, "installer-manifest.json"), 65536);
-        if (FlutterInstallerUpdateSource.VerifyManifest(_manifest, "windows-x64", FlutterReleaseUpdateSource.ReadTrustedKeys()) <=
+        var record = InstalledUpdateFiles.Read<System.Text.Json.JsonElement>(Path.Combine(root, "installer-manifest.json"), 65536);
+        var verified = VerifySignedManifest(record, FlutterReleaseUpdateSource.ReadTrustedKeys());
+        _manifest = verified.Manifest;
+        _expectedBytes = verified.Bytes;
+        if (verified.Version <=
             ApplicationUpdateVersion.Parse(plan.CurrentVersion)) throw new InvalidDataException("Not a newer installed update.");
         if (!recovery) {
             _client = InstalledUpdatePlan.Pin(plan.ClientPid, plan.ClientStartTicks, Executable);
@@ -30,11 +35,25 @@ internal sealed class InstalledUpdateWindowsOperations : IInstalledUpdateOperati
         }
     }
 
+    internal static (FlutterInstallerUpdateSource.Manifest Manifest, long? Bytes, Version Version) VerifySignedManifest(
+        System.Text.Json.JsonElement record, IReadOnlyDictionary<string, string> keys)
+    {
+        if (record.TryGetProperty("downloadUrls", out _))
+        {
+            var v2 = FlutterInstallerManifestV2.Read(record);
+            return (v2.Common, v2.DownloadBytes, v2.Verify("windows-x64", keys));
+        }
+        var v1 = System.Text.Json.JsonSerializer.Deserialize<FlutterInstallerUpdateSource.Manifest>(record, InstalledUpdateFiles.Json)
+            ?? throw new InvalidDataException();
+        return (v1, null, FlutterInstallerUpdateSource.VerifyManifest(v1, "windows-x64", keys));
+    }
+
     internal async Task VerifyInstallerAsync(CancellationToken cancellation)
     {
         InstalledUpdateFiles.Plain(_installer);
         _installerLease = new FileStream(_installer, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (_installerLease.Length <= 0 || _installerLease.Length > FlutterUpdateManifestVerifier.MaximumPackageBytes ||
+            _expectedBytes is not null && _installerLease.Length != _expectedBytes ||
             !CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(_installerLease, cancellation), Convert.FromHexString(_manifest.DownloadSha256)))
             throw new InvalidDataException("Installer changed before handoff.");
         await FlutterInstallerPublisherVerifier.VerifyAsync(_installer, _manifest.Version, cancellation);

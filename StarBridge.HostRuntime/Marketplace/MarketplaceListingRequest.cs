@@ -35,11 +35,16 @@ internal static class MarketplaceListingRequest
             !value.TryGetDecimal(out var price) || price <= 0 || price > 1000000000000000m) throw Invalid();
         return price;
     }
-    internal static string? Quality(JsonElement input)
+    /// <summary>A sell listing states its goods' quality; a buy order states the least it accepts, as SCM's
+    /// <c>qualityMin</c> (accepted by SCM's TradeQualityDataValidator; user 2026-11-07).</summary>
+    internal static string? Quality(JsonElement input, bool minimum = false)
     {
         if (!input.TryGetProperty("quality", out var value) || value.ValueKind == JsonValueKind.Null ||
             value.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(value.GetString())) return null;
-        return JsonSerializer.Serialize(new { type = "material", quality = Integer(input, "quality", 0, 1000) });
+        var quality = Integer(input, "quality", 0, 1000);
+        return minimum
+            ? JsonSerializer.Serialize(new { type = "material", qualityMin = quality })
+            : JsonSerializer.Serialize(new { type = "material", quality });
     }
     internal static object Create(JsonElement input, JsonElement manifest = default)
     {
@@ -63,7 +68,11 @@ internal static class MarketplaceListingRequest
         }
         object[] provided = fromManifest
             ? ManifestItems(manifest)
-            : new object[] { new { itemId = item, quantity = count, price = Price(input, side == "barter"), qualityData = Quality(input) } };
+            // SCM's item quantity is "how many of this item in ONE unit of the order"; the stock goes only in
+            // remainingQuantity. The SCM site sends 1 here for a single order (barter has a separate offered quantity),
+            // and SCM multiplies by it for warehouse reserves, trade cards and mails.
+            : new object[] { new { itemId = item, quantity = side == "barter" && input.TryGetProperty("offeredQuantity", out _)
+                ? Integer(input, "offeredQuantity", 1, 999) : 1, price = Price(input, side == "barter"), qualityData = Quality(input, side == "buy") } };
         return new
         {
             creatorType = side == "buy" ? 0 : 1,
@@ -86,14 +95,14 @@ internal static class MarketplaceListingRequest
                 price = amount, qualityData = MarketplaceTradePolicy.Text(row, "qualityData") };
         }).ToArray();
     }
-    internal static object Update(JsonElement input, bool barter) => new
+    internal static object Update(JsonElement input, bool barter, bool buy = false) => new
     {
         orderNumber = Text(input, "id", 100),
         unitPrice = Price(input, barter),
         remainingQuantity = Integer(input, "quantity"),
         status = Visible(input) ? 1 : 0,
         expireTimeType = Expiry(Integer(input, "expiryDays", 0, 14)),
-        qualityData = Quality(input)
+        qualityData = Quality(input, buy)
     };
     internal static object Checklist(JsonElement input, bool update)
     {

@@ -162,6 +162,7 @@ class TrayApplicationBinding {
       locale: p.locale.toLanguageTag(),
       dark: p.appearanceMode == AppearanceMode.dark,
       reduceMotion: p.motionPreference == MotionPreference.reduce,
+      performanceMode: p.performanceMode,
       styleId: p.designStyleId,
       interactionStyle: p.interactionStyle.name,
       automaticKey: c.displayPresenceKey,

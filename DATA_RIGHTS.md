@@ -80,12 +80,46 @@ It is not a claim of permission. The repository media audit
 in the packaging paths that run it, which are the WPF-era installer and update
 scripts. **The Flutter official binary does not run this audit.**
 
-The 0.7.2 Flutter official binary ships the ship images and system maps in this
-registry, still `unverified`, by the maintainer's own decision for a
-non-commercial test release. Verifying their sources is planned for 0.7.3. The
+From 0.7.3 the ship pictures in the Flutter official binary come from the
+official ship pictures of Roberts Space Industries (from its ship data and
+store pages) for 257 of the 258 catalog ships. Constellation Phoenix
+Emerald uses the official picture of the Constellation Phoenix, as no
+separate one exists. The pictures are only
+resized. No source has granted StarBridge a licence: shipping them is the
+maintainer's decision for a non-commercial release, and they are not in the
+public source. The system maps are unchanged and remain `unverified`. The
 home scene videos ship in that binary only, under
-`maintainer-recording-no-written-license`. Neither is authorized by the rights
-holder, and neither is in the public source package.
+`maintainer-recording-no-written-license`. None of this media is authorized by
+the rights holder, and none of it is in the public source package.
+
+The 0.7.3 Flutter official binary also shows ship makers' marks from the Star
+Citizen Fan Kit, unchanged, in `assets/ships/catalog-maker-*.png`, under the Fan
+Kit agreement and with its notice. They are not in the public source. Without
+them the client names each maker in words.
+
+The 0.7.3 Flutter official binary also embeds a table of default key bindings in
+the Host, with the game's English action names. It was converted from the game's
+`defaultProfile.xml` and English `global.ini`, and those bindings and names belong
+to Cloud Imperium. This is the maintainer's own
+decision for a non-commercial release, recorded on 2026-11-03. It is not a grant
+of rights. The table is not in the public source package, whose key bindings page
+lists only the keys a player changed. If the rights holder objects, the table is
+withdrawn from the next release, and the page falls back to that same list with
+no other change. At runtime the client reads only the player's own
+`actionmaps.xml` and, in the official binary, action names from the `global.ini`
+for the selected language under the game's `data\Localization` folder, when there
+is one. It never opens the game's data archive, and no community translation is
+bundled in any package.
+
+The 0.7.3 Flutter official binary also ships ship silhouettes in
+`assets/ships/catalog-silhouettes.bin`. StarBridge generated these outlines from
+ship 3D models, and the outlines follow Cloud Imperium's ship designs. This
+is the maintainer's own decision for a non-commercial release, recorded on
+2026-11-02. It is not a grant of rights. The silhouettes are not in the public
+source package, which keeps the category icons. If the rights holder objects,
+the silhouettes are withdrawn from the next release, and the client falls back to
+the category icons with no other change. The model files themselves are not kept
+in any repository or package.
 
 A group approved for the audited paths must register a repository-relative `evidencePath` below
 `.private-ops/third-party-media-rights/`, the evidence file's SHA-256 in

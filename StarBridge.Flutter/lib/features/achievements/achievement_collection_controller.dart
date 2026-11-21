@@ -319,6 +319,9 @@ final class AchievementCollectionController
         earnedAt: permanentMilestones
             ? {...result.earnedAt, ...?previous?.earnedAt}
             : result.earnedAt,
+        percentages: result.percentages,
+        tiers: result.tiers,
+        contractRecords: result.contractRecords,
         catalog: result.catalog,
         ownedIds: result.ownedIds,
         progress: permanentMilestones
@@ -374,6 +377,9 @@ final class AchievementCollectionController
     ownedIds: previous.ownedIds,
     unknownIds: previous.unknownIds,
     progress: previous.progress,
+    percentages: previous.percentages,
+    tiers: previous.tiers,
+    contractRecords: previous.contractRecords,
     cachedAtUtc: previous.cachedAtUtc,
     synchronizedAtUtc: previous.synchronizedAtUtc,
     isRefreshing: refreshing,

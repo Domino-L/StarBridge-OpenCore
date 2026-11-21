@@ -52,6 +52,18 @@ class _AchievementEntryState extends State<AchievementEntry> {
       ],
     );
     final summary = p.earned ? p.memory : p.condition;
+    final note = p.note == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              p.note!,
+              style: TextStyle(
+                fontSize: 12,
+                color: tokens.colors.textSecondary,
+              ),
+            ),
+          );
     final foot = progress == null ? null : AchievementProgress(presentation: p);
     final body = widget.wall
         ? LayoutBuilder(
@@ -72,12 +84,15 @@ class _AchievementEntryState extends State<AchievementEntry> {
                     child: AchievementArt(
                       definition: widget.definition,
                       earned: p.earned,
+                      rank: p.rank,
                       size: (constraints.maxWidth - 2).clamp(1, 1000),
                     ),
                   ),
                 ),
                 const SizedBox(height: 10),
                 title,
+                ?note,
+                AchievementRarityInfo(presentation: p),
                 if (p.memory.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
@@ -104,20 +119,21 @@ class _AchievementEntryState extends State<AchievementEntry> {
           )
         : Padding(
             padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AchievementArt(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final art = AchievementArt(
                   definition: widget.definition,
                   earned: p.earned,
+                  rank: p.rank,
                   size: 64,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      title,
+                );
+                final text = Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    title,
+                    ?note,
+                    AchievementRarityInfo(presentation: p),
+                    if (summary.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         summary,
@@ -126,11 +142,32 @@ class _AchievementEntryState extends State<AchievementEntry> {
                           color: tokens.colors.textSecondary,
                         ),
                       ),
-                      if (foot != null) ...[const SizedBox(height: 8), foot],
                     ],
-                  ),
-                ),
-              ],
+                    if (foot != null) ...[const SizedBox(height: 8), foot],
+                  ],
+                );
+                return constraints.maxWidth < 300 ||
+                        MediaQuery.textScalerOf(context).scale(1) >= 1.5
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: art,
+                          ),
+                          const SizedBox(height: 12),
+                          text,
+                        ],
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          art,
+                          const SizedBox(width: 12),
+                          Expanded(child: text),
+                        ],
+                      );
+              },
             ),
           );
     return MouseRegion(
@@ -159,6 +196,7 @@ class _AchievementEntryState extends State<AchievementEntry> {
               p.name,
               ?p.status,
               summary,
+              ?p.note,
               progress ?? '',
             ].join('. '),
             baseRadius: 8,
@@ -176,8 +214,15 @@ class _AchievementEntryState extends State<AchievementEntry> {
 }
 
 class AchievementProgress extends StatelessWidget {
-  const AchievementProgress({required this.presentation, super.key});
+  const AchievementProgress({
+    required this.presentation,
+    this.showStations = false,
+    super.key,
+  });
   final AchievementPresentation presentation;
+
+  /// The reached-station list is detail-only; cards keep their height.
+  final bool showStations;
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -190,6 +235,20 @@ class AchievementProgress extends StatelessWidget {
             color: context.tokens.colors.textSecondary,
           ),
         ),
+      if (presentation.reachedStations case final names
+          when showStations && names.isNotEmpty) ...[
+        const SizedBox(height: 4),
+        Text(
+          AppStrings.of(context)
+              .text('achievements.stationsVisited')
+              .replaceAll('{names}', names.join('、')),
+          key: const Key('achievement-reached-stations'),
+          style: TextStyle(
+            fontSize: 12,
+            color: context.tokens.colors.textSecondary,
+          ),
+        ),
+      ],
       if (presentation.fraction case final value?) ...[
         const SizedBox(height: 5),
         LinearProgressIndicator(
@@ -200,6 +259,56 @@ class AchievementProgress extends StatelessWidget {
       ],
     ],
   );
+}
+
+class AchievementRarityInfo extends StatelessWidget {
+  const AchievementRarityInfo({
+    required this.presentation,
+    this.level,
+    super.key,
+  });
+  final AchievementPresentation presentation;
+  final int? level;
+  @override
+  Widget build(BuildContext context) {
+    final text = presentation.rarityTextFor(level);
+    if (text == null) return const SizedBox.shrink();
+    final label = presentation.rarityLabelFor(level);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              color: context.tokens.colors.textSecondary,
+            ),
+          ),
+          if (label != null)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: context.tokens.colors.accentSoft,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: context.tokens.colors.accent,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class AchievementSourceTag extends StatelessWidget {

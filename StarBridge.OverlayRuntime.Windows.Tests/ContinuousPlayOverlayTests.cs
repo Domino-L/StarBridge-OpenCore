@@ -1,169 +1,90 @@
-using System.Reflection;
 using System.IO;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using StarBridge.HostRuntime.Reminders;
+using StarBridge.HostRuntime.Notifications;
 using StarBridge.Core.Presence;
 
 namespace StarBridge.Desktop.Tests;
 
 internal static class ContinuousPlayOverlayTests
 {
-    private static readonly DateTimeOffset Noon = new(2026, 9, 30, 15, 0, 0, TimeSpan.Zero);
-    private static readonly OverlayDisplaySettings Settings = OverlayDisplaySettings.Default with
-    { AnimationFrameRate = OverlayAnimationFrameRate.Off, EventNotificationTypes = OverlayEventNotificationTypes.LocalPlayReminder };
-
     internal static void RunAll()
     {
-        var failures = new List<string>();
-        foreach (var test in new Action[] { Copy, LongSession, SourceChange, PendingAndLanguages, Invalidation, Gates, TimerToCard })
-        {
-            try { test(); Console.WriteLine("PASS continuous play overlay " + test.Method.Name); }
-            catch (Exception error) { failures.Add(test.Method.Name + ": " + error.Message); }
-        }
-        if (failures.Count > 0) throw new Exception(string.Join(Environment.NewLine, failures));
-    }
-
-    private static OverlayViewModel Model()
-    {
-        var model = new OverlayViewModel(new([]), Settings, OverlayRosterSelectionSettings.Default,
-            "zh", false, new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
-        model.EventNotifications.Clear(); // Exclude the independent receiver-connected startup card.
-        return model;
-    }
-
-    private static bool Queue(OverlayViewModel model, ContinuousPlayNotice notice, OverlayDisplaySettings? settings = null,
-        bool visible = true) => NativeInformationOverlayRuntime.TryQueueContinuousPlay(notice, settings ?? Settings,
-            visible, "zh", (type, title, detail, important, positive, current, deviceLocal) =>
-                model.QueueGameEventNotification(type, title, detail, important, positive, current, isDeviceLocal: deviceLocal), Noon, new Random(2));
-
-    private static void Copy()
-    {
-        var model = Model();
-        try
-        {
-            var duration = TimeSpan.FromMinutes(120);
-            var expected = LocalPlayReminderCopyCatalog.Pick(true, Noon, duration, random: new Random(2));
-            Check(Queue(model, new(duration, () => true)), "due reminder accepted");
-            Check(model.EventNotifications.Single().Title.Contains(expected.Title), "selected hydration/rest title must be retained");
-        }
-        finally { model.ClearAuthorizedContent(); }
-    }
-
-    private static void LongSession()
-    {
-        var model = Model();
-        try
-        {
-            Queue(model, new(TimeSpan.FromHours(10), () => true));
-            Check(model.EventNotifications.Single().Detail.Contains("10 个小时"), "ten-hour reminder must use actual continuous duration");
-        }
-        finally { model.ClearAuthorizedContent(); }
-    }
-
-    private static void SourceChange()
-    {
-        var model = Model();
-        try
-        {
-            model.Refresh(new([]), Settings with { EventNotificationTypes = OverlayEventNotificationTypes.All },
-                OverlayRosterSelectionSettings.Default, "zh", false, new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
-            Queue(model, new(TimeSpan.FromHours(2), () => true));
-            model.QueueGameEventNotification(OverlayEventNotificationTypes.ShipChange, "Peer", "Old scene ship", false, false);
-            Check(model.EventNotifications.Count == 2, "source reset includes an actual peer card");
-            model.ClearAuthorizedContent(preserveDeviceLocalEvents: true); // Actual room/community continuity boundary.
-            Check(model.EventNotifications.Count == 1 && model.EventNotifications[0].EventType == OverlayEventNotificationTypes.LocalPlayReminder,
-                "changing the authorized source must clear shared events while retaining device-local rest reminder");
-        }
-        finally { model.ClearAuthorizedContent(); }
-    }
-
-    private static void PendingAndLanguages()
-    {
-        var model = Model();
-        try
-        {
-            model.Refresh(new([]), Settings with { EventNotificationMaxVisibleCount = 1 },
-                OverlayRosterSelectionSettings.Default, "zh", false, new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
-            model.QueueGameEventNotification(OverlayEventNotificationTypes.LocalPlayReminder, "Old scene", "fixture", false, false);
-            Queue(model, new(TimeSpan.FromHours(2), () => true));
-            Check(model.PendingEventNotificationCount == 1, "due reminder can be pending");
-            model.ClearAuthorizedContent(preserveDeviceLocalEvents: true);
-            model.Refresh(new([]), Settings, OverlayRosterSelectionSettings.Default, "zh", false,
-                new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
-            Check(model.EventNotifications.Single().IsDeviceLocal && model.PendingEventNotificationCount == 0,
-                "queued local reminder survives source reset and promotes normally");
-        }
-        finally { model.ClearAuthorizedContent(); }
-        foreach (var language in new[] { "zh", "zh-Hant", "en" })
-        {
-            var selected = -1;
-            string title = "", detail = "";
-            NativeInformationOverlayRuntime.TryQueueContinuousPlay(new(TimeSpan.FromHours(10), () => true), Settings,
-                true, language, (_, t, d, _, _, _, _) => { title = t; detail = d; }, Noon, new Random(2), selected: index => selected = index);
-            Check(title.Contains(language == "en" ? "superhuman" : language == "zh" ? "超人" : "超人") &&
-                detail.Contains(language == "en" ? "10 hours" : language == "zh" ? "10 个小时" : "10 個小時"), "duration-aware three-language copy");
-            var next = -1;
-            NativeInformationOverlayRuntime.TryQueueContinuousPlay(new(TimeSpan.FromHours(10), () => true), Settings,
-                true, language, (_, _, _, _, _, _, _) => { }, Noon, new Random(2), selected, index => next = index);
-            Check(selected != next, "successive reminders preserve non-repeating copy selection");
-        }
-    }
-
-    private static void Invalidation()
-    {
-        var model = Model();
-        var current = true;
-        try
-        {
-            Queue(model, new(TimeSpan.FromHours(2), () => current));
-            current = false;
-            Tick(model);
-            Check(model.EventNotifications.Count == 0, "disabled/stale reminder must clear from the actual card queue");
-        }
-        finally { model.ClearAuthorizedContent(); }
-    }
-
-    private static void Gates()
-    {
-        var model = Model();
+        var model = new OverlayViewModel(new([]), OverlayDisplaySettings.Default,
+            OverlayRosterSelectionSettings.Default, "zh", false, new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
+        model.EventNotifications.Clear();
         try
         {
             var notice = new ContinuousPlayNotice(TimeSpan.FromHours(2), () => true);
-            Check(!Queue(model, notice, visible: false), "hidden overlay rejected");
-            Check(!Queue(model, notice, Settings with { ShowEventNotifications = false }), "event module disabled");
-            Check(!Queue(model, notice, Settings with { EventNotificationTypes = OverlayEventNotificationTypes.None }), "type disabled");
-            Check(!Queue(model, notice with { IsCurrent = () => false }), "stale notice rejected");
-            Check(model.EventNotifications.Count == 0, "suppression does not insert a card");
+            Check(!NativeInformationOverlayRuntime.DispatchContinuousPlayAsync(notice,
+                (_, _, _) => Task.FromResult(false), CancellationToken.None).AsTask().GetAwaiter().GetResult(), "card rejected");
+            Check(!NativeInformationOverlayRuntime.DispatchContinuousPlayAsync(notice, null,
+                CancellationToken.None).AsTask().GetAwaiter().GetResult(), "missing card sink");
+            // Even an old caller or preview cannot put this retired type in either event box.
+            model.QueueGameEventNotification(OverlayEventNotificationTypes.LocalPlayReminder, "fixture", "fixture", false, true);
+            Check(model.EventNotifications.Count == 0 && model.PendingEventNotificationCount == 0, "no event fallback");
+            var called = false;
+            Check(!NativeInformationOverlayRuntime.DispatchContinuousPlayAsync(notice with { IsCurrent = () => false },
+                (_, _, _) => { called = true; return Task.FromResult(true); }, CancellationToken.None).AsTask().GetAwaiter().GetResult()
+                && !called, "stale notice rejected");
+            Check(NativeInformationOverlayRuntime.DispatchContinuousPlayAsync(notice,
+                (content, current, _) => Task.FromResult(content.Duration == notice.Duration && current()),
+                CancellationToken.None).AsTask().GetAwaiter().GetResult(), "card dispatch preserves duration and validity");
         }
         finally { model.ClearAuthorizedContent(); }
+        Exception? failure = null;
+        var thread = new Thread(() => { try { Pictures(); } catch (Exception error) { failure = error; } });
+        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+        if (failure != null) throw failure;
+        Console.WriteLine("PASS continuous play: no event fallback, stale gate, 18 offscreen cards");
     }
 
-    private static void TimerToCard()
+    private static void Pictures()
     {
-        var root = Path.Combine(Path.GetTempPath(), "starbridge-overlay-play-" + Guid.NewGuid().ToString("N"));
-        var model = Model();
-        var clock = new Clock { Now = Noon.AddMinutes(-120) };
-        using var runtime = new ContinuousPlayReminderRuntime(root,
-            () => new("running", Noon.AddMinutes(-120)), new Sink(model), clock);
-        try
+        foreach (var locale in new[] { "zh-CN", "zh-TW", "en" })
+        foreach (var theme in new[] { "dark", "light" })
+        foreach (var hours in new[] { 1.5, 2, 10 })
         {
-            runtime.TickAsync().GetAwaiter().GetResult();
-            clock.Now = Noon.AddSeconds(-1); runtime.TickAsync().GetAwaiter().GetResult();
-            Check(model.EventNotifications.Count == 0, "timer does not notify early");
-            clock.Now = Noon; runtime.TickAsync().GetAwaiter().GetResult();
-            Check(model.EventNotifications.Single().EventType == OverlayEventNotificationTypes.LocalPlayReminder,
-                "actual timer and storage reach the native dispatch boundary and card model");
-            runtime.SaveAsync(new(false), 0).GetAwaiter().GetResult();
-            Tick(model);
-            Check(model.EventNotifications.Count == 0, "actual saved disable invalidates already queued reminder");
+            var content = new ContinuousPlayNotificationContent(TimeSpan.FromHours(hours));
+            var notice = new DesktopNotification(Guid.NewGuid(), false, 0, 0,
+                "fullContent", "bottomRight", locale, theme, () => true) { ContinuousPlay = content };
+            Check(NativeDesktopNotificationRuntime.IsPassive(notice) &&
+                NativeDesktopNotificationRuntime.DisplayLifetime(notice) == TimeSpan.FromSeconds(8), "eight seconds, passive hover/click behavior");
+            var card = new ContinuousPlayNotificationCard(notice);
+            card.Measure(new Size(220, 56)); card.Arrange(new Rect(0, 0, 220, 56)); card.UpdateLayout();
+            Check(card.ActualWidth == 220 && card.ActualHeight == 56 && !card.IsHitTestVisible && !card.Focusable, "passive size");
+            var left = (FrameworkElement)LogicalTreeHelper.FindLogicalNode(card, "PlayDurationBox");
+            var right = (FrameworkElement)LogicalTreeHelper.FindLogicalNode(card, "PlayLabels");
+            Rect Bounds(FrameworkElement child) => child.TransformToAncestor(card).TransformBounds(new Rect(child.RenderSize));
+            var a = Bounds(left); var b = Bounds(right);
+            Check(a.Right + 7 <= b.Left && a.Left >= 1 && b.Right <= 219 &&
+                a.Top >= 1 && b.Top >= 1 && a.Bottom <= 55 && b.Bottom <= 55, "text blocks do not overlap or leave card");
+            foreach (var block in ((System.Windows.Controls.StackPanel)right).Children.OfType<System.Windows.Controls.TextBlock>())
+                Check(block.DesiredSize.Width <= right.ActualWidth + 0.1, "right text not clipped");
+            // User 11-14 ("logo位置不正，参考其他的"): the activity card's rule scaled to 54 px inside the border: a whole mark,
+            // right-aligned and vertically centred, size and inset in the same proportion as 60 and 12 in 86.
+            var frame = (System.Windows.Controls.Grid)card.Child;
+            var mark = frame.Children.OfType<NotificationBrandWatermark>().SingleOrDefault();
+            var textLayer = frame.Children.IndexOf((UIElement)VisualTreeHelper.GetParent(left));
+            Check(mark is not null && frame.Children.IndexOf(mark) < textLayer, "brand mark behind the text");
+            var m = Bounds(mark!);
+            var scale = 54 / NotificationBrandWatermark.ReferenceInnerHeight;
+            Check(Math.Abs(m.Width - Math.Round(NotificationBrandWatermark.ReferenceSize * scale)) < 0.5 && Math.Abs(m.Height - m.Width) < 0.5,
+                "brand mark size scaled like the activity card's (60 in 86)");
+            Check(Math.Abs((m.Top + m.Bottom) / 2 - 28) < 0.75 && m.Top >= 1 && m.Bottom <= 55,
+                "brand mark vertically centred and whole, like the activity card's");
+            Check(Math.Abs((219 - m.Right) - NotificationBrandWatermark.ReferenceInset * scale) < 0.75 && m.Right <= 219,
+                "brand mark right inset scaled like the activity card's (12 in 86)");
+            // 乙 (user 11-14): neither text block reaches the mark, in every language and duration (10 hours is the longest).
+            Check(a.Right + 4 <= m.Left && b.Right + 4 <= m.Left, $"text keeps clear of the brand mark ({locale}, {theme}, {hours} h)");
+            var bitmap = new RenderTargetBitmap(220, 56, 96, 96, PixelFormats.Pbgra32); bitmap.Render(card);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(AppContext.BaseDirectory,
+                $"continuous-play-{locale}-{theme}-{content.Number}.png"));
+            encoder.Save(file);
         }
-        finally { model.ClearAuthorizedContent(); if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
-
-    private static void Tick(OverlayViewModel model) => typeof(OverlayViewModel)
-        .GetMethod("TickEventNotifications", BindingFlags.Instance | BindingFlags.NonPublic)!
-        .Invoke(model, [DateTimeOffset.Now]);
-    private sealed class Clock : TimeProvider { internal DateTimeOffset Now; public override DateTimeOffset GetUtcNow() => Now; }
-    private sealed class Sink(OverlayViewModel model) : IContinuousPlayReminderSink
-    { public ValueTask<bool> TryQueueAsync(ContinuousPlayNotice notice, CancellationToken cancellation) => new(Queue(model, notice)); }
-    private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+    private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 }

@@ -16,6 +16,15 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     private static readonly TimeSpan UnknownEnvironmentGrace = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan UnknownEnvironmentRetry = TimeSpan.FromMilliseconds(250);
     private sealed record DeferredActivity(DesktopNotification Notice, long Since);
+    internal static TimeSpan OfflineSettle { get; set; } = TimeSpan.FromSeconds(20);
+    private sealed record PendingOffline(DesktopNotification Notice, PlayerActivityMemberState? Before,
+        long Since, TimeSpan Settle, Func<bool> Valid);
+    private readonly Dictionary<string, PendingOffline> _offline = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PendingOffline> _returning = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PlayerActivityMemberState> _lastMembers = new(StringComparer.Ordinal);
+    private CancellationTokenSource? _offlineRetry;
+    internal Task OfflineSettleWork { get; private set; } = Task.CompletedTask;
+    private long? _observedGeneration;
     private readonly object _gate = new();
     private readonly PlayerActivityPreferencesStore _store;
     private readonly PlayerActivityPreferencesBridge _preferences;
@@ -23,6 +32,7 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     private readonly Func<long> _generation;
     private readonly Func<PlayerActivityEnvironment> _environment;
     private readonly Func<long> _timestamp;
+    private readonly TimeProvider _time;
     private readonly IDesktopNotificationSink? _sink;
     private readonly NotificationDeliveryJournal _delivery;
     private readonly NotificationPolicyStore _policies;
@@ -42,16 +52,23 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     public static IReadOnlyList<string> Capabilities { get; } = ["playerActivity.read", "playerActivity.save", "playerActivity.test"];
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
     public PlayerActivityRuntime(string root, Func<long> generation, IDesktopNotificationSink? sink,
-        Func<PlayerActivityEnvironment> environment, Func<long>? timestamp = null)
+        Func<PlayerActivityEnvironment> environment, Func<long>? timestamp = null, TimeProvider? time = null)
     {
         _store = new(root); _policies = new(root); _appearance = new(root); _generation = generation; _sink = sink; _environment = environment;
         _timestamp = timestamp ?? Stopwatch.GetTimestamp;
+        _time = time ?? TimeProvider.System;
         _delivery = new(root);
         _preferences = new(_store, generation, () => !_disposed && _sink is not null);
     }
     public bool ShouldObserve()
     {
-        try { var saved = _store.Read(); return !_disposed && !_accountRetired && _sink is not null && saved.Value.Enabled && !saved.DoNotDisturb; }
+        try {
+            lock (_gate) {
+                var saved = _store.Read();
+                if (_revision is not null && (_revision != saved.Revision || _observedGeneration != _generation())) ResetLocked();
+                return !_disposed && !_accountRetired && _sink is not null && saved.Value.Enabled && !saved.DoNotDisturb;
+            }
+        }
         catch { return false; }
     }
     public void Observe(PlayerActivityObservation observation) => _ = ObserveAsync(observation);
@@ -69,14 +86,15 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
                 if (observation.Source is not ("friends" or "organization" or "room") ||
                     observation.Members.Length > 10000 || !observation.IsComplete) return;
                 var saved = _store.Read();
-                if (_scope != observation.Scope || _revision != saved.Revision)
-                { ResetLocked(); _scope = observation.Scope; _revision = saved.Revision; }
+                if (_scope != observation.Scope || _revision != saved.Revision || _observedGeneration != observation.Generation)
+                { ResetLocked(); _scope = observation.Scope; _revision = saved.Revision; _observedGeneration = observation.Generation; }
                 var policyRevision = Policies()?.Revision ?? -1;
-                if (_policyRevision != policyRevision) { _tracker = new(); _epoch++; _policyRevision = policyRevision; _unknownEnvironmentAt = null; }
+                if (_policyRevision != policyRevision) { _tracker = new(); _epoch++; _held.Clear(); ClearOfflineLocked(); _policyRevision = policyRevision; _unknownEnvironmentAt = null; }
                 if (_sources.TryGetValue(observation.SourceKey, out var previous) && previous.Sequence >= observation.Sequence) return;
                 var firstSource = previous is null;
                 var sourceChanged = firstSource || !SameObservedPresence(previous!.Members, observation.Members);
                 _sources[observation.SourceKey] = observation;
+                ReconcileOfflineLocked(saved.Value.Scope);
                 var env = _environment();
                 if (!env.Known)
                 {
@@ -120,31 +138,68 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
         var staleUnknown = _unknownEnvironmentAt is { } started &&
             Stopwatch.GetElapsedTime(started, _timestamp()) > UnknownEnvironmentGrace;
         _unknownEnvironmentAt = null;
+        var returns = new List<(PlayerActivityMemberState Before, PlayerActivityMemberState After)>();
+        ReconcileOfflineLocked(saved.Value.Scope);
+        foreach (var (key, pending) in _returning)
+        {
+            var member = members.FirstOrDefault(m => m.Key == key);
+            if (member is not null && pending.Valid())
+                returns.Add((pending.Before!, member));
+        }
+        _returning.Clear();
         var events = _tracker.Evaluate(members, settings,
             new(env.AppBackground, env.GameRunning, env.OverlayRunning), DateTimeOffset.UtcNow,
-            establishBaselineOnly: staleUnknown);
+            establishBaselineOnly: staleUnknown).ToList();
+        // Treat a brief disconnection as continuous presence. Reuse the policy
+        // for genuine game changes (including its silent Away transitions).
+        foreach (var (before, after) in returns)
+        {
+            events.RemoveAll(activity => activity.MemberKey == after.Key);
+            var continuity = new PlayerActivityNotificationTracker();
+            var context = new PlayerActivityNotificationContext(env.AppBackground, env.GameRunning, env.OverlayRunning);
+            continuity.Evaluate([before], settings, context, DateTimeOffset.UtcNow, establishBaselineOnly: true);
+            events.AddRange(continuity.Evaluate([after], settings, context, DateTimeOffset.UtcNow, establishBaselineOnly: staleUnknown));
+        }
         if (events.Count == 0 && sourceChanged)
             stage = firstSource || staleUnknown
                 ? NotificationDeliveryStage.BaselineEstablished : NotificationDeliveryStage.NoFreshEvent;
+        var offlineSince = _timestamp();
         foreach (var activity in events)
         {
             var epoch = _epoch;
             var revision = saved.Revision;
             var expected = members.Single(m => m.Key == activity.MemberKey).Presence;
             var sources = SourceLabels(activity.MemberKey, saved.Value.Scope);
+            var organizationLease = OrganizationLease(activity.MemberKey, saved.Value.Scope);
+            var policyRevision = _policyRevision;
+            var owner = _policyOwner?.Invoke();
+            bool Valid() => !_disposed && !_accountRetired && epoch == _epoch && observation.Generation == _generation() &&
+                Equals(_policyOwner?.Invoke(), owner) && organizationLease() && (Policies()?.Revision ?? -1) == policyRevision &&
+                _store.Read().Revision == revision && ShouldObserve() &&
+                SourceLabels(activity.MemberKey, saved.Value.Scope).SequenceEqual(sources);
             bool Current()
             {
                 lock (_gate)
                 {
                     if (_disposed || epoch != _epoch || observation.Generation != _generation()) return false;
-                    try { return _store.Read().Revision == revision && ShouldObserve() && EnvironmentAllows(saved.Value) &&
+                    try { return Valid() && EnvironmentAllows(saved.Value) &&
                         Members(saved.Value.Scope).Any(m => m.Key == activity.MemberKey && m.Presence == expected) &&
                         SourceLabels(activity.MemberKey, saved.Value.Scope).SequenceEqual(sources); }
                     catch { return false; }
                 }
             }
-            output.Add(Create(activity, saved.Value, false, Current, sources));
+            var notice = Create(activity, saved.Value, false, Current, sources);
+            if (activity.Kind == PlayerActivityNotificationKind.Offline)
+            {
+                // Without a prior state the card is still held and delivered; it only skips return pairing.
+                _offline[activity.MemberKey] = new(notice,
+                    _lastMembers.TryGetValue(activity.MemberKey, out var before) ? before : null, offlineSince, OfflineSettle, Valid);
+            }
+            else output.Add(notice);
         }
+        _lastMembers.Clear();
+        foreach (var member in members) _lastMembers[member.Key] = member;
+        EnsureOfflineRetryLocked(saved.Value.Scope);
         foreach (var (key, pending) in _deferred.ToArray())
         {
             if (Stopwatch.GetElapsedTime(pending.Since, _timestamp()) > UnknownEnvironmentGrace ||
@@ -171,7 +226,162 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
             _deferred.Remove(key);
             if (current) output.Add(pending.Notice);
         }
-        return (output, stage);
+        return (GroupLocked(output, saved.Value.Scope), stage);
+    }
+    private void ClearOfflineLocked()
+    {
+        _offlineRetry?.Cancel(); _offlineRetry = null; _offline.Clear(); _returning.Clear(); _lastMembers.Clear();
+    }
+    private void ReconcileOfflineLocked(int scope)
+    {
+        if (_offline.Count == 0 && _returning.Count == 0) return;
+        var members = Members(scope).ToDictionary(m => m.Key, StringComparer.Ordinal);
+        foreach (var (key, pending) in _returning.ToArray())
+            if (!members.TryGetValue(key, out var member) || member.Presence == PlayerPresenceKind.Offline || !pending.Valid())
+                _returning.Remove(key);
+        foreach (var (key, pending) in _offline.ToArray())
+        {
+            if (!members.TryGetValue(key, out var member) || !pending.Valid()) { _offline.Remove(key); continue; }
+            if (member.Presence == PlayerPresenceKind.Offline) continue;
+            _offline.Remove(key);
+            // Record the arrival time even if native environment detection is
+            // temporarily unknown; a later retry must not invent an Online edge.
+            if (pending.Before is not null && Stopwatch.GetElapsedTime(pending.Since, _timestamp()) < pending.Settle) _returning[key] = pending;
+        }
+    }
+    private void EnsureOfflineRetryLocked(int scope)
+    {
+        if (_offline.Count == 0 || _offlineRetry is not null || _disposed || _accountRetired) return;
+        var work = _accountRetirement.Enter(default);
+        if (work is null) return;
+        var retry = CancellationTokenSource.CreateLinkedTokenSource(work.Token);
+        _offlineRetry = retry;
+        OfflineSettleWork = FlushOfflineAsync(scope, _epoch, retry, work);
+    }
+    private async Task FlushOfflineAsync(int scope, long epoch, CancellationTokenSource retry,
+        Lifecycle.AsyncWorkRetirement.Lease work)
+    {
+        using var admission = work;
+        try
+        {
+            while (true)
+            {
+                TimeSpan remaining;
+                lock (_gate)
+                {
+                    if (_disposed || _accountRetired || epoch != _epoch || _offlineRetry != retry || _offline.Count == 0) return;
+                    remaining = _offline.Values.Min(p => p.Settle - Stopwatch.GetElapsedTime(p.Since, _timestamp()));
+                }
+                // Always yield, including a shortened zero-duration test hold.
+                await Task.Delay(remaining > TimeSpan.Zero ? remaining : TimeSpan.FromMilliseconds(1), _time, retry.Token).ConfigureAwait(false);
+                List<DesktopNotification> output = [];
+                lock (_gate)
+                {
+                    if (_disposed || _accountRetired || epoch != _epoch || _offlineRetry != retry) return;
+                    foreach (var (key, pending) in _offline.ToArray())
+                    {
+                        if (!pending.Valid()) { _offline.Remove(key); continue; }
+                        if (Stopwatch.GetElapsedTime(pending.Since, _timestamp()) < pending.Settle) continue;
+                        _offline.Remove(key);
+                        // DeliverAsync re-checks IsCurrent and parks a card whose native environment is
+                        // momentarily unknown, so an expired hold is never silently lost here.
+                        output.Add(pending.Notice);
+                    }
+                    output = GroupLocked(output, scope);
+                }
+                await DeliverAsync(output, null, retry.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch { lock (_gate) { if (_offlineRetry == retry) _offline.Clear(); } }
+        finally
+        {
+            lock (_gate) {
+                if (_offlineRetry == retry) { _offlineRetry = null; EnsureOfflineRetryLocked(scope); }
+            }
+            retry.Dispose();
+        }
+    }
+    // 0.7.3 (user 11-06: "合成一张"): within 60 s the first two members coming online get their own
+    // card; from the third on, arrivals are held briefly and shown as one card ("3 位成员上线 · 在线 5/12").
+    // Going offline follows the same rule. Cards already shown are never taken back.
+    internal static TimeSpan GroupHold { get; set; } = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan GroupWindow = TimeSpan.FromSeconds(60);
+    private const int GroupFrom = 3;
+    // Who got a card of each kind in the last minute; one member counts once however often they flap.
+    private readonly Dictionary<string, List<(long At, string Member)>> _recentCards = new(StringComparer.Ordinal);
+    private static string MemberOf(DesktopNotification notice) => notice.Activity?.MemberKey ?? notice.Id.ToString("N");
+    private readonly Dictionary<string, List<DesktopNotification>> _held = new(StringComparer.Ordinal);
+    private List<DesktopNotification> GroupLocked(List<DesktopNotification> output, int scope)
+    {
+        var now = _timestamp();
+        var held = new HashSet<DesktopNotification>(ReferenceEqualityComparer.Instance);
+        foreach (var kind in new[] { "Online", "Offline" })
+        {
+            var fresh = output.Where(notice => !notice.Test && notice.Activity?.Kind == kind).ToList();
+            if (fresh.Count == 0) continue;
+            if (!_recentCards.TryGetValue(kind, out var recent)) _recentCards[kind] = recent = [];
+            recent.RemoveAll(card => Stopwatch.GetElapsedTime(card.At, now) > GroupWindow);
+            if (_held.TryGetValue(kind, out var waiting)) waiting.AddRange(fresh);
+            else if (recent.Select(card => card.Member).Concat(fresh.Select(MemberOf)).Distinct(StringComparer.Ordinal).Count() >= GroupFrom)
+            {
+                if (!ScheduleGroupLocked(kind, scope)) continue;
+                _held[kind] = fresh;
+            }
+            else { recent.AddRange(fresh.Select(notice => (now, MemberOf(notice)))); continue; }
+            held.UnionWith(fresh);
+        }
+        return held.Count == 0 ? output : output.Where(notice => !held.Contains(notice)).ToList();
+    }
+    private bool ScheduleGroupLocked(string kind, int scope)
+    {
+        if (_disposed || _accountRetired) return false;
+        var work = _accountRetirement.Enter(default);
+        if (work is null) return false;
+        _ = FlushGroupAsync(kind, scope, _epoch, work);
+        return true;
+    }
+    private async Task FlushGroupAsync(string kind, int scope, long epoch, Lifecycle.AsyncWorkRetirement.Lease work)
+    {
+        using var admission = work;
+        try
+        {
+            await Task.Delay(GroupHold, work.Token).ConfigureAwait(false);
+            List<DesktopNotification> output = [];
+            lock (_gate)
+            {
+                if (_disposed || _accountRetired || epoch != _epoch || !_held.Remove(kind, out var held)) return;
+                var live = held.Where(notice => notice.IsCurrent())
+                    .GroupBy(MemberOf, StringComparer.Ordinal)
+                    .Select(group => group.Last()).ToList();
+                if (live.Count == 0) return;
+                var now = _timestamp();
+                if (!_recentCards.TryGetValue(kind, out var recent)) _recentCards[kind] = recent = [];
+                recent.AddRange(live.Select(notice => (now, MemberOf(notice))));
+                output.Add(live.Count == 1 ? live[0] : Grouped(live, Members(scope)));
+            }
+            await DeliverAsync(output, null, work.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch { /* A grouped card is optional; ordinary activity keeps working. */ }
+    }
+    internal static DesktopNotification Grouped(IReadOnlyList<DesktopNotification> live, IReadOnlyCollection<PlayerActivityMemberState> members)
+    {
+        var first = live[0];
+        var names = live.Select(notice => notice.Activity!).Select(activity =>
+            string.IsNullOrWhiteSpace(activity.Callsign) ? activity.GameId : activity.Callsign)
+            .Where(name => !string.IsNullOrWhiteSpace(name)).ToArray();
+        var sources = live.SelectMany(notice => notice.Activity!.Sources ?? []).Distinct(StringComparer.Ordinal)
+            .OrderBy(label => label == "friends" ? 0 : label == "room" ? 2 : 1).ThenBy(label => label, StringComparer.Ordinal).ToArray();
+        var content = first.Activity! with { Callsign = "", GameId = "", AvatarImageData = null, MemberKey = null, Sources = sources };
+        content = content with {
+            GroupNames = names,
+            OnlineNow = members.Count(member => member.Presence != PlayerPresenceKind.Offline),
+            Tracked = members.Count
+        };
+        // The card names everyone in it, so it stays only while every one of them is still valid
+        // (no one went invisible, paused sharing or changed state again).
+        return first with { Id = Guid.NewGuid(), Activity = content, IsCurrent = () => live.All(notice => notice.IsCurrent()) };
     }
     private void EnsureUnknownRetryLocked()
     {
@@ -284,7 +494,7 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     {
         var policies = Policies();
         bool Allowed(PlayerActivityObservation observation, PlayerActivityObservedMember member) => _policyOwner == null || policies != null &&
-            (observation.Source == "organization" ? member.PolicySources?.Any(key => policies.For(key) == NotificationSourceMode.Normal) == true :
+            (observation.Source == "organization" ? member.PolicySources?.Any(key => OrganizationAllows(policies, key)) == true :
                 policies.For(observation.Source == "friends" ? "friends" : "room") == NotificationSourceMode.Normal);
         var valid = _sources.Values.Where(o => o.IsCurrent() &&
             (scope & (o.Source == "friends" ? 4 : o.Source == "organization" ? 2 : 1)) != 0);
@@ -313,7 +523,8 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     {
         var labels = new List<string>();
         var policies = Policies();
-        bool Allowed(string key) => _policyOwner == null || policies?.For(key) == NotificationSourceMode.Normal;
+        bool Allowed(string key) => _policyOwner == null || policies != null && (key.StartsWith("organization:", StringComparison.Ordinal)
+            ? OrganizationAllows(policies, key) : policies.For(key) == NotificationSourceMode.Normal);
         foreach (var source in _sources.Values.Where(o => o.IsCurrent()))
         foreach (var member in source.Members.Where(m => m.MemberKey == memberKey && !m.IsSelf && m.AllowsPresenceEvents &&
             m.Presence is "online" or "inGame" or "away" or "offline")) {
@@ -385,7 +596,20 @@ public sealed class PlayerActivityRuntime : IBridgeRequestDispatcher
     }
     public void Reset() { lock (_gate) ResetLocked(); }
     private NotificationPolicySnapshot? Policies() => _policyOwner?.Invoke() is {} owner ? _policies.Read(owner) : null;
-    private void ResetLocked() { _epoch++; _unknownRetry?.Cancel(); _unknownRetry = null; _sources.Clear(); _deferred.Clear(); _tracker = new(); _scope = null; _revision = null; _policyRevision = -1; _unknownEnvironmentAt = null; }
+    private bool OrganizationAllows(NotificationPolicySnapshot policies, string key) => NotificationOrganizationPolicy.Allows(
+        policies.Rule(key), NotificationEventKind.PlayerOnline, _time.GetUtcNow(), NotificationOrganizationPolicy.LocalZone(_time));
+    private Func<bool> OrganizationLease(string memberKey, int scope)
+    {
+        if ((scope & 2) == 0 || _policyOwner?.Invoke() is not { } owner) return () => true;
+        var saved = _policies.Read(owner);
+        var keys = _sources.Values.Where(o => o.Source == "organization" && o.IsCurrent())
+            .SelectMany(o => o.Members.Where(m => m.MemberKey == memberKey).SelectMany(m => m.PolicySources ?? []))
+            .Distinct().Where(key => OrganizationAllows(saved, key)).ToArray();
+        var at = _time.GetUtcNow(); var zone = NotificationOrganizationPolicy.LocalZone(_time);
+        return () => keys.All(key => NotificationOrganizationPolicy.Current(_policies, owner, key, NotificationEventKind.PlayerOnline,
+            saved.SuppressionRevision(key), at, zone, _time));
+    }
+    private void ResetLocked() { _epoch++; ClearOfflineLocked(); _observedGeneration = null; _unknownRetry?.Cancel(); _unknownRetry = null; _sources.Clear(); _deferred.Clear(); _held.Clear(); _recentCards.Clear(); _tracker = new(); _scope = null; _revision = null; _policyRevision = -1; _unknownEnvironmentAt = null; }
     // Retire account observations and their native submissions, not the device
     // settings/test module: those local controls remain usable without a login.
     internal Task RetireAccountActivityAsync()

@@ -34,8 +34,8 @@ public sealed partial class NativeInformationOverlayRuntime
         var ship = running && session.Ship.State is "confirmed" or "likely" or "possible"
             ? (zh ? session.Ship.ChineseName : session.Ship.EnglishName) ?? session.Ship.EnglishName ?? session.Ship.Key
             : null;
-        location = string.IsNullOrWhiteSpace(location) ? zh ? "等待位置确认" : "Location pending" : location;
-        ship = string.IsNullOrWhiteSpace(ship) ? zh ? "等待舰船确认" : "Ship pending" : ship;
+        location = string.IsNullOrWhiteSpace(location) ? OverlayPlaceholderText.Location(zh) : location;
+        ship = string.IsNullOrWhiteSpace(ship) ? OverlayPlaceholderText.Ship(zh) : ship;
         // "likely"/"possible" mostly mean the same place with older evidence: the
         // score decays between log lines and recovers on the next one. A trust
         // prefix would flip the row and fire two location events while the

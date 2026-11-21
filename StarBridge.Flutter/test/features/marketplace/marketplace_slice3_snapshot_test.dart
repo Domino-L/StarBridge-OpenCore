@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'marketplace_confirm_location_fixture.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
 import 'package:starbridge_flutter/app/preferences/in_memory_app_preferences.dart';
@@ -311,6 +312,7 @@ void main() {
         });
         await shot('confirm-1280');
         port.writeGate = Completer();
+        await chooseConfirmLocation(tester);
         await tester.tap(find.text(tradeTextFor(locale, '确认发起')));
         await shot('confirm-submitting-1280');
         port.writeGate!.completeError(

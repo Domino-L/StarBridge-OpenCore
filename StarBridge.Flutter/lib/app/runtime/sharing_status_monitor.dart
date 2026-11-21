@@ -8,6 +8,13 @@ import '../presence/manual_presence.dart';
 
 enum SharingIndicatorState { sharing, closed, stopping, unknown }
 
+/// How long an issue must last before the shell strip shows it.
+Duration serviceNoticeDelay(String? issue) => switch (issue) {
+  'waiting' => const Duration(seconds: 15),
+  'service' => const Duration(minutes: 5),
+  _ => const Duration(seconds: 30),
+};
+
 /// App-level projection; polling never publishes. Retry requires a user action.
 /// Shell chrome consumes only this read model, not settings implementation.
 class SharingStatusMonitor extends ValueNotifier<String?> {
@@ -25,6 +32,9 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
   final ManualPresenceController? presence;
   VoidCallback? _release;
   Timer? _grace;
+  // The delay the running grace timer was started with: switching to an issue
+  // with a different delay starts it again instead of reusing the old one.
+  Duration? _graceDelay;
   bool _overdue = false, _disposed = false;
   int? _epoch;
   bool _retryAvailable = false;
@@ -81,6 +91,7 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
   void _clearGrace() {
     _grace?.cancel();
     _grace = null;
+    _graceDelay = null;
     _overdue = false;
   }
 
@@ -101,10 +112,17 @@ class SharingStatusMonitor extends ValueNotifier<String?> {
       _clearGrace();
     }
     final issue = _project();
+    // A server that cannot be reached for a few minutes is not worth a banner:
+    // 'service' waits five minutes before the strip appears.
     final delayed =
-        issue == 'waiting' || recoveringSharingIssues.contains(issue);
+        issue == 'waiting' ||
+        issue == 'service' ||
+        recoveringSharingIssues.contains(issue);
     if (delayed) {
-      _grace ??= Timer(Duration(seconds: issue == 'waiting' ? 15 : 30), () {
+      final delay = serviceNoticeDelay(issue);
+      if (_graceDelay != delay) _clearGrace();
+      _graceDelay = delay;
+      _grace ??= Timer(delay, () {
         if (_disposed) return;
         _overdue = true;
         _changed();

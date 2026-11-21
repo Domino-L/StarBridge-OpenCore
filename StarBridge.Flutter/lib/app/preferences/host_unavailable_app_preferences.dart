@@ -51,5 +51,14 @@ final class HostUnavailableAppPreferences implements AppPreferencesPort {
   Future<bool> setHolidayAppearance(bool enabled) async => false;
 
   @override
+  Future<bool> setPerformanceMode(bool enabled) async => false;
+
+  @override
+  Future<bool> setReadOwnHealth(bool enabled) async => false;
+
+  @override
+  Future<bool> setReadOwnHealthInBackground(bool enabled) async => false;
+
+  @override
   void dispose() => _projection.dispose();
 }

@@ -10,6 +10,7 @@ internal static partial class FirstUseBusinessOwnerTests
         await Case("online mode requires the exact live Native installation", CommitRequiresNative);
         await Case("original installed graph commits once after review expiry and survives normal close", CommitInstalledOnline);
         await Case("failed write waits for actual callback exit and restores both local graphs", CommitWriteFailure);
+        await Case("explicit local action recovers a completed failed installation without replay", ExplicitCommitRecovery);
         await Case("leaving the UI wait does not abandon the original commit recovery", CommitObserverCancellation);
         await Case("closing first cannot save online or preserve an uncommitted session", CommitCloseFirst);
         await Case("Close waits for an in-flight write classification before choosing sign-out", CommitCloseBeforeWrite);
@@ -87,6 +88,27 @@ internal static partial class FirstUseBusinessOwnerTests
 
     private static async Task CommitWriteFailure() => await FailedCommitRecovery(cancelObserver: false);
     private static async Task CommitObserverCancellation() => await FailedCommitRecovery(cancelObserver: true);
+
+    private static async Task ExplicitCommitRecovery()
+    {
+        using var f = new Fixture(); f.Original.Clock.AllowTimers = true; await f.Start();
+        var root = f.Original.Local.Runtime;
+        await using var native = new NativeAccountRuntimeBinding(root);
+        var installed = await CommitInstallation(f, native);
+        var path = Path.Combine(f.Original.Local.Root, "first-use-mode-v1", "state.bin.lock");
+        using (var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Check((await Finish(f.Original.Mode.CommitOnlineAsync(3, Id(), installed))).State == "recoveryRequired" &&
+                !f.Original.Mode.LocalMode().Active && installed.HasCompletedCandidateExit,
+                "A held final writer retains the exact exited installation and recovery state");
+        }
+        var traffic = f.Original.Transport.TokenRequests;
+        var timers = f.Original.Clock.Timers;
+        Check((await f.Original.Mode.RecoverLocalSelectionAsync(f.Original.Mode.Current.Revision, Id(), native, default)).State == "local" &&
+            f.Original.Mode.LocalMode().Active && native.Read(owner => ReferenceEquals(owner, root), false) &&
+            f.Original.Transport.TokenRequests == traffic && f.Original.Clock.Timers == timers,
+            "An explicit local recovery finishes the same physical exit without installing or signing in again");
+    }
 
     private static async Task FailedCommitRecovery(bool cancelObserver)
     {

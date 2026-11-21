@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'marketplace_category_roots.dart';
 import 'marketplace_port.dart';
 import 'marketplace_prefetch.dart';
+import 'marketplace_display_rules.dart';
 
 /// Market-only state. Item navigation does not own or reset this query.
 class MarketplaceBrowser extends ChangeNotifier {
@@ -27,6 +28,10 @@ class MarketplaceBrowser extends ChangeNotifier {
   }
 
   MarketRead? result;
+  bool get localQualityFilter => kind == 'orders' &&
+      options['creatorType'] == '0' && options['minQuality'] != null;
+  List<MarketRow> get visibleRows => kind == 'orders' && options['creatorType'] == '0'
+      ? marketBuyQualityRows(result?.rows ?? [], options) : result?.rows ?? [];
   final overview = <String, int>{};
   bool overviewFailed = false, _overviewLoaded = false;
   int _overviewEpoch = 0;
@@ -65,7 +70,16 @@ class MarketplaceBrowser extends ChangeNotifier {
     if (result == null && !loading) await reload();
   }
 
-  Future<void> choose({int? category, String? keyword, String? kind}) async {
+  /// [narrow]: the orders tab's own category tree narrows the current order
+  /// filters (side, type, price…) instead of replacing them; only the items
+  /// tab has category-specific filters to reset (G3, user 2026-11-14).
+  Future<void> choose({
+    int? category,
+    String? keyword,
+    String? kind,
+    bool narrow = false,
+  }) async {
+    final narrowOrders = narrow && category != null && this.kind == 'orders';
     if (category != null) {
       this.category = category;
       listed = true;
@@ -79,12 +93,22 @@ class MarketplaceBrowser extends ChangeNotifier {
       this.kind = kind;
       if (kind == 'orders') this.category = 0;
     }
-    options.clear();
-    location = null;
+    if (!narrowOrders) {
+      options.clear();
+      location = null;
+    }
     await reload(reset: true);
   }
 
   Future<void> filter(String key, String? value) async {
+    if (key == 'displayType' && (value == '2' || value == '3')) {
+      options.remove('minPrice');
+      options.remove('maxPrice');
+      if (options['sortType'] == 'price') {
+        options['sortType'] = 'time';
+        options['sortOrder'] = 'desc';
+      }
+    }
     if (key == 'locationId' && (value == null || value.isEmpty)) {
       location = null;
     }
@@ -172,7 +196,8 @@ class MarketplaceBrowser extends ChangeNotifier {
           if (kind == 'items') 'sortKey': 'totalOrderCount',
           if (kind == 'orders') 'sortType': 'time',
           'sortOrder': 'desc',
-          ...options,
+          ...marketReadFilters(options,
+              buy: kind == 'orders' && options['creatorType'] == '0'),
           if (kind == 'items' && listed) 'minOrderCount': '1',
         },
       );

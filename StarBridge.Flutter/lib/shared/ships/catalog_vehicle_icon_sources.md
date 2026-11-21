@@ -64,6 +64,15 @@ The task-local static-port-qa.json compares source SVG paths/affine transforms t
 
 No application build or visible client was started by the design task. The integration owner should verify the widget under the real Flutter theme, exact keys, unsupported-key empty placeholders, light/dark mode, and the final organization-row layout. Do not overwrite existing hangar motion implementations as part of this port.
 
+## Ship silhouettes (2026-11-02)
+
+`ShipVehicleIcon` shows a ship's own outline when the optional private asset
+`assets/ships/catalog-silhouettes.bin` knows it, and this category artwork in
+every other case: public source, unknown ships and a damaged or withdrawn pack.
+Test runs never read the asset, so goldens do not depend on private local media.
+Rights are in `open-core/DATA_RIGHTS.md`. The asset, how it is built and how it
+is withdrawn are recorded in the private repository only.
+
 ## Rights and packaging boundary
 
 Design approval and permission for this local StarBridge integration are not a public redistribution license. No claim is made that these assets are Apache-2.0 or cleared for third-party distribution. The current open-core/ASSET_POLICY.md requires source and licensing information for new assets; the repository owner must resolve the applicable release/license treatment before public publication. Do not bundle game screenshots, media references, local QA images, or the full design directory.

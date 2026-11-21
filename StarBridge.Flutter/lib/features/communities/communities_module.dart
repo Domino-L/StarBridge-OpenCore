@@ -729,11 +729,12 @@ final class CommunitiesModule extends ChangeNotifier
     if (action == 'leave' && status == 'accepted') {
       joined = List.unmodifiable(joined.where((row) => row.key != card.key));
     }
-    message = status == 'accepted'
-        ? 'done.$action'
-        : status == 'unknown'
-        ? 'outcomeUnknown'
-        : 'refreshRequired';
+    message = switch (status) {
+      'accepted' => 'done.$action',
+      'unknown' => 'outcomeUnknown',
+      'identityRequired' || 'identityAmbiguous' => status,
+      _ => 'refreshRequired',
+    };
     // Do not replay a write after uncertainty. A fresh directory supplies new action targets.
     // Independent readbacks: a slow discovery directory must not delay the
     // joined sidebar. Keep old cards visible, but never reuse consumed actions.
@@ -751,6 +752,12 @@ final class CommunitiesModule extends ChangeNotifier
         notifyListeners();
       }
     }
+  }
+
+  /// The entries the port offers changed without new data (for example the
+  /// account was confirmed SCM-only); pages redraw them without a read.
+  void entriesChanged() {
+    if (!_closed) notifyListeners();
   }
 
   @override

@@ -54,11 +54,15 @@ class GeneralSettingsPage extends StatelessWidget {
     required this.preferences,
     this.gameplayTime,
     this.scmRoute,
+    this.openUsageMode,
     super.key,
   });
 
   final AppPreferencesPort preferences;
   final GameplayTimeController? gameplayTime;
+
+  /// Opens Usage mode, where the installed game identity is reviewed.
+  final Future<void> Function(BuildContext)? openUsageMode;
 
   /// Present when the Host offers the route preference (domestic route, 0.7.2).
   final ScmRoutePort? scmRoute;
@@ -99,6 +103,7 @@ class GeneralSettingsPage extends StatelessWidget {
                   motion: motion,
                   gameplayTime: gameplayTime,
                   scmRoute: scmRoute,
+                  openUsageMode: openUsageMode,
                 ),
               );
             },
@@ -114,6 +119,7 @@ class _GeneralSettingsContent extends StatelessWidget {
     required this.motion,
     this.gameplayTime,
     this.scmRoute,
+    this.openUsageMode,
   });
 
   final AppPreferencesPort preferences;
@@ -121,6 +127,7 @@ class _GeneralSettingsContent extends StatelessWidget {
   final GeneralSettingsMotionState motion;
   final GameplayTimeController? gameplayTime;
   final ScmRoutePort? scmRoute;
+  final Future<void> Function(BuildContext)? openUsageMode;
 
   @override
   Widget build(BuildContext context) {
@@ -220,6 +227,18 @@ class _GeneralSettingsContent extends StatelessWidget {
                       ),
                     ),
                     Divider(height: tokens.space.lg),
+                    _SwitchSetting(
+                      controlKey: const Key('general-performance-mode'),
+                      titleKey: 'settings.general.performance.title',
+                      descriptionKey:
+                          'settings.general.performance.description',
+                      value: effective.performanceMode,
+                      enabled: enabled,
+                      onChanged: (value) => motion.run(
+                        () => preferences.setPerformanceMode(value),
+                      ),
+                    ),
+                    Divider(height: tokens.space.lg),
                     _MotionSetting(
                       value:
                           effective.motionPreference == MotionPreference.reduce,
@@ -261,7 +280,10 @@ class _GeneralSettingsContent extends StatelessWidget {
               ),
               SizedBox(height: tokens.space.md),
               if (gameplayTime != null) ...[
-                GameplayTimePanel(controller: gameplayTime!),
+                GameplayTimePanel(
+                  controller: gameplayTime!,
+                  onConfirmIdentity: openUsageMode,
+                ),
                 SizedBox(height: tokens.space.md),
               ],
               if (scmRoute != null) ...[
@@ -378,6 +400,59 @@ class _MotionSetting extends StatelessWidget {
         StarBridgeSwitch(
           controlKey: const Key('general-reduce-motion'),
           label: strings.text('settings.general.motion.reduce'),
+          value: value,
+          onChanged: enabled ? onChanged : null,
+        ),
+      ],
+    );
+  }
+}
+
+/// A titled on/off row with a one-line description.
+class _SwitchSetting extends StatelessWidget {
+  const _SwitchSetting({
+    required this.controlKey,
+    required this.titleKey,
+    required this.descriptionKey,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final Key controlKey;
+  final String titleKey;
+  final String descriptionKey;
+  final bool value;
+  final bool enabled;
+  final Future<bool> Function(bool value) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                strings.text(titleKey),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              SizedBox(height: tokens.space.xxs),
+              Text(
+                strings.text(descriptionKey),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        SizedBox(width: tokens.space.md),
+        StarBridgeSwitch(
+          controlKey: controlKey,
+          label: strings.text(titleKey),
           value: value,
           onChanged: enabled ? onChanged : null,
         ),

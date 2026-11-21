@@ -55,7 +55,8 @@ internal static partial class AccountSessionRestoreTests
                     return JsonResponse(HttpStatusCode.OK, "{\"access_token\":\"synthetic-access-" + refreshes +
                         "\",\"refresh_token\":\"synthetic-next\",\"token_type\":\"Bearer\",\"expires_in\":3600}");
                 });
-                var oauth = new OAuthPkceClient(new ScmHttpClient(authHandler), vault, options);
+                var clock = new SharingTestClock();
+                var oauth = new OAuthPkceClient(new ScmHttpClient(authHandler), vault, options) { SessionClock = clock, RestoreBackoffRandom = () => 0.5 };
                 var session = (await oauth.TryRestoreSessionAsync(default))!;
                 var writes = 0;
                 var clears = 0;
@@ -84,7 +85,7 @@ internal static partial class AccountSessionRestoreTests
                 var owner = new BridgeAccountContext("test", "sharing.invalid", "fixture");
                 PrivacyPublicationInput? input = new(owner, 1, "Fixture", true, null, GameLogSessionSnapshot.Empty);
                 var store = new LocalPrivacyStore(root);
-                var clock = new SharingTestClock();
+
                 store.Save(owner, 0, Guid.NewGuid().ToString("N"), new(true,
                     new(PlayerSharedStateFields.Presence, false, true, []), new(PlayerSharedStateFields.None, false)), () => true);
                 using var publication = new PrivacyPublication(store, () => input, async (current, body, ct) => {

@@ -75,6 +75,7 @@ class CommunityChatMediaCache {
   /// A read was refused: the chat's own read decides what that means.
   final void Function()? onAccessLost;
   final _seenAvatarReads = <String, DateTime>{};
+  int _seenAvatarEpoch = 0;
   DateTime get _now => _identityNow?.call() ?? avatars.now();
   CommunityImageDecodeCache get images => avatars.images;
   late final StreamSubscription<void> _subscription;
@@ -177,7 +178,7 @@ class CommunityChatMediaCache {
     DateTime? earliest;
     for (final key in _keys) {
       if (!_pageCurrent(key)) continue;
-      final deadline = key.person.observation?.validUntil;
+      final deadline = key.person.observation?.displayDeadline;
       if (deadline != null &&
           deadline.isAfter(_now) &&
           (earliest == null || deadline.isBefore(earliest))) {
@@ -192,8 +193,8 @@ class CommunityChatMediaCache {
     for (final key in _keys) {
       final message = key.person.authority;
       if (key.person.retired || message == null) continue;
-      if (message.authorIdentity?.validUntil?.isAfter(at) == false ||
-          key.person.observation?.validUntil?.isAfter(at) == false) {
+      if (message.authorIdentity?.displayDeadline?.isAfter(at) == false ||
+          key.person.observation?.displayDeadline?.isAfter(at) == false) {
         expired[message.messageRef] = message;
       }
     }
@@ -203,6 +204,7 @@ class CommunityChatMediaCache {
 
   void retireAuthors(Iterable<CommunityChatMessage> messages) {
     if (_invalidated || !_official) return;
+    _seenAvatarEpoch++;
     final authorities = messages.toList();
     final people = authorities
         .map(
@@ -232,6 +234,21 @@ class CommunityChatMediaCache {
     }
   }
 
+  /// A verified hidden answer withdraws this sender across publication windows.
+  /// Keep independently authorized attachments and their pending work.
+  void retireSenders(Set<String> senders) {
+    if (_invalidated || !_official) return;
+    _seenAvatarEpoch++;
+    for (final key in _keys) {
+      if (!senders.contains(key.sender)) continue;
+      key.person.retired = true;
+      final authority = key.person.authority;
+      if (authority != null) avatars.retire(_avatarKey(authority), key.version);
+      final ready = _ready[key];
+      if (ready != null) _ready[key] = _admitted(key, ready);
+    }
+  }
+
   /// Reads the avatar of someone shown by their last-seen name, at most once a
   /// minute per person. The server still answers for who may see it; a hidden
   /// answer withdraws them, any other failure just waits for the next try.
@@ -243,6 +260,8 @@ class CommunityChatMediaCache {
     final last = _seenAvatarReads[sender];
     if (_invalidated ||
         !_official ||
+        !expected.visible ||
+        !_now.isBefore(expected.validUntil!) ||
         port is! CommunityChatAuthorDetailPort ||
         last != null && at.difference(last) < const Duration(minutes: 1)) {
       return;
@@ -253,6 +272,7 @@ class CommunityChatMediaCache {
     );
     if (_seenAvatarReads.length >= _maximumRetained) return;
     _seenAvatarReads[sender] = at;
+    final epoch = _seenAvatarEpoch;
     unawaited(
       assembleCommunityChatDetail(
         port,
@@ -263,11 +283,18 @@ class CommunityChatMediaCache {
         identity: CommunityChatDetailIdentity(
           expected: expected,
           now: () => _now,
-          current: () => !_invalidated,
-          avatarConfirmed: (version, bytes) =>
-              onAvatarConfirmed?.call(sender, version, bytes),
+          current: () => !_invalidated && epoch == _seenAvatarEpoch,
+          avatarConfirmed: (version, bytes) {
+            if (!_invalidated &&
+                epoch == _seenAvatarEpoch &&
+                expected.admit(_now).visible &&
+                _now.isBefore(expected.validUntil!)) {
+              onAvatarConfirmed?.call(sender, version, bytes);
+            }
+          },
           narrow: (observed) {
-            if (observed.state == CommunityAuthorState.hidden) {
+            if (observed.state == CommunityAuthorState.hidden ||
+                observed.visible && !observed.hasAvatar) {
               narrowAuthor?.call(message, observed);
             }
           },
@@ -286,7 +313,10 @@ class CommunityChatMediaCache {
           // A refusal may mean lost access or just a missing message. The next
           // chat read tells them apart and clears everything if access is gone.
           if (error is CommunityFailure &&
-              const {'notAllowed', 'identityUnavailable'}.contains(error.code)) {
+              const {
+                'notAllowed',
+                'identityUnavailable',
+              }.contains(error.code)) {
             onAccessLost?.call();
           }
         },
@@ -316,6 +346,11 @@ class CommunityChatMediaCache {
     final publication = Object();
     _publications[reference] = publication;
     Future<Uint8List?> avatar() {
+      if (_official &&
+          (message.authorIdentity?.visible != true ||
+              !_now.isBefore(message.authorIdentity!.validUntil!))) {
+        return Future<Uint8List?>.value(null);
+      }
       final Object source = port;
       final current = !_official && source is CommunityOwnAvatarSource
           ? source.ownAvatarImageData
@@ -449,11 +484,15 @@ class CommunityChatMediaCache {
               const CommunityAuthorProjection.unavailable(),
           now: () => _now,
           current: () => _pageCurrent(key),
-          avatarConfirmed: (version, bytes) =>
-              onAvatarConfirmed?.call(message.senderRef, version, bytes),
+          avatarConfirmed: (version, bytes) {
+            if (_pageCurrent(key)) {
+              onAvatarConfirmed?.call(message.senderRef, version, bytes);
+            }
+          },
           narrow: (observed) {
             // A retired proof does not stop an answer of hidden from counting.
-            if (observed.state == CommunityAuthorState.hidden) {
+            if (observed.state == CommunityAuthorState.hidden ||
+                observed.visible && !observed.hasAvatar) {
               narrowAuthor?.call(message, observed);
             }
             if (key.person.retired) return;

@@ -34,13 +34,13 @@
       "sourceRoot": "StarBridge.Desktop/Data/ShipDetailImages",
       "payloadRoot": "Data/ShipDetailImages",
       "sourceType": "historical-unverified-collection",
-      "sourceName": "Historical StarBridge ship detail image collection",
-      "sourceReference": "git:2e7da91a0a0338eaf7c7cc71c4db78e2898798e3,git:69055d4aace2e2960d359a811f7b132b925246a1",
-      "snapshotDate": null,
-      "rightsholder": "Unconfirmed",
-      "licenseOrPermission": "Pending provenance and redistribution review",
+      "sourceName": "Roberts Space Industries official ship pictures",
+      "sourceReference": "https://robertsspaceindustries.com/",
+      "snapshotDate": "2026-11-02",
+      "rightsholder": "Cloud Imperium Rights LLC",
+      "licenseOrPermission": "No licence has been granted to StarBridge",
       "rightsBasisType": "unverified",
-      "rightsBasis": "Git history records two ingestion commits only; it does not establish the original source or redistribution permission.",
+      "rightsBasis": "257 of the 258 pictures come from the official ship pictures of Roberts Space Industries (from its ship data and store pages); Constellation Phoenix Emerald uses the official Constellation Phoenix picture. The pictures are only resized. No redistribution permission has been granted.",
       "evidencePath": null,
       "evidenceSha256": null,
       "permissionExpiresAt": null,
@@ -48,10 +48,10 @@
       "allowedDistributionScopes": [
         "internal-only"
       ],
-      "attribution": "Pending rights review",
+      "attribution": "Roberts Space Industries",
       "reviewedBy": null,
       "reviewedAt": null,
-      "notes": "252 wide ship detail images. The Basher image was added in a later batch and may require a separate source entry after provenance is recovered. The 0.7.2 Flutter official binary ships this group by the maintainer's own decision; its source remains unverified and this is not a claim of permission."
+      "notes": "258 wide ship pictures. The 0.7.3 Flutter official binary ships this group by the maintainer's own decision for a non-commercial release; this is not a claim of permission."
     },
     {
       "id": "system-maps-historical",

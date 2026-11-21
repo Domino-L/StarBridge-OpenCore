@@ -5,26 +5,27 @@ import 'package:flutter/foundation.dart';
 import '../../platform/window/overlay_editor_window_port.dart';
 
 import 'overlay_preview_identity.dart';
-import 'overlay_preview_guide_port.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_settings_models.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_port.dart';
+import 'overlay_workspace_module_ports.dart';
 import 'overlay_workspace_port_capabilities.dart';
 import 'overlay_workspace_runtime_sync.dart';
 import 'overlay_workspace_auto_save.dart';
 import 'overlay_workspace_commit.dart';
 import 'overlay_experience_presets.dart';
-import 'overlay_appearance_progress.dart';
-import 'overlay_appearance_live_session.dart';
 import 'overlay_workspace_rules.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_workspace_visor_specs.dart';
 import 'overlay_workspace_projection.dart';
 import 'overlay_workspace_draft.dart';
+import 'overlay_workspace_members_resize.dart';
+import 'overlay_visor_switch_notice.dart';
 
 export 'overlay_workspace_projection.dart';
 
-final class OverlayWorkspaceModule {
+final class OverlayWorkspaceModule with OverlayWorkspaceModulePorts {
   OverlayWorkspaceModule(
     this._port, {
     this.editorWindow = const UnavailableOverlayEditorWindow(),
@@ -46,12 +47,9 @@ final class OverlayWorkspaceModule {
     if (!_disposed) _qualificationUnknown.value = value;
   }
 
-  OverlayPreviewGuidePort? get previewGuidePort => _port.previewGuide;
-  OverlayAppearanceLivePort? get appearanceLivePort => _port.appearanceLive;
-  OverlayAppearanceProgressPort? get appearanceProgressPort =>
-      _port.appearanceProgress;
-  OverlayAppearancePreviewPort? get appearancePreviewPort =>
-      _port.appearancePreview;
+  late final visorNotice = OverlayVisorNoticeState(_port.visorNotice, this);
+  @override
+  OverlayWorkspacePort get capabilityPort => _port;
   final ValueNotifier<OverlayWorkspaceProjection> _projection = ValueNotifier(
     const OverlayWorkspaceProjection.loading(),
   );
@@ -70,10 +68,12 @@ final class OverlayWorkspaceModule {
   final List<OverlayWorkspaceDraft> _redoHistory = [];
   String? _lastHistoryKey;
   String _runtimeLanguage = 'zh';
+  @override
   String get runtimeLanguage => _runtimeLanguage;
   int _manualPresetSelection = 0;
   int get manualPresetSelection => _manualPresetSelection;
 
+  @override
   ValueListenable<OverlayWorkspaceProjection> get projection => _projection;
 
   /// The Host pushes runtime changes (`overlay.runtime.changed`), so callers
@@ -151,6 +151,7 @@ final class OverlayWorkspaceModule {
       final snapshot = await _port.read();
       if (!_disposed) {
         _resetHistory();
+        visorNotice.note(snapshot);
         _projection.value = OverlayWorkspaceProjection.fromSnapshot(snapshot);
         if (snapshot.availability == OverlayWorkspaceAvailability.available) {
           _projection.value = _projection.value.copyWith(
@@ -182,7 +183,7 @@ final class OverlayWorkspaceModule {
     }
   }
 
-  void updateSetting(String field, Object? value) {
+  void updateSetting(String field, Object? value, {bool? coalesce}) {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available) return;
     try {
@@ -209,11 +210,8 @@ final class OverlayWorkspaceModule {
           .kind;
       _recordChange(
         current,
-        key: 'setting:$field',
-        coalesce:
-            kind == OverlayWorkspaceFieldKind.number ||
-            kind == OverlayWorkspaceFieldKind.color ||
-            kind == OverlayWorkspaceFieldKind.eventDurations,
+        key: 'setting:${overlayWorkspaceVisorHistoryGroups[field] ?? field}',
+        coalesce: coalesce ?? overlayWorkspaceCoalescingKinds.contains(kind),
       );
       _projection.value = current.copyWith(
         settings: next,
@@ -258,7 +256,7 @@ final class OverlayWorkspaceModule {
         current.sources == null) {
       return;
     }
-    final next = change(current.sources!);
+    final next = overlayOverviewFollowsMembers(change(current.sources!));
     if (next == current.sources) return;
     _recordChange(current, key: key, coalesce: false);
     _projection.value = current.copyWith(
@@ -297,70 +295,83 @@ final class OverlayWorkspaceModule {
       _updateSources((value) => value.withChatSources(sources), 'source:chat');
 
   void applyExperiencePreset(String preset) {
-    final current = _projection.value;
-    if (_disposed || current.busy || !current.available) return;
     final values = overlayExperiencePresets[preset];
     if (values == null) return;
-    try {
-      final next = values.entries.fold(
-        current.settings!,
-        (next, entry) =>
-            applyOverlayWorkspaceSettingChange(next, entry.key, entry.value),
-      );
-      _recordChange(current, key: 'setting:experiencePreset', coalesce: false);
-      _projection.value = current.copyWith(
-        settings: next,
+    _editDraft(
+      'setting:experiencePreset',
+      coalesce: false,
+      (current) => current.copyWith(
+        settings: values.entries.fold<OverlayWorkspaceSettings>(
+          current.settings!,
+          (next, entry) =>
+              applyOverlayWorkspaceSettingChange(next, entry.key, entry.value),
+        ),
         clearFailure: true,
         dirty: true,
-      );
-      _edited();
-    } on Object {
-      _projection.value = current.copyWith(
-        failure: OverlaySettingsFailure.invalidValue,
-      );
-    }
+      ),
+    );
   }
 
   void beginEventNotificationGesture() {
     _lastHistoryKey = null;
   }
 
-  void updateEventNotificationPlacement(String side, double normalizedY) {
+  /// The events' place: the screen side they open from and lean to, their
+  /// height, and (11-12 "应该允许事件随意调整位置了") where they sit across, [x]
+  /// as a screen fraction of their screen-edge side or -1 at the edge; null
+  /// keeps the saved one.
+  void updateEventNotificationPlacement(
+    String side,
+    double normalizedY, {
+    double? x,
+  }) => _editDraft('setting:eventNotificationPlacement', (current) {
+    final next = overlayWorkspaceEventPlacement(
+      current.settings!,
+      side,
+      normalizedY,
+      x: x,
+    );
+    return next == null
+        ? null
+        : current.copyWith(settings: next, clearFailure: true, dirty: true);
+  });
+
+  void endEventNotificationGesture() {
+    _lastHistoryKey = null;
+  }
+
+  /// Size and placement are one draft revision and one undo step per gesture.
+  void updateMembersSize(
+    int width,
+    int height,
+    OverlayWorkspaceLayoutItem item,
+  ) => _editDraft(
+    'setting:visorMembersSize',
+    (current) => overlayWorkspaceMembersResized(current, width, height, item),
+  );
+
+  void stepMembersSize(String field, Object? value) =>
+      updateSetting(field, value, coalesce: false);
+
+  /// One draft edit: null keeps the draft; a throw marks the value invalid.
+  void _editDraft(
+    String key,
+    OverlayWorkspaceProjection? Function(OverlayWorkspaceProjection) change, {
+    bool coalesce = true,
+  }) {
     final current = _projection.value;
     if (_disposed || current.busy || !current.available) return;
-    final normalizedSide = side == 'Left' ? 'Left' : 'Right';
-    final clampedY = normalizedY.clamp(0.0, 1.0).toDouble();
-    final currentSide = current.settings!['eventNotificationSide']! as String;
-    final currentY = (current.settings!['eventNotificationY']! as num)
-        .toDouble();
-    if (currentSide == normalizedSide &&
-        (currentY - clampedY).abs() < 0.000001) {
-      return;
-    }
     try {
-      final next = current.settings!
-          .withValue('eventNotificationSide', normalizedSide)
-          .withValue('eventNotificationY', clampedY);
-      _recordChange(
-        current,
-        key: 'setting:eventNotificationPlacement',
-        coalesce: true,
-      );
-      _projection.value = current.copyWith(
-        settings: next,
-        clearFailure: true,
-        dirty: true,
-      );
+      final next = change(current);
+      if (next == null) return;
+      _recordChange(current, key: key, coalesce: coalesce);
+      _projection.value = next;
       _edited();
     } on Object {
       _projection.value = current.copyWith(
         failure: OverlaySettingsFailure.invalidValue,
       );
     }
-  }
-
-  void endEventNotificationGesture() {
-    _lastHistoryKey = null;
   }
 
   void updateLayoutItem(
@@ -644,19 +655,12 @@ final class OverlayWorkspaceModule {
               OverlayWorkspaceMutationKind.configurePresetSources &&
           mutation.presetId == current.snapshot?.activePresetId &&
           updated.sources != null) {
-        OverlayPresetSources? rebase(OverlayPresetSources? source) =>
-            source == null
-            ? null
-            : OverlayPresetSources(
-                binding: updated.sources!.binding,
-                autoSwitch: updated.sources!.autoSwitch,
-                modules: source.modules,
-                chatSources: source.chatSources,
-              );
-        retainedSources = rebase(retainedSources);
+        final saved = updated.sources!;
+        retainedSources = overlayRebasedSources(retainedSources, saved);
         for (final history in [_undoHistory, _redoHistory]) {
           for (var i = 0; i < history.length; i++) {
-            history[i] = history[i].withSources(rebase(history[i].sources));
+            final source = overlayRebasedSources(history[i].sources, saved);
+            history[i] = history[i].withSources(source);
           }
         }
       }
@@ -773,6 +777,7 @@ final class OverlayWorkspaceModule {
     final unsaved = last.dirty && last.snapshot?.revision != null;
     _disposed = true;
     _qualificationUnknown.dispose();
+    visorNotice.dispose();
     _autoSave.close();
     _liveSync.close();
     _pushes.dispose();

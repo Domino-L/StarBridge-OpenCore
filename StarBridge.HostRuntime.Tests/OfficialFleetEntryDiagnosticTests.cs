@@ -23,8 +23,12 @@ internal static class OfficialFleetEntryDiagnosticTests
         }
         var error = await D.Failure(() => f.Host.ReadOfficialFleetHangarSharingAsync(f.Owner, D.Open, default));
         if (code == "stale-generation") D.Check(error is BridgeStaleGenerationException, "Retirement exception preserved");
-        if (code is "no-session" or "no-relay-session" or "reauthorization-required" or "credential-unavailable")
+        if (code is "no-session" or "no-relay-session" or "reauthorization-required")
             D.Check(error is AccountBridgeHostException { Code: AccountBridgeStableErrors.ReauthorizationRequired }, "Authorization error unchanged");
+        // 11-15: a temporary recovery failure is retryable, never a sign-in request.
+        if (code == "credential-unavailable")
+            D.Check(error is AccountBridgeHostException { Code: AccountBridgeStableErrors.CredentialTemporarilyUnavailable, Retryable: true },
+                "Temporary credential error is retryable");
         if (code == "communities-unavailable")
             D.Check(error is AccountBridgeHostException { Code: "communities.unavailable" }, "Missing client behavior unchanged");
         var lines = f.Lines("official-hangar-entry");

@@ -237,9 +237,57 @@ internal static class StoreFileCommitTests
         var expected = file.GetAccessControl(AccessControlSections.Access).GetSecurityDescriptorSddlForm(AccessControlSections.Access);
         store.Save(Owner, 1, Op(), Settings(null), () => true);
         var actual = new FileInfo(file.FullName).GetAccessControl(AccessControlSections.Access).GetSecurityDescriptorSddlForm(AccessControlSections.Access);
-        Check(actual == expected, "A commit dropped the file's DACL.");
+        // The commit may write the entries in another order (StoreFileCommit.CarryDacl goes through FileSecurity, whose sort
+        // depends on the order it was given), which changes no access; anything else (an entry lost or added, the
+        // inheritance flags, a deny entry behind an allow entry) still fails. 11-19: HOST-DACL-1316.
+        Check(SameDacl(actual, expected), $"A commit dropped the file's DACL. Expected {expected}, found {actual}.");
+        DaclComparisonStillCatchesLosses(expected);
         Console.WriteLine("PASS Privacy commit keeps a tightened DACL");
         return Task.CompletedTask;
+    }
+
+    // Two DACLs grant the same access when they have the same flags (protected, auto-inherited) and the same entries, and
+    // the found one keeps every deny entry ahead of the allow entries of its kind (explicit, inherited). The order of the
+    // entries otherwise is not part of it.
+    private static bool SameDacl(string actual, string expected)
+    {
+        var (actualFlags, actualEntries) = Dacl(actual);
+        var (expectedFlags, expectedEntries) = Dacl(expected);
+        return actualFlags == expectedFlags && DenyFirst(actualEntries) &&
+            actualEntries.Order(StringComparer.Ordinal).SequenceEqual(expectedEntries.Order(StringComparer.Ordinal));
+    }
+
+    private static (string Flags, List<string> Entries) Dacl(string sddl)
+    {
+        var open = sddl.IndexOf('(');
+        return (open < 0 ? sddl : sddl[..open],
+            System.Text.RegularExpressions.Regex.Matches(sddl, @"\([^)]*\)").Select(m => m.Value).ToList());
+    }
+
+    private static bool DenyFirst(List<string> entries)
+    {
+        foreach (var inherited in new[] { false, true })
+        {
+            var kinds = entries.Where(e => e.Split(';')[1].Contains("ID") == inherited).Select(e => e[1..].Split(';')[0]).ToList();
+            var firstAllow = kinds.IndexOf("A");
+            if (firstAllow >= 0 && kinds.Skip(firstAllow).Contains("D")) return false;
+        }
+        return true;
+    }
+
+    // The order-free comparison must still see a lost entry, an added entry, a changed inheritance flag and a deny entry
+    // moved behind the allow entries, and must not see a reordering.
+    private static void DaclComparisonStillCatchesLosses(string expected)
+    {
+        var (flags, entries) = Dacl(expected);
+        Check(flags.Contains('P') && entries.Count >= 2, $"The tightened DACL is not protected with two entries or more: {expected}");
+        Check(!SameDacl(flags + string.Concat(entries.Skip(1)), expected), "The DACL comparison missed a lost entry.");
+        Check(!SameDacl(expected + "(A;;FA;;;WD)", expected), "The DACL comparison missed an added entry.");
+        Check(!SameDacl(flags.Replace("P", "") + string.Concat(entries), expected), "The DACL comparison missed the inheritance turned back on.");
+        Check(!SameDacl(flags + "(D;;FA;;;WD)" + string.Concat(entries), expected), "The DACL comparison missed an added deny entry.");
+        var denied = flags + "(D;;FA;;;WD)" + string.Concat(entries);
+        Check(!SameDacl(flags + string.Concat(entries) + "(D;;FA;;;WD)", denied), "The DACL comparison missed a deny entry behind the allow entries.");
+        Check(SameDacl(flags + string.Concat(Enumerable.Reverse(entries)), expected), "The DACL comparison failed entries in another order.");
     }
 
     private static Task StuckReaderFailsPrivacyCommitWithoutChange(string root)

@@ -8,11 +8,22 @@ import 'package:flutter/widgets.dart';
 
 import '../../shared/diagnostics/loading_metrics.dart';
 import 'loading_tour.dart';
+import '../runtime/frame_governor.dart';
 
 const _loadingTraceZoneKey = #starBridgeLoadingTrace;
 
 /// Explicit local opt-in. No process-global mutable state, and no output during
 /// ordinary startup. The diagnostic zone is also the Flutter binding's zone.
+/// The main window runs without an auxiliary surface.
+FrameSurface _frameSurface(LoadingAuxiliarySurface? surface) =>
+    switch (surface) {
+      null => FrameSurface.main,
+      LoadingAuxiliarySurface.friends => FrameSurface.friends,
+      LoadingAuxiliarySurface.messages => FrameSurface.messages,
+      LoadingAuxiliarySurface.notifications => FrameSurface.notifications,
+      LoadingAuxiliarySurface.menu => FrameSurface.menu,
+    };
+
 abstract final class LoadingDiagnostics {
   static bool get enabled => LoadingMetrics.current?.stopped == false;
   static String? auxiliaryTracePath(
@@ -57,7 +68,7 @@ abstract final class LoadingDiagnostics {
         path.isEmpty ||
         !File(path).isAbsolute ||
         path.startsWith(r'\\')) {
-      WidgetsFlutterBinding.ensureInitialized();
+      StarBridgeBinding.ensureInitialized(_frameSurface(auxiliarySurface));
       launch();
       return;
     }
@@ -68,7 +79,7 @@ abstract final class LoadingDiagnostics {
     );
     runZoned(
       () {
-        WidgetsFlutterBinding.ensureInitialized();
+        StarBridgeBinding.ensureInitialized(_frameSurface(auxiliarySurface));
         trace.start();
         launch();
       },

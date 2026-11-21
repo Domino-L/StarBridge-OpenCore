@@ -179,7 +179,7 @@ final class CommunityAnnouncementAuthorSurface {
     DateTime? earliest;
     retireExpiredDetails(at);
     for (final person in [_author, _editor, ...detailProofs()]) {
-      final deadline = person.visible ? person.validUntil : null;
+      final deadline = person.visible ? person.displayDeadline : null;
       if (deadline != null &&
           deadline.isAfter(at) &&
           (earliest == null || deadline.isBefore(earliest))) {

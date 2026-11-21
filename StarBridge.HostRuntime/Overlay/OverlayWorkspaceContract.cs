@@ -33,7 +33,9 @@ internal sealed record OverlayWorkspaceReadResult(
     IReadOnlyList<InformationOverlayLayoutItem> Layout,
     IReadOnlyList<OverlayWorkspacePresetSnapshot> Presets,
     bool RemovedOrganizationBindings = false,
-    bool SourcePresetsEnabled = false);
+    bool SourcePresetsEnabled = false,
+    // 0.7.3 overlay v2: the earlier overlay was used here and the "settings reset" line is unseen.
+    bool VisorSwitchNotice = false);
 
 internal enum OverlayWorkspaceMutationKind
 {

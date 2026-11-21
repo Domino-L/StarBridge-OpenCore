@@ -135,6 +135,8 @@ final class CommunityMemberRoleOutcome {
               'refreshRequired',
               'requestChanged',
               'identityUnavailable',
+              'identityRequired',
+              'identityAmbiguous',
               'notAllowed',
               'unavailable',
               'invalidDraft',

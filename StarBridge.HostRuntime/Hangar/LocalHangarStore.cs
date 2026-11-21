@@ -30,6 +30,9 @@ public sealed partial class LocalHangarStore
 
     public LocalHangarStore(string root) => _directory = Path.Combine(Path.GetFullPath(root), "hangar-local-v1");
 
+    /// <summary>The data root this store lives under; siblings such as hangar-cloud-v1 use it.</summary>
+    internal string Root => Path.GetDirectoryName(_directory)!;
+
     private LocalHangarSnapshot ReadCore(BridgeAccountContext owner) => ReadFile(owner)?.Snapshot ?? new(0, null, null, Array.Empty<LocalHangarShip>());
 
     private SavedFile? ReadFile(BridgeAccountContext owner)

@@ -338,7 +338,7 @@ internal static class DesktopNotificationCardTests
             } catch (Exception e) { failure = e; }
         });
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
-        if (failure != null) throw failure;
+        if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
     private static void VerifyHangarCards()
     {
@@ -346,12 +346,19 @@ internal static class DesktopNotificationCardTests
         var expired = new DesktopNotification(Guid.NewGuid(), false, 0, 0, "sourceOnly", "bottomRight", "zh-CN", "dark", () => true) {
             PresentUntil = DateTimeOffset.UtcNow.AddSeconds(-1), Diagnostic = notices.Add
         };
-        var runtime = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(NativeDesktopNotificationRuntime));
-        typeof(NativeDesktopNotificationRuntime).GetField("_celebration", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .SetValue(runtime, StarBridge.HostRuntime.Achievements.AchievementCelebrationActivity.Shared);
-        if ((bool)typeof(NativeDesktopNotificationRuntime).GetMethod("Show", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .Invoke(runtime, [expired])! || !notices.Contains("expired"))
-            throw new Exception("A queued hangar card past its presentation deadline must expire before allocating a native window");
+        // A real, constructed runtime: an uninitialized object left the queues null, and
+        // Show became ShowAsync (11-05), so the old reflection crashed the whole group.
+        // The expired path never creates a window, and no revalidation is set, so the
+        // call completes before returning and needs no dispatcher.
+        var show = typeof(NativeDesktopNotificationRuntime).GetMethod("ShowAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+            [typeof(DesktopNotification), typeof(CancellationToken)])
+            ?? throw new Exception("NativeDesktopNotificationRuntime.ShowAsync(notice, token) was renamed; update this check");
+        using (var runtime = new NativeDesktopNotificationRuntime(Environment.ProcessId)) {
+            var shown = (Task<bool>)show.Invoke(runtime, [expired, CancellationToken.None])!;
+            if (!shown.IsCompleted || shown.Result || !notices.Contains("expired") || notices.Contains("windowShown"))
+                throw new Exception("A queued hangar card past its presentation deadline must expire before allocating a native window");
+        }
         var origin = new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero);
         var config = new StarBridge.Core.Tools.ExecHangarConfig("fixture", "fixture", null, origin, 0, 65, 120, 0);
         foreach (var locale in new[] { "zh-CN", "zh-TW", "en-US" })

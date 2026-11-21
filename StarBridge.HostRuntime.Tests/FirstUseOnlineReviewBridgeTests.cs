@@ -30,12 +30,14 @@ internal static class FirstUseOnlineReviewBridgeTests
     private static async Task<JsonElement> Login(FirstUseOnlineReturnTests.Fixture f)
     {
         var result = await Send(f, FirstUseOnlineReviewBridgeDispatcher.LoginRequest, new { schemaVersion = 1, revision = 3 });
-        if (f.Callback is not null) await f.Callback.WaitAsync(TimeSpan.FromSeconds(3));
+        if (f.Callback is not null) await f.Callback.WaitAsync(FirstUseTestWait.Bound);
         return Identity(result);
     }
     internal static async Task Run()
     {
         await Case("side-effect-free reads never start authentication or restore a previous credential", Read);
+        await Case("login without a local log projects cached account display without identity authority", NoLogDisplay);
+        await Case("new setup without a log cannot begin online through the subset route", NoLogBeginDenied);
         await Case("real PKCE login, review, polling and confirmation keep the installed local owner", Matching);
         await Case("strict wire rejects stale revisions, generations, contexts and invented actions", Strict);
         await Case("fresh confirmation observes actual revocation and never grants online completion", Revoked);
@@ -52,6 +54,32 @@ internal static class FirstUseOnlineReviewBridgeTests
         Check(Identity(read).GetProperty("state").GetString() == "notStarted" && f.Candidate is null &&
             f.Transport.Requests == 0 && File.ReadAllBytes(f.VaultPath).SequenceEqual(before), "Read is not a mode change or authorization.");
         f.Local.RequireLocalStateUnchanged();
+    }
+    private static async Task NoLogBeginDenied()
+    {
+        using var f = new FirstUseOnlineReturnTests.Fixture(); await f.Prepare();
+        var local = new LocalFirstUseStore(f.Local.Root);
+        local.DeferLog(local.Read().Revision, Id(), () => true);
+        var result = await Send(f, FirstUseOnlineReviewBridgeDispatcher.BeginRequest, new { schemaVersion = 1, revision = 2 });
+        Check(result.Response.Error?.Code == "firstUse.evidence_required" && f.Mode.Current.State == "local" &&
+            f.Candidate is null && f.Transport.Requests == 0, "No log cannot stage login, switch mode or contact SCM");
+    }
+    private static async Task NoLogDisplay()
+    {
+        using var f = new FirstUseOnlineReturnTests.Fixture(); await Begin(f);
+        var store = new LocalFirstUseStore(f.Local.Root);
+        store.DeferLog(store.Read().Revision, Id(), () => true);
+        var identity = await Login(f);
+        Check(identity.GetProperty("state").GetString() == "needsLocalIdentity" &&
+            identity.GetProperty("accountDisplayName").GetString() == "Synthetic Pilot" &&
+            identity.GetProperty("authoritativeHandle").GetString() is not null &&
+            identity.GetProperty("confirmationKey").ValueKind == JsonValueKind.Null,
+            "The cached sign-in can display a verified name but cannot issue identity confirmation");
+        var requests = f.Transport.Requests;
+        var polled = Identity(await Send(f, FirstUseOnlineReviewBridgeDispatcher.ReadRequest));
+        Check(polled.GetProperty("accountDisplayName").GetString() == "Synthetic Pilot" &&
+            f.Transport.Requests == requests && !f.Mode.HasConfirmedOnlineIdentity(3),
+            "Account-card polling performs no new download or account request and grants no identity");
     }
     private static async Task Matching()
     {
@@ -112,14 +140,14 @@ internal static class FirstUseOnlineReviewBridgeTests
     {
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Begin(f); f.Transport.HoldToken = true;
         var login = Send(f, FirstUseOnlineReviewBridgeDispatcher.LoginRequest, new { schemaVersion = 1, revision = 3 });
-        await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var cancel = Send(f, FirstUseOnlineReviewBridgeDispatcher.CancelRequest, new { schemaVersion = 1, revision = 3 });
         Check(!cancel.IsCompleted && f.Mode.LocalMode().Active && f.Store.Read().Phase == "onlinePending",
             "Cancellation requested is not actual OAuth exit.");
         f.Transport.ReleaseToken.TrySetResult();
-        Check((await login.WaitAsync(TimeSpan.FromSeconds(3))).Response.Status != BridgeResponseStatuses.Ok,
+        Check((await login.WaitAsync(FirstUseTestWait.Bound)).Response.Status != BridgeResponseStatuses.Ok,
             "The retired login must not publish late success.");
-        var returned = await cancel.WaitAsync(TimeSpan.FromSeconds(3));
+        var returned = await cancel.WaitAsync(FirstUseTestWait.Bound);
         Check(returned.Response.Payload.GetProperty("modeState").GetString() == "local" &&
             Identity(returned).GetProperty("state").GetString() == "notStarted" && f.Store.Read().Phase == "local" &&
             f.Clock.Timers == 0, "Only original candidate cleanup can acknowledge local return.");
@@ -148,11 +176,11 @@ internal static class FirstUseOnlineReviewBridgeTests
         Check(f.Mode.HasConfirmedOnlineIdentity(3), "Initial identity precondition must be real.");
         f.Transport.HoldToken = true;
         var replacement = Send(f, FirstUseOnlineReviewBridgeDispatcher.LoginRequest, new { schemaVersion = 1, revision = 3 });
-        await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var poll = Identity(await Send(f, FirstUseOnlineReviewBridgeDispatcher.ReadRequest));
         Check(!f.Mode.HasConfirmedOnlineIdentity(3) && poll.GetProperty("state").GetString() == "authorizing" &&
             poll.GetProperty("confirmationKey").ValueKind == JsonValueKind.Null, "Replacement clears prior proof before its real auth transport.");
-        f.Transport.ReleaseToken.TrySetResult(); await replacement.WaitAsync(TimeSpan.FromSeconds(3));
+        f.Transport.ReleaseToken.TrySetResult(); await replacement.WaitAsync(FirstUseTestWait.Bound);
         Check(!f.Mode.HasConfirmedOnlineIdentity(3), "New authorization requires another explicit review, never reuses the old confirmation.");
     }
     private static async Task Composite()

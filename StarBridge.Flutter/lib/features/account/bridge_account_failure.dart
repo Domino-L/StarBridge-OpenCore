@@ -25,6 +25,7 @@ AccountFailure mapAccountBridgeFailure(Object error) {
 }
 
 String _messageKeyForCode(String code) => switch (code) {
+  'account.local_mode' => 'account.error.localMode',
   'bridge.disconnected' => 'account.error.hostUnavailable',
   'bridge.timeout' || 'account.login_timeout' => 'account.error.timeout',
   'bridge.cancelled' || 'account.login_cancelled' => 'account.login.cancelled',

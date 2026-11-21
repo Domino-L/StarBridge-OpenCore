@@ -414,7 +414,10 @@ void main() {
   );
   test('legacy toolbar appends hangar without resetting custom order or visibility', () {
     final old = MenuToolbarPreferences.ids
-        .where((id) => id != 'execHangar')
+        .where(
+          (id) =>
+              id != 'execHangar' && id != 'marketplace' && id != 'officialFleet',
+        )
         .toList()
         .reversed
         .toList();
@@ -424,7 +427,7 @@ void main() {
       'density': 'compact',
       'labels': 'iconsOnly',
     });
-    expect(saved!.order, [...old, 'execHangar']);
+    expect(saved!.order, [...old, 'execHangar', 'marketplace', 'officialFleet']);
     expect(saved.hidden, ['friends', 'image']);
     expect(saved.density, 'compact');
     expect(MenuToolbarPreferences.parse(saved.toMap())!.toMap(), saved.toMap());

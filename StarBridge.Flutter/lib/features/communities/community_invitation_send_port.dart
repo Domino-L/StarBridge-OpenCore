@@ -116,6 +116,8 @@ final class CommunityInvitationProgress {
                   'unavailable',
                   'notAllowed',
                   'identityUnavailable',
+                  'identityRequired',
+                  'identityAmbiguous',
                   'outcomeUnknown',
                   'refreshRequired',
                   'rateLimited',

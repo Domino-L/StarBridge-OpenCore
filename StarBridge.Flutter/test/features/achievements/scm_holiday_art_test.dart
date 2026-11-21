@@ -204,12 +204,52 @@ void main() {
     }
   }, skip: const bool.fromEnvironment('STARBRIDGE_PUBLIC_SOURCE'));
 
+  test('SCM holiday group rows with limited-event titles reuse that art', () {
+    for (final title in ['春节欢庆', '春节欢庆！', '春节欢庆!']) {
+      for (final earned in [true, false]) {
+        final art = scmAchievementArtAsset(
+          holiday(title, group: 'scm-HOLIDAY'),
+          earned: earned,
+          logicalSize: 64,
+          devicePixelRatio: 2,
+        )!;
+        expect(
+          art.path,
+          'assets/achievements/scm-event-spring-participant'
+          '${earned ? '' : '-locked'}.svg',
+        );
+        expect(art.vector, isTrue);
+      }
+    }
+    // Holiday titles keep their own raster art; other titles stay without art.
+    expect(
+      scmAchievementArtAsset(
+        holiday('新春快乐！', group: 'scm-HOLIDAY'),
+        earned: true,
+        logicalSize: 64,
+        devicePixelRatio: 1,
+      )!.path,
+      'assets/achievements/scm-holiday-spring-festival-192.webp',
+    );
+    expect(
+      scmAchievementArtAsset(
+        holiday('春节欢庆二期', group: 'scm-HOLIDAY'),
+        earned: true,
+        logicalSize: 64,
+        devicePixelRatio: 1,
+      ),
+      isNull,
+    );
+  });
+
   test(
     'flat art never reaches hidden, other-category or other-source rows',
     () {
       for (final d in [
         holiday('萌新启航', group: 'scm-HIDDEN'),
         holiday('萌新启航', group: 'scm-HOLIDAY'),
+        holiday('萌新启航!', group: 'scm-NORMAL'),
+        holiday('萌新启航！', group: 'scm-SPECIAL'),
         holiday('春节精英', group: 'scm-NORMAL'),
         holiday('春节精英', group: 'scm-HIDDEN'),
         holiday('萌新启航', source: AchievementSource.bridge, group: 'scm-NORMAL'),

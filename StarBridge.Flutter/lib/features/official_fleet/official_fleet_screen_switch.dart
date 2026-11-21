@@ -1,8 +1,9 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../common/organization_holo_art.dart';
@@ -55,12 +56,26 @@ class _ScreenSwitchState extends State<OfficialFleetScreenSwitch>
   /// whole upper screen in the switch's first frame (lab 2026-10-31).
   late bool _upperShown = !widget.lower;
 
+  // Light visuals finish a running switch at once, so turning them off again
+  // never returns to a half-way frame (review CX-C-FULL-073-REVIEW P2-1).
+  late final ValueListenable<bool> _light = lightVisuals();
+
+  void _onLight() {
+    if (_light.value) _progress.value = widget.lower ? 1 : 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _light.addListener(_onLight);
+  }
+
   @override
   void didUpdateWidget(OfficialFleetScreenSwitch oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.lower == widget.lower) return;
     final target = widget.lower ? 1.0 : 0.0;
-    if (resolveStarBridgeInteraction(context).reduceMotion) {
+    if (resolveStarBridgeInteraction(context).reduceMotion || _light.value) {
       _progress.value = target;
     } else {
       _progress.animateTo(target);
@@ -69,6 +84,7 @@ class _ScreenSwitchState extends State<OfficialFleetScreenSwitch>
 
   @override
   void dispose() {
+    _light.removeListener(_onLight);
     _progress.dispose();
     super.dispose();
   }
@@ -83,130 +99,136 @@ class _ScreenSwitchState extends State<OfficialFleetScreenSwitch>
     // line 2026-10-29: every frame re-ran both builders).
     final upper = Builder(builder: widget.upper);
     final lower = Builder(builder: widget.lowerBuilder);
-    return AnimatedBuilder(
-      animation: _progress,
-      builder: (context, _) {
-        final raw = _progress.value;
-        final d = _ease(raw);
-        final moving = raw > 0 && raw < 1;
-        final upperOpacity = (1 - d / .45).clamp(0.0, 1.0);
-        final rise = _ease(((raw - .3) / .7).clamp(0.0, 1.0));
-        final lowerOpacity = ((raw - .3) / .4).clamp(0.0, 1.0);
-        final deck =
-            widget.bannerHeight + (widget.barHeight - widget.bannerHeight) * d;
-        final sweep = ((raw - .45) / .55).clamp(0.0, 1.0);
-        final upperHidden = raw >= 1;
-        if (!upperHidden) _upperShown = true;
-        return LayoutBuilder(
-          builder: (context, box) => Stack(
-            children: [
-              if (raw > 0)
-                Positioned.fill(
-                  key: const ValueKey('official-fleet-lower-screen'),
-                  child: IgnorePointer(
-                    ignoring: moving,
-                    child: Opacity(
-                      opacity: lowerOpacity,
-                      child: Transform.translate(
-                        offset: Offset(0, 70 * (1 - rise)),
-                        child: Stack(
-                          children: [
-                            // The mirror under the bar's edge stays on the
-                            // lower screen, behind its content.
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              top: widget.barHeight,
-                              height: 72,
-                              child: RepaintBoundary(
-                                child: OfficialFleetDeckMirror(widget.banner),
-                              ),
-                            ),
-                            Positioned.fill(
-                              child: RepaintBoundary(child: lower),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              if (moving) ...[
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: 0,
-                  height: deck,
-                  child: IgnorePointer(
-                    child: _ShrinkingDeck(art: widget.banner, depth: d),
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: deck,
-                  height: 120 - 48 * d,
-                  child: IgnorePointer(
-                    child: Opacity(
-                      opacity: .9 - .35 * d,
-                      child: OfficialFleetDeckMirror(widget.banner),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  top: deck,
-                  height: 1,
-                  child: const IgnorePointer(child: _DeckEdge()),
-                ),
-                // The scan passes over the arriving screen only, never the deck.
-                if (sweep > 0 && sweep < 1)
-                  Positioned(
-                    left: 20,
-                    right: 20,
-                    top: deck,
-                    bottom: 0,
+    return ValueListenableBuilder<bool>(
+      valueListenable: lightVisuals(),
+      builder: (context, lightOnly, _) => AnimatedBuilder(
+        animation: _progress,
+        builder: (context, _) {
+          final raw = lightOnly ? (widget.lower ? 1.0 : 0.0) : _progress.value;
+          final d = _ease(raw);
+          final moving = raw > 0 && raw < 1;
+          final upperOpacity = (1 - d / .45).clamp(0.0, 1.0);
+          final rise = _ease(((raw - .3) / .7).clamp(0.0, 1.0));
+          final lowerOpacity = ((raw - .3) / .4).clamp(0.0, 1.0);
+          final deck =
+              widget.bannerHeight +
+              (widget.barHeight - widget.bannerHeight) * d;
+          final sweep = ((raw - .45) / .55).clamp(0.0, 1.0);
+          final upperHidden = raw >= 1;
+          if (!upperHidden) _upperShown = true;
+          return LayoutBuilder(
+            builder: (context, box) => Stack(
+              children: [
+                if (raw > 0)
+                  Positioned.fill(
+                    key: const ValueKey('official-fleet-lower-screen'),
                     child: IgnorePointer(
-                      child: ClipRect(
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              top: (box.maxHeight - deck) * sweep - 100,
-                              height: 100,
-                              child: _Scan(fade: 1 - sweep * .6),
-                            ),
-                          ],
+                      ignoring: moving,
+                      child: Opacity(
+                        opacity: lowerOpacity,
+                        child: Transform.translate(
+                          offset: Offset(0, 70 * (1 - rise)),
+                          child: Stack(
+                            children: [
+                              // The mirror under the bar's edge stays on the
+                              // lower screen, behind its content.
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: widget.barHeight,
+                                height: 72,
+                                child: RepaintBoundary(
+                                  child: OfficialFleetDeckMirror(widget.banner),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: RepaintBoundary(child: lower),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-              ],
-              // The upper screen paints above the shrinking deck: its slab and
-              // title overlap the banner's lower edge, and the deck must not
-              // cut them off while the switch runs (user report 2026-10-25).
-              if (_upperShown)
-                Positioned.fill(
-                  key: const ValueKey('official-fleet-upper-slot'),
-                  child: Offstage(
-                    offstage: upperHidden,
-                    child: TickerMode(
-                      key: const ValueKey('official-fleet-upper-screen'),
-                      enabled: !upperHidden,
-                      child: ExcludeFocus(
-                        excluding: upperHidden,
-                        child: IgnorePointer(
-                          ignoring: moving,
-                          child: Opacity(
-                            opacity: upperOpacity,
-                            child: Transform.translate(
-                              offset: Offset(0, -60 * d),
-                              child: RepaintBoundary(
-                                child: OfficialFleetHoloGlassHold(
-                                  hold: moving || upperHidden,
-                                  child: upper,
+                if (moving) ...[
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    height: deck,
+                    child: IgnorePointer(
+                      child: _ShrinkingDeck(art: widget.banner, depth: d),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: deck,
+                    height: 120 - 48 * d,
+                    // The fade goes into the mirror's own mask: an Opacity
+                    // here was one more offscreen layer on every frame.
+                    child: IgnorePointer(
+                      child: OfficialFleetDeckMirror(
+                        widget.banner,
+                        opacity: .9 - .35 * d,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: deck,
+                    height: 1,
+                    child: const IgnorePointer(child: _DeckEdge()),
+                  ),
+                  // The scan passes over the arriving screen only, never the deck.
+                  if (sweep > 0 && sweep < 1)
+                    Positioned(
+                      left: 20,
+                      right: 20,
+                      top: deck,
+                      bottom: 0,
+                      child: IgnorePointer(
+                        child: ClipRect(
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: (box.maxHeight - deck) * sweep - 100,
+                                height: 100,
+                                child: _Scan(fade: 1 - sweep * .6),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+                // The upper screen paints above the shrinking deck: its slab and
+                // title overlap the banner's lower edge, and the deck must not
+                // cut them off while the switch runs (user report 2026-10-25).
+                if (_upperShown)
+                  Positioned.fill(
+                    key: const ValueKey('official-fleet-upper-slot'),
+                    child: Offstage(
+                      offstage: upperHidden,
+                      child: TickerMode(
+                        key: const ValueKey('official-fleet-upper-screen'),
+                        enabled: !upperHidden,
+                        child: ExcludeFocus(
+                          excluding: upperHidden,
+                          child: IgnorePointer(
+                            ignoring: moving,
+                            child: Opacity(
+                              opacity: upperOpacity,
+                              child: Transform.translate(
+                                offset: Offset(0, -60 * d),
+                                child: RepaintBoundary(
+                                  child: OfficialFleetHoloGlassHold(
+                                    hold: moving || upperHidden,
+                                    child: upper,
+                                  ),
                                 ),
                               ),
                             ),
@@ -215,17 +237,24 @@ class _ScreenSwitchState extends State<OfficialFleetScreenSwitch>
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
-/// The banner on its way to becoming the bar: more blur and shade the
-/// further it shrinks, so the bar ends calm behind its text.
+/// The banner on its way to becoming the bar: softer and darker the further
+/// it shrinks, so the bar ends calm behind its text.
+///
+/// Performance (user report 2026-11-07, scrolling the upper screen with a
+/// game open): a live blur of the whole banner was recomputed on every frame
+/// of the switch. The softness now comes from a small decode of the same
+/// banner under the sharp one, which fades out faster than it shrinks (the
+/// blur's 8 × depth reached most of its softness early), so no frame needs
+/// an image filter.
 class _ShrinkingDeck extends StatelessWidget {
   const _ShrinkingDeck({required this.art, required this.depth});
 
@@ -235,18 +264,14 @@ class _ShrinkingDeck extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ground = Theme.of(context).scaffoldBackgroundColor;
+    final sharp = math.pow(1 - depth.clamp(0.0, 1.0), 2).toDouble();
     return ClipRect(
       child: Stack(
         fit: StackFit.expand,
         children: [
-          ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(
-              sigmaX: 8 * depth,
-              sigmaY: 8 * depth,
-              tileMode: TileMode.clamp,
-            ),
-            child: OfficialFleetHoloBannerImage(art),
-          ),
+          ColoredBox(color: context.tokens.surfaces.raised.fill),
+          OfficialFleetHoloSoftBanner(art),
+          OfficialFleetHoloBannerImage(art, opacity: sharp),
           ColoredBox(color: ground.withValues(alpha: .5 * depth)),
         ],
       ),
@@ -286,21 +311,19 @@ class _Scan extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = context.tokens.colors.accent;
-    return Opacity(
-      opacity: fade,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              accent.withValues(alpha: 0),
-              accent.withValues(alpha: .10),
-              accent.withValues(alpha: .45),
-              accent.withValues(alpha: 0),
-            ],
-            stops: const [0, .8, .99, 1],
-          ),
+    // The fade is in the colours themselves, not an Opacity layer.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            accent.withValues(alpha: 0),
+            accent.withValues(alpha: .10 * fade),
+            accent.withValues(alpha: .45 * fade),
+            accent.withValues(alpha: 0),
+          ],
+          stops: const [0, .8, .99, 1],
         ),
       ),
     );
@@ -310,13 +333,22 @@ class _Scan extends StatelessWidget {
 /// The banner mirrored and blurred under the deck edge, fading into the page:
 /// the "mirror" of the holo deck, kept under the lower screen's bar.
 class OfficialFleetDeckMirror extends StatelessWidget {
-  const OfficialFleetDeckMirror(this.art, {super.key});
+  const OfficialFleetDeckMirror(this.art, {this.opacity = 1, super.key});
 
   final OrganizationHoloArt? art;
 
+  /// Fades the whole reflection through its mask (no extra layer).
+  final double opacity;
+
   @override
-  Widget build(BuildContext context) {
-    if (art == null) return const SizedBox.shrink();
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) =>
+        lightOnly ? const SizedBox.shrink() : _mirror(context),
+  );
+
+  Widget _mirror(BuildContext context) {
+    if (art == null || opacity <= 0) return const SizedBox.shrink();
     final ground = Theme.of(context).scaffoldBackgroundColor;
     return ExcludeSemantics(
       child: ClipRect(
@@ -330,7 +362,7 @@ class OfficialFleetDeckMirror extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  ground.withValues(alpha: .6),
+                  ground.withValues(alpha: .6 * opacity.clamp(0.0, 1.0)),
                   ground.withValues(alpha: 0),
                 ],
               ).createShader(bounds),

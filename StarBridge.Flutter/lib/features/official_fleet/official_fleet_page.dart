@@ -1,3 +1,4 @@
+import '../../design_system/surfaces/light_visual_shadow_scope.dart';
 import 'official_fleet_activity_section.dart';
 import '../common/organization_communication.dart';
 import 'official_fleet_manage_workspace.dart';
@@ -50,6 +51,7 @@ import 'official_fleet_support_views.dart';
 import 'official_fleet_workspace_header.dart';
 import 'official_fleet_workspace_navigation.dart';
 import '../settings/local_privacy_controller.dart';
+import '../settings/organization_notification_leave_guard.dart';
 import 'official_fleet_first_sharing_choice.dart';
 import 'official_fleet_manual_refresh.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
@@ -77,9 +79,8 @@ class _OfficialFleetPageState extends State<OfficialFleetPage> {
   Object? _contextKey;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) => ValueListenableBuilder<OfficialFleetProjection>(
+  Widget build(BuildContext context) => LightVisualShadowScope(child: Builder(builder: _buildPage));
+  Widget _buildPage(BuildContext context) => ValueListenableBuilder<OfficialFleetProjection>(
     valueListenable: widget.module.projection,
     builder: (context, projection, _) {
       Widget content;
@@ -98,7 +99,8 @@ class _OfficialFleetPageState extends State<OfficialFleetPage> {
           section: _section,
           sharedShipsPort: widget.sharedShipsPort,
           hangarSharingPort: widget.hangarSharingPort,
-          onSectionChanged: (value) => setState(() => _section = value),
+          onSectionChanged: guardedOrganizationSectionChange(
+            this, () => _section, (value) => setState(() => _section = value)),
         );
         // The holo header is full-bleed: the workspace owns its own insets.
         return OfficialFleetBackdrop(
@@ -757,6 +759,7 @@ class _FleetWorkspaceState extends State<_FleetWorkspace>
               OfficialFleetMembersSection(
                 sourceRef: fleet.sourceRef,
                 module: widget.module.members,
+                governance: communication.governance,
                 retained: widget.projection.refreshFailed,
                 officialMemberCount: fleetRsiMemberCount(widget.module, fleet),
               ),

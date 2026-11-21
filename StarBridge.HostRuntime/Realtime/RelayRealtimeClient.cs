@@ -42,6 +42,7 @@ internal sealed partial class RelayRealtimeClient : IDisposable
         _origin = origin;
         _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }, handler is null)
             { Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
         _socketFactory = socketFactory ?? (() => new ClientWebSocket());
         EventReceived += ObserveDirectMessageHint;
     }
@@ -204,6 +205,25 @@ internal sealed partial class RelayRealtimeClient : IDisposable
 
     private enum Outcome { Unsupported, Failed, Reauthenticate }
 
+    /// <summary>
+    /// The socket address for a ticket's gateway path, or null when it would leave the
+    /// relay origin (CX-OWNER-ALIAS-073-R #5): "//host/x" and "/\host" are host
+    /// changes, not paths, and the socket carries the version header and the ticket.
+    /// </summary>
+    internal static Uri? GatewayUri(Uri origin, string gateway, string ticket)
+    {
+        if (gateway.Length == 0 || gateway[0] != '/' || gateway.StartsWith("//", StringComparison.Ordinal) ||
+            gateway.Contains('\\') || gateway.Any(char.IsControl)) return null;
+        if (!Uri.TryCreate(origin, gateway, out var combined) ||
+            Uri.Compare(combined, origin, UriComponents.SchemeAndServer, UriFormat.UriEscaped, StringComparison.OrdinalIgnoreCase) != 0)
+            return null;
+        return new UriBuilder(combined)
+        {
+            Scheme = origin.Scheme == "https" ? "wss" : "ws",
+            Query = "ticket=" + Uri.EscapeDataString(ticket)
+        }.Uri;
+    }
+
     private async Task<Outcome> ConnectOnceAsync(string bearer, CancellationToken token)
     {
         string ticket, gateway;
@@ -221,7 +241,7 @@ internal sealed partial class RelayRealtimeClient : IDisposable
             if (root.GetProperty("protocol").GetInt32() != 1) return Outcome.Unsupported;
             ticket = root.GetProperty("ticket").GetString() ?? "";
             gateway = root.GetProperty("gateway").GetString() ?? "";
-            if (ticket.Length == 0 || !gateway.StartsWith('/')) return Outcome.Failed;
+            if (ticket.Length == 0 || GatewayUri(_origin, gateway, ticket) is null) return Outcome.Failed;
         }
         catch (Exception error) when (error is HttpRequestException or JsonException or InvalidOperationException
                                           or KeyNotFoundException or TaskCanceledException)
@@ -230,15 +250,10 @@ internal sealed partial class RelayRealtimeClient : IDisposable
             return Outcome.Failed;
         }
 
-        using var socket = _socketFactory();
+        using var socket = Support.RelayClientVersion.Apply(_socketFactory());
         try
         {
-            var ws = new UriBuilder(new Uri(_origin, gateway))
-            {
-                Scheme = _origin.Scheme == "https" ? "wss" : "ws",
-                Query = "ticket=" + Uri.EscapeDataString(ticket)
-            }.Uri;
-            await socket.ConnectAsync(ws, token);
+            await socket.ConnectAsync(GatewayUri(_origin, gateway, ticket)!, token);
             var hello = await ReceiveAsync(socket, TimeSpan.FromSeconds(10), token);
             if (hello?.Op != "hello") return Outcome.Failed;
             var heartbeat = TimeSpan.FromMilliseconds(Math.Clamp(

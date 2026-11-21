@@ -30,7 +30,7 @@ internal sealed class LocalDeviceSetupReader(LocalFirstUseStore local,
     OverlayBridgeDispatcher overlay, NotificationSettingsBridgeDispatcher notifications,
     ContinuousPlayReminderRuntime reminder)
 {
-    private sealed record Scope(long Generation, long Revision, string SourceKey, string ProfileId,
+    private sealed record Scope(long Generation, long Revision, string? SourceKey, string? ProfileId,
         string Version, bool? ListeningEnabled);
 
     internal async ValueTask<LocalDeviceSetupObservation> ReadAsync(CancellationToken cancellationToken = default)
@@ -57,6 +57,8 @@ internal sealed class LocalDeviceSetupReader(LocalFirstUseStore local,
     {
         var hostGeneration = generation();
         var value = local.Read();
+        if (value.LogDeferred && value.SelectedSourceKey is null && value.ActiveProfileId is null)
+            return new(hostGeneration, value.Revision, null, null, "", null);
         var source = value.Sources.SingleOrDefault(s => s.SourceKey == value.SelectedSourceKey);
         return source is { NeedsFreshGameEvidence: false, ConfirmedProfileId: not null } &&
                value.ActiveProfileId == source.ConfirmedProfileId

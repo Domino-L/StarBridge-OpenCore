@@ -218,17 +218,20 @@ void _noOldTitle(WidgetTester t, _Probe p, FeatureDescriptor old) {
 
 void _currentTitle(WidgetTester t, _Probe p) {
   final strings = AppStrings.of(t.element(_header));
-  for (final key in [
-    p.navigation.selected.labelKey,
-    p.navigation.selected.descriptionKey,
-  ]) {
-    final text = strings.text(key);
-    expect(
-      find.descendant(of: _header, matching: find.text(text)),
-      findsOneWidget,
-    );
-    expect(find.bySemanticsLabel(RegExp(RegExp.escape(text))), findsWidgets);
-  }
+  final title = strings.text(p.navigation.selected.labelKey);
+  expect(
+    find.descendant(of: _header, matching: find.text(title)),
+    findsOneWidget,
+  );
+  expect(find.bySemanticsLabel(RegExp(RegExp.escape(title))), findsWidgets);
+  // 用户要求去掉标题下的说明小字（"去掉小字"）。
+  expect(
+    find.descendant(
+      of: _header,
+      matching: find.text(strings.text(p.navigation.selected.descriptionKey)),
+    ),
+    findsNothing,
+  );
 }
 
 Future<List<int>> _pixels(WidgetTester t, _Probe p, Rect globalRect) async {

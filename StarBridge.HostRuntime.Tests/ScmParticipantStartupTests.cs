@@ -16,16 +16,18 @@ internal static partial class LegacyPasswordLoginTests
         try
         {
             // Hold the original background owner read before it can enter
-            // enrollment. The root request must still verify its own owner.
+            // enrollment. The root request joins that owner read but must not
+            // wait for the later participant registration.
             await coordinator.BackgroundStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
             reading = host.GetCurrentAsync(cancellation.Token);
+            Check(!reading.IsCompleted && coordinator.Reads == 1,
+                "Root readiness joins the pending owner confirmation instead of issuing a second request");
+            coordinator.ReleaseBackground.TrySetResult();
             var current = await reading.WaitAsync(TimeSpan.FromSeconds(2));
             Check(current.Context == host.CurrentContext && current.Context is not null,
                 "Root read must project the real current account independently of discovery");
-            Check(coordinator.Reads == 2 && host.ResolveLocalDataOwner(current.Context!) == current.Context,
+            Check(coordinator.Reads == 1 && host.ResolveLocalDataOwner(current.Context!) == current.Context,
                 "Root readiness must retain fresh local storage ownership verification");
-            Check(transport.Registrations == 0, "Root read must not steal the background registration");
-            coordinator.ReleaseBackground.TrySetResult();
             await transport.RegistrationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(3));
             await host.GetCurrentAsync(cancellation.Token).WaitAsync(TimeSpan.FromSeconds(2));
             Check(transport.Registrations == 1, "Polling while registration is pending must not replay it");
@@ -45,7 +47,7 @@ internal static partial class LegacyPasswordLoginTests
     internal static async Task ScmParticipantRootReadStillWaitsForOwner()
     {
         using var transport = new EnrollmentTransport();
-        var coordinator = new StartupOwnerCoordinator { HoldRoot = true };
+        var coordinator = new StartupOwnerCoordinator();
         using var reader = new S2CompatibilityReader(coordinator, UnavailableLegacyRelayAccountPort.Instance);
         using var host = StartupParticipantHost(transport, reader);
         using var cancellation = new CancellationTokenSource();
@@ -55,10 +57,10 @@ internal static partial class LegacyPasswordLoginTests
         {
             await coordinator.BackgroundStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
             reading = host.GetCurrentAsync(cancellation.Token);
-            await coordinator.RootStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            Check(!reading.IsCompleted, "Root read cannot declare readiness before its storage owner check");
+            Check(!reading.IsCompleted && coordinator.Reads == 1,
+                "Root read cannot declare readiness before the shared storage owner check");
             cancellation.Cancel();
-            try { await reading; throw new Exception("Expected cancelled owner read"); }
+            try { await reading.WaitAsync(TimeSpan.FromSeconds(2)); throw new Exception("Expected cancelled owner read"); }
             catch (OperationCanceledException) { }
             Check(transport.Registrations == 0, "Cancelled owner verification cannot start registration");
         }
@@ -85,9 +87,7 @@ internal static partial class LegacyPasswordLoginTests
     private sealed class StartupOwnerCoordinator : IAccountCompatibilityCoordinator
     {
         internal int Reads;
-        internal bool HoldRoot;
         internal readonly TaskCompletionSource BackgroundStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal readonly TaskCompletionSource RootStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly TaskCompletionSource ReleaseBackground = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<AccountBridgeCompatibilityProjection> ReadAsync(ScmOAuthSession session, CancellationToken token)
         {
@@ -95,11 +95,6 @@ internal static partial class LegacyPasswordLoginTests
             {
                 BackgroundStarted.TrySetResult();
                 await ReleaseBackground.Task.WaitAsync(token);
-            }
-            else
-            {
-                RootStarted.TrySetResult();
-                if (HoldRoot) await Task.Delay(Timeout.InfiniteTimeSpan, token);
             }
             return new("unlinked", "notApplicable", false, false, ["linkExistingAccount"], null);
         }

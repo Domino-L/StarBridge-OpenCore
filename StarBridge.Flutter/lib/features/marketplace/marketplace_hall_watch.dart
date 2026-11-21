@@ -122,7 +122,7 @@ class _WatchTile extends StatelessWidget {
                           Text(
                             item == null ? marketText(context, 'itemNameMissing') : marketName(item, marketLocale(context)),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                           ),

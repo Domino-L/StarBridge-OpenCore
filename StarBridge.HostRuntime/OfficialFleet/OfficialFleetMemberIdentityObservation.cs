@@ -11,11 +11,11 @@ internal sealed record OfficialFleetMemberIdentityObservation(OfficialFleetMembe
     DateTimeOffset IdentityObservedAtUtc, DateTimeOffset IdentityValidUntilUtc)
 {
     internal static IReadOnlyDictionary<long, OfficialFleetMemberIdentityObservation> Parse(
-        JsonElement root, string sourceRef, IReadOnlyCollection<long> requested, DateTimeOffset now)
+        JsonElement root, string sourceRef, IReadOnlyCollection<long> requested, DateTimeOffset now, bool checkTime = true)
     {
         try
         {
-            RequireProperties(root, ["schemaVersion", "sourceRef", "members"]);
+            RequireProperties(root, ["schemaVersion", "sourceRef", "members"], ["serverTime"]);
             if (root.GetProperty("schemaVersion").GetInt32() != 2 ||
                 root.GetProperty("sourceRef").GetString() != sourceRef ||
                 requested.Count is < 1 or > 100 || requested.Any(id => id <= 0) || requested.Distinct().Count() != requested.Count ||
@@ -46,7 +46,7 @@ internal sealed record OfficialFleetMemberIdentityObservation(OfficialFleetMembe
             var identities = OfficialFleetMemberIdentity.Parse(identityDocument.RootElement, sourceRef, requested);
             var result = identities.ToDictionary(p => p.Key, p => new OfficialFleetMemberIdentityObservation(
                 p.Value, stamps[p.Key].Observed, stamps[p.Key].Until));
-            EnsureCurrent(result.Values, now);
+            EnsureCurrent(result.Values, now, checkTime);
             return new ReadOnlyDictionary<long, OfficialFleetMemberIdentityObservation>(result);
         }
         catch (AccountBridgeHostException) { throw; }
@@ -55,17 +55,25 @@ internal sealed record OfficialFleetMemberIdentityObservation(OfficialFleetMembe
         { throw OfficialFleetMemberIdentity.Invalid(); }
     }
 
-    internal static void EnsureCurrent(IEnumerable<OfficialFleetMemberIdentityObservation> rows, DateTimeOffset now)
+    internal static void EnsureCurrent(IEnumerable<OfficialFleetMemberIdentityObservation> rows, DateTimeOffset now, bool checkTime = true)
     {
         AccountReadTiming.Checkpoint(MemberReadCheckpoint.G1Deadline);
         foreach (var row in rows)
         {
             if (row.IdentityObservedAtUtc.Offset != TimeSpan.Zero || row.IdentityValidUntilUtc.Offset != TimeSpan.Zero ||
-                row.IdentityObservedAtUtc - now > TimeSpan.FromSeconds(1) ||
                 row.IdentityValidUntilUtc <= row.IdentityObservedAtUtc ||
-                row.IdentityValidUntilUtc - row.IdentityObservedAtUtc > TimeSpan.FromSeconds(5) ||
-                now >= row.IdentityValidUntilUtc) throw OfficialFleetMemberIdentity.Invalid();
+                row.IdentityValidUntilUtc - row.IdentityObservedAtUtc > TimeSpan.FromSeconds(5)) throw OfficialFleetMemberIdentity.Invalid();
+            if (checkTime && (OfficialFleetServerClock.IsFuture(row.IdentityObservedAtUtc, now) ||
+                OfficialFleetServerClock.IsExpired(row.IdentityValidUntilUtc, now)))
+                throw new AccountBridgeHostException("official_fleet.identity_clock_skew");
         }
+    }
+
+    internal static void EnsureCurrent(IEnumerable<OfficialFleetMemberIdentityObservation> rows, TimeProvider clock)
+    {
+        try { EnsureCurrent(rows, clock.GetUtcNow()); }
+        catch (AccountBridgeHostException error) when (error.Code == "official_fleet.identity_clock_skew" && clock is OfficialFleetServerClock)
+        { throw ((OfficialFleetServerClock)clock).TimeFailure(); }
     }
 
     internal static DateTimeOffset Utc(JsonElement value)

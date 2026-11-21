@@ -17,6 +17,7 @@ internal static class FirstUseOnlineIdentityTests
     }
     internal static async Task Run()
     {
+        await Case("completed setup retains every online identity requirement", CompletedModeSwitch);
         await Case("sign-in is required without restoring cached credentials", BeforeLogin);
         await Case("review and explicit fresh readback do not activate or merge accounts", Matching);
         await Case("canonical and normalized-only Handles retain the confirmed local owner", Canonical);
@@ -36,10 +37,60 @@ internal static class FirstUseOnlineIdentityTests
         await Case("a cold owner cannot reuse a live candidate confirmation", Cold);
         await Case("damaged local identity storage preserves bytes and cannot authorize a review", DamagedLocal);
     }
+    private static async Task CompletedModeSwitch()
+    {
+        foreach (var scenario in new[] { "login", "local", "unverified", "mismatch", "installation" })
+        {
+            using var f = new FirstUseOnlineReturnTests.Fixture();
+            await f.Prepare();
+            var local = new LocalFirstUseStore(f.Local.Root).Read();
+            var completion = new FirstUseCompletionStore(f.Local.Root);
+            var historical = completion.Save(null, Id(), "local", local.ActiveProfileId,
+                local.SelectedSourceKey, () => true);
+            var path = Path.Combine(f.Local.Root, "first-use-completion-v1", "state.bin");
+            var original = File.ReadAllBytes(path);
+            f.Mode.RequestOnline(2, Id()); await f.Stage();
+            if (scenario != "login")
+                Check((await f.Login()).Response.Status == "ok", "Synthetic login after completed setup");
+            if (scenario == "local")
+            {
+                var store = new LocalFirstUseStore(f.Local.Root); var state = store.Read();
+                store.InvalidateSourceIdentity(state.Revision, Id(), state.SelectedSourceKey!, () => true);
+            }
+            if (scenario == "unverified")
+            { f.Transport.IdentityStatus = "UNVERIFIED"; f.Transport.IdentityVerified = false; }
+            if (scenario == "mismatch")
+            { f.Transport.Handle = "Other-Pilot"; f.Transport.NormalizedHandle = "other-pilot"; }
+            await using var native = new NativeAccountRuntimeBinding(f.Local.Runtime);
+            var reviewed = await Read(f);
+            if (scenario == "installation")
+                Check((await Confirm(f, reviewed)).State == "confirmedForHandoff", "Matching identity can be confirmed");
+            else
+            {
+                Check(reviewed.ConfirmationKey is null && !f.Mode.HasConfirmedOnlineIdentity(3),
+                    "Missing login, local evidence, verification or matching Handle cannot authorize online");
+                using var installation = new FirstUseOnlineInstallationBridgeDispatcher(f.Mode, native,
+                    _ => throw new Exception("Unexpected installation"));
+                var refused = await installation.DispatchAsync(BridgeEnvelope.Request(
+                    "onboarding.onlineInstallation.install", Id(), f.Mode.ControlGeneration,
+                    new { schemaVersion = 1, revision = 3 }));
+                Check(refused.Response.Status == "error" && f.Mode.Current.ActiveMode == "local",
+                    "Actual Host installation protocol rejects every missing online precondition");
+            }
+            using var network = f.Mode.DeviceNetwork.Enter();
+            Check(f.Mode.Current.ActiveMode == "local" && !f.Mode.HasInstalledOnlineForCompletion &&
+                network is null, "Even confirmed identity needs actual installation");
+            Check(completion.Read() == historical && File.ReadAllBytes(path).SequenceEqual(original),
+                "Mode intent and identity review leave completion bytes unchanged");
+            await f.Cancel();
+            Check(f.Mode.Current.ActiveMode == "local" && File.ReadAllBytes(path).SequenceEqual(original),
+                "Cancellation preserves local mode and historical completion");
+        }
+    }
     private static async Task Start(FirstUseOnlineReturnTests.Fixture f, bool login = true, TimeProvider? clock = null)
     {
         await f.Prepare(clock); f.Mode.RequestOnline(2, Id()); await f.Stage();
-        if (login) Check((await f.Login().WaitAsync(TimeSpan.FromSeconds(3))).Response.Status == BridgeResponseStatuses.Ok,
+        if (login) Check((await f.Login().WaitAsync(FirstUseTestWait.Bound)).Response.Status == BridgeResponseStatuses.Ok,
             "Actual synthetic PKCE login must complete.");
     }
     private static Task<FirstUseOnlineIdentityObservation> Read(FirstUseOnlineReturnTests.Fixture f) =>
@@ -203,7 +254,7 @@ internal static class FirstUseOnlineIdentityTests
         using (var f = new FirstUseOnlineReturnTests.Fixture())
         {
             await Start(f); f.Transport.HoldIdentity = true; var read = Read(f);
-            await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); SwitchSource(f);
+            await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound); SwitchSource(f);
             f.Transport.ReleaseIdentity.TrySetResult();
             Check((await read).State == "contextChanged", "Late transport cannot authorize a new selected source."); Blocked(f);
         }
@@ -212,12 +263,12 @@ internal static class FirstUseOnlineIdentityTests
     {
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f);
         f.Transport.HoldIdentity = true; var read = Read(f);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); var cancel = f.Cancel();
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound); var cancel = f.Cancel();
         Check(!cancel.IsCompleted && f.Transport.IdentityToken.IsCancellationRequested && f.Mode.LocalMode().Active,
             "Cancellation acknowledgment must await actual admitted identity transport exit.");
         f.Transport.ReleaseIdentity.TrySetResult();
-        Check((await read.WaitAsync(TimeSpan.FromSeconds(3))).State == "contextChanged" &&
-            (await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local" && !f.Mode.HasConfirmedOnlineIdentity(3) &&
+        Check((await read.WaitAsync(FirstUseTestWait.Bound)).State == "contextChanged" &&
+            (await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local" && !f.Mode.HasConfirmedOnlineIdentity(3) &&
             f.Vault.LoadActiveAccountKey() is null, "Late read cannot commit identity after actual candidate retirement.");
         f.Local.RequireLocalStateUnchanged();
     }
@@ -244,7 +295,7 @@ internal static class FirstUseOnlineIdentityTests
             if (hold)
             {
                 f.Transport.HoldIdentity = true; work = Confirm(f, review);
-                await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
             }
             f.Vault.SaveRefreshToken(key, "synthetic-newer-refresh"); var bytes = File.ReadAllBytes(f.VaultPath);
             Check(!f.Mode.HasConfirmedOnlineIdentity(3), "Changed actual Windows credential version invalidates the live precondition.");
@@ -292,7 +343,7 @@ internal static class FirstUseOnlineIdentityTests
     {
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f);
         f.Transport.HoldIdentity = true; var read = Read(f);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         await Expect("firstUse.operation_in_progress", () => Read(f));
         f.Transport.ReleaseIdentity.TrySetResult(); var review = await read;
         await Confirm(f, review);

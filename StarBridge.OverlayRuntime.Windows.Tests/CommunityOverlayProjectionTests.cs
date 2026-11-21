@@ -39,7 +39,7 @@ internal static class CommunityOverlayProjectionTests
         var model = new OverlayViewModel(new OverlayAuthorizedRoster(projected.Scene.Players), settings,
             OverlayRosterSelectionSettings.Default, "en", true, projected.Command,
             PlayerPresenceKind.AppOnline, "", projected.Scene.Context, projected.Chat);
-        Check(model.SquadsTitle == "ORGANIZATION OVERVIEW" && model.MembersTitle == "ORGANIZATION MEMBERS",
+        Check(model.SquadsTitle == "ORGANIZATION OVERVIEW" && model.MembersTitle == "Organization name",
             "Actual renderer labels organization content without enabling main fleet.");
         var overview = OverlayOverviewProjection.Project(projected.Scene.Players.ToArray(),
             projected.Scene.Context, true, PlayerPresenceKind.AppOnline, "", "en");

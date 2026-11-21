@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <!-- Shown names only (0.7.3 rename); the exe file name stays because the installed update finds it by path. -->
+    <Product>SCM StarBridge</Product>
+    <AssemblyTitle>SCM StarBridge Update Helper</AssemblyTitle>
+    <Company>SCM StarBridge</Company>
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

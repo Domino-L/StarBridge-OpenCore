@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'marketplace_port.dart';
+import 'marketplace_time.dart';
 
 /// One paged record list in 我的交易 (reviews, reports or blocklist).
 class MarketRecordList {
@@ -10,7 +11,12 @@ class MarketRecordList {
   int total = 0, page = 0;
   bool loading = false, failed = false;
   String? error;
+  int? tradeTotal, contractTotal;
   bool get more => rows.length < total;
+  bool get reviewsComplete => !loading && !failed &&
+      tradeTotal != null && contractTotal != null &&
+      rows.where((r) => r['sourceType'] == 'trade').length >= tradeTotal! &&
+      rows.where((r) => r['sourceType'] == 'contract').length >= contractTotal!;
 }
 
 /// The member's own records (0.7.2 G5/G6/G7): reviews received, reports filed
@@ -22,6 +28,7 @@ class MarketplaceRecordsController extends ChangeNotifier {
 
   final reviews = MarketRecordList();
   final reports = MarketRecordList();
+  String reportKind = 'reports';
   final blocklist = MarketRecordList();
   final Set<String> unblocking = {};
   bool _disposed = false;
@@ -56,6 +63,12 @@ class MarketplaceRecordsController extends ChangeNotifier {
         ..rows = more ? [...list.rows, ...rows] : rows
         ..total = (data['total'] as num?)?.toInt() ?? rows.length
         ..page = page;
+      if (operation == 'reviews') {
+        list.tradeTotal = (data['tradeTotal'] as num?)?.toInt();
+        list.contractTotal = (data['contractTotal'] as num?)?.toInt();
+        list.rows.sort((a, b) => (scmInstant(b['createTime'])?.millisecondsSinceEpoch ?? 0)
+            .compareTo(scmInstant(a['createTime'])?.millisecondsSinceEpoch ?? 0));
+      }
     } on MarketplaceTradeError catch (error) {
       if (_disposed || epoch != _epoch) return;
       list
@@ -96,6 +109,8 @@ class MarketplaceRecordsController extends ChangeNotifier {
     for (final list in [reviews, reports, blocklist]) {
       list
         ..rows = const []
+        ..tradeTotal = null
+        ..contractTotal = null
         ..total = 0
         ..page = 0
         ..loading = false

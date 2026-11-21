@@ -103,7 +103,7 @@ internal static partial class OfficialFleetPreviewAuthorTests
         Check(neutral.GetProperty("messages")[0].GetProperty("authorIdentityState").GetString() == "unavailable", "invalid author proof remains neutral");
         fixture.Handler.BadProof = false;
         var pending = await fixture.Host.OfficialFleetCommunicationAsync(fixture.Owner, JsonSerializer.SerializeToElement(fixture.Renewal()), default);
-        fixture.Handler.Clock.Now += TimeSpan.FromSeconds(6);
+        fixture.Handler.Clock.Now += TimeSpan.FromSeconds(16);
         Check(JsonSerializer.SerializeToElement(pending).GetProperty("messages")[0].GetProperty("senderCallsign").GetString() == "", "expiry at final publication still redacts proof");
 
         using var stale = new Fixture(); await stale.Open(); stale.Handler.Hold = true;
@@ -142,7 +142,8 @@ internal static partial class OfficialFleetPreviewAuthorTests
             var options = new ScmOAuthOptions("fixture-scm", new("http://127.0.0.1:3000/"), new("http://127.0.0.1:18080/"),
                 new("http://127.0.0.1:18082/"), "starbridge-desktop", "starbridge-api", "organizations.read", "/oauth/callback");
             var session = new ScmOAuthSession("fixture-scm", "fixture-owner-" + Guid.NewGuid().ToString("N"), "Synthetic", "synthetic-access", DateTimeOffset.UtcNow.AddHours(1), ["organizations.read"]);
-            Host = new(new OAuthPkceClient(new ScmHttpClient(Handler), new Vault(), options), new ScmProfileCacheStore(Path.GetTempPath()),
+            Host = new(new OAuthPkceClient(new ScmHttpClient(Handler), new Vault(), options)
+                { OfficialFleetIdentityObservationClock = Handler.Clock }, new ScmProfileCacheStore(Path.GetTempPath()),
                 "fixture", () => null, initialSession: session, initialGeneration: 1, communities: Client);
             Dispatcher = new(Host); Owner = Host.CurrentContext!;
         }

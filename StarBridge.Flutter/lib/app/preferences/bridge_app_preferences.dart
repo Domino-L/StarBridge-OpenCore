@@ -47,6 +47,11 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
         'interactionStyle': patch.interactionStyle!.name,
       if (patch.holidayAppearance != null)
         'holidayAppearance': patch.holidayAppearance,
+      if (patch.performanceMode != null)
+        'performanceMode': patch.performanceMode,
+      if (patch.readOwnHealth != null) 'readOwnHealth': patch.readOwnHealth,
+      if (patch.readOwnHealthInBackground != null)
+        'readOwnHealthInBackground': patch.readOwnHealthInBackground,
       if (patch.applicationBehavior != null)
         'applicationBehavior': {
           'launchAtStartup': patch.applicationBehavior!.launchAtStartup,
@@ -132,7 +137,7 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
       'scan' => InteractionStyle.scan,
       'glow' => InteractionStyle.glow,
       null when !values.containsKey('interactionStyle') =>
-        InteractionStyle.standard,
+        InteractionStyle.scan,
       _ => throw const BridgeFormatException(
         'Interaction style is unsupported.',
       ),
@@ -150,6 +155,31 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
         'Holiday appearance preference is invalid.',
       ),
     };
+    // 旧 Host 没有这个字段：缺就按默认关；显式的 null 或其他类型报错。
+    final performanceMode = switch (values['performanceMode']) {
+      final bool enabled => enabled,
+      null when !values.containsKey('performanceMode') => false,
+      _ => throw const BridgeFormatException(
+        'Performance mode preference is invalid.',
+      ),
+    };
+    // 旧 Host 没有这个字段：缺就按默认关；显式的 null 或其他类型报错。
+    final readOwnHealth = switch (values['readOwnHealth']) {
+      final bool enabled => enabled,
+      null when !values.containsKey('readOwnHealth') => false,
+      _ => throw const BridgeFormatException(
+        'Read own health preference is invalid.',
+      ),
+    };
+    // b93 及更早的 Host 没有这个字段：缺就按默认关；显式的 null 或其他类型报错。
+    final readOwnHealthInBackground =
+        switch (values['readOwnHealthInBackground']) {
+          final bool enabled => enabled,
+          null when !values.containsKey('readOwnHealthInBackground') => false,
+          _ => throw const BridgeFormatException(
+            'Read own health in background preference is invalid.',
+          ),
+        };
     final applicationBehavior = behaviorValue == null
         ? ApplicationBehaviorPreferences.defaults
         : _parseApplicationBehavior(
@@ -163,6 +193,9 @@ final class BridgeAppPreferencesStore implements AppPreferencesStore {
         interactionStyle: interaction,
         applicationBehavior: applicationBehavior,
         holidayAppearance: holidayAppearance,
+        performanceMode: performanceMode,
+        readOwnHealth: readOwnHealth,
+        readOwnHealthInBackground: readOwnHealthInBackground,
       ),
       revision: revision,
       source: source,

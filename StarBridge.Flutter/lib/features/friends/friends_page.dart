@@ -1,3 +1,4 @@
+import '../common/last_online_days.dart';
 import '../../shared/guide/guide_empty_state.dart';
 import '../../shared/guide/guide_scope.dart';
 
@@ -9,6 +10,7 @@ import '../common/user_avatar_menu.dart';
 import '../common/social_identity_text.dart';
 import '../direct_messages/chat_avatar.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../design_system/interaction/starbridge_field_frame.dart';
@@ -47,6 +49,7 @@ class FriendsPage extends StatefulWidget {
     this.inboxRequests,
     this.openCommunityInvite,
     this.sendCommunityInvite,
+    this.communityInviteAvailable,
     super.key,
   });
   final FriendsPort Function() createPort;
@@ -57,6 +60,7 @@ class FriendsPage extends StatefulWidget {
   final Future<void> Function(BuildContext, String)? openCommunityInvite;
   final Future<void> Function(BuildContext, DirectMessagesModule)?
   sendCommunityInvite;
+  final ValueListenable<bool>? communityInviteAvailable;
   @override
   State<FriendsPage> createState() => _FriendsPageState();
 }
@@ -259,12 +263,10 @@ class _FriendsPageState extends State<FriendsPage> {
         );
       }
     }
-    if (s['lastOnlineAt'] is String) {
-      final date = DateTime.tryParse(s['lastOnlineAt'] as String)?.toLocal();
-      if (date != null) {
-        parts.add(
-          '${strings.text('settings.privacy.field.lastOnline')}: ${MaterialLocalizations.of(context).formatShortDate(date)} ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(date))}',
-        );
+    if (!const {'AppOnline', 'InGame', 'Away'}.contains(s['presence'])) {
+      final days = resolveLastOnlineDays(s);
+      if (days != null) {
+        parts.add(lastOnlineDaysText(days, strings.locale, prefix: true));
       }
     }
     return parts.join(' · ');
@@ -289,6 +291,7 @@ class _FriendsPageState extends State<FriendsPage> {
           sharedModule: _notificationInbox ? null : _messages,
           openCommunityInvite: widget.openCommunityInvite,
           sendCommunityInvite: widget.sendCommunityInvite,
+          communityInviteAvailable: widget.communityInviteAvailable,
           onBack: () {
             if (widget.messagesOnly) {
               Actions.invoke(context, const OpenDestinationIntent('/friends'));
@@ -543,6 +546,7 @@ class _FriendsPageState extends State<FriendsPage> {
       gameId: row.gameId,
       conversationKey: row.conversationKey,
       presence: friendSharedConversationPresence(row),
+      lastOnlineDays: resolveLastOnlineDays(row.shared),
     );
     if (widget.separateMessages) {
       _module.requestedConversation = conversation;

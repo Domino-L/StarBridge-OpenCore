@@ -35,9 +35,8 @@ String _asset(WidgetTester tester) {
 void main() {
   for (final name in ['dark', 'light']) {
     test('the $name picture is a 2560 by 854 still', () async {
-      final bytes = File(
-        'assets/brand/default_banner_$name.png',
-      ).readAsBytesSync();
+      final bytes = File('assets/brand/default_banner_$name.png')
+          .readAsBytesSync();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       expect((frame.image.width, frame.image.height), (2560, 854));
@@ -89,5 +88,34 @@ void main() {
       await tester.pump();
     }
     expect(_asset(tester), 'assets/brand/default_banner_dark.png');
+  });
+
+  // Review P2 (2026-11-07): the switch's soft layer must not go blank when the
+  // banner fails, or the end of the switch shows only the ground.
+  testWidgets('the soft switch layer falls back to the same picture', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      OfficialFleetHoloSoftBanner(
+        OrganizationHoloArt.bytes(Uint8List.fromList(const [1, 2, 3])),
+      ),
+      Brightness.dark,
+    );
+    for (var i = 0; i < 4; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+    }
+    final soft = tester.widget<Image>(
+      find.byKey(const Key('official-fleet-holo-soft-banner-placeholder')),
+    );
+    final resized = soft.image as ResizeImage;
+    expect(
+      (resized.imageProvider as AssetImage).assetName,
+      'assets/brand/default_banner_dark.png',
+    );
+    expect(resized.width, OfficialFleetHoloSoftBanner.decodeWidth(900));
   });
 }

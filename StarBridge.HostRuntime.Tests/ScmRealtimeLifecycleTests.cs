@@ -265,7 +265,7 @@ internal static class ScmRealtimeLifecycleTests
     // Cleanup runs in finally: a throw here would replace the test's real failure
     // (10-30 logs only showed a .tmp/.lock delete error). An unfinished credential
     // clear or a file scanner may still hold a file; a leftover temp dir proves nothing.
-    private static async Task DeleteTemporaryRoot(string root)
+    internal static async Task DeleteTemporaryRoot(string root)
     {
         for (var attempt = 0; ; attempt++)
         {

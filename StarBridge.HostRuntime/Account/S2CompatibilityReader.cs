@@ -14,7 +14,7 @@ internal sealed class S2CompatibilityReader(
     internal static S2CompatibilityReader Create(
         ScmHttpClient http, OAuthPkceClient oauth, ScmRuntimeConfiguration configuration)
     {
-        var legacyHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        var legacyHttp = Support.RelayClientVersion.NewClient(TimeSpan.FromSeconds(8));
         var links = new IdentityLinkClient(http, legacyHttp, configuration.OAuthOptions,
             () => configuration.LegacyRelayBaseUri);
         var credentials = new WindowsLegacyMigrationCredentialStore(configuration.LegacyMigrationCredentialPath);
@@ -49,10 +49,13 @@ internal sealed class S2CompatibilityReader(
                 LegacyRelayAccessState.Ready => "ready",
                 LegacyRelayAccessState.AccountMismatch => "accountMismatch",
                 LegacyRelayAccessState.AuthorizationRequired => "authorizationRequired",
+                // Both sources agree on the same legacy ID: SCM's link and the relay's
+                // migration answer. Local files keep that owner through the alias.
+                LegacyRelayAccessState.Migrated => "migrated",
                 _ => "unavailable"
             },
             LegacyFeaturesAvailable = state == LegacyRelayAccessState.Ready,
-            AvailableActions = state == LegacyRelayAccessState.Ready ? [] : ["retry"]
+            AvailableActions = (state is LegacyRelayAccessState.Ready or LegacyRelayAccessState.Migrated) ? [] : ["retry"]
         };
     }
 

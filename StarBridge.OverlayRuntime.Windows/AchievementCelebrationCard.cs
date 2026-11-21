@@ -5,71 +5,123 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
-// The accepted preview's slanted card and fast preload/release + diagonal seal
-// reveal. Animation changes only drawing clips/opacity/transforms, not layout.
-internal sealed class AchievementCelebrationCard : FrameworkElement
+internal sealed partial class AchievementCelebrationCard : FrameworkElement
 {
-    internal const double CardWidth = 336, CardHeight = 104;
-    private const double Slant = CardHeight * .2, ImageX = 22, ImageY = 18, ImageSize = 68, TextX = 104;
-    internal const double EntryMilliseconds = 1800, HoldMilliseconds = 4000, ExitMilliseconds = 180;
+    internal const double CardWidth = 364, CardHeight = 108, Bleed = 24;
+    internal const double HoldMilliseconds = 4500, ExitMilliseconds = 300;
     private readonly bool _light, _reduced;
-    private readonly string _locale;
-    private readonly string _name, _memory;
+    private readonly string _locale, _name, _memory;
+    private readonly int _summaryCount;
     private readonly ImageSource? _earned, _locked;
-    private double _elapsed;
-    private int _remaining;
-    private readonly TranslateTransform _exit = new();
-
+    private readonly Palette _palette;
     internal AchievementCelebrationCard(string? locale, bool light, bool reduced, string id = "first-entry", int rank = 0,
-        string? displayName = null, string? localImagePath = null)
+        string? displayName = null, string? localImagePath = null, StarBridge.HostRuntime.Achievements.ContractRecordLines? record = null,
+        int summaryCount = 0, string? rarityTier = null, int? rarityBasisPoints = null)
     {
         _locale = locale ?? CultureInfo.CurrentUICulture.Name;
-        _light = light; _reduced = reduced;
-        Width = CardWidth; Height = CardHeight;
-        // Keep texture sampling explicit on the hardware window path. The
-        // software/offscreen renderer can choose a different default from the
-        // layered desktop window, especially for a large master drawn at 68 DIP.
+        _light = light;
+        _reduced = reduced;
+        _summaryCount = id == "scm-summary" ? Math.Clamp(summaryCount, 0, 4096) : 0;
+        Width = CardWidth + Bleed;
+        Height = CardHeight + Bleed;
+        ClipToBounds = true;
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
-        RenderTransform = _exit;
-        var english = _locale.StartsWith("en", StringComparison.OrdinalIgnoreCase);
-        var traditional = _locale.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase);
+        var english = English;
+        var traditional = Traditional;
+        (RarityLevel, RarityLine) = _summaryCount > 0 ? (0, "") : DescribeRarity(
+            id.StartsWith("scm-", StringComparison.Ordinal), rarityTier, rarityBasisPoints);
+        _palette = Palette.Create(light, RarityLevel);
         var (prefix, name, memory) = id switch {
+            "contract-first" => (id,english ? "Open for Business" : traditional ? "開張大吉" : "开张大吉", ""),
+            "contract-tsg-lead" => (id, english ? "TSG · Leader" : traditional ? "打擊群·領隊" : "打击群·领队", ""),
+            "contract-tsg-complete" => (id, english ? "TSG · Triumph" : traditional ? "打擊群·凱旋" : "打击群·凯旋", ""),
+            "contract-tsg-swift" => (id, english ? "TSG · Blitz" : traditional ? "打擊群·閃擊" : "打击群·闪击", ""),
+            "contract-tsg-deathless" => (id, english ? "TSG · Undying" : traditional ? "打擊群·不滅" : "打击群·不灭", ""),
             "journey-lorville" => (id, english ? "Lorville Dusk" : traditional ? "羅威爾黃昏" : "罗威尔黄昏", english ? "Dusk lingers; the towers stand like mountains" : traditional ? "夕照未盡，塔影如山" : "夕照未尽，塔影如山"),
             "journey-area18" => (id, english ? "Neon Area18" : traditional ? "霓虹十八區" : "霓虹十八区", english ? "The city that never dims" : traditional ? "燈火通明，不眠不休" : "灯火通明，不眠不休"),
             "journey-orison" => (id, english ? "Orison Above the Clouds" : traditional ? "雲上奧里森" : "云上奥里森", english ? "A city afloat on a sea of cloud" : traditional ? "雲海之上，自有人間" : "云海之上，自有人间"),
             "journey-new-babbage" => (id, english ? "Snowfall over New Babbage" : traditional ? "雪落新巴貝奇" : "雪落新巴贝奇", english ? "Snow falls quietly; the lights come on to meet you" : traditional ? "雪落無聲，燈火相迎" : "雪落无声，灯火相迎"),
             "journey-stanton" => (id, english ? "Stanton Pilgrimage" : traditional ? "巡禮斯坦頓" : "巡礼斯坦顿", english ? "Four cities reached; the stars are home" : traditional ? "四城皆至，星海為家" : "四城皆至，星海为家"),
-            "hangar-home" => ("home", english ? "A Ship to Call Home" : traditional ? "星海有歸舟" : "星海有归舟", english ? "And all I ask is a tall ship\nand a star to steer her by;" : traditional ? "滿船清夢壓星河" : "满船清梦压星河"),
-            "hangar-collection" => ("collection", english ? "Poetry in Motion" : traditional ? "舷影成詩" : "舷影成诗", english ? "I am a part of all\nthat I have met;" : traditional ? "星河欲轉千帆舞" : "星河欲转千帆舞"),
-            "hangar-paths" => ("paths", english ? "The World Is Your Oyster" : traditional ? "萬途皆可往" : "万途皆可往", english ? "I dwell in Possibility -" : traditional ? "大海從魚躍，長空任鳥飛" : "大海从鱼跃，长空任鸟飞"),
+            "journey-levski" => (id, english ? "Levski in the Rock" : traditional ? "岩中列夫斯基" : "岩中列夫斯基", english ? "Deep in the rock, the lights still burn" : traditional ? "岩壁深處，自有燈火" : "岩壁深处，自有灯火"),
+            "journey-pyro-majors" => (id, english ? "First Steps in Pyro" : traditional ? "初探派羅" : "初探派罗", english ? "A lawless star, first seen up close" : traditional ? "無主之地，初見火光" : "无主之地，初见火光"),
+            "journey-pyro-all" => (id, english ? "Walker of the Fire Sea" : traditional ? "火海行者" : "火海行者", english ? "Across the sea of fire, every harbour known" : traditional ? "火海茫茫，處處留航" : "火海茫茫，处处留航"),
+            "journey-grimhex" => (id, english ? "Lawless Grim HEX" : traditional ? "法外六角灣" : "法外六角湾", english ? "A hidden reef in the ring, a harbour of its own" : traditional ? "環中暗礁，自成一港" : "环中暗礁，自成一港"),
+            "hangar-home" => ("home", english ? "Fleet Builder" : traditional ? "艦隊成軍" : "舰队成军", english ? "And all I ask is a tall ship\nand a star to steer her by;" : traditional ? "滿船清夢壓星河" : "满船清梦压星河"),
+            "hangar-collection" => ("collection", english ? "Model Collector" : traditional ? "型號收藏家" : "型号收藏家", english ? "I am a part of all\nthat I have met;" : traditional ? "星河欲轉千帆舞" : "星河欲转千帆舞"),
+            "hangar-paths" => ("paths", english ? "Every Role Covered" : traditional ? "全能機庫" : "全能机库", english ? "I dwell in Possibility -" : traditional ? "大海從魚躍，長空任鳥飛" : "大海从鱼跃，长空任鸟飞"),
             _ => ("first-entry", english ? "First Light" : "初入星海", english ? "Look’d up in perfect silence\nat the stars" : traditional ? "星漢燦爛，若出其裏" : "星汉灿烂，若出其里")
         };
         _name = name + (rank > 0 ? " · " + StarBridge.Core.Achievements.HangarAchievementPolicy.Roman(rank) : ""); _memory = memory;
-        _earned = Load(prefix + "-earned.png"); _locked = Load(prefix + "-locked.png");
+        if (StarBridge.Core.Achievements.ContractAchievementPolicy.IsAward(id)) _memory = record?.For(_locale) ?? "";
+        // Every bundled artwork ships an earned/locked pair; a missing locked
+        // image falls back to the shared first-entry locked art.
+        var rankedArt = id is "hangar-home" or "hangar-collection" or "hangar-paths";
+        var artRank = rank is >= 1 and <= 5 ? rank : 1;
+        _earned = Load(rankedArt ? $"{prefix}-{artRank}.png" : prefix + "-earned.png");
+        _locked = Load(prefix + "-locked.png") ?? Load("first-entry-locked.png");
         if (id.StartsWith("scm-", StringComparison.Ordinal) && displayName is not null)
         {
             _name = displayName; _memory = "";
             _earned = LoadLocal(localImagePath);
             _locked = LoadLocal(localImagePath?.Replace("-512.webp", "-locked-512.webp", StringComparison.Ordinal));
         }
+        if (_summaryCount > 0)
+        {
+            _name = SummaryName(_summaryCount);
+            _memory = english ? "See them in the achievement centre" : "到成就中心查看";
+            _earned = null; _locked = null;
+        }
         System.Windows.Automation.AutomationProperties.SetName(this,
             (english ? "Achievement unlocked: " : "成就已解锁：") + _name);
     }
-    internal double LifetimeMilliseconds => (_reduced ? 0 : EntryMilliseconds + ExitMilliseconds) + HoldMilliseconds;
+    private bool English => _locale.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+    private bool Traditional => _locale.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase);
+    internal double EntryMilliseconds => _reduced ? 0 : RarityLevel switch { 2 => 1100, 1 => 820, _ => 760 };
+    internal double LifetimeMilliseconds => EntryMilliseconds + HoldMilliseconds + (_reduced ? 0 : ExitMilliseconds);
     internal bool HasArtwork => _earned is not null && _locked is not null;
     internal string Memory => _memory;
-    internal void Advance(double elapsed, int remaining)
+    internal int RarityLevel { get; }
+    internal string RarityLine { get; }
+    private string SummaryName(int count) => English ? $"{count} more SCM achievement{(count == 1 ? "" : "s")} unlocked" :
+        Traditional ? $"另有 {count} 個 SCM 成就已解鎖" : $"另有 {count} 个 SCM 成就已解锁";
+
+    internal int SummaryCountAt(double elapsed)
     {
-        _elapsed = elapsed; _remaining = remaining;
-        var exit = _reduced ? 0 : Fraction(elapsed, EntryMilliseconds + HoldMilliseconds, LifetimeMilliseconds);
-        Opacity = 1 - exit; _exit.Y = exit * 8;
-        InvalidateVisual();
+        if (_summaryCount == 0 || _reduced || elapsed >= 760) return _summaryCount;
+        // At most 21 distinct numbers need text drawings, even for a large backlog.
+        var step = Math.Clamp(Math.Floor((elapsed - 420) / 17), 0, 20) / 20;
+        return 1 + (int)Math.Floor((_summaryCount - 1) * step);
     }
-    private static ImageSource? Load(string file)
+
+    private (int Level, string Line) DescribeRarity(bool scm, string? tier, int? basisPoints)
+    {
+        if (scm) return tier switch
+        {
+            "RARE" => (1, English ? "Rare" : "稀有"),
+            "EPIC" => (2, English ? "Epic" : Traditional ? "史詩" : "史诗"),
+            "LEGENDARY" => (2, English ? "Legendary" : Traditional ? "傳說" : "传说"),
+            _ => (0, "")
+        };
+
+        var (level, label) = tier switch
+        {
+            "rare" => (1, English ? "Rare" : "稀有"),
+            "veryRare" => (2, English ? "Ultra rare" : Traditional ? "極稀有" : "极稀有"),
+            _ => (0, "")
+        };
+        if (basisPoints is not (>= 0 and <= 10000)) return (level, label);
+        var percent = (basisPoints.Value / 100d).ToString("0.0", CultureInfo.InvariantCulture);
+        var ratio = English
+            ? basisPoints < 10 ? "Earned by fewer than 0.1% of players" : $"Earned by {percent}% of players"
+            : (basisPoints < 10 ? (Traditional ? "少於 0.1%" : "少于 0.1%") : $"{percent}%") +
+                (Traditional ? " 的玩家獲得" : " 的玩家获得");
+        return (level, label.Length == 0 ? ratio : label + " · " + ratio);
+    }
+    private static ImageSource? Load(string file, string folder = "Achievements")
     {
         try
         {
-            var image = new BitmapImage(new Uri($"pack://application:,,,/StarBridge.OverlayRuntime.Windows;component/Assets/Achievements/{file}"));
+            var image = new BitmapImage(new Uri($"pack://application:,,,/StarBridge.OverlayRuntime.Windows;component/Assets/{folder}/{file}"));
             image.Freeze(); return image;
         }
         catch { return null; } // An optional image never suppresses the achievement text.
@@ -77,7 +129,10 @@ internal sealed class AchievementCelebrationCard : FrameworkElement
     private static ImageSource? LoadLocal(string? relative)
     {
         // Only bundled artwork, never ImageUrl, a URI, an arbitrary file or a WIC network codec.
-        if (relative is null || !relative.StartsWith("Assets/Achievements/scm-holiday-", StringComparison.Ordinal) ||
+        // SCM holiday, daily and limited-event art (daily/event added for 0.7.3 build 105).
+        if (relative is null || !(relative.StartsWith("Assets/Achievements/scm-holiday-", StringComparison.Ordinal) ||
+            relative.StartsWith("Assets/Achievements/scm-daily-", StringComparison.Ordinal) ||
+            relative.StartsWith("Assets/Achievements/scm-event-", StringComparison.Ordinal)) ||
             !relative.EndsWith("-512.webp", StringComparison.Ordinal) || relative.Contains("..") || relative.Contains('\\') ||
             relative["Assets/Achievements/".Length..].Contains('/')) return null;
         try
@@ -90,94 +145,5 @@ internal sealed class AchievementCelebrationCard : FrameworkElement
             image.Freeze(); return image;
         }
         catch { return null; }
-    }
-    internal static double Fraction(double ms, double start, double end) => Math.Clamp((ms - start) / (end - start), 0, 1);
-    private static double Out(double value) => 1 - Math.Pow(1 - value, 3);
-    private static double Move(double ms, double start, double end, double from, double to) =>
-        from + (to - from) * Out(Fraction(ms, start, end));
-    private static Brush Color(string hex) => new SolidColorBrush((System.Windows.Media.Color)ColorConverter.ConvertFromString(hex));
-    private static Geometry Polygon(params Point[] points)
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open()) { context.BeginFigure(points[0], true, true); context.PolyLineTo(points.Skip(1).ToArray(), true, false); }
-        geometry.Freeze(); return geometry;
-    }
-    protected override void OnRender(DrawingContext dc)
-    {
-        base.OnRender(dc);
-        var t = _reduced ? EntryMilliseconds : _elapsed;
-        var left = Move(t, 300, 378, 120, -40);
-        var right = t < 445 ? Move(t, 315, 445, 60, CardWidth - 28) : Move(t, 445, 545, CardWidth - 28, CardWidth + 40);
-        dc.PushClip(new RectangleGeometry(new Rect(Math.Max(0, left), 0, Math.Max(0, right - Math.Max(0, left)), CardHeight)));
-        dc.PushClip(Polygon(new(Slant, 0), new(CardWidth, 0), new(CardWidth, CardHeight), new(0, CardHeight)));
-        dc.DrawRectangle(Color(_light ? "#f7fafb" : "#111920"), null, new(0, 0, CardWidth, CardHeight));
-        dc.DrawLine(new Pen(Color(_light ? "#bfd0dc" : "#365061"), 1), new(Slant, .5), new(CardWidth, .5));
-        DrawImage(dc, t);
-        var english = _locale.StartsWith("en", StringComparison.OrdinalIgnoreCase);
-        var traditional = _locale.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase);
-        // The stack is centred as a whole, so a card without a memory line is not top-heavy.
-        var name = Format(_name, NameSize(english && _name.Contains(" · ") ? 15 : 19), _light ? "#182b36" : "#e8f0f5", true);
-        var memory = _memory.Length == 0 ? null : Format(_memory, 12, _light ? "#536875" : "#aabcc7");
-        var top = (CardHeight - (19 + name.Height + (memory is null ? 0 : 5 + memory.Height))) / 2;
-        Draw(dc, Format(english ? "ACHIEVEMENT UNLOCKED" : traditional ? "成就已解鎖" : "成就已解锁", 11, _light ? "#286b92" : "#93c8e8"),
-            TextX, top, Fraction(t, 345, 500));
-        Draw(dc, name, TextX, top + 19, Fraction(t, 325, 485));
-        if (memory is not null) Draw(dc, memory, TextX, top + 19 + name.Height + 5, Fraction(t, 410, 640));
-        if (_remaining > 0) Draw(dc, Format($"+{_remaining}", 11, _light ? "#536875" : "#aabcc7"), CardWidth - 38, 10, Fraction(t, 410, 600));
-        dc.Pop(); dc.Pop();
-        if (!_reduced && t < 365)
-        {
-            var x = t < 60 ? CardWidth + 6 : Move(t, 60, 210, CardWidth + 6, 60);
-            var gather = t < 210 ? 1 : t < 300 ? Move(t, 210, 285, 1, .52) : Move(t, 300, 335, .52, 1);
-            dc.PushOpacity(1 - Fraction(t, 335, 365));
-            dc.DrawRectangle(Color(_light ? "#286b92" : "#93c8e8"), null, new(x, CardHeight / 2 - 24.5 * gather, 1.6, 49 * gather));
-            dc.Pop();
-        }
-    }
-    private void DrawImage(DrawingContext dc, double t)
-    {
-        var bounds = new Rect(ImageX, ImageY, ImageSize, ImageSize);
-        var imageRight = ImageX + ImageSize;
-        dc.PushClip(new RectangleGeometry(bounds));
-        dc.DrawRectangle(Color(_light ? "#e5e9eb" : "#080c10"), null, bounds);
-        if (_locked is not null) dc.DrawImage(_locked, bounds);
-        var progress = Out(Fraction(t, 730, 1180));
-        if (progress > 0)
-        {
-            // Reveal from top right toward bottom left; the moving seal is the
-            // diagonal boundary, not a crossfade to a newly awarded collection.
-            var distance = progress * ImageSize * 2;
-            dc.PushClip(Polygon(new(imageRight - distance, ImageY), new(imageRight, ImageY), new(imageRight, ImageY + distance)));
-            if (_earned is not null) dc.DrawImage(_earned, bounds);
-            else { dc.DrawRectangle(Color(_light ? "#c9dce7" : "#284459"), null, bounds); Draw(dc, Format("✦", 36, "#93c8e8"), ImageX + 18, ImageY + 11, 1); }
-            dc.Pop();
-            if (progress < 1)
-            {
-                dc.PushOpacity(Fraction(t, 730, 780) * (1 - Fraction(t, 1100, 1200)));
-                dc.DrawLine(new Pen(Color(_light ? "#ffffff" : "#b9d5e5"), 2.5), new(imageRight - distance, ImageY), new(imageRight, ImageY + distance));
-                dc.Pop();
-            }
-        }
-        dc.Pop();
-    }
-    private FormattedText Format(string value, double size, string color, bool bold = false, double maxWidth = CardWidth - TextX - 18)
-    {
-        var typeface = new Typeface(new FontFamily("Segoe UI, Microsoft YaHei UI"), FontStyles.Normal,
-            bold ? FontWeights.SemiBold : FontWeights.Normal, FontStretches.Normal);
-        return new(value, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, size, Color(color),
-            VisualTreeHelper.GetDpi(this).PixelsPerDip) { MaxTextWidth = maxWidth, Trimming = TextTrimming.CharacterEllipsis };
-    }
-    // A long English title stays on one line instead of pushing the stack out of the card.
-    private double NameSize(double size)
-    {
-        var limit = CardWidth - TextX - 18;
-        var width = Format(_name, size, "#000000", true, 10000).Width;
-        return width < limit ? size : Math.Max(14, Math.Floor(size * limit / width * 2) / 2);
-    }
-    private static void Draw(DrawingContext dc, FormattedText text, double x, double y, double opacity)
-    {
-        if (opacity <= 0) return;
-        dc.PushOpacity(opacity);
-        dc.DrawText(text, new(x, y)); dc.Pop();
     }
 }

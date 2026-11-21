@@ -123,13 +123,13 @@ internal static partial class FirstUseBusinessOwnerTests
             var reentered = false;
             var observer = Task.Factory.StartNew(() =>
             {
-                Check(entered.Wait(TimeSpan.FromSeconds(3)), "Cancellation callback was entered.");
+                Check(entered.Wait(FirstUseTestWait.Bound), "Cancellation callback was entered.");
                 var shutdown = candidate.ShutdownFirstUseOnlineCandidateAsync();
                 var retire = candidate.RetireFirstUseOnlineCandidateAsync();
                 observed.Set(); return (shutdown, retire);
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             using var callback = lease.Token.Register(() =>
-            { entered.Set(); reentered = observed.Wait(TimeSpan.FromSeconds(3)); });
+            { entered.Set(); reentered = observed.Wait(FirstUseTestWait.Bound); });
             Task<bool>? first = null;
             try
             {

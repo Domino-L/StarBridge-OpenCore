@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'marketplace_confirm_location_fixture.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_port.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_controller.dart';
@@ -240,7 +241,8 @@ void main() {
       // Preserve the order draft across the nested profile dialog.
       await tester.tap(find.byKey(const Key('market-confirm-quantity-add')));
       await tester.pumpAndSettle();
-      expect(find.text('2'), findsOneWidget);
+      expect(find.text('2 件'), findsOneWidget);
+      await chooseConfirmLocation(tester);
       await tester.tap(find.text('确认发起'));
       await tester.pumpAndSettle();
       expect(port.writes, 1);
@@ -254,7 +256,7 @@ void main() {
       expect(port.writes, 1);
       expect(find.text('确认发起'), findsOneWidget);
       expect(find.byType(TradeProfileForm), findsNothing);
-      expect(find.text('2'), findsOneWidget);
+      expect(find.text('2 件'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       market.dispose();
     },

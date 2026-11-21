@@ -8,7 +8,7 @@ import 'package:starbridge_flutter/features/marketplace/marketplace_listings_con
 import 'marketplace_slice4_test.dart' show ListingsFixture, preview;
 
 void main() {
-  testWidgets('unavailable own trading hours offer SCM without claiming unset', (tester) async {
+  testWidgets('unavailable own trading hours offer profile settings without claiming unset', (tester) async {
     final c = MarketplaceListingsController(ListingsFixture());
     var opened = false;
     await tester.pumpWidget(preview(ListingPublishDialog(
@@ -18,8 +18,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('请到 SCM 查看或设置交易时段'), findsOneWidget);
     expect(find.text('未设置'), findsNothing);
-    await tester.ensureVisible(find.text('打开 SCM'));
-    await tester.tap(find.text('打开 SCM'));
+    await tester.ensureVisible(find.text('设置交易时段'));
+    await tester.tap(find.text('设置交易时段'));
     expect(opened, isTrue);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -103,7 +103,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Fixture manifest'), findsOneWidget);
-    expect(find.text('数量'), findsOneWidget);
+    // A barter's quantity is how many trades are open (LS9 wording).
+    expect(find.text('可以交易几次'), findsOneWidget);
     expect(find.text('5'), findsOneWidget);
     expect(find.text('—'), findsNothing);
     expect(find.text('发布后先不上架，可在“我的挂单”中上架。'), findsOneWidget);
@@ -131,4 +132,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     c.dispose();
   });
+
+  for (final multiple in [true, false]) {
+    testWidgets('LS11 bundle publish hint only when a line is above 1 ($multiple)', (
+      tester,
+    ) async {
+      final c = MarketplaceListingsController(ListingsFixture())
+        ..manifests = [
+          {'id': 9, 'name': 'Fixture manifest', 'items': [
+            {'itemId': 1, 'price': 100000, 'quantity': multiple ? 2 : 1},
+            {'itemId': 2, 'price': 50000, 'quantity': 1},
+          ]},
+        ];
+      final draft = ListingDraft(manifestId: 9, side: 'sell', quantity: '1');
+      await tester.pumpWidget(
+        preview(
+          ListingPublishDialog(c, draft, initialStep: 3),
+          AppearanceMode.dark,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final hint = find.text(
+        '清单里有数量大于 1 的物品。发布后 SCM 会按各行价格直接相加显示每套价格，没有乘数量，和这里的合计会不一样。',
+      );
+      expect(hint, multiple ? findsOneWidget : findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      c.dispose();
+    });
+  }
 }

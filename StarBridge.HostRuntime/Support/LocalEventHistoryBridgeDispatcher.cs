@@ -12,7 +12,7 @@ public sealed class LocalEventHistoryBridgeDispatcher(LocalEventJournalReader re
     public const string RequestName = "diagnostics.getLocalEvents";
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } = ["diagnostics.localEvents"];
     private static readonly HashSet<string> Categories = new(StringComparer.Ordinal)
-        { "all", "session", "identity", "server", "ship", "location", "life", "other" };
+        { "all", "session", "identity", "server", "ship", "location", "life", "contract", "other" };
     private volatile bool _disposed;
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
 
@@ -53,14 +53,16 @@ public sealed class LocalEventHistoryBridgeDispatcher(LocalEventJournalReader re
                 id = e.Id, occurredAt = e.OccurredAt.ToString("O"), category = e.Category,
                 eventType = e.EventType, title = e.Title, detail = e.Detail
             }).ToArray();
-            return ValueTask.FromResult(new BridgeDispatchBatch(BridgeEnvelope.Response(request,
-                new Dictionary<string, object?>
+            var payload = new Dictionary<string, object?>
                 {
                     ["schemaVersion"] = 1, ["state"] = snapshot.State,
                     ["totalCount"] = snapshot.Entries.Count, ["filteredCount"] = filtered.Count,
                     ["offset"] = offset, ["pageSize"] = pageSize, ["revision"] = revision,
                     ["hasMore"] = offset + page.Length < filtered.Count, ["entries"] = page
-                }, preserveRequestAccountContext: false), []));
+                };
+            if (snapshot.UnavailableSources is { Count: > 0 } sources) payload["unavailableSources"] = sources;
+            return ValueTask.FromResult(new BridgeDispatchBatch(BridgeEnvelope.Response(request,
+                payload, preserveRequestAccountContext: false), []));
         }
         catch (OperationCanceledException) { return ValueTask.FromResult(new BridgeDispatchBatch(BridgeEnvelope.CancelledResponse(request), [])); }
         catch { return Failure(request, "localEvents.unavailable"); }

@@ -8,6 +8,7 @@ import '../routing/room_invitation_destination.dart';
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../features/direct_messages/direct_messages_module.dart';
@@ -30,6 +31,8 @@ class SocialWindowBinding {
     required this.navigate,
     this.openInvite,
     this.sendInvite,
+    this.sendInviteAvailable,
+    this.sendInviteChanges,
     this.openProfile,
     this.preferences,
     this.tradeChat,
@@ -63,6 +66,7 @@ class SocialWindowBinding {
           .observeVisibleReception(() => !_disposed && _visible && _active);
     }
     preferences?.projection.addListener(pulse);
+    sendInviteChanges?.addListener(pulse);
     _unregisterTour = LoadingDiagnostics.registerTourWindow(
       kind,
       LoadingTourWindow(open: open, close: () => _notify('detach')),
@@ -81,6 +85,13 @@ class SocialWindowBinding {
   final Future<void> Function(String) navigate;
   final Future<void> Function(String)? openInvite;
   final Future<void> Function(Conversation)? sendInvite;
+
+  /// Whether the invitation entry is offered right now; it follows the account
+  /// (a SCM-only account cannot deliver invitations to private chats).
+  final bool Function()? sendInviteAvailable;
+  final Listenable? sendInviteChanges;
+  bool get _sendInviteShown =>
+      sendInvite != null && (sendInviteAvailable?.call() ?? true);
   final Future<void> Function(Conversation)? openProfile;
   final MarketplaceChatController? tradeChat;
   StreamSubscription<Map<String, Object?>>? _tradePushSub;
@@ -152,7 +163,7 @@ class SocialWindowBinding {
       'scope': scope,
       'targetVersion': _targetVersion,
       'openInvite': openInvite != null,
-      'sendInvite': sendInvite != null,
+      'sendInvite': _sendInviteShown,
       'openProfile': openProfile != null,
       if (_target != null) 'target': encodeConversation(_target!),
       'supportsSending':
@@ -172,7 +183,7 @@ class SocialWindowBinding {
             'serial': tradeChat!.requests.value,
             'ref': ref,
             if (tradeChat!.attachment case final attach?) ...{
-              'orderId': attach.orderId,
+              'orderNumber': attach.orderNumber,
               'label': attach.label,
             },
           },
@@ -367,7 +378,7 @@ class SocialWindowBinding {
       result = true;
     } else if (kind == 'messages' &&
         op == 'sendInvite' &&
-        sendInvite != null &&
+        _sendInviteShown &&
         _known[a['ref']] != null) {
       await sendInvite!(_known[a['ref']]!);
       result = true;
@@ -502,6 +513,7 @@ class SocialWindowBinding {
     unawaited(_tradePushSub?.cancel());
     _tradePulse?.cancel();
     preferences?.projection.removeListener(pulse);
+    sendInviteChanges?.removeListener(pulse);
     unawaited(_activity?.cancel());
     unawaited(_invalidations?.cancel());
     unawaited(messages.close());

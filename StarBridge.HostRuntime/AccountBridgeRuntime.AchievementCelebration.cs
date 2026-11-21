@@ -5,6 +5,7 @@ using StarBridge.HostRuntime.Achievements;
 public sealed partial class AccountBridgeRuntime
 {
     private AchievementCelebrationDelivery? _achievementCelebration;
+    private ContractRecordStore? _contractRecordStore;
     private readonly HangarAchievementClassifier _hangarAchievementClassifier = new(Hangar.HangarShipNames.Resource("StarBridge.ShipDisplayCatalog.tsv"));
     private HangarAchievementEvidence? CaptureHangarAchievementEvidence()
     {
@@ -24,9 +25,20 @@ public sealed partial class AccountBridgeRuntime
         _achievements?.ObserveCity(evidence);
         _achievements?.Wake();
     }
+    private void WakeContractAchievements() => _achievements?.ContractQueued();
     private void PublishSeriesEarned(long generation, string id, int rank, DateTimeOffset at)
     {
-        _achievementCelebration?.SeriesEarned(generation, id, rank, at);
+        ContractRecordLines? record = null;
+        var owner = GameplayOwner();
+        if (owner.Context is not null && owner.Generation == generation && _contractRecordStore is not null &&
+            Core.Achievements.ContractAchievementPolicy.IsAward(id))
+        {
+            try { record = _contractRecordStore.ReadLines(owner.Context, new(1, new() { [id] = at })).GetValueOrDefault(id); }
+            catch (Exception error) when (ContractRecordStore.IsStorageError(error)) { }
+        }
+        if (GameplayOwner() != owner) return;
+        _achievementCelebration?.SeriesEarned(generation, id, rank, at, record,
+            _achievements?.ReadRarity(owner)?.ForCelebration(id, rank) ?? default);
         _dispatcher.PublishDomainEvent("achievements.earned", generation,
             new { schemaVersion = 1, achievementId = id, rank, earnedAt = at });
     }
@@ -52,7 +64,11 @@ public sealed partial class AccountBridgeRuntime
 
     private void PublishFirstEntryEarned(long generation, DateTimeOffset at)
     {
-        _achievementCelebration?.FirstEntryEarned(generation, at);
+        var owner = GameplayOwner();
+        var rarity = owner.Generation == generation
+            ? _achievements?.ReadRarity(owner)?.ForCelebration(Core.Achievements.FirstEntryAchievementPolicy.Id, 0)
+            : null;
+        _achievementCelebration?.FirstEntryEarned(generation, at, rarity ?? default);
         _dispatcher.PublishDomainEvent("achievements.earned", generation,
             new { schemaVersion = 1, achievementId = Core.Achievements.FirstEntryAchievementPolicy.Id, earnedAt = at });
     }

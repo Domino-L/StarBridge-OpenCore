@@ -1,3 +1,5 @@
+import '../../_support/hangar_test_actions.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -17,7 +19,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_presentation.dar
 import 'package:starbridge_flutter/features/hangar/local_hangar_images.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_card_image.dart';
 import 'package:starbridge_flutter/features/communities/community_logo_port.dart';
-import 'package:starbridge_flutter/features/hangar/local_hangar_ship_card.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_wall_card.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_ship_row.dart';
 
 void main() {
@@ -150,7 +152,7 @@ void main() {
     expect(price, findsOneWidget);
     expect(
       tester.getRect(price).right,
-      closeTo(tester.getRect(card).right - 12, 0.1),
+      closeTo(tester.getRect(card).right, 0.1),
     );
   });
 
@@ -162,7 +164,10 @@ void main() {
       final port = _ImageOwnerPort(_ImagePort());
       await tester.pumpWidget(_app(port));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('local-hangar-ship-a2-one')));
+      await openHangarDetails(
+        tester,
+        find.byKey(const ValueKey('local-hangar-ship-a2-one')),
+      );
       await tester.pumpAndSettle();
       expect(port.imageRevisions.last, 1);
       await tester.tap(find.byKey(const Key('hangar-detail-favorite')));
@@ -274,7 +279,10 @@ void main() {
       final port = _Port();
       await tester.pumpWidget(_app(port));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('local-hangar-ship-a2-one')));
+      await openHangarDetails(
+        tester,
+        find.byKey(const ValueKey('local-hangar-ship-a2-one')),
+      );
       await tester.pumpAndSettle();
       expect(find.text('本艘'), findsOneWidget);
       expect(find.byType(SelectionArea), findsOneWidget);
@@ -307,7 +315,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('hangar-favorite-a2-one')));
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('local-hangar-ship-a2-one')));
+      await openHangarDetails(
+        tester,
+        find.byKey(const ValueKey('local-hangar-ship-a2-one')),
+      );
       await tester.pump(const Duration(milliseconds: 400));
       port.pendingRead = Completer<LocalHangarSnapshot>();
       tester
@@ -320,6 +331,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.tap(find.byKey(const Key('hangar-detail-close')));
       await tester.pump(const Duration(milliseconds: 400));
+      await backToHangarWall(tester);
       final button = tester.widget<IconButton>(
         find.byKey(const ValueKey('hangar-favorite-a2-one')),
       );
@@ -354,7 +366,7 @@ void main() {
       final port = _Port();
       await tester.pumpWidget(_app(port));
       await tester.pumpAndSettle();
-      expect(find.byType(LocalHangarShipCard), findsWidgets);
+      expect(find.byType(LocalHangarWallCard), findsWidgets);
       expect(
         find.byKey(const ValueKey('local-hangar-ship-a2-one')),
         findsOneWidget,
@@ -366,13 +378,13 @@ void main() {
       for (final image in tester.widgetList<LocalHangarShipImage>(
         find.byType(LocalHangarShipImage),
       )) {
-        expect(image.fit, BoxFit.contain);
+        expect(image.fit, BoxFit.cover);
       }
       await tester.binding.setSurfaceSize(const Size(440, 900));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('hangar-list')));
       await tester.pumpAndSettle();
-      expect(find.byType(LocalHangarShipCard), findsNothing);
+      expect(find.byType(LocalHangarWallCard), findsNothing);
       expect(find.byType(LocalHangarShipRow), findsWidgets);
       await tester.tap(find.byKey(const Key('hangar-grid')));
       await tester.pumpAndSettle();
@@ -556,10 +568,16 @@ void main() {
             ),
         isTrue,
       );
-      await tester.tap(card);
+      await openHangarDetails(tester, card);
       await tester.pumpAndSettle();
       expect(find.byType(LocalHangarDetail), findsOneWidget);
-      expect(find.textContaining('最后移出机库'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(LocalHangarDetail),
+          matching: find.textContaining('最后移出机库'),
+        ),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -708,7 +726,10 @@ void main() {
       final port = _Port();
       await tester.pumpWidget(_app(port));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('local-hangar-ship-a2-one')));
+      await openHangarDetails(
+        tester,
+        find.byKey(const ValueKey('local-hangar-ship-a2-one')),
+      );
       await tester.pumpAndSettle();
       expect(find.byType(LocalHangarDetail), findsOneWidget);
       final panel = find
@@ -759,7 +780,8 @@ void main() {
               find.byKey(const ValueKey('local-hangar-ship-a2-one')),
             );
             await tester.pumpAndSettle();
-            await tester.tap(
+            await openHangarDetails(
+              tester,
               find.byKey(const ValueKey('local-hangar-ship-a2-one')),
             );
             await tester.pumpAndSettle();
@@ -797,7 +819,8 @@ void main() {
             '../../../build/reviews/hangar-cards-${mode.name}.png',
           ),
         );
-        await tester.tap(
+        await openHangarDetails(
+          tester,
           find.byKey(const ValueKey('local-hangar-ship-a2-one')),
         );
         await tester.pumpAndSettle();

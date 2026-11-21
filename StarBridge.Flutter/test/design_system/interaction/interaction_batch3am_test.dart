@@ -830,8 +830,8 @@ void main() {
         capture: capture,
       );
       await action(t, const Key('role-custom_navigation'), 'pointer');
-      final rect = t.getRect(find.text('身份组与权限').first);
-      final nameLabel = t.getRect(find.text('身份组名称'));
+      final rect = t.getRect(find.text('成员角色').first);
+      final nameLabel = t.getRect(find.text('角色名称'));
       final editorViewport = t.getRect(
         find
             .ancestor(

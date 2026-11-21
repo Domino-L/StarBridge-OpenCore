@@ -7,6 +7,24 @@ namespace StarBridge.HostRuntime.Account;
 
 internal sealed partial class LegacyPasswordLoginClient
 {
+    internal async Task<Presence.GameplayAccountTotal> ReadGameplayAccountTotalAsync(string bearer, CancellationToken token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_baseUri, "api/profile/me"));
+        request.Headers.Authorization = new("Bearer", bearer);
+        request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 8 * 1024 * 1024);
+        var root = json.RootElement;
+        Profiles.LocalPersonalProfileStore.RejectDuplicates(root);
+        if (root.GetProperty("schemaVersion").GetInt32() != PersonalProfileContractPolicy.CurrentSchemaVersion) throw new JsonException();
+        var statistics = root.GetProperty("gameplayStatistics");
+        if (statistics.ValueKind == JsonValueKind.Null) return new("empty");
+        if (!statistics.GetProperty("playTimeSeconds").TryGetInt64(out var seconds) || seconds < 0) throw new JsonException();
+        token.ThrowIfCancellationRequested();
+        return new("available", seconds);
+    }
+
     internal async Task<bool> PublishGameplayStatisticsAsync(string bearer,
         PersonalProfileGameplayStatisticsUpdateRequestContract update, CancellationToken token)
     {

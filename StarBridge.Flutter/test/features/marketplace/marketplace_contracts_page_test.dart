@@ -134,11 +134,11 @@ class ContractsPort extends FixturePort implements MarketplaceContractsPort {
             {'id': 2, 'order': 2, 'title': '拦截并提交截图', 'status': 0},
           ],
           'participants': {'rows': const [], 'total': 0},
-          if (applied) 'me': {'id': 6, 'status': 0},
+          if (applied) 'me': {'reference': 'opaque-person', 'status': 1},
         };
       case 'apply':
         applied = true;
-        return {'confirmed': true, 'participantId': 6};
+        return {'confirmed': true};
       case 'create':
         return {'id': 99};
     }

@@ -117,6 +117,11 @@ internal static class OfficialFleetAudienceTests
         support=false;
         Check((await Save(expected:1,op:Guid.NewGuid().ToString("N"))).Error?.Code=="official_fleet.audience_unsupported",
             "new restricted save still checks current remote capability");
+        // The unsupported save above retired the positive context; read a live
+        // one so this checks the generation, not an expired reference.
+        support=true;
+        scope=(await bridge.DispatchAsync(BridgeEnvelope.Request("privacy.officialFleetRead",Guid.NewGuid().ToString("N"),1,
+            new{schemaVersion=1},Owner),default)).Response;
         generation=2;
         Check((await Save(gen:2)).Error?.Code=="privacy_local.account_changed","committed retry cannot cross account generation");
     }

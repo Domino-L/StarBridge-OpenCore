@@ -58,12 +58,30 @@ ScmArtAsset? scmAchievementArtAsset(
   required double devicePixelRatio,
 }) {
   if (definition.source != AchievementSource.scm) return null;
-  final title = definition.serverName?.trim();
+  // Exact titles. Holiday and limited-event rows also ignore a trailing
+  // exclamation mark (SCM writes 春节欢庆！); never a substring.
+  final festive =
+      definition.groupId == 'scm-HOLIDAY' ||
+      definition.groupId == 'scm-EVENT_LIMITED';
+  final trimmed = definition.serverName?.trim();
+  final title = festive
+      ? trimmed?.replaceFirst(RegExp(r'[!！]+$'), '')
+      : trimmed;
   final state = earned ? '' : '-locked';
   switch (definition.groupId) {
     case 'scm-HOLIDAY':
       final slug = _holidaySlugs[title];
-      if (slug == null) return null;
+      if (slug == null) {
+        // SCM lists some limited-event titles (e.g. 春节欢庆) under the holiday
+        // group; reuse the approved limited-event artwork by exact title.
+        final event = _limitedEventSlugs[title];
+        return event == null
+            ? null
+            : (
+                path: 'assets/achievements/scm-event-$event$state.svg',
+                vector: true,
+              );
+      }
       // The delivery ships a 192 list image and a 512 detail image only.
       final resolution = logicalSize * devicePixelRatio <= 192 ? 192 : 512;
       return (

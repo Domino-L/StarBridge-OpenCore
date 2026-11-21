@@ -278,7 +278,9 @@ void main() {
               }
             }
             expect(seenChoices, hasLength(13));
-            expect(seenToggles, hasLength(37));
+            // 37 before the menu showed client pages; +2: the trading hall and
+            // main fleet toolbar tools each have a visibility switch.
+            expect(seenToggles, hasLength(39));
             expect(MenuWindowPreferences.parse(port.value.toMap()), isNotNull);
             expect(t.takeException(), isNull);
             await t.runAsync(() async {

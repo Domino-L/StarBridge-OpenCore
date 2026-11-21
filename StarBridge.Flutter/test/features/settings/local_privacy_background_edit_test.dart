@@ -42,6 +42,7 @@ class BackgroundPrivacyPort extends ConfidencePrivacy
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     actions.add(action);
     if (action == 'status' && pendingStatus != null) {

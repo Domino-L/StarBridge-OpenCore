@@ -1,3 +1,5 @@
+import '../../features/common/last_online_days.dart';
+
 import 'package:flutter/widgets.dart';
 
 import 'menu_overlay_locale.dart';
@@ -233,10 +235,12 @@ final class MenuOrganizationRow {
     required this.isSelf,
     this.avatar,
     this.profileKey,
+    this.lastOnlineDays,
     this.logo,
     this.memberCount,
     this.importedAt = '',
     this.iconKey = '',
+    this.vehicleName = '',
     this.announcementState = '',
     this.announcementTime = '',
     this.currentAnnouncement = false,
@@ -268,8 +272,10 @@ final class MenuOrganizationRow {
   final bool isSelf;
   final String? logo;
   final int? memberCount;
+  final int? lastOnlineDays;
   final String relationship, tags, language, activeTime;
-  final String importedAt, iconKey, announcementState, announcementTime;
+  final String importedAt, iconKey, vehicleName;
+  final String announcementState, announcementTime;
   final String serverKind, shipKind, locationKind;
   final String serverTextKey, shipTextKey, locationTextKey;
   final bool currentAnnouncement;
@@ -290,9 +296,11 @@ final class MenuOrganizationRow {
     isSelf: isSelf,
     avatar: avatar,
     profileKey: profileKey,
+    lastOnlineDays: lastOnlineDays,
     memberCount: memberCount,
     importedAt: importedAt,
     iconKey: iconKey,
+    vehicleName: vehicleName,
     announcementState: announcementState,
     announcementTime: announcementTime,
     currentAnnouncement: currentAnnouncement,
@@ -341,6 +349,7 @@ final class MenuOrganizationRow {
       handle: _text(value, 'handle', 128),
       role: _text(value, 'role', 128),
       roleColor: color,
+      lastOnlineDays: readLastOnlineDays(value['lastOnlineDays']),
       presence: presence,
       ship: _text(value, 'ship', 512),
       location: _text(value, 'location', 512),
@@ -357,6 +366,7 @@ final class MenuOrganizationRow {
       memberCount: memberCount as int?,
       importedAt: _text(value, 'importedAt', 64),
       iconKey: _text(value, 'iconKey', 64),
+      vehicleName: _text(value, 'vehicleName', 256),
       announcementState: _text(value, 'announcementState', 16),
       announcementTime: _text(value, 'announcementTime', 64),
       currentAnnouncement: value['currentAnnouncement'] == true,

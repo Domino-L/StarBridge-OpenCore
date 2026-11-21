@@ -114,11 +114,8 @@ final class CommunityWorkspaceInformation {
   ].where((v) => v.isNotEmpty).join(' · ');
 
   /// The active hours in the viewer's own clock; empty in the same offset.
-  String get viewerActivityText => communityViewerActivitySummary(
-    context,
-    workspace.activityWindows,
-    workspace.timeZoneStandardOffsetMinutes,
-  );
+  String get viewerActivityText =>
+      communityViewerTimeZoneSummary(context, workspace);
 
   /// Every contact as (platform, value), the website last.
   List<(String, String)> get contactEntries => [
@@ -219,6 +216,14 @@ final class CommunityWorkspaceInformation {
                 ].where((v) => v.isNotEmpty).join(' · '),
                 width: width,
               ),
+              if (projection.viewerActivityText.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                projection._fact(
+                  t('viewerTime'),
+                  projection.viewerActivityText,
+                  width: width,
+                ),
+              ],
             ],
           ),
           Column(

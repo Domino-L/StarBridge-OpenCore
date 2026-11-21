@@ -5,13 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../features/overlay_settings/overlay_visor_layout.dart';
+import '../../features/overlay_settings/overlay_visor_projection.dart';
 import '../../features/overlay_settings/overlay_workspace_layout_geometry.dart';
-import '../../features/overlay_settings/overlay_workspace_layout_item.dart';
+import '../../features/overlay_settings/overlay_workspace_models.dart';
 import '../localization/app_strings.dart';
 import 'menu_bridge_style.dart';
 import 'menu_hud_placement_bars.dart';
+import 'menu_hud_placement_module.dart';
 import 'menu_hud_placement_opacity.dart';
 import 'menu_hud_placement_paint.dart';
+import 'menu_hud_placement_samples.dart';
+import 'menu_hud_placement_visor.dart';
 import 'menu_hud_quick_view.dart';
 
 const _layoutModules = ['Notice', 'Squads', 'Members', 'Chat'];
@@ -48,9 +53,13 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
   // even before the primary engine echoes the draft back.
   final _local = <String, OverlayWorkspaceLayoutItem>{};
   ({String side, double y})? _localEvents;
+  double? _localEventsX; // the visor events' place across (11-12)
+  ({double x, double y})? _localBadge;
   OverlayWorkspaceLayoutItem? _gestureStart;
-  Rect? _eventsStart;
+  Rect? _eventsStart, _badgeStart;
+  Size _surface = Size.zero;
   Offset _gestureDelta = Offset.zero;
+  Offset? _grab;
   bool _gestureFirst = false;
   String? _pendingKey, _pendingValue;
   ({List<double> vertical, List<double> horizontal}) _guides = (
@@ -94,7 +103,55 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
     if (_dragging == null) {
       _local.clear();
       _localEvents = null;
+      _localEventsX = null;
+      _localBadge = null;
     }
+  }
+
+  // ---- the visor (11-11 user: "Alt+M 按面罩排布") ----
+
+  /// The visor's settings while placing on it, else null (the older,
+  /// free-size placement).
+  OverlayWorkspaceSettings? get _visor => widget.view.visor;
+
+  /// The visor settings with the gesture in flight applied (events, badge).
+  OverlayWorkspaceSettings? get _visorNow => switch (_visor) {
+    final visor? => MenuHudVisorPlacement.withLocal(
+      visor,
+      events: _localEvents,
+      eventsX: _localEventsX,
+      badge: _localBadge,
+    ),
+    null => null,
+  };
+
+  /// Sends one visor placement step (the first of a gesture at once, so it
+  /// starts its own undo step) and shows it before the engine echoes it.
+  void _apply(MenuHudVisorEdit? edit) {
+    switch (edit) {
+      case MenuHudVisorItem(:final item):
+        _local[item.key] = item;
+        _sendItem(item, first: _gestureFirst);
+      case MenuHudVisorEvents(:final right, :final y, :final x):
+        final side = right ? 'Right' : 'Left';
+        _localEvents = (side: side, y: y);
+        _localEventsX = x;
+        _send(
+          'placeEvents',
+          jsonEncode({'side': side, 'y': y, 'x': x, 'first': _gestureFirst}),
+          now: _gestureFirst,
+        );
+      case MenuHudVisorBadge(:final x, :final y):
+        _localBadge = (x: x, y: y);
+        _send(
+          'placeBadge',
+          jsonEncode({'x': x, 'y': y, 'first': _gestureFirst}),
+          now: _gestureFirst,
+        );
+      case null:
+        return;
+    }
+    _gestureFirst = false;
   }
 
   @override
@@ -154,6 +211,15 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
       _items.where((item) => item.key == key).firstOrNull;
 
   Map<String, Rect> _rects(Size surface) {
+    if (_visorNow case final visor?) {
+      return MenuHudVisorPlacement.rects(
+        _items,
+        visor,
+        _visible,
+        surface,
+        rally: _rallyDrag,
+      );
+    }
     final shown = [
       for (final item in _items)
         if (_layoutModules.contains(item.key) && _visible(item.key)) item,
@@ -193,8 +259,10 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
     _hiddenOpen = false;
   });
 
-  void _start(String key, Size surface, {required bool resize}) {
+  void _start(String key, Size surface, {required bool resize, Offset? at}) {
     _select(key);
+    final box = context.findRenderObject() as RenderBox?;
+    _grab = at == null ? null : box?.globalToLocal(at);
     if (key == 'Crosshair') return;
     final item = _item(key);
     if (item?.isLocked ?? false) {
@@ -202,7 +270,13 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
       return;
     }
     _gestureStart = item;
-    _eventsStart = key == 'Events' ? _eventsRect(surface) : null;
+    final visorRects = _visorNow == null
+        ? const <String, Rect>{}
+        : _rects(surface);
+    _eventsStart = key == 'Events'
+        ? (visorRects['Events'] ?? _eventsRect(surface))
+        : null;
+    _badgeStart = key == 'Badge' ? visorRects['Badge'] : null;
     _gestureDelta = Offset.zero;
     _gestureFirst = true;
     setState(() => _dragging = key);
@@ -217,6 +291,34 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
   }) {
     if (_dragging != key) return;
     _gestureDelta += delta;
+    if (_visorNow case final visor?) {
+      final (edit, guides) = MenuHudVisorPlacement.drag(
+        key: key,
+        start: _gestureStart,
+        startBox: key == 'Events' ? _eventsStart : _badgeStart,
+        delta: _gestureDelta,
+        pointer: pointer,
+        items: _items,
+        visor: visor,
+        surface: surface,
+        snapping: _align,
+        grab: _grab,
+      );
+      _apply(edit);
+      setState(
+        () => _guides = (
+          vertical: [
+            for (final guide in guides)
+              if (guide.vertical) guide.at,
+          ],
+          horizontal: [
+            for (final guide in guides)
+              if (!guide.vertical) guide.at,
+          ],
+        ),
+      );
+      return;
+    }
     final rects = _rects(surface);
     if (key == 'Events') {
       final start = _eventsStart!;
@@ -292,7 +394,25 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
     });
   }
 
+  (OverlayWorkspaceLayoutItem, double)? get _rallyDrag =>
+      _dragging == 'Notice' && _gestureStart != null
+      ? (_gestureStart!, _gestureDelta.dy)
+      : null;
   void _end() {
+    final key = _dragging;
+    if ((_visorNow, _rallyDrag) case (final visor?, (final s, final dy))) {
+      _apply(MenuHudVisorPlacement.rallyDrop(s, visor, _surface, dy));
+    }
+    if (_visorNow case final visor? when key == 'Members' || key == 'Chat') {
+      final item = _item(key!);
+      if (item != null) {
+        final dropped = OverlayVisorLayout.drop(item, _items, visor, _surface);
+        if (dropped != null) {
+          _local[key] = dropped;
+          _sendItem(dropped, first: false);
+        }
+      }
+    }
     _flush();
     setState(() {
       _dragging = null;
@@ -302,6 +422,20 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
 
   void _nudge(String key, Offset delta, Size surface) {
     if (key == 'Crosshair') return;
+    if (_visorNow case final visor?) {
+      _gestureFirst = true;
+      _apply(
+        MenuHudVisorPlacement.nudge(
+          key: key,
+          rects: _rects(surface),
+          delta: delta,
+          items: _items,
+          visor: visor,
+          surface: surface,
+        ),
+      );
+      return;
+    }
     if (key == 'Events') {
       final rect = _eventsRect(surface);
       final available = (surface.height - rect.height).clamp(
@@ -390,6 +524,7 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
     final selected = _selected;
     if (selected == null) return KeyEventResult.ignored;
     if (key == LogicalKeyboardKey.delete) {
+      if (selected == 'Badge') return KeyEventResult.handled;
       _hide(selected);
       return KeyEventResult.handled;
     }
@@ -412,10 +547,16 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final surface = constraints.biggest;
+      _surface = surface;
       final rects = _rects(surface);
+      final tilts = switch (_visorNow) {
+        final visor? => OverlayVisorProjection.tilts(_items, visor, surface),
+        null => const <String, bool>{},
+      };
       final view = widget.view;
       final notice = rects['Notice'];
-      final toolbarTop = notice != null && notice.top <= 0.5
+      // a notice in the top half (the visor's rally too) keeps the bar below
+      final toolbarTop = notice != null && notice.center.dy < surface.height / 2
           ? notice.bottom + 44
           : 24.0;
       final hidden = {
@@ -447,7 +588,7 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
                     onTapDown: (_) => _select(null),
                   ),
                 ),
-                if (_grid)
+                if (_grid && _visor == null)
                   const Positioned.fill(
                     child: IgnorePointer(
                       child: CustomPaint(painter: MenuHudPlacementGrid()),
@@ -458,8 +599,16 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
                     child: CustomPaint(painter: MenuHudPlacementFrame()),
                   ),
                 ),
+                ?menuHudVisorAids(
+                  items: _items,
+                  visor: _visorNow,
+                  rally: notice,
+                  selected: _selected == 'Notice',
+                  dragDy: _rallyDrag?.$2,
+                  surface: surface,
+                ),
                 for (final entry in rects.entries)
-                  _module(entry.key, entry.value, surface),
+                  _module(entry.key, entry.value, surface, tilts),
                 Positioned.fill(
                   child: IgnorePointer(
                     child: CustomPaint(
@@ -499,27 +648,15 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
                           hidden: hidden,
                           hiddenOpen: _hiddenOpen,
                           busy: busy,
-                          onDrag: (details) => setState(() {
-                            final box =
-                                context.findRenderObject() as RenderBox?;
-                            final base =
-                                _toolbarOffset ??
-                                Offset(
-                                  ((box?.size.width ?? surface.width) - 760) /
-                                      2,
-                                  toolbarTop,
-                                );
-                            _toolbarOffset = Offset(
-                              (base.dx + details.delta.dx).clamp(
-                                0,
-                                surface.width - 200,
-                              ),
-                              (base.dy + details.delta.dy).clamp(
-                                0,
-                                surface.height - 60,
-                              ),
-                            );
-                          }),
+                          onDrag: (details) => setState(
+                            () => _toolbarOffset = menuHudToolbarOffset(
+                              _toolbarOffset,
+                              (context.findRenderObject() as RenderBox?)?.size,
+                              toolbarTop,
+                              details.delta,
+                              surface,
+                            ),
+                          ),
                           onGrid: () => setState(() => _grid = !_grid),
                           onAlign: () => setState(() => _align = !_align),
                           onUndo: () {
@@ -541,39 +678,19 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
                           },
                           onCancel: _cancel,
                           onDone: _done,
+                          showGrid: _visor == null,
+                          hintKey: _visor == null
+                              ? 'menu.hudPlace.hint'
+                              : 'menu.hudPlace.hintVisor',
                         ),
                       ),
                     ),
                   ),
                 ),
                 if (_toast case final toast?)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 150,
-                    child: Center(
-                      child: Container(
-                        key: const ValueKey('menu-hud-place-toast'),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 11,
-                        ),
-                        decoration: BoxDecoration(
-                          color: BridgeInk.window,
-                          border: Border(
-                            top: BorderSide(
-                              color: view.placeResult == 'saved'
-                                  ? BridgeInk.green
-                                  : BridgeInk.amber,
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          toast,
-                          style: const TextStyle(fontSize: 15),
-                        ),
-                      ),
-                    ),
+                  MenuHudPlacementToast(
+                    text: toast,
+                    saved: view.placeResult == 'saved',
                   ),
               ],
             ),
@@ -583,150 +700,58 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
     },
   );
 
-  Widget _module(String key, Rect rect, Size surface) {
-    final selected = _selected == key, dragging = _dragging == key;
-    final hovered = _hovered == key;
+  Widget _module(String key, Rect rect, Size surface, Map<String, bool> tilts) {
     final locked = _item(key)?.isLocked ?? false;
-    final resizable = _layoutModules.contains(key) && !locked;
-    final tagBelow = rect.top < 30;
-    return Positioned.fromRect(
+    final visor = _visorNow;
+    final right = tilts[key];
+    final degrees = visor == null ? 0.0 : OverlayVisorProjection.degrees(visor);
+    return MenuHudPlacementModule(
+      moduleKey: key,
       rect: rect,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = key),
-        onExit: (_) =>
-            setState(() => _hovered = _hovered == key ? null : _hovered),
-        cursor: key == 'Crosshair' || locked
-            ? SystemMouseCursors.basic
-            : SystemMouseCursors.move,
-        child: GestureDetector(
-          key: ValueKey('menu-hud-place-module-$key'),
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => _select(key),
-          onPanStart: (_) => _start(key, surface, resize: false),
-          onPanUpdate: (details) => _update(
-            key,
-            details.delta,
-            details.globalPosition,
-            surface,
-            resize: false,
-          ),
-          onPanEnd: (_) => _end(),
-          onPanCancel: _end,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: MenuHudModuleOutline(
-                    selected: selected,
-                    dragging: dragging,
-                    hovered: hovered,
-                  ),
-                ),
-              ),
-              if (selected || hovered)
-                Positioned(
-                  left: -1,
-                  top: tagBelow ? null : -26,
-                  bottom: tagBelow ? -26 : null,
-                  child: Container(
-                    height: 24,
-                    padding: const EdgeInsets.symmetric(horizontal: 9),
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      color: BridgeInk.placementLabel,
-                      border: Border(top: BorderSide(color: BridgeInk.blue)),
-                    ),
-                    child: Text(
-                      [
-                        _t('menu.hudQuick.module.$key'),
-                        if (locked) _t('menu.hudPlace.locked'),
-                        if (key == 'Crosshair') _t('menu.hudPlace.fixed'),
-                      ].join(' · '),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ),
-              if (resizable)
-                Positioned(
-                  right: -10,
-                  bottom: -10,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.resizeDownRight,
-                    child: GestureDetector(
-                      key: ValueKey('menu-hud-place-grip-$key'),
-                      behavior: HitTestBehavior.opaque,
-                      onPanStart: (_) => _start(key, surface, resize: true),
-                      onPanUpdate: (details) => _update(
-                        key,
-                        details.delta,
-                        details.globalPosition,
-                        surface,
-                        resize: true,
-                      ),
-                      onPanEnd: (_) => _end(),
-                      onPanCancel: _end,
-                      // A 32 px target; the drawn grip keeps its size and place.
-                      child: Semantics(
-                        label: _t('menu.hudPlace.resize'),
-                        child: const SizedBox.square(
-                          dimension: 32,
-                          child: Align(
-                            alignment: Alignment.bottomRight,
-                            child: SizedBox.square(
-                              dimension: 24,
-                              child: CustomPaint(painter: MenuHudGrip()),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
+      selected: _selected == key,
+      dragging: _dragging == key,
+      hovered: _hovered == key,
+      locked: locked,
+      // the visor sizes its blocks itself ("面罩大小"): position only
+      resizable: _visor == null && _layoutModules.contains(key) && !locked,
+      tag: menuHudModuleTag(_t, key, _item(key), visor: visor != null),
+      resizeLabel: _t('menu.hudPlace.resize'),
+      // over the real visor: the side blocks lean as it draws them (11-11)
+      transform: right == null || degrees == 0
+          ? null
+          : OverlayVisorProjection.forWidget(
+              rect,
+              right: right,
+              degrees: degrees,
+              surface: surface,
+              distance: OverlayVisorProjection.distance(visor!),
+            ),
+      content: menuHudVisorSample(key, visor, rect, surface),
+      onHover: (on) => setState(
+        () => _hovered = on ? key : (_hovered == key ? null : _hovered),
       ),
+      onSelect: () => _select(key),
+      onStart: (resize, at) => _start(key, surface, resize: resize, at: at),
+      onMove: (delta, pointer, resize) =>
+          _update(key, delta, pointer, surface, resize: resize),
+      onEnd: _end,
     );
   }
 
-  Widget _readout(String key, Rect rect, Size surface) {
-    final text = switch (key) {
-      'Notice' =>
-        '${_t(rect.top <= 0.5 ? 'menu.hudPlace.dockTop' : 'menu.hudPlace.dockBottom')} · X ${rect.left.round()} · ${rect.width.round()} × ${rect.height.round()}',
-      'Events' =>
-        '${_t((_localEvents?.side ?? widget.view.eventSide) == 'Left' ? 'menu.hudPlace.left' : 'menu.hudPlace.right')} · Y ${rect.top.round()}',
-      _ =>
-        'X ${rect.left.round()} · Y ${rect.top.round()} · ${rect.width.round()} × ${rect.height.round()}',
-    };
-    final below = rect.bottom + 40 < surface.height;
-    return Positioned(
-      left: rect.left.clamp(4, surface.width - 320),
-      top: below ? rect.bottom + 10 : rect.top - 34,
-      child: IgnorePointer(
-        child: Container(
-          key: const ValueKey('menu-hud-place-readout'),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: BridgeInk.placementReadout,
-            border: Border.all(color: menuHudGuide),
-          ),
-          child: Text(
-            text,
-            style: const TextStyle(
-              fontSize: 12,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _readout(String key, Rect rect, Size surface) =>
+      MenuHudPlacementReadout(
+        moduleKey: key,
+        rect: rect,
+        surface: surface,
+        visor: _visor != null,
+        eventsLeft: (_localEvents?.side ?? widget.view.eventSide) == 'Left',
+        text: _t,
+      );
 
   Widget _moduleTools(String key, Rect rect, Size surface) {
     final item = _layoutModules.contains(key) ? _item(key) : null;
     // A top-docked notice keeps its tools beside it, clear of the main bar.
-    final beside = key == 'Notice' && rect.top <= 0.5;
+    final beside = key == 'Notice' && rect.center.dy < surface.height / 2;
     final above = rect.top > 70;
     return Positioned(
       left: beside
@@ -752,16 +777,23 @@ class _MenuHudPlacementLayerState extends State<MenuHudPlacementLayer> {
           _sendItem(next, first: first);
         },
         onReset: () {
-          if (item == null) return;
-          _sendItem(
-            OverlayWorkspaceLayoutGeometry.resetPosition(
-              item,
-              widget.view.presetId,
+          _gestureFirst = true;
+          // the badge goes back above the game's key hints; the rally to the top
+          _apply(switch (item) {
+            null when key == 'Badge' => const MenuHudVisorBadge(-1, -1),
+            null => null,
+            final item => MenuHudVisorItem(
+              OverlayVisorLayout.resetPosition(
+                item,
+                widget.view.presetId,
+                _visor,
+              ),
             ),
-            first: true,
-          );
+          });
         },
         onHide: () => _hide(key),
+        canHide: key != 'Badge',
+        canReset: key == 'Badge',
       ),
     );
   }

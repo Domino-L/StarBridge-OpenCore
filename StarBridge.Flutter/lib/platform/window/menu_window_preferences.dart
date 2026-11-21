@@ -26,6 +26,8 @@ class MenuWindowPreferences {
     'browser',
     'settings',
     'execHangar',
+    'marketplace',
+    'officialFleet',
   };
   static const defaults = MenuWindowPreferences(
     0,

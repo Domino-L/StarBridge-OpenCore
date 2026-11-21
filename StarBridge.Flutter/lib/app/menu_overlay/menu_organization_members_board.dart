@@ -195,6 +195,7 @@ class _MenuMemberBoardState extends State<MenuOrganizationMembersBoard> {
               RegExp(r'^#[a-fA-F0-9]{6}$').hasMatch(data.roleColor)
           ? Color(int.parse('ff${data.roleColor.substring(1)}', radix: 16))
           : null,
+      lastOnlineDays: data.lastOnlineDays,
       presence: switch (data.presence) {
         'inGame' => OrganizationMemberPresence.inGame,
         'online' => OrganizationMemberPresence.online,

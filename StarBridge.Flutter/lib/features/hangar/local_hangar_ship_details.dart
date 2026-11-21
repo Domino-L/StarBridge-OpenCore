@@ -158,8 +158,13 @@ class _LocalHangarShipDetailsState extends State<LocalHangarShipDetails> {
                 ? c.unknown
                 : c.dateTime(context, _ship.removedAt!),
           ),
-        if (_ship.addedAt case final added?)
-          field(c.addedAt, c.dateTime(context, added)),
+        field(
+          c.acquiredOn,
+          _ship.acquiredOn == null
+              ? c.unknown
+              : MaterialLocalizations.of(context)
+                    .formatCompactDate(_ship.acquiredOn!),
+        ),
         const Divider(height: 28),
         Text(
           c.pick('型号', '型號', 'Model'),

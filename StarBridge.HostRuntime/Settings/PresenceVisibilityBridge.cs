@@ -83,6 +83,8 @@ internal sealed class PresenceVisibilityBridge(
         PublicationVisibilitySnapshot Result(string revision, int? observation, PlayerPresenceVisibilityMode mode, string? error)
         {
             var snapshot = new PublicationVisibilitySnapshot(scope.Owner, scope.Generation, revision, observation, mode, error);
+            Support.IdentityGateJournal.Changed("publication-visibility",
+                $"mode={mode} observed={observation?.ToString() ?? "none"} error={error ?? "none"} confirmed={Volatile.Read(ref _confirmed) is not null} uncertain={Volatile.Read(ref _uncertain) is not null} awaiting={Volatile.Read(ref _awaitingOnlineObservation) is not null}");
             observeVisibility?.Invoke(snapshot, wakePublication);
             return snapshot;
         }

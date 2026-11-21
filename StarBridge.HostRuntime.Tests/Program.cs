@@ -5,11 +5,212 @@ using StarBridge.HostRuntime.LegacyRelay;
 using StarBridge.NativeBridge;
 using StarBridge.Core.Profiles;
 
+
 using System.Net;
 using System.Net.Http.Json;
+// A failing group must report FAIL and exit non-zero, never crash: an unhandled
+// crash leaves a topmost "Application Error" dialog on the user's desktop.
+// Process-local only; no system or error-reporting settings.
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+{
+    Console.Out.Flush();
+    Console.Error.WriteLine("FAIL unhandled test exception: " + e.ExceptionObject);
+    Console.Error.Flush();
+    Environment.Exit(1);
+};
+args = args.Where(a => a is not ("-nodeReuse:false" or "-p:UseSharedCompilation=false" or "--")).ToArray();
 if (!HostDataRoot.IsIsolatedTestProcess || !Path.GetFullPath(HostDataRoot.CurrentRoot).StartsWith(
     Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
 { Console.Error.WriteLine("Host test data root is outside TEMP; refusing to run."); return 97; }
+if (args is ["--profile-account-facts-only"]) { await ProfileAccountFactsTests.Run(); return 0; }
+if (args is ["--overlay-rows-only"]) { await OverlayRowsCompatibilityTests.Run(); return 0; }
+if (args is ["--catalog-only"]) { await ScmCatalogReaderTests.Run(); return 0; }
+if (args is ["--visitor-gameplay-time-only"]) { await VisitorGameplayTimeTests.Run(); return 0; }
+if (args is ["--gameplay-owner-only"])
+{
+    // Gameplay owner-continuity groups, run directly so a failure keeps its stack trace.
+    var ownerGroups = new (string, Func<Task>)[] {
+        ("transient", () => GameplayTransient073Tests.Run()),
+        ("owner recovery notifications", GameplayTransient073Tests.OwnerRecoveryNotifications),
+        ("owner probe read failure backoff", GameplayTransient073Tests.OwnerProbeReadFailureBackoff),
+        ("early owner gap", () => GameplayTimeRuntimeTests.EarlyOwnerGapResumesWithSavedConsent()),
+        ("history once-only", () => GameplayHistoryRuntimeTests.OnceOnlyAndMigration()),
+        ("reset recovery", () => GameplayHistoryRuntimeTests.ResetRecovery()),
+        ("reset confirmation", () => GameplayHistoryRuntimeTests.ResetBridgeConfirmation()) };
+    var ownerFailed = 0;
+    foreach (var (name, run) in ownerGroups)
+    {
+        try { await run(); Console.WriteLine($"PASS {name}"); }
+        catch (Exception error) { ownerFailed++; Console.WriteLine($"FAIL {name}: {error}"); }
+    }
+    Console.WriteLine($"SUMMARY gameplay owner groupsPassed={ownerGroups.Length - ownerFailed} groupsFailed={ownerFailed}");
+    return ownerFailed == 0 ? 0 : 1;
+}
+if (args is ["--mission-records-only"]) {
+    await LocalMissionRecordsTests.Run();
+    await AccountLifecycleIsEnabled();
+    using var signedOut = new AccountBridgeRuntime(new LifecycleAccountHost());
+    var unavailable = (await signedOut.DispatchAsync(BridgeEnvelope.Request("missionRecords.importStart",
+        "mission-records-signed-out", 0, new { schemaVersion = 1 }))).Response;
+    AssertEqual("missionRecords.unavailable", unavailable.Error?.Code, "signed-out mission import");
+    AssertEqual("signedOut", unavailable.Payload.GetProperty("reason").GetString(), "signed-out mission reason");
+    Console.WriteLine("PASS mission records: account capability list and lifecycle");
+    return 0;
+}
+if (args is ["--cx-mission-accept-only"]) {
+    var acceptGroups = new (string Name, Func<Task> Run)[] {
+        ("mission records", LocalMissionRecordsTests.Run),
+        ("live timestamped physical notifications", ContractAchievementTests.TimestampedPhysicalLines),
+        ("history clear invalidates objective text", LocalContractHistoryTests.ClearInvalidatesObjectiveText),
+        ("history continuation clear invalidates objective text", LocalContractHistoryTests.ContinuationClearInvalidatesObjectiveText),
+        ("history missing contracts read", LocalContractHistoryTests.MissingContractsPreserveUnavailableLegacyRead),
+        ("history missing contracts export", LocalContractHistoryTests.MissingContractsPreserveUnavailableLegacyExport),
+        ("history retries leases", LocalContractHistoryTests.LeaseRetryAndNonBlockingObserve),
+        ("history source failures", LocalContractHistoryTests.SourceAvailabilityReadAndExport),
+        ("history background recovery", LocalContractHistoryTests.BackgroundFaultRecovers),
+        ("history retirement and disposal", LocalContractHistoryTests.PendingRetirementAndDispose),
+        ("history clear during backoff", LocalContractHistoryTests.ClearDuringBackoffPreventsRetryCommit),
+        ("history clear barrier", LocalContractHistoryTests.ClearBarrierAndScope),
+        ("history bounded queue and dedup", LocalContractHistoryTests.QueueBoundAndUncommittedDedup),
+        ("history fault isolation", LocalContractHistoryTests.HistoryFaultsPreserveAuthority),
+        ("history real timeline", LocalContractHistoryTests.RealTimeline),
+        ("history historical acceptance", LocalContractHistoryTests.HistoricalAcceptanceLiveEvidence),
+        ("history corrupt source", LocalContractHistoryTests.CorruptContractsDoNotBlockLegacy),
+        ("history stages and outcomes", LocalContractHistoryTests.StageTextAndOutcomes),
+        ("history legacy recovery", LocalContractHistoryTests.MissingCorruptRecoveryAndLegacy),
+        ("history pagination and filter", LocalContractHistoryTests.MergePaginationRevisionAndFilter),
+        ("history clear isolation", LocalContractHistoryTests.ClearIsolationAndWriteFailure),
+    };
+    var acceptFailed = 0;
+    foreach (var acceptGroup in acceptGroups) {
+        try { await acceptGroup.Run(); Console.WriteLine("PASS MISSION ACCEPT GROUP " + acceptGroup.Name); }
+        catch (Exception e) { acceptFailed++; Console.WriteLine("FAIL MISSION ACCEPT GROUP " + acceptGroup.Name + ": " + e.Message); }
+    }
+    Console.WriteLine($"SUMMARY MISSION ACCEPT groupsPassed={acceptGroups.Length - acceptFailed} groupsFailed={acceptFailed}");
+    return acceptFailed == 0 ? 0 : 1;
+}
+if (args is ["--application-preferences-only"]) { await ApplicationPreferencesTests.PreviewGuidePersistsIndependently(); await ApplicationPreferencesTests.HolidayAppearancePersistsIndependently(); await ApplicationPreferencesTests.HolidayAppearanceRejectsInvalidPatches(); await ApplicationPreferencesTests.PerformanceModeDefaultsOffAndPersists(); return 0; }
+if (args is ["--help-support-only"]) { await HelpSupportTests.RunAll(); return 0; }
+if (args is ["--marketplace-listing-only"]) { await MarketplaceListingTests.Run(); return 0; }
+if (args is ["--visor-cards-only"]) { await NotificationCardPreferencesTests.Run(); return 0; }
+if (args is ["--hud-health-only"])
+{
+    await HudHealthTests.Run();
+    await ApplicationPreferencesTests.ReadOwnHealthIsOffByDefaultAndPersists();
+    await ApplicationPreferencesTests.ReadOwnHealthRejectsInvalidPatches();
+    await ApplicationPreferencesTests.ReadOwnHealthInBackgroundIsOffByDefaultAndPersists();
+    return 0;
+}
+if (args is ["--visor-switch-only"]) { await OverlayVisorSwitchTests.Run(); await OverlayVisorRollbackTests.Run(); await OverlaySettingsTests.SavesWorkspaceLoadedFromLegacyExperimentalRenderMode(); await OverlaySettingsTests.WritesFullWorkspaceWithBackupAndRevisionGuard(); await PlayerActivityGroupTests.Run(); return 0; }
+if (args is ["--cx-announce-cold-worker", var coldRoot, var phase]) return await AnnouncementPersistenceTests.ColdWorker(coldRoot, phase);
+if (args is ["--cx-announce-default-follow-only"]) {
+    var groups = new (string Name, Func<Task> Run)[] {
+        ("default follow policy and persistence", AnnouncementDefaultFollowTests.Run),
+        ("notification reconciliation writes", AnnouncementDefaultFollowTests.Reconciliation),
+        ("announcement alerts", AnnouncementNotificationTests.Run),
+        ("announcement summaries", AnnouncementSummaryTests.Run),
+        ("announcement persistence", AnnouncementPersistenceTests.Run),
+        ("announcement revisions", AnnouncementRevisionTests.Run),
+        ("notification v2 and quiet hours", FleetPrivacyNotificationTests.Run),
+        ("community notification delivery", CommunityNotificationDeliveryTests.Run),
+    };
+    var failed = 0;
+    foreach (var group in groups) {
+        try { await group.Run(); Console.WriteLine("PASS default follow group: " + group.Name); }
+        catch (Exception e) { failed++; Console.WriteLine("FAIL default follow group: " + group.Name + ": " + e.Message); }
+    }
+    Console.WriteLine($"Default follow Host groups: {groups.Length - failed} passed, {failed} failed");
+    return failed == 0 ? 0 : 1;
+}
+if (args is ["--cx-announce-f3-only"]) { await AnnouncementPersistenceTests.Run(); await AnnouncementSummaryTests.Run(); return 0; }
+if (args is ["--cx-announce-summary-only"]) {
+    try { await AnnouncementSummaryTests.Run(); return 0; }
+    catch (Exception e) { Console.Error.WriteLine(e); return 1; }
+}
+if (args is ["--cx-announce-f2-only"]) { await AnnouncementRevisionTests.Run(); return 0; }
+if (args is ["--cx-announce-alerts-only"]) {
+    try { await AnnouncementNotificationTests.Run(); return 0; }
+    catch (Exception e) { Console.Error.WriteLine(e); return 1; }
+}
+if (args is ["--cx-announce-affected-only"]) {
+    var groups = new (string Name, Func<Task> Run)[] {
+        ("announcement alerts", AnnouncementNotificationTests.Run),
+        ("announcement summaries", AnnouncementSummaryTests.Run),
+        ("community notification reads", CommunityNotificationTests.Run),
+        ("community notification delivery", CommunityNotificationDeliveryTests.Run),
+        ("community notification audio", CommunityNotificationAudioTests.Run),
+        ("official fleet notifications", OfficialFleetNotificationTests.Run),
+        ("notification policy bridge", NotificationPolicyBridgeTests.Run),
+        ("notification v2 and quiet hours with rally isolation", FleetPrivacyNotificationTests.Run),
+        ("notification settings", NotificationSettingsTests.Run),
+        ("notification audio", NotificationAudioTests.Run),
+        ("desktop notifications", DesktopNotificationTests.Run),
+        ("rally overlay", OverlayRallyTests.Run),
+        ("official fleet rally", OfficialFleetRallyClientTests.RunAsync),
+    };
+    var failed = 0;
+    foreach (var group in groups) {
+        try { await group.Run(); Console.WriteLine("PASS announcement affected group: " + group.Name); }
+        catch (Exception e) { failed++; Console.WriteLine("FAIL announcement affected group: " + group.Name + " [" + e.GetType().Name + "] " + e.Message); }
+    }
+    Console.WriteLine($"Announcement affected Host groups: {groups.Length-failed} passed, {failed} failed");
+    return failed == 0 ? 0 : 1;
+}
+if (args is ["--cx-notify-v2-f2-only"]) { await NotificationRollbackAvailabilityTests.Run(); return 0; }
+if (args is ["--cx-notify-v2-f-only"]) { await NotificationRollbackRecoveryTests.Run(); return 0; }
+if (args is ["--cx-polish-b-only"]) { await PolishRsiRefreshTests.Run(); return 0; }
+if (args is ["--cx-onboard-r4-only"]) { await FirstUseBusinessOwnerTests.RunReturningUsageMode(); await FirstUseStartupTests.Run(); return 0; }
+if (args is ["--cx-onboard-r3-only"]) { await FirstUseLogSearchTests.Run(); return 0; }
+if (args.Length == 0) await FirstUseLogSearchTests.Run();
+if (args.Length == 0) await PolishRsiRefreshTests.Run();
+if (args.Length == 0) await GameplayRecordingGateTests.Run();
+if (args is ["--gameplay-recording-gate-only"]) { await GameplayRecordingGateTests.Run(); return 0; }
+if (args is ["--data-continuity-new-only"]) { await DataContinuityTests.Run(); return 0; }
+if (args is ["--data-continuity-only"]) {
+    var groups = new (string Name, Func<Task> Run)[] {
+        ("new continuity regressions", DataContinuityTests.Run),
+        ("account total transport", AccountTotalTransportTests.Run),
+        ("runtime consent/reopen", GameplayTimeRuntimeTests.ConsentAndReopen),
+        ("runtime ownership", GameplayTimeRuntimeTests.OwnershipAndProtocol),
+        ("runtime storage", GameplayTimeRuntimeTests.StorageFailures),
+        ("runtime failure log/backoff", GameplayTimeRuntimeTests.FailuresLogAndRecoverOnBackoff),
+        ("runtime suspended reopen backoff", GameplayTimeRuntimeTests.SuspendedReopenWaitsForBackoff),
+        ("runtime owner gate flips", GameplayTimeRuntimeTests.OwnerGateFlipsDoNotFlood),
+        ("runtime recording gate", GameplayRecordingGateTests.Run),
+        ("linked account ownership", CompatibilityGameplayTimeTests.Verify),
+        ("local statistics", LocalGameplayTimeTests.Run),
+        ("first-use completion", FirstUseCompletionRuntimeTests.Run),
+        ("history once/migration", GameplayHistoryRuntimeTests.OnceOnlyAndMigration),
+        ("reset recovery", GameplayHistoryRuntimeTests.ResetRecovery),
+        ("reset bridge", GameplayHistoryRuntimeTests.ResetBridgeConfirmation),
+        ("history failure/ownership", GameplayHistoryRuntimeTests.FailureAndOwnership),
+        ("old snapshot preferences", GameplayHistoryRuntimeTests.OldSnapshotCompatibility),
+    };
+    var failed = 0;
+    foreach (var group in groups) {
+        try { await group.Run(); Console.WriteLine("PASS affected group: " + group.Name); }
+        catch (Exception e) { failed++; Console.WriteLine("FAIL affected group: " + group.Name + " [" + e.GetType().Name + "] " + e.Message); }
+    }
+    Console.WriteLine($"Affected Host groups: {groups.Length-failed} passed, {failed} failed");
+    return failed == 0 ? 0 : 1;
+}
+if (args is ["--cx-owner-gate-073-contract"]) return await ContractAchievementTests.OwnerGate073Contracts() == 0 ? 0 : 1;
+if (args.Length == 0 && await ContractAchievementTests.OwnerGate073Contracts() != 0) return 1;
+if (args is ["--contract-host-only"]) {
+    try { await ContractAchievementTests.Run(); return 0; }
+    catch (Exception e) { Console.WriteLine("FAIL CONTRACT HOST " + e.Message); return 1; }
+}
+if (args is ["--cx-owner-gate-073"]) return await OwnerGate073Tests.Run() == 0 ? 0 : 1;
+if (args is ["--owner-alias-073"]) return await OwnerAlias073Tests.Run() == 0 ? 0 : 1;
+if (args.Length == 0 && await OwnerAlias073Tests.Run() != 0) return 1;
+if (args is ["--migration-entry-073"]) return await MigrationEntry073Tests.Run() == 0 ? 0 : 1;
+if (args.Length == 0 && await MigrationEntry073Tests.Run() != 0) return 1;
+if (args.Length == 0 && await OwnerGate073Tests.Run() != 0) return 1;
+if (args is ["--cx-owner-gate-073-city"]) return await OwnerGate073CityTests.Run() == 0 ? 0 : 1;
+if (args.Length == 0 && await OwnerGate073CityTests.Run() != 0) return 1;
+if (args is ["--leaderboard-only"]) { await LeaderboardTests.Run(); return 0; }
+if (args is ["--achievement-rarity-record-only"]) { await AchievementRarityRecordTests.Run(); return 0; }
+if (args is ["--official-fleet-realtime-text-only"]) { await OfficialFleetRealtimeTextParsingTests.Run(); return 0; }
 if (args is ["--cx-gov-3-only"]) { await ActivityWaitLaneTests.RunAsync(); await AccountDispatchConcurrencyTests.VerifyOfficialActivityLane(); return 0; }
 if (args is ["--cx-gov-3-read-cancel-only"]) {
     await AccountPreferenceActionTests.StagedPipeCancellationReachesHttp();
@@ -26,6 +227,10 @@ if (args.Length == 0) await OfficialFleetGov2ClientTests.RunAsync();
 if (args is ["--official-fleet-governance-management-only"]) { await OfficialFleetGovernanceManagementClientTests.RunAsync(); return 0; }
 if (args.Length == 0) await OfficialFleetGovernanceManagementClientTests.RunAsync();
 if (args is ["--achfu-only"]) { await FirstUseBusinessOwnerTests.RunAchievementConcurrencyRegression(); return 0; }
+if (args is ["--cx-announce-f4-only"]) {
+    try { await AccountRuntimeSubscriptionTests.Run(); return 0; }
+    catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+}
 if (args is ["--overlay-fleet-only"]) { await OverlayFleetSourceTests.Run(); return 0; }
 if (args is ["--overlay-fleet-affected-only"])
 {
@@ -43,7 +248,11 @@ if (args is ["--overlay-fleet-affected-only"])
     return 0;
 }
 #if STARBRIDGE_LOCATION_CATALOG
-if (args is ["--cityhost-only"]) { await CityAchievementTests.Run(); return 0; }
+if (args is ["--outbox-compat-only"]) {
+    try { await CityOutboxCompatibilityTests.Run(); return 0; }
+    catch (Exception e) { Console.WriteLine("FAIL OUTBOX " + e.Message); return 1; }
+}
+if (args is ["--cityhost-only"]) { await CityAchievementTests.Run(); await CityAchievementTests.OutboxFaultRun(); return 0; }
 #endif
 if (args is ["--achievement-contract-only"]) { await AchievementReadContractTests.Run(); return 0; }
 if (args is ["--game-identity-only"])
@@ -57,9 +266,11 @@ if (args is ["--first-use-game-identity-only"])
     catch { return 1; }
 }
 #if STARBRIDGE_LOCATION_CATALOG
-if (args.Length == 0) await CityAchievementTests.Run();
+if (args.Length == 0) { await CityAchievementTests.Run(); await CityAchievementTests.OutboxFaultRun(); }
 #endif
 if (args is ["--scm-achievement-unlocks-only"]) { await ScmAchievementUnlockTests.Run(); return 0; }
+if (args is ["--achievement-celebration-delivery-only"]) { AchievementCelebrationTests.Run(); return 0; }
+if (args is ["--scm-achievement-composition-only"]) { await ScmAchievementCompositionTests.Run(); return 0; }
 if (args is ["--achcel-first-use-only"]) { await FirstUseBusinessOwnerTests.RunAchievementRefreshRegression(); return 0; }
 if (args is ["--celebration-audio-queue-only"]) { await CelebrationNotificationAudioTests.Run(); return 0; }
 if (args is ["--achcel-only"])
@@ -99,6 +310,7 @@ if (args is ["--lane-recovery-only"]) { await PrivacyLaneRecoveryTests.Isolation
 if (args is ["--owner-recovery-only"]) { await PrivacyLaneRecoveryTests.OwnerRecovery(); await PrivacyLaneRecoveryTests.FailureAndPrivacy(); await PrivacyLaneRecoveryTests.ExplicitResume(); return 0; }
 if (args is ["--official-sharing-defaults-only"]) { await OfficialSharingDefaultsTests.Run(); return 0; }
 if (args is ["--privacy-rejected-only"]) { await PrivacyPublicationTests.RejectedBackoff(); return 0; }
+if (args is ["--consent409-only"]) { await ConsentChoiceChangedTests.Run(); return 0; }
 if (args is ["--sharing-review-only"])
 {
     await SharingReviewRegressionTests.Run();
@@ -106,7 +318,9 @@ if (args is ["--sharing-review-only"])
     args = ["--filter", "CX-L11"];
 }
 if (args is ["--archived-appearance-only"]) { OverlayArchivedAppearanceMigrationTests.Run(); return 0; }
-if (args.Length == 0) { await PrivacyLaneRecoveryTests.Isolation(); await PrivacyLaneRecoveryTests.OwnerRecovery(); await PrivacyLaneRecoveryTests.FailureAndPrivacy(); await PrivacyLaneRecoveryTests.ExplicitResume(); OverlayArchivedAppearanceMigrationTests.Run(); }
+if (args is ["--opacity-migration-only"]) { OverlayOpacityMigrationTests.Run(); return 0; }
+if (args is ["--background-scale-only"]) { OverlayBackgroundScaleTests.Run(); return 0; }
+if (args.Length == 0) { await PrivacyLaneRecoveryTests.Isolation(); await PrivacyLaneRecoveryTests.OwnerRecovery(); await PrivacyLaneRecoveryTests.FailureAndPrivacy(); await PrivacyLaneRecoveryTests.ExplicitResume(); OverlayArchivedAppearanceMigrationTests.Run(); OverlayOpacityMigrationTests.Run(); OverlayBackgroundScaleTests.Run(); }
 if (args is ["--visitor-decoration-races-only"]) { await VisitorDecorationRaceTests.Run(); return 0; }
 if (args is ["--affiliation-logo-only"]) { await PublicOrganizationLogoTests.Run(); await LegacyPasswordLoginTests.VisitorOrganizationLogos(); await VisitorDecorationRaceTests.Run(); return 0; }
 if (args.Length == 0) { await PublicOrganizationLogoTests.Run(); await LegacyPasswordLoginTests.VisitorOrganizationLogos(); await VisitorDecorationRaceTests.Run(); }
@@ -395,6 +609,9 @@ if (args is ["--page-edit-wire-fixture"])
     return 0;
 }
 
+if (args is ["--profile-import-journal-only"]) { await ProfileImportJournalTests.Run(); return 0; }
+if (args is ["--profile-sidefile-only"]) { await ProfileShowcaseSidefileTests.Run(); return 0; }
+if (args is ["--profile-showcases-only"]) { await ProfileShowcaseTests.Run(); return 0; }
 if (args is ["--page-presentation-only"])
 {
     await PagePresentationClientTests.Verify();
@@ -449,6 +666,7 @@ if (args is ["--first-use-online-identity-only"]) { await FirstUseOnlineIdentity
 if (args is ["--first-use-online-review-bridge-only"]) { await FirstUseOnlineReviewBridgeTests.Run(); return 0; }
 if (args is ["--first-use-online-handoff-only"]) { await FirstUseOnlineHandoffTests.Run(); return 0; }
 if (args is ["--first-use-business-owner-only"]) { await FirstUseBusinessOwnerTests.Run(); return 0; }
+if (args is ["--first-use-cold-completion-only"]) { await FirstUseBusinessOwnerTests.RunColdCompletion(); return 0; }
 if (args is ["--first-use-installation-only"]) { await FirstUseBusinessOwnerTests.RunInstallation(); return 0; }
 if (args is ["--first-use-native-installation-only"]) { await FirstUseBusinessOwnerTests.RunNativeInstallation(); return 0; }
 if (args is ["--first-use-candidate-shutdown-only"]) { await FirstUseBusinessOwnerTests.RunCandidateShutdown(); return 0; }
@@ -586,6 +804,7 @@ if (args is ["--regional-fallback-only"])
     var regionalCases = new (string Name, Func<Task> Run)[]
     {
         ("routing", ScmRegionFallbackTests.Verify),
+        ("websites", ScmWebsiteRoutingTests.Verify),
         ("login", ScmRouteStateTests.LoginFailures),
         ("bridge", ScmRouteStateTests.PreferencesAndBridge)
     };
@@ -594,6 +813,7 @@ if (args is ["--regional-fallback-only"])
     {
         try { await regional.Run(); }
         catch (Exception error) { regionalFailed++; Console.WriteLine($"FAIL regional {regional.Name}: {error.Message}"); }
+        finally { StarBridge.HostRuntime.Auth.ScmWebsiteRouting.SetActive(null); }
     }
     Console.WriteLine($"SUMMARY PASS {regionalCases.Length - regionalFailed}/{regionalCases.Length}; FAIL {regionalFailed}");
     return regionalFailed == 0 ? 0 : 1;
@@ -604,6 +824,7 @@ if (args is ["--friends-read-probe-disabled-only"]) { await FriendsReadProbeTest
 
 if (args is ["--exec-hangar-game-overlay-only"]) { await ExecHangarGameOverlayTests.Run(); return 0; }
 if (args is ["--exec-hangar-only"]) { await ExecHangarTests.Run(); await ExecHangarGameOverlayTests.Run(); return 0; }
+if (args is ["--key-bindings-only"]) { await KeyBindingsTests.Run(); return 0; }
 
 if (args is ["--daily-support-only"])
 {
@@ -619,6 +840,7 @@ if (args is ["--bound-legacy-login-only"])
 
 if (args is ["--achievements-only"])
 {
+    await AchievementRarityRecordTests.Run();
     await AchievementRuntimeTests.ConfirmedCacheNeverFlashesLocked();
     await HangarAchievementTests.Run();
     AchievementCelebrationTests.Run();
@@ -657,6 +879,10 @@ if (args is ["--compatibility-gameplay-time-only"])
     await GameplayTimeRuntimeTests.ConsentAndReopen();
     await GameplayTimeRuntimeTests.OwnershipAndProtocol();
     await GameplayTimeRuntimeTests.StorageFailures();
+    await GameplayTimeRuntimeTests.FailuresLogAndRecoverOnBackoff();
+    await GameplayTimeRuntimeTests.EarlyOwnerGapResumesWithSavedConsent();
+    await GameplayTimeRuntimeTests.SuspendedReopenWaitsForBackoff();
+    await GameplayTimeRuntimeTests.OwnerGateFlipsDoNotFlood();
     Console.WriteLine("PASS compatible gameplay time ownership, consent and file leases");
     return 0;
 }
@@ -696,6 +922,7 @@ if (args is ["--compatibility-login-only"])
 
 if (args is ["--selected-profile-import-only"])
 {
+    await ProfileImportJournalTests.Run();
     await FullProfilePresentationImportTests.Run();
     await SelectedProfileImportTests.Run();
     await SelectedLocalProfileImportTests.Run();
@@ -734,6 +961,12 @@ if (args is ["--overlay-startup-isolation-only"])
     await OverlayStartupIsolationTests.Run();
     return 0;
 }
+if (args is ["--hangar-acquired-date-only"])
+{
+    await HangarAcquiredDateTests.Run();
+    return 0;
+}
+
 if (args is ["--interaction-preferences-only"])
 {
     await ApplicationInteractionPreferencesTests.Run();
@@ -873,6 +1106,39 @@ if (args is ["--ship-identity-only"])
 
 if (args is ["--overlay-arrival-only"])
 {
+    await QuantumOwnShipTests.OtherShipWithoutNavigation();
+    await QuantumOwnShipTests.MatchingNavigation();
+    await QuantumOwnShipTests.CurrentShipWithoutNavigation();
+    await QuantumOwnShipTests.ReleasedControlWithoutNavigation();
+    await QuantumOwnShipTests.NavigationThenExitRejectsArrival();
+    await QuantumOwnShipTests.DrivingThenExitRejectsArrival();
+    await QuantumOwnShipTests.GroundInventoryRejectsLaterArrival();
+    await QuantumOwnShipTests.InventoryConfirmsAcceptedArrival();
+    await QuantumOwnShipTests.ForeignExitAndInventoryPreserveProof();
+    await QuantumOwnShipTests.ForeignOwnedChannelExitRevokesProof();
+    await QuantumOwnShipTests.ClearDriverRespectsCoreDisembarkation();
+    await QuantumOwnShipTests.ReboardingDoesNotRestoreOldTarget();
+    await QuantumOwnShipTests.DifferentChannelCannotRestoreExitedInstance();
+    await QuantumOwnShipTests.DifferentChannelCannotRestoreInventoryInstance();
+    await QuantumOwnShipTests.SameInstanceDrivingRestoresArrival();
+    await QuantumOwnShipTests.SameInstanceNavigationRestoresArrival();
+    await QuantumOwnShipTests.DifferentModelExitPreservesCurrentJourney();
+    await QuantumOwnShipTests.MatchingOrUnknownModelExitRevokesCurrentJourney();
+    await QuantumOwnShipTests.DifferentModelExitRevokesOnlyMatchingLastKnown();
+    await QuantumOwnShipTests.WeakControlCannotRestoreRevokedInstance();
+    await QuantumOwnShipTests.TwoJourneysWithInventoryConfirmation();
+    await QuantumOwnShipTests.PassengerChannelRejectsMatchingModelWithoutInstance();
+    await QuantumOwnShipTests.PassengerChannelRejectsDifferentModel();
+    await QuantumOwnShipTests.PassengerChannelExitRejectsMatchingModel();
+    await QuantumOwnShipTests.PassengerChannelRejectsConflictingInstance();
+    await QuantumOwnShipTests.PassengerInventoryRevokesChannel();
+    await QuantumOwnShipTests.ExpiredOrFutureNavigation();
+    await QuantumOwnShipTests.MissingInstanceNeverAccepted();
+    await QuantumOwnShipTests.ForeignArrivalPreservesNavigation();
+    await QuantumOwnShipTests.LatestNavigationWins();
+    await QuantumOwnShipTests.RepeatedNavigationRefreshesProof();
+    await QuantumOwnShipTests.SessionBoundariesClearNavigation();
+    await QuantumOwnShipTests.RecentLastKnownShipOnly();
     await GameLogJournalSourceTests.ServerNavigationAndPrivateProjection();
     await GameLogJournalSourceTests.CurrentF8CMatchesJournal();
     Console.WriteLine("PASS current local session preserves quantum arrival confirmation");
@@ -901,6 +1167,7 @@ if (args is ["--local-self-source-only"])
     await LocalGamePresenceTests.Verify();
     await RoomOverlaySessionTests.Membership();
     await RoomOverlaySessionTests.Revocation();
+    await RoomOverlaySessionTests.Presence();
     await RoomOverlaySessionTests.Chat();
     Console.WriteLine("PASS local process confirmation and authorized self source");
     return 0;
@@ -1092,6 +1359,10 @@ if (args is ["--avatar-only"])
 if (args is ["--callsign-only"])
 {
     await LegacyPasswordLoginTests.ScmCallSignWrite();
+    await LegacyPasswordLoginTests.ScmSingleCallsign();
+    await LegacyPasswordLoginTests.ScmSingleCallsignImportGuards();
+    await LegacyPasswordLoginTests.ScmSingleCallsignImportGuardsSaves();
+    await LegacyPasswordLoginTests.ScmCallsignPresentationEvent();
     Console.WriteLine("PASS SCM callsign owner, scope, CAS, acknowledgement and invalidation checks");
     return 0;
 }
@@ -1277,6 +1548,7 @@ if (args is ["--release-configuration-only"])
     return 0;
 }
 
+if (args is ["--profile-account-facts-only"]) { await ProfileAccountFactsTests.Run(); return 0; }
 if (args is ["--help-support-only"])
 {
     await HelpSupportTests.RunAll();
@@ -1402,10 +1674,16 @@ if (args is ["--isolated-update-helper", var helperPath, var fixturePath])
     return 0;
 }
 
+if (args is ["--update-hero-only"])
+{
+    await FlutterUpdateHeroTests.Verify();
+    return 0;
+}
 if (args is ["--flutter-updates-only"])
 {
     await InstalledUpdateTransactionTests.Verify();
     await FlutterInstallerUpdateTests.Verify();
+    await FlutterUpdateMirrorTests.Verify();
     await FlutterInstallerDownloadTests.Verify();
     await FlutterUpdateTests.Verify();
     await FlutterUpdateTransactionTests.Verify();
@@ -1447,6 +1725,7 @@ if (args is ["--hangar-cards-only"])
     return 0;
 }
 
+if (args is ["--hangar-cloud-only"]) { await HangarCloudSyncTests.Verify(); return 0; }
 if (args is ["--hangar-auto-sync-only"])
 {
     try
@@ -1456,6 +1735,7 @@ if (args is ["--hangar-auto-sync-only"])
         await HangarReaderDispatcherTests.ReadOnlyPreviewMatrix();
         await HangarAutoSyncIntegrationTests.Verify();
         await HangarAutoSyncTests.Verify();
+        await HangarCloudSyncTests.Verify();
         await CommunityHangarSharingClientTests.Verify();
         Console.WriteLine("PASS Local hangar automatic publication lifecycle");
         return 0;
@@ -1620,6 +1900,7 @@ if (args is ["--player-activity-transition-reliability-only"])
 {
     await PlayerActivityTransitionReliabilityTests.Run();
     await PlayerActivityPolicyTests.Run();
+    await PlayerActivityGroupTests.Run();
     Console.WriteLine("PASS Player activity transitions and audience policy gates");
     return 0;
 }
@@ -1641,6 +1922,7 @@ if (args is ["--communities-only"])
         await CommunityWpfS2InviteTests.Verify();
         await CommunityWpfS2LeaveTests.Verify();
         await CommunityCreationClientTests.Verify();
+        await CommunityRelayRefusalTests.Verify();
         await CommunityWpfS2CreationTests.Verify();
         await CommunityWpfS2InvitationSendTests.Verify();
         await CommunityWpfS2ProfileTests.Verify();
@@ -1722,6 +2004,39 @@ if (args.Length == 2 && args[0] == "--hangar-catalog-bundle")
 
 var tests = new (string Name, Func<Task> Test)[]
 {
+    ("TOKEN-BACKOFF 404AndConcurrency", AccountSessionRestoreTests.Backoff404AndConcurrency),
+    ("TOKEN-BACKOFF DoublingAndCap", AccountSessionRestoreTests.BackoffDoublingAndCap),
+    ("TOKEN-BACKOFF JitterBounds", AccountSessionRestoreTests.BackoffJitterBounds),
+    ("TOKEN-BACKOFF SuccessResets", AccountSessionRestoreTests.BackoffSuccessResets),
+    ("TOKEN-BACKOFF InvalidGrantResets", AccountSessionRestoreTests.BackoffInvalidGrantResets),
+    ("TOKEN-BACKOFF TransportAndTimeout", AccountSessionRestoreTests.BackoffTransportAndTimeout),
+    ("TOKEN-BACKOFF IdentityReusesRotation", AccountSessionRestoreTests.BackoffIdentityReusesRotation),
+    ("TOKEN-BACKOFF SwitchAndLogoutReset", AccountSessionRestoreTests.BackoffSwitchAndLogoutReset),
+    ("TOKEN-BACKOFF HostProjection", AccountSessionRestoreTests.BackoffHostProjection),
+    ("TOKEN-BACKOFF Bootstrap", AccountSessionRestoreTests.BackoffBootstrap),
+    ("TOKEN-BACKOFF DeviceStatus", AccountSessionRestoreTests.BackoffDeviceStatus),
+    ("CX-ROWS20 0.7.2.1 compatibility and local rows extension", OverlayRowsCompatibilityTests.Run),
+    ("CX-LAST-ONLINE-073 negotiated days and legacy compatibility", LastOnlineDaysTests.Run),
+    ("CX-POLL-NAV-F2 leave during G1 stops following requests and member return", OfficialFleetNavigationTests.LeaveDuringG1),
+    ("CX-POLL-NAV-F2 leave during self identity rejects final member return", OfficialFleetNavigationTests.LeaveDuringSelf),
+    ("CX-POLL-NAV-F2 runtime and activity revocation stops reads and final hints", OfficialFleetNavigationTests.LeaveDuringRuntimeAndWait),
+    ("CX-POLL-NAV-F2 equivalent TTL refresh survives G1 self relay and activity stages", OfficialFleetNavigationTests.EquivalentRefreshAtLaterStages),
+    ("CX-POLL-NAV-F2 revoked 401 cannot refresh or retry later requests", OfficialFleetNavigationTests.RevokedAuthenticationDoesNotRefresh),
+    ("CX-POLL-NAV-F1 cached source cannot restore announcement or overlay membership", OfficialFleetNavigationTests.ObservationOrder),
+    ("CX-POLL-NAV-F1 bootstrap response keeps its actual session version", OfficialFleetNavigationTests.BootstrapSessionRotation),
+    ("CX-POLL-NAV-F1 equivalent TTL refresh preserves in-flight public page", OfficialFleetNavigationTests.EquivalentRefresh),
+    ("CX-POLL-NAV-F1 failed old read only clears its own navigation entry", OfficialFleetNavigationTests.FailureOwnsOnlyItsEntry),
+    ("CX-POLL-NAV-F1 same source observation allows pending bootstrap without caching it", OfficialFleetNavigationTests.SameSourceObservationDuringBootstrap),
+    ("CX-POLL-NAV-F1 real 401 refresh and reauthorization preserve owner fences", OfficialFleetNavigationTests.UnauthorizedRefreshAndReauthorization),
+    ("CX-POLL-NAV-F1 activity waits refresh G1 and preserve replacement owner", OfficialFleetNavigationTests.ActivityWaitRefreshAndOwner),
+    ("CX-POLL-MEMBER-NAV one-hour navigation read budget", OfficialFleetNavigationTests.Hour),
+    ("CX-POLL-MEMBER-NAV account generation session fleet retirement boundaries", OfficialFleetNavigationTests.Boundaries),
+    ("CX-POLL-MEMBER-NAV page and G1 failures invalidate navigation", OfficialFleetNavigationTests.Failures),
+    ("CX-POLL-MEMBER-NAV TTL expiry and refresh boundaries", OfficialFleetNavigationTests.Lifetime),
+    ("CX-POLL-MEMBER-NAV runtime one-hour independent authorization", OfficialFleetNavigationTests.RuntimeHour),
+    ("CX-POLL-MEMBER-NAV notification overlay and concurrent invalidation", OfficialFleetNavigationTests.NotificationsAndRaces),
+    ("CX-POLL-MEMBER-NAV self lookup and final G1 deadlines stay independent", OfficialFleetNavigationTests.AuthorizationIsNotCached),
+    ("Manual updates use current terms independently of device mode", UpdateTermsAdmissionTests.Run),
     ("SCM game identity bridge, session and participant enrollment", GameIdentityBridgeTests.Run),
     ("Visitor fleet affiliation status and old-server compatibility", VisitorFleetAffiliationTests.Run),
     ("Official sharing defaults require explicit choice and preserve fail-closed storage", OfficialSharingDefaultsTests.Run),
@@ -1800,6 +2115,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("First-use online review bridge exposes actual auth and identity without installation authority", FirstUseOnlineReviewBridgeTests.Run),
     ("First-use handoff seals and drains the actual confirmed authentication owner", FirstUseOnlineHandoffTests.Run),
     ("Official runtime Ready follows the actual installed Native owner", FirstUseBusinessOwnerTests.RunRuntimeReady),
+    ("Account runtime subscriptions retire without overwriting overlay or notification observers", AccountRuntimeSubscriptionTests.Run),
     ("First-use business preparation reads current existing storage ownership and drains physical IO", FirstUseBusinessOwnerTests.Run),
     ("First-use candidate lifecycles retain noncolliding actual account generations", FirstUseGenerationTests.Run),
     ("First-use Native composition skips sealed account consumers and retains device routes", FirstUseCompositionTests.Run),
@@ -1811,8 +2127,10 @@ var tests = new (string Name, Func<Task> Test)[]
     ("First-use cold recovery requires durable real retirement and actual process exit", FirstUseModeRecoveryTests.Run),
     ("Missing original mode is unknown and cannot restore account startup", FirstUseMissingModeTests.Run),
     ("The actual guide recovers only an explicitly chosen originally stopped local owner", FirstUseRecoveryGuideTests.Run),
-    ("SCM public ship specifications preserve exact model identity", ShipSpecificationTests.Run),
+        ("SCM public ship specifications preserve exact model identity", ShipSpecificationTests.Run),
+        ("Polish SCM ship thumbnails preserve exact model identity", PolishShipThumbnailTests.Run),
     ("Executive hangar schedules independent device reminders", ExecHangarTests.Run),
+    ("Key bindings read one fixed file and merge the player choices", KeyBindingsTests.Run),
     ("Executive hangar game overlay display grants", ExecHangarGameOverlayTests.Run),
     ("Achievement authenticated SCM transport and cloud receipt", AchievementRemoteTests.Run),
     ("Achievement read sample shared with Flutter and the server", AchievementReadContractTests.Run),
@@ -1854,6 +2172,15 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Independent account reads retain mutation barriers and session isolation", AccountDispatchConcurrencyTests.Verify),
     ("Account timing separates queued roots without changing admission", AccountDispatchConcurrencyTests.ReadTiming),
     ("Help support history and public endpoints", HelpSupportTests.RunAll),
+    ("Mission and blueprint catalogue reads (27 synthetic cases)", ScmCatalogReaderTests.Run),
+    ("Public profile header reads the shared sample and visitor facts", ProfilePublicHeaderTests.Run),
+    ("Marketplace reads: hall, item offers (single or checklist), masked traders", MarketplaceTests.Run),
+    ("Marketplace listing drafts and publish checks", MarketplaceListingTests.Run),
+    ("Marketplace trade records and masked counterparties", MarketplaceRecordsTests.Run),
+    ("Marketplace chat: full handles, opaque peers, one-shot sends", MarketplaceChatTests.Run),
+    ("Marketplace contracts: masked people, validated publish, one-shot writes", MarketplaceContractsTests.Run),
+    ("Marketplace warehouse: personal read-only spaces and ledger", MarketplaceWarehouseTests.Run),
+    ("Marketplace notices: categories, counts, read marks only", MarketplaceNoticesTests.Run),
     ("Independent event preferences reuse isolated revisioned persistence", SharedEventPreferencesStoreTests.Run),
     ("Independent event transport confirms one write without fallback or replay", EventSharingTransportTests.Run),
     ("Live event source excludes history and discards withdrawn session events", SharedActivityEventSourceTests.Run),
@@ -1870,6 +2197,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Flutter updates isolate package identity, signatures and staging", FlutterUpdateTests.Verify),
     ("Installed updates retain registry, uninstaller and recoverable startup", InstalledUpdateTransactionTests.Verify),
     ("Flutter installer update checks preserve release identity and trust", FlutterInstallerUpdateTests.Verify),
+    ("Flutter update mirrors preserve signed regional fallback and cleanup", FlutterUpdateMirrorTests.Verify),
     ("Flutter installer downloads preserve integrity, cancellation and publisher gates", FlutterInstallerDownloadTests.Verify),
     ("Flutter update transaction preserves rollback and recovers interrupted renames", FlutterUpdateTransactionTests.Verify),
     ("Flutter update checks enforce strict generation and read-only contracts", FlutterUpdateBridgeTests.Verify),
@@ -1900,6 +2228,39 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Process journal StorageAndVersionFailuresDoNotBreakObservation", LocalGameProcessJournalTests.StorageAndVersionFailuresDoNotBreakObservation),
     ("Process journal BackwardClockAndSharedGameLogJournal", LocalGameProcessJournalTests.BackwardClockAndSharedGameLogJournal),
     ("GameLog journal WarmupThenRealEvents", GameLogJournalSourceTests.WarmupThenRealEvents),
+    ("Quantum own ship rejects unrelated arrivals", QuantumOwnShipTests.OtherShipWithoutNavigation),
+    ("Quantum own ship matches recent local navigation", QuantumOwnShipTests.MatchingNavigation),
+    ("Quantum own ship accepts current ship without navigation", QuantumOwnShipTests.CurrentShipWithoutNavigation),
+    ("Quantum own ship accepts arrival after control release", QuantumOwnShipTests.ReleasedControlWithoutNavigation),
+    ("Quantum own ship rejects arrival after navigation then exit", QuantumOwnShipTests.NavigationThenExitRejectsArrival),
+    ("Quantum own ship rejects arrival after driving then exit", QuantumOwnShipTests.DrivingThenExitRejectsArrival),
+    ("Quantum own ship ground inventory invalidates proof", QuantumOwnShipTests.GroundInventoryRejectsLaterArrival),
+    ("Quantum own ship inventory confirms accepted arrival", QuantumOwnShipTests.InventoryConfirmsAcceptedArrival),
+    ("Quantum own ship foreign exit and inventory preserve proof", QuantumOwnShipTests.ForeignExitAndInventoryPreserveProof),
+    ("Quantum own ship foreign-owned channel exit revokes proof", QuantumOwnShipTests.ForeignOwnedChannelExitRevokesProof),
+    ("Quantum own ship ClearDriver respects Core disembarkation", QuantumOwnShipTests.ClearDriverRespectsCoreDisembarkation),
+    ("Quantum own ship reboarding cannot restore old target", QuantumOwnShipTests.ReboardingDoesNotRestoreOldTarget),
+    ("Quantum own ship DifferentChannelCannotRestoreExitedInstance", QuantumOwnShipTests.DifferentChannelCannotRestoreExitedInstance),
+    ("Quantum own ship DifferentChannelCannotRestoreInventoryInstance", QuantumOwnShipTests.DifferentChannelCannotRestoreInventoryInstance),
+    ("Quantum own ship SameInstanceDrivingRestoresArrival", QuantumOwnShipTests.SameInstanceDrivingRestoresArrival),
+    ("Quantum own ship SameInstanceNavigationRestoresArrival", QuantumOwnShipTests.SameInstanceNavigationRestoresArrival),
+    ("Quantum own ship different-model exit preserves current journey", QuantumOwnShipTests.DifferentModelExitPreservesCurrentJourney),
+    ("Quantum own ship matching or unknown exit revokes current journey", QuantumOwnShipTests.MatchingOrUnknownModelExitRevokesCurrentJourney),
+    ("Quantum own ship different-model exit revokes only matching LastKnown", QuantumOwnShipTests.DifferentModelExitRevokesOnlyMatchingLastKnown),
+    ("Quantum own ship weak control cannot restore revoked instance", QuantumOwnShipTests.WeakControlCannotRestoreRevokedInstance),
+    ("Quantum own ship two journeys confirm inventory locations", QuantumOwnShipTests.TwoJourneysWithInventoryConfirmation),
+    ("Quantum passenger channel rejects matching model without instance", QuantumOwnShipTests.PassengerChannelRejectsMatchingModelWithoutInstance),
+    ("Quantum passenger channel rejects different model", QuantumOwnShipTests.PassengerChannelRejectsDifferentModel),
+    ("Quantum passenger channel exit rejects matching model", QuantumOwnShipTests.PassengerChannelExitRejectsMatchingModel),
+    ("Quantum passenger channel rejects conflicting instance", QuantumOwnShipTests.PassengerChannelRejectsConflictingInstance),
+    ("Quantum passenger inventory revokes channel", QuantumOwnShipTests.PassengerInventoryRevokesChannel),
+    ("Quantum own ship rejects expired or future navigation", QuantumOwnShipTests.ExpiredOrFutureNavigation),
+    ("Quantum own ship requires instance identity", QuantumOwnShipTests.MissingInstanceNeverAccepted),
+    ("Quantum own ship rejection preserves navigation", QuantumOwnShipTests.ForeignArrivalPreservesNavigation),
+    ("Quantum own ship uses latest navigation", QuantumOwnShipTests.LatestNavigationWins),
+    ("Quantum own ship repeated navigation refreshes proof", QuantumOwnShipTests.RepeatedNavigationRefreshesProof),
+    ("Quantum own ship clears evidence at session boundaries", QuantumOwnShipTests.SessionBoundariesClearNavigation),
+    ("Quantum own ship bounds LastKnown fallback", QuantumOwnShipTests.RecentLastKnownShipOnly),
     ("GameLog journal LifeEvidenceUsesSameParser", GameLogJournalSourceTests.LifeEvidenceUsesSameParser),
     ("GameLog journal InvalidIdentityAndAccountDoNotCommit", GameLogJournalSourceTests.InvalidIdentityAndAccountDoNotCommit),
     ("GameLog journal PauseResetAndPartialLines", GameLogJournalSourceTests.PauseResetAndPartialLines),
@@ -1929,11 +2290,37 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Local journal reports backup without restoring", LocalEventJournalReaderTests.BackupIsExplicitAndNeverRestored),
     ("Local journal preserves identity dedup and bounded history", LocalEventJournalReaderTests.IdentityDedupAndBoundedLatestHistory),
     ("Local journal rejects untrusted and oversized data", LocalEventJournalReaderTests.LargeOrUntrustedDataDoesNotBecomeExportable),
+    ("Local mission records storage, live, import and bridge", LocalMissionRecordsTests.Run),
+    ("Contract history clear invalidates objective text", LocalContractHistoryTests.ClearInvalidatesObjectiveText),
+    ("Contract history continuation clear invalidates objective text", LocalContractHistoryTests.ContinuationClearInvalidatesObjectiveText),
+    ("Contract history missing contracts preserves unavailable legacy read", LocalContractHistoryTests.MissingContractsPreserveUnavailableLegacyRead),
+    ("Contract history missing contracts preserves unavailable legacy export", LocalContractHistoryTests.MissingContractsPreserveUnavailableLegacyExport),
+    ("Contract history retries leases without blocking Observe", LocalContractHistoryTests.LeaseRetryAndNonBlockingObserve),
+    ("Contract history reports source failures in reads and exports", LocalContractHistoryTests.SourceAvailabilityReadAndExport),
+    ("Contract history recovers after background faults", LocalContractHistoryTests.BackgroundFaultRecovers),
+    ("Contract history pending retirement switch close and dispose complete", LocalContractHistoryTests.PendingRetirementAndDispose),
+    ("Contract history clear during backoff prevents retry commit", LocalContractHistoryTests.ClearDuringBackoffPreventsRetryCommit),
+    ("Contract history clear barrier rejects old reads and queued retries", LocalContractHistoryTests.ClearBarrierAndScope),
+    ("Contract history queue is bounded and seen requires commit", LocalContractHistoryTests.QueueBoundAndUncommittedDedup),
+    ("Contract history faults preserve independent achievements and authority cancellation", LocalContractHistoryTests.HistoryFaultsPreserveAuthority),
+    ("Contract history production callers share one owner and clear barrier", ContractAchievementTests.LocalHistoryProductionComposition),
+    ("Contract history real reader clear prevents original batch commit", ContractAchievementTests.LocalHistoryReadClearCommit),
+    ("Contract history uses real parsed timeline", LocalContractHistoryTests.RealTimeline),
+    ("Contract history historical acceptance admits live evidence", LocalContractHistoryTests.HistoricalAcceptanceLiveEvidence),
+    ("Contract history corrupt source preserves legacy operations", LocalContractHistoryTests.CorruptContractsDoNotBlockLegacy),
+    ("Contract history respects real reader identity and replay gates", ContractAchievementTests.LocalHistoryRuntimeGates),
+    ("Contract history records completed named stages and whole endings", LocalContractHistoryTests.StageTextAndOutcomes),
+    ("Contract history preserves legacy reads and recovery states", LocalContractHistoryTests.MissingCorruptRecoveryAndLegacy),
+    ("Contract history merges sort pages revisions and category", LocalContractHistoryTests.MergePaginationRevisionAndFilter),
+    ("Contract history clears both stores and isolates failures", LocalContractHistoryTests.ClearIsolationAndWriteFailure),
+    ("Contract achievement host groups (contract-host-only)", ContractAchievementTests.Run),
     ("Local history paginates and filters within bounds", LocalEventHistoryBridgeTests.PaginationAndFilter),
     ("Local history rejects mixed revisions", LocalEventHistoryBridgeTests.RevisionChangesNeverMixPages),
     ("Local history preserves missing corrupt and backup states", LocalEventHistoryBridgeTests.MissingCorruptBackupAndRejectedQueries),
     ("Local history rejects cancelled stale and disposed reads", LocalEventHistoryBridgeTests.CancellationGenerationAndDispose),
     ("Local game events have an independent overlay source", LocalGameOverlayEventTests.Verify),
+    ("Continuous play passive card, quiet bypass and rollback compatibility", ContinuousPlayCardTests.Run),
+    ("Visor size of a preset never saved follows the screen", OverlayVisorAutoSizeTests.Run),
     ("Play reminder preserves WPF defaults and repeat", ContinuousPlayReminderTests.DefaultsAndRepeat),
     ("Play reminder disabling and reenabling", ContinuousPlayReminderTests.DisabledAndReenabled),
     ("Play reminder interval changes", ContinuousPlayReminderTests.IntervalChangeUsesSessionAndLastAccepted),
@@ -1949,6 +2336,10 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Trade Windows notifications use live pushes with privacy and account fencing", TradeNotificationTests.Run),
     ("Direct message notice source suppresses history, own sends and stale accounts", DirectMessageNotificationObserverTests.Run),
     ("Local notification settings persist and gate authenticated room reminders", NotificationSettingsTests.Run),
+    ("0.7.3 card preferences keep a separate file and switch Windows cards on once", NotificationCardPreferencesTests.Run),
+    ("0.7.3 activity cards: the third member onward within a minute shares one card", PlayerActivityGroupTests.Run),
+    ("0.7.3 overlay v2 storage: own folder from defaults, earlier files untouched", OverlayVisorSwitchTests.Run),
+    ("0.7.3 visor rollback: v2 documents stay 0.7.2.1-readable", OverlayVisorRollbackTests.Run),
     ("Desktop notification tickets enforce privacy, expiry and single delivery", DesktopNotificationTests.Run),
     ("Friend publication gates consent and retires uncertain sessions", FriendSharingPublicationTests.Verify),
     ("Friend sharing runtime binds real source lifecycle and remote policy", FriendSharingRuntimeTests.Run),
@@ -1967,6 +2358,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("SCM account and sharing identity policy agree before game launch", () => { CompatibilityPublicationIdentityTests.Verify(); return Task.CompletedTask; }),
     ("Player activity sources require complete authorized identities", PlayerActivitySourcesTests.Verify),
     ("Player activity preserves every real transition without replay", PlayerActivityTransitionReliabilityTests.Run),
+    ("Player activity settles offline for 20 seconds and suppresses brief reconnects", PlayerActivityOfflineSettleTests.Run),
     ("Background social activity observes friends without a page", LegacyPasswordLoginTests.VerifyBackgroundPlayerActivity),
     ("Manual presence shares publication gate and preserves consent", ManualPresenceIntegrationTests.Verify),
     ("SCM realtime Host lifecycle and authority observation", ScmRealtimeLifecycleTests.Verify),
@@ -1990,6 +2382,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Community WPF S2 admissions expose bounded management and reuse original decisions", CommunityWpfS2ManagementTests.Verify),
     ("Community WPF S2 governance preserves original permissions and one-shot mutations", CommunityWpfS2GovernanceTests.Verify),
     ("Community creation preserves WPF options and never replays an uncertain write", CommunityCreationClientTests.Verify),
+    ("Community writes explain relay 428 and named 409 identity refusals without forwarding relay text", CommunityRelayRefusalTests.Verify),
     ("CX-L13 workspace member identity survives authorization lease expiry", CommunityMemberReferenceTests.WorkspaceLease),
     ("CX-L13b invisible announcement authors omit retained member references", CommunityMemberReferenceAuthorTests.InvisibleAnnouncementAuthors),
     ("CX-L13b full mapping reuses oldest member before adding a new member", CommunityMemberReferenceTests.CapacityReusesOldestBatch),
@@ -2020,7 +2413,10 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Community hangar sharing preserves scoped explicit choices and verifies saves", CommunityHangarSharingClientTests.Verify),
     ("Official own-sharing protects scoped inventory and one-shot grants", OfficialFleetHangarSharingClientTests.Run),
     ("Official public ships preserve typed source, identity deadlines and complete query semantics", OfficialFleetSharedShipsClientTests.Run),
+    ("Official ships read failures clear presentation without claiming identity changes", OfficialFleetShipsReadFailureTests.Run),
     ("Hangar background publication retries only safe failures and cancels obsolete work", HangarAutoSyncTests.Verify),
+    ("Hangar account copy uploads, restores only empty accounts and deletes on request", HangarCloudSyncTests.Verify),
+    ("Visitor gameplay time publishes only the current SCM account snapshot", VisitorGameplayTimeTests.Run),
     ("Local hangar save returns before remote publication and emits an isolated refresh", HangarAutoSyncIntegrationTests.Verify),
     ("Community roles protect definitions, revisions and uncertain writes", CommunityRolesClientTests.Verify),
     ("Community member role assignment protects identities and uncertain writes", CommunityMemberRoleClientTests.Verify),
@@ -2036,6 +2432,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Invitation account Bridge binds current identity and safely projects recovery", InvitationAccountBridgeTests.Verify),
     ("Privacy publication fails closed on invalid acknowledgements and unreadable policy", PrivacyPublicationTests.FailClosed),
     ("Privacy publication rejection uses long backoff and accurate status", PrivacyPublicationTests.RejectedBackoff),
+    ("Consent conflict requires explicit local confirmation", ConsentChoiceChangedTests.Run),
     ("Verified local owner recovery resumes only remembered sharing", S2CompatibilityReadTests.VerifySharingAfterOwnerRecovery),
     ("Privacy publication production timer automatically recovers", PrivacyPublicationRecoveryTests.AutomaticTimerRecovery),
     ("Privacy publication HTTP restart and session recovery", PrivacyPublicationRecoveryTests.ServerAndSessionRecovery),
@@ -2048,6 +2445,19 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Privacy publication revoked consent stays stopped across restart", PrivacyPublicationRecoveryTests.RevokedConsentRestart),
     ("Privacy consent storage, revocation and invisibility remain account-scoped", PrivacyConsentTests.Verify),
     ("Privacy publication recovery preserves consent and security boundaries", PrivacyPublicationRecoveryTests.Guards),
+    ("CX-CONSENT-FIX organization saves preserve consent and durable pause", LocalPrivacyConsentSaveTests.OrganizationSave),
+    ("CX-CONSENT-FIX global off transition revokes consent and preserves pause", LocalPrivacyConsentSaveTests.GlobalTransitions),
+    ("CX-CONSENT-FIX2 organization apply rejects concurrent pause", OrganizationApplyConcurrencyTests.ConcurrentPause),
+    ("CX-CONSENT-FIX2 organization apply rejects concurrent withdrawal", OrganizationApplyConcurrencyTests.ConcurrentWithdrawal),
+    ("CX-CONSENT-FIX2 organization apply without concurrent changes is unchanged", OrganizationApplyConcurrencyTests.NoConcurrentChange),
+    ("CX-CONSENT-B first official defaults consent and protection matrix", OfficialFirstDefaultConsentTests.Run),
+    ("CX-CONSENT-B2 organization apply requires first default intent", OfficialDefaultIntentTests.MissingIntent),
+    ("CX-CONSENT-B2 explicit first default protects both publication lanes", OfficialDefaultIntentTests.ExplicitIntent),
+    ("CX-CONSENT-B3 first default rejects invisible observation during admission", FirstDefaultAdmissionObservationTests.InvisibleObservation),
+    ("CX-CONSENT-B3 first default rejects pause observation during admission", FirstDefaultAdmissionObservationTests.PauseObservation),
+    ("CX-CONSENT-B3 first default rechecks current visibility during admission", FirstDefaultAdmissionObservationTests.CurrentVisibility),
+    ("CX-CONSENT-B3 first default without observation is unchanged", FirstDefaultAdmissionObservationTests.NoObservation),
+    ("CX-CONSENT-B3 first default ignores observations for other owners or generations", FirstDefaultAdmissionObservationTests.UnrelatedObservation),
     ("Local privacy isolates owners and persists independent WPF axes", LocalPrivacyTests.Storage),
     ("Local privacy preserves corrupt records and rejects invalid audiences", LocalPrivacyTests.FailClosed),
     ("Local privacy bridge rejects stale consent without publication", LocalPrivacyTests.Contract),
@@ -2079,9 +2489,9 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Game log ship names and cross-format release share catalog identity", GameLogJournalSourceTests.ShipNamesAndRelease),
     ("Party rooms actual Host peer avatar pipeline", LegacyPasswordLoginTests.RoomAvatarPipeline),
     ("Party rooms overlay only accepts current authorized membership", RoomOverlaySessionTests.Membership),
-    ("Party room keepalive carries only Host-owned current membership", PartyRoomKeepaliveTests.Transport),
     ("Party rooms overlay clears revoked stale and expired content", RoomOverlaySessionTests.Revocation),
     ("Party rooms overlay chat baselines history and bounds live messages", RoomOverlaySessionTests.Chat),
+    ("Party rooms overlay draws a room state it does not know as unknown, never app online", RoomOverlaySessionTests.Presence),
     ("Public two-member room create and dual-view readback", PartyRoomReaderTests.PublicTwoMemberCreateReadback),
     ("Party rooms read projection protects membership and private fields", PartyRoomReaderTests.Projection),
     ("Party rooms display projects bounded avatars and explicit leader versions", PartyRoomDisplayTests.Projection),
@@ -2096,6 +2506,8 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Selected profile import preserves explicit selection across transport", SelectedProfileImportTests.Run),
     ("Selected local profile import preserves unrelated fields and inventory references", SelectedLocalProfileImportTests.Run),
     ("Selected profile import recovery survives restart and preserves local edits", SelectedProfileImportRecoveryTests.Run),
+    ("Profile import journal preserves old disk contract and complete recovery intent", ProfileImportJournalTests.Run),
+    ("Interaction style persists; 0.7.3 moves a never-chosen standard to scan once", ApplicationInteractionPreferencesTests.Run),
     ("Friends read projection bounds data and hides private fields", FriendsReaderTests.Projection),
     ("SCM participant discovery and friend action preflight respect identity and privacy", LegacyPasswordLoginTests.ScmFriendDiscovery),
     ("SCM session enrolls only itself without replaying uncertain registration", LegacyPasswordLoginTests.ScmParticipantEnrollment),
@@ -2117,10 +2529,19 @@ var tests = new (string Name, Func<Task> Test)[]
     ("CX81 direct unread full response and generation boundaries", DirectUnreadOverlayTests.ResponseBoundaries),
     ("CX81 direct unread lifecycle invalidation and sink failures", DirectUnreadOverlayTests.LifecycleAndFailures),
     ("Official fleet notifications reuse current authorized reads and the shared lifecycle", OfficialFleetNotificationTests.Run),
+    ("Announcement notifications consume stable IDs before output", AnnouncementNotificationTests.Run),
+    ("Announcement startup summaries consume before output", AnnouncementSummaryTests.Run),
+    ("Announcement membership persists and output reuses the current read", AnnouncementPersistenceTests.Run),
+    ("Announcement quiet recovery, membership revisions and deferred audio revalidation", AnnouncementRevisionTests.Run),
+    ("Organization announcements follow the reminder mode by default and persist the choice", AnnouncementDefaultFollowTests.Run),
+    ("Announcement default follow reconciles notification writes", AnnouncementDefaultFollowTests.Reconciliation),
     ("Organization notification reads and source importance are bounded", CommunityNotificationTests.Run),
     ("Organization background delivery honors saved source policy", CommunityNotificationDeliveryTests.Run),
     ("Organization management sound honors saved policy and freshness", CommunityNotificationAudioTests.Run),
     ("Notification source policy bridge validates membership and account", NotificationPolicyBridgeTests.Run),
+    ("Fleet privacy notification v2 compatibility and local quiet hours", FleetPrivacyNotificationTests.Run),
+    ("Notification rollback recovery keeps extensions and bridge availability", NotificationRollbackRecoveryTests.Run),
+    ("Notification rollback availability keeps settings usable when either file is readable", NotificationRollbackAvailabilityTests.Run),
     ("Direct messages reject cross-account and malformed history", DirectMessageReadTests.Guards),
     ("Direct message privacy uses the existing account-scoped Relay contract", DirectMessagePrivacyTests.Verify),
     ("Friend request privacy defaults open and remains account scoped", FriendRequestPrivacyTests.Verify),
@@ -2177,10 +2598,17 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Game log server and current ship stay local, scoped and evidence-based", GameLogRuntimeTests.SessionContext),
     ("Game log ownership, protocol and storage failures", GameLogRuntimeTests.OwnershipAndFailures),
     ("Game log bounded snapshots and rotation", GameLogRuntimeTests.LargeAndRotatedLogs),
+    ("Gameplay transient owner continuity and bounded reconciliation", GameplayTransient073Tests.Run),
+    ("Gameplay owner recovery notifications and current-login admission", GameplayTransient073Tests.OwnerRecoveryNotifications),
+    ("Gameplay owner probe read failure respects backoff", GameplayTransient073Tests.OwnerProbeReadFailureBackoff),
     ("Gameplay time runtime consent, independent timer and reopen", GameplayTimeRuntimeTests.ConsentAndReopen),
     ("Compatible time preserves old ownership without duplicate leases", CompatibilityGameplayTimeTests.Verify),
     ("Gameplay time runtime ownership and protocol guards", GameplayTimeRuntimeTests.OwnershipAndProtocol),
     ("Gameplay time runtime storage failures, retry and exclusive writer", GameplayTimeRuntimeTests.StorageFailures),
+    ("Gameplay time failures log a reason and reload on a backoff", GameplayTimeRuntimeTests.FailuresLogAndRecoverOnBackoff),
+    ("Gameplay time resumes with saved consent after an early owner gap", GameplayTimeRuntimeTests.EarlyOwnerGapResumesWithSavedConsent),
+    ("Gameplay time reopen after an account switch waits out its backoff", GameplayTimeRuntimeTests.SuspendedReopenWaitsForBackoff),
+    ("Gameplay time recording-owner gate flips are counted, not repeated", GameplayTimeRuntimeTests.OwnerGateFlipsDoNotFlood),
     ("Gameplay time consent and ownership isolate account samples", GameplayTimeAccumulatorTests.ConsentAndOwnership),
     ("Gameplay time sampling excludes sleep and preserves WPF boundaries", GameplayTimeAccumulatorTests.Sampling),
     ("Gameplay time uncertainty and invalid storage stop accumulation", GameplayTimeAccumulatorTests.Uncertainty),
@@ -2192,7 +2620,13 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Global account avatar update and owner isolation", LegacyPasswordLoginTests.AvatarUpdate),
     ("SCM avatar comes from RSI only; custom upload refused", LegacyPasswordLoginTests.ScmAvatarWrite),
     ("SCM callsign Java ownership, grant and CAS", LegacyPasswordLoginTests.ScmCallSignWrite),
+    ("SCM single callsign: Relay first, Hong Kong in step", LegacyPasswordLoginTests.ScmSingleCallsign),
+    ("SCM single callsign: first rename and unreadable Hong Kong keep the import", LegacyPasswordLoginTests.ScmSingleCallsignImportGuards),
+    ("SCM single callsign: revision-0 saves import first; a failed import pushes nothing", LegacyPasswordLoginTests.ScmSingleCallsignImportGuardsSaves),
+    ("SCM single callsign: Settings rename and sync retry refresh the account name like the profile editor", LegacyPasswordLoginTests.ScmCallsignPresentationEvent),
+    ("Profile showcases and public achievements", ProfileShowcaseTests.Run),
     ("Page presentation bounded transport and provenance", PagePresentationClientTests.Verify),
+    ("Profile bridge preserves nullable page provenance", ProfilePresentationBridgeResponseTests.Verify),
     ("Page presentation normal authority readback and isolation", LegacyPasswordLoginTests.ScmPagePresentationWrite),
     ("Hangar media transport preserves ownership and uncertain write outcomes", HangarMediaTransportTests.Verify),
     ("Profile visibility and background publication preserve owner boundaries", LegacyPasswordLoginTests.ProfileVisibility),
@@ -2202,6 +2636,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Gameplay history scanner bounds, identity and interval semantics", GameplayHistoryScannerTests.Verify),
     ("Local game presence is independent, versioned and confirms process exit", LocalGamePresenceTests.Verify),
     ("Saved hangar catalog and exact-hash bundled images are safe optional display facts", HangarCatalogTests.Verify),
+    ("Personal hangar shows the official pledge date, never the import time", HangarAcquiredDateTests.Run),
     ("Local personal profile preserves ownership and atomic saves", LocalPersonalProfileTests.Storage),
     ("Profile hangar presentation preserves explicit inventory and display-only status", ProfileHangarPresentationTests.Verify),
     ("Local favorite modules enforce capacity, global uniqueness and reopen", LocalPersonalProfileTests.FavoriteModules),
@@ -2212,6 +2647,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Local hangar storage protects identity, revisions and atomic persistence", LocalHangarStoreTests.Verify),
     ("Local hangar read failure separates busy storage from hard rejection", LocalHangarReadFailureTests.Verify),
     ("Hangar sandbox isolates credentials and rejects stale requests", HangarSandboxTests.GuardsAndProjection),
+    ("Hangar sandbox folder comes only from the environment and refuses without one", HangarSandboxTests.LocationFromEnvironmentOnly),
     ("Hangar live and complete previews use the bundled Chinese name catalog", HangarShipNameTests.Verify),
     ("Full RSI titles retain their Chinese model names", HangarShipNameTests.FullRsiTitles),
     ("Hangar verifies identity once and confines the locked scan", HangarLockedScanTests.Verify),
@@ -2229,6 +2665,11 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Application preferences default and persist through the Host", ApplicationPreferencesTests.DefaultsAndPersistence),
     ("Application preferences persist holiday appearance independently", ApplicationPreferencesTests.HolidayAppearancePersistsIndependently),
     ("Application preferences reject invalid holiday values and unknown fields", ApplicationPreferencesTests.HolidayAppearanceRejectsInvalidPatches),
+    ("Application preferences performance mode defaults off and persists", ApplicationPreferencesTests.PerformanceModeDefaultsOffAndPersists),
+    ("Application preferences keep read own health off by default and persist it", ApplicationPreferencesTests.ReadOwnHealthIsOffByDefaultAndPersists),
+    ("Application preferences reject invalid read own health values", ApplicationPreferencesTests.ReadOwnHealthRejectsInvalidPatches),
+    ("Application preferences keep read own health in background off by default and persist it", ApplicationPreferencesTests.ReadOwnHealthInBackgroundIsOffByDefaultAndPersists),
+    ("Own health reading: display rules, capture lifecycle, model file and privacy", HudHealthTests.Run),
     ("Preview help acknowledgement preserves independent local preferences", ApplicationPreferencesTests.PreviewGuidePersistsIndependently),
     ("Application preferences publish committed native presentation language", ApplicationPreferencesTests.LivePresentationLanguage),
     ("Application preferences project legacy WPF behavior without a Desktop dependency", ApplicationPreferencesTests.LegacyApplicationBehaviorIsProjectedWithoutWpf),
@@ -2389,6 +2830,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Regional discovery failures preserve the configured SCM fallback", ScmRegionFallbackTests.Verify),
     ("Regional login failures select overseas on next startup", ScmRouteStateTests.LoginFailures),
     ("Regional preferences and safe bridge projections", ScmRouteStateTests.PreferencesAndBridge),
+    ("Regional website roots preserve identity and URL paths", ScmWebsiteRoutingTests.Verify),
     ("SCM section 9 offline Host contracts", ScmSpecSection9Tests.Run),
     ("SCM spec H1-H3: stable chat ids, business codes on direct DTOs, no server text in logs", ScmSpecHostTests.Run),
     ("Production Host rejects retained loopback service routes", ProductionHostRejectsLoopbackRoutes),
@@ -2442,8 +2884,8 @@ var tests = new (string Name, Func<Task> Test)[]
     ("CX-CHAT-COST surfaces, bounds, references and old relay compatibility", OfficialFleetPreviewAuthorTests.ChatRenewalContract),
     ("CX-CHAT-COST archive and uncertain send confirmation", OfficialFleetPreviewAuthorTests.ChatRenewalArchiveAndConfirmation),
     ("CX-CHAT-COST exact brake fallback and unavailable renewal", OfficialFleetPreviewAuthorTests.ChatAuthorsBrakeFallback),
-    ("CX-CHAT-LAPSED announcements expired remain unavailable", () => CommunityMemberReferenceAuthorTests.LapsedAnnouncementAuthors(-6)),
-    ("CX-CHAT-LAPSED announcements future remain unavailable", () => CommunityMemberReferenceAuthorTests.LapsedAnnouncementAuthors(2)),
+    ("CX-CHAT-LAPSED announcements expired remain unavailable", () => CommunityMemberReferenceAuthorTests.LapsedAnnouncementAuthors(-16)),
+    ("CX-CHAT-LAPSED announcements future remain unavailable", () => CommunityMemberReferenceAuthorTests.LapsedAnnouncementAuthors(11)),
     ("Official fleet projection preserves SCM authority and rejects invalid ranks", OfficialFleetProjectionPreservesAuthority),
     ("Official fleet projection distinguishes missing and conflicting membership", OfficialFleetProjectionRejectsAmbiguousMembership),
     ("SCM bootstrap projects only account-scoped active overlay appearances", ScmBootstrapProjectsOverlayEntitlements),
@@ -2457,17 +2899,18 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Final Host layers remain independent from Desktop and WPF", HostLayersRemainWpfIndependent)
 };
 
-tests = tests.Concat(AppStatsHeartbeatTests.Cases).Concat(SharingReviewRegressionTests.VisibilityResumeCases)
+tests = tests.Concat(PrivacyIdentityLoopTests.Cases).Concat(AppStatsHeartbeatTests.Cases).Concat(SharingReviewRegressionTests.VisibilityResumeCases)
     .Concat(OfficialHangarDiagnosticTests.Cases).Concat(PublicationReceiptDiagnosticTests.Cases)
     .Concat(OfficialFleetReadTests.MemberDiagnosticCases())
     .Concat(OfficialFleetEntryDiagnosticTests.Cases()).Concat(OfficialFleetActivationDiagnosticTests.Cases())
     .Concat(OfficialHangarShapeDiagnosticTests.Cases()).Concat(OfficialAnnouncementDiagnosticTests.Cases())
-    .Concat(OfficialChatAuthorDiagnosticTests.Cases()).ToArray();
+    .Concat(OfficialChatAuthorDiagnosticTests.Cases()).Concat(new (string, Func<Task>)[] { ("CX-CLOCK-SKEW ten-second identity grace and bounded fields", OfficialFleetServerClockTests.Run), ("CX-CLOCK-SKEW Host display text parsing", OfficialFleetRealtimeTextParsingTests.Run) }).ToArray();
 
 var failures = new List<string>();
 var executed = 0;
 foreach (var (name, test) in tests)
 {
+    if (args is ["--token-backoff-only"] && !name.StartsWith("TOKEN-BACKOFF ", StringComparison.Ordinal)) continue;
     if (args.Length == 2 && args[0] == "--filter" &&
         !name.Contains(args[1], StringComparison.OrdinalIgnoreCase))
     {
@@ -2484,6 +2927,8 @@ foreach (var (name, test) in tests)
         failures.Add($"{name}: {exception}");
         Console.WriteLine($"FAIL {name}: {exception.Message}");
     }
+    // A test that resolves a domestic route must not leak the published SCM website root.
+    finally { StarBridge.HostRuntime.Auth.ScmWebsiteRouting.SetActive(null); }
 }
 
 if (executed == 0)
@@ -2866,10 +3311,11 @@ static async Task TransientRestoreProjectsRecoverableState()
     vault.SaveRefreshToken(accountKey, "refresh-offline");
     var handler = new ScriptedHttpMessageHandler(
         _ => throw new HttpRequestException("offline"));
+    var (clock, advance) = AccountSessionRestoreTests.ManualClock();
     var oauth = new OAuthPkceClient(
         new ScmHttpClient(handler),
         vault,
-        options);
+        options) { SessionClock = clock, RestoreBackoffRandom = () => 0.5 };
     using var account = new AccountBridgeRuntime(
         new ScmAccountBridgeHost(
             oauth,
@@ -2901,8 +3347,22 @@ static async Task TransientRestoreProjectsRecoverableState()
             0,
             new { schemaVersion = 1 }));
     AssertEqual(BridgeResponseStatuses.Ok, second.Response.Status, "retry response status");
+    AssertEqual("credentialTemporarilyUnavailable", second.Response.Payload.GetProperty("state").GetString(),
+        "immediate retry stays temporarily unavailable");
+    // 11-15 backoff: an immediate retry inside the 5-second window sends nothing.
+    AssertEqual(requestsAfterFirstAttempt, handler.Requests.Count,
+        "immediate retry is held by the backoff window");
+
+    advance(TimeSpan.FromSeconds(6));
+    var third = await account.DispatchAsync(
+        BridgeEnvelope.Request(
+            "account.getCurrent",
+            "account-temporarily-unavailable-after-window",
+            0,
+            new { schemaVersion = 1 }));
+    AssertEqual(BridgeResponseStatuses.Ok, third.Response.Status, "post-window retry response status");
     AssertEqual(true, handler.Requests.Count > requestsAfterFirstAttempt,
-        "retry performed a fresh restore attempt");
+        "retry after the window performs a fresh restore attempt");
 }
 
 static Task UnconfiguredHostUsesProductionDefaults()
@@ -2937,7 +3397,7 @@ static Task UnconfiguredHostUsesProductionDefaults()
         AssertEqual(true, settings.AccountAccessEnabled, "production account access");
         AssertEqual(true, settings.RegionDiscoveryEnabled, "region discovery defaults on with guarded domestic routing");
         AssertEqual("scms.flowcld.com", settings.RegionApiUri?.Host, "region endpoint");
-        AssertEqual<Uri?>(null, settings.RegionFallbackApiUri, "secondary region endpoint disabled by default");
+        AssertEqual(new Uri("https://flowcld.xyz/app-api/region"), settings.RegionFallbackApiUri, "built-in secondary region endpoint");
         AssertEqual("scmk.flowcld.com", settings.EffectiveWebSocketBaseUri.Host, "default WS host");
         AssertEqual(true, settings.TrustedRegionHosts.Contains("ws.flowcld.xyz"), "approved domestic WS trusted by default");
         AssertEqual("scm.flowcld.com", settings.WebBaseUri.Host, "SCM web endpoint");
@@ -3251,6 +3711,7 @@ static async Task AccountLifecycleIsEnabled()
                 "account.redeemLegacyEntitlements",
                 "account.legacySession",
                 "account.compatibility.linkExisting",
+                "account.migration",
                 "account.lifecycle",
                 "account.scmRouteRead",
                 "account.scmRouteSave",
@@ -3258,6 +3719,8 @@ static async Task AccountLifecycleIsEnabled()
                 "account.profileCache.clear",
                 "profile.stagedRead",
                 "personalProfile.read",
+                "personalProfile.accountFacts.read.v1",
+                "personalProfile.visitorAccountFacts.v1",
                 "personalProfile.write",
                 "personalProfile.presentation.write.v1",
                 "officialFleet.read",
@@ -3318,6 +3781,7 @@ static async Task AccountLifecycleIsEnabled()
                 "officialFleet.readGovernanceOutcome",
                 "officialFleet.wait",
                 "officialFleet.governanceRole",
+                "account.refreshRsiData",
                 "officialFleet.readRoleTemplates",
                 "officialFleet.manageRoleTemplates",
                 "officialFleet.readRoleTemplateOutcome",
@@ -3367,8 +3831,11 @@ static async Task AccountLifecycleIsEnabled()
                 "hangar.localFavorites",
                 "hangar.localReconciliation",
                 "hangar.localPersonalData",
+                "hangar.cloud",
                 "ships.specifications",
                 "marketplace.read",
+                "catalog.read",
+                "catalog.openScm",
                 "marketplace.trade",
                 "marketplace.records",
                 "marketplace.notices",
@@ -3384,6 +3851,7 @@ static async Task AccountLifecycleIsEnabled()
                 "eventSharing.settings",
                 "friendSharing.settings",
                 "gameIdVisibility.settings",
+                "gameIdVisibility.callsign",
                 "privacy.publication",
                 "privacy.publicationEvents",
                 "privacy.communityScopes",
@@ -3395,8 +3863,13 @@ static async Task AccountLifecycleIsEnabled()
                 "gameplayTime.history",
                 "gameplayTime.historyProgress",
                 "gameplayTime.reset",
+                "missionRecords.read",
+                "missionRecords.import",
                 "gameLog.local",
                 "achievements.read",
+                "achievements.leaderboard.read",
+                "achievements.leaderboard.consent.read",
+                "achievements.leaderboard.consent.write",
                 "scmAchievements.read"
             ],
             StringComparer.Ordinal),

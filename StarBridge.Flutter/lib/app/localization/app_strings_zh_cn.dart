@@ -1,3 +1,4 @@
+import 'leaderboard_strings.dart';
 import 'menu_overlay_strings.dart';
 import 'room_tag_strings.dart';
 import 'community_tag_strings.dart';
@@ -17,6 +18,7 @@ import 'privacy_scope_settings_strings.dart';
 import 'legacy_migration_strings.dart';
 import 'local_profile_strings.dart';
 import 'startup_strings.dart';
+import 'account_migration_strings.dart';
 import 'gameplay_time_strings.dart';
 import 'game_log_strings.dart';
 import 'help_support_strings.dart';
@@ -26,16 +28,25 @@ import 'handle_mismatch_strings.dart';
 import 'game_identity_strings.dart';
 import 'achievements_strings.dart';
 import 'exec_hangar_strings.dart';
+import 'key_bindings_strings.dart';
+import 'catalog_strings.dart';
+import 'mission_records_strings.dart';
+import 'terminal_strings.dart';
 
 const simplifiedAppStrings = <String, String>{
+  ...leaderboardZhCn,
   ...menuOverlayZhCn,
   'account.error.compatibilityProofRejected': '关联证明无效或已过期，请重新发起账号关联。',
   'account.legacyLogin.retired': '此旧账号已迁入 SCM，请使用 SCM 账号登录。',
   ...execHangarZhCn,
+  ...keyBindingsZhCn,
+  ...catalogZhCn,
+  ...missionRecordsZhCn,
+  ...terminalZhCn,
   ...achievementsZhCn,
   ...handleMismatchZhCn,
   ...gameIdentityZhCn,
-  'app.name': '星海舰桥',
+  'app.name': 'SCM 星海舰桥',
   'navigation.home': '首页',
   'navigation.home.description': '当前态势与下一步',
   'navigation.rooms': '房间',
@@ -102,6 +113,7 @@ const simplifiedAppStrings = <String, String>{
   ...simplifiedLocalProfileStrings,
   ...simplifiedStartupStrings,
   ...gameplayTimeZhCn,
+  ...accountMigrationZhCn,
   ...gameLogZhCn,
   ...helpSupportZhCn,
   ...overlaySettingsZhCn,
@@ -267,11 +279,14 @@ const simplifiedAppStrings = <String, String>{
   'account.error.directoryUnavailable': '暂时无法读取 SCM 时区目录，资料没有被修改。',
   'account.error.invalidResponse': '本机账号服务返回了不兼容的资料，已安全停止处理。',
   'account.error.writeRejected': '当前资料更改不合法，未发送。',
+  'account.error.localMode': '现在是本机模式，不能登录。',
   'account.error.unavailable': '账号资料暂时不可用，请稍后重试。',
   'account.error.compatibilityUnavailable': '暂时无法读取旧数据兼容状态。',
   'account.error.compatibilityWriteUnavailable': '暂时无法完成旧数据兼容操作，未知结果没有被当成成功。',
-  'account.error.legacyProofUnavailable': '旧账号验证服务暂时不可用（503），本次未提交关联。SCM 登录保持不变；请稍后重试，若持续出现请联系支持。',
-  'account.error.compatibilityConflict': '该 SCM 账号或旧账号已存在其他关联，无法关联。请使用原已关联账号登录。',
+  'account.error.legacyProofUnavailable':
+      '旧账号验证服务暂时不可用（503），本次未提交关联。SCM 登录保持不变；请稍后重试，若持续出现请联系支持。',
+  'account.error.compatibilityConflict':
+      '该 SCM 账号或旧账号已存在其他关联，无法关联。请使用原已关联账号登录。',
   'account.error.compatibilityExistingLinkMismatch':
       '当前 SCM 账号已有不同的旧账号关联，请先核对账号。',
   'account.error.legacyCredentialsRequired': '没有可用的迁移凭据，请输入旧账号名或邮箱和密码。',

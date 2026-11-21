@@ -122,7 +122,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect((await routeRead.future).suite, InteractionSuite.standard);
+        expect((await routeRead.future).suite, InteractionSuite.scan);
         unawaited(
           showStarBridgeDialog<void>(
             tester.element(find.text('Route')),
@@ -225,6 +225,9 @@ void main() {
           'locale',
           'reduceMotion',
           'interactionStyle',
+          // Display-only: the auxiliary engines follow the user's performance
+          // mode (review CX-PERF-MODE-073-REVIEW P2).
+          'performanceMode',
         });
         expect(
           WindowPresentation.decode(data).theme
@@ -380,7 +383,7 @@ void main() {
         } else {
           expect(
             (await future).values.interactionStyle.name,
-            responseStyle ?? 'standard',
+            responseStyle ?? 'scan',
           );
         }
       } finally {

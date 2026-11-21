@@ -36,7 +36,7 @@ internal static class RoomOverlayProjectionTests
         Check(NativeInformationOverlayRuntime.ProjectRoom(content, OverlayScenePreference.Auto, "zh-Hant")
             .Command.NoticeTitle == "房間接入", "Traditional notice.");
         Check(NativeInformationOverlayRuntime.ProjectRoom(content, OverlayScenePreference.Auto, "en")
-            .Command.NoticeTitle == "PARTY LINK", "English notice.");
+            .Command.NoticeTitle == "ROOM LINK", "English notice.");
         var fleet = NativeInformationOverlayRuntime.ProjectRoom(content, OverlayScenePreference.Fleet, "en");
         Check(fleet.Scene.Context.IsLocalOnly && fleet.Chat.Length == 0 && fleet.Scene.Players.Count == 0,
             "Explicit fleet never leaks room data into another scene.");

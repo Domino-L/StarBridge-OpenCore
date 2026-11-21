@@ -97,8 +97,9 @@ public sealed partial class AccountBridgeRuntime
                 if (language is not ("CN" or "EN") || id < 0 || category < 0 || side is < 0 or > 3 || side == 3 && operation != "latest" ||
                     page is < 1 or > 10000 ||
                     keyword.Length > 100 || keyword.Any(char.IsControl) ||
-                    operation is not ("reputation" or "categories" or "trending" or "latest" or "search" or "hotWords" or "item" or "offers" or "trend" or "acquisition" or "blueprints" or "attachments" or "marketItems" or "marketOrders" or "locations" or "timezones" or "categoryListings" or "bestPrices" or "qualityTiers") ||
+                    operation is not ("reputation" or "categories" or "trending" or "latest" or "search" or "hotWords" or "item" or "offers" or "trend" or "acquisition" or "blueprints" or "attachments" or "marketItems" or "marketOrders" or "locations" or "timezones" or "categoryListings" or "bestPrices" or "qualityTiers" or "order") ||
                     operation is "item" or "offers" or "trend" or "acquisition" or "blueprints" or "attachments" && id <= 0 ||
+                    operation == "order" && string.IsNullOrWhiteSpace(keyword) ||
                     operation == "offers" && side > 1)
                     return MarketError(request, "marketplace.invalid_request");
                 var options = body.TryGetProperty("options", out var supplied) ? supplied : default;
@@ -107,7 +108,7 @@ public sealed partial class AccountBridgeRuntime
                     if (operation is not ("marketItems" or "marketOrders" or "offers")) return MarketError(request, "marketplace.invalid_request");
                     ScmMarketplaceReader.BrowseOptions(options);
                 }
-                var traderReference = owner is not null && operation is "latest" or "offers" or "marketOrders" &&
+                var traderReference = owner is not null && operation is "latest" or "offers" or "marketOrders" or "order" &&
                     _host is Account.IMarketplaceTraderProfileTargets targets
                     ? await targets.PrepareMarketTraderReferencesAsync(owner, generation, token) : null;
                 result = operation == "reputation"
@@ -143,7 +144,7 @@ public sealed partial class AccountBridgeRuntime
                 ? value.GetString() : null;
             var safeOperation = operation is "reputation" or "categories" or "trending" or "latest" or "search" or
                 "hotWords" or "item" or "offers" or "trend" or "acquisition" or "blueprints" or "attachments" or
-                "marketItems" or "marketOrders" or "locations" or "timezones" or "categoryListings" or "bestPrices" or "qualityTiers"
+                "marketItems" or "marketOrders" or "locations" or "timezones" or "categoryListings" or "bestPrices" or "qualityTiers" or "order"
                 ? $"operation={operation} " : "";
             Auth.ScmAuthDiagnostics.Write("marketplace", "marketplace-read", "rejected",
                 $"{safeOperation}code={code}" + (exception is null ? "" : $" exceptionType={exception.GetType().Name}"));

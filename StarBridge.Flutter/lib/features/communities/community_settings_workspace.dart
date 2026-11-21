@@ -24,6 +24,7 @@ import 'community_logs_dialog.dart';
 import 'community_announcements_port.dart';
 import 'community_announcements_dialog.dart';
 import '../settings/organization_notification_pane.dart';
+import '../settings/organization_notification_leave_guard.dart';
 import '../settings/organization_personal_settings.dart';
 import '../settings/organization_privacy_pane.dart';
 
@@ -49,8 +50,8 @@ String communitySettingsText(BuildContext context, String key) {
     'notifications': ('通知', '通知', 'Notifications'),
     'quickActions': ('常用管理', '常用管理', 'Quick actions'),
     'membersHelp': (
-      '查看成员并分配身份组。',
-      '查看成員並分配身分組。',
+      '查看成员并分配角色。',
+      '查看成員並分配角色。',
       'View members and assign roles.',
     ),
     'announcementsHelp': (
@@ -60,8 +61,8 @@ String communitySettingsText(BuildContext context, String key) {
     ),
     'announcements': ('公告中心', '公告中心', 'Announcements'),
     'admissions': ('申请与邀请', '申請與邀請', 'Applications & invites'),
-    'roles': ('权限与身份组', '權限與身分組', 'Permissions & roles'),
-    'logs': ('数据与日志', '資料與日誌', 'Data & logs'),
+    'roles': ('成员角色', '成員角色', 'Member roles'),
+    'logs': ('操作记录', '操作記錄', 'Activity record'),
     'advanced': ('高级', '進階', 'Advanced'),
     'danger': ('交接与解散', '交接與解散', 'Transfer & dissolution'),
     'identity': ('组织信息', '組織資訊', 'Organization'),
@@ -80,8 +81,8 @@ String communitySettingsText(BuildContext context, String key) {
       'Edit branding, description, activity and contacts.',
     ),
     'rolesHelp': (
-      '设置身份组与权限；在成员页分配身份组。',
-      '設定身分組與權限；在成員頁分配身分組。',
+      '设置成员角色；在成员页分配角色。',
+      '設定成員角色；在成員頁分配角色。',
       'Configure roles and permissions; assign them on the members page.',
     ),
     'admissionsHelp': (
@@ -176,6 +177,7 @@ class CommunitySettingsWorkspaceState
     if (_switching) return false;
     _switching = true;
     try {
+      if (!await confirmOrganizationNotificationLeave()) return false;
       return await (_profile.currentState?.confirmLeave() ??
           _roles.currentState?.confirmLeave() ??
           _admissions.currentState?.confirmLeave() ??
@@ -276,7 +278,8 @@ class CommunitySettingsWorkspaceState
         ('logs', StandardIconSemantic.history),
       if (widget.hasDangerActions)
         ('danger', StandardIconSemantic.warningAmber),
-      if (_personal?.privacy != null) ('privacy', StandardIconSemantic.verifiedUser),
+      if (_personal?.privacy != null)
+        ('privacy', StandardIconSemantic.verifiedUser),
       if (_personal?.notificationSources != null)
         ('notifications', StandardIconSemantic.campaign),
     ];

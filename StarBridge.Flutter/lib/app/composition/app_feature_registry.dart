@@ -1,5 +1,11 @@
+import '../../features/gameplay_time/gameplay_identity_notice.dart';
+import '../../features/onboarding/bridge_onboarding_adapter.dart';
+
 import 'dart:async';
 
+import '../../features/achievements/achievement_collection_session.dart';
+import '../../features/achievements/swift_leaderboard.dart';
+import '../../features/achievements/swift_leaderboard_page.dart';
 import '../../features/communities/community_bridge_transport.dart';
 import '../../features/official_fleet/bridge_official_fleet_announcement_management.dart';
 import '../../features/official_fleet/bridge_official_fleet_governance.dart';
@@ -25,9 +31,29 @@ import '../../features/settings/gameplay_data_export_dialog.dart';
 import '../../features/gameplay_time/gameplay_time_controller.dart';
 import '../../features/game_log/game_log_controller.dart';
 import '../../features/game_log/game_log_panel.dart';
+import '../../features/game_log/local_game_log_setup_panel.dart';
+import '../../features/settings/usage_mode_settings_entry.dart';
+import '../routing/open_destination_intent.dart';
+import '../../features/onboarding/connection_mode_controller.dart';
+import '../../features/account/account_models.dart';
+import '../../features/account/account_relay_features.dart';
+import 'account_scm_only.dart';
+import 'computed_flag.dart';
+import '../localization/account_card_title.dart';
+
+import 'package:flutter/widgets.dart';
+
+import '../../features/tools/key_bindings_labels.dart';
+import '../../features/tools/mission_records_port.dart';
+import '../../features/tools/catalog_recent.dart';
+import '../../platform/catalog_recent_file_store.dart';
+import 'catalog_recent_session.dart';
+import '../../features/tools/key_bindings_port.dart';
 import '../../features/game_log/game_session_overview.dart';
 import '../../features/account/account_module.dart';
 import '../../features/account/account_page.dart';
+import '../../features/account/account_migration_controller.dart';
+import '../../features/account/bridge_account_migration.dart';
 import '../../features/account/bridge_game_identity_verification.dart';
 import '../../features/account/account_safety_dialog.dart';
 import '../../features/account/bridge_account_safety.dart';
@@ -95,10 +121,12 @@ import '../../features/settings/bridge_data_location.dart';
 import '../../features/settings/scm_route_port.dart';
 import '../../features/settings/data_location_dialog.dart';
 import '../../features/settings/settings_models.dart';
+import '../../features/settings/screen_reading_settings_page.dart';
 import '../../features/settings/sync_privacy_module.dart';
 import '../../features/settings/sync_privacy_page.dart';
 import '../../features/settings/privacy_settings_page.dart';
 import '../../features/tools/tools_feature.dart';
+import '../../features/tools/catalog_port.dart';
 import '../../features/tools/exec_hangar_port.dart';
 import '../../platform/host/native_host_connector.dart';
 import '../../platform/host/desktop_notification_port.dart';
@@ -144,12 +172,51 @@ FeatureRegistry createAppFeatureRegistry(
   MarketplaceChatController? tradeChat,
 ]) {
   final shared = communities.port;
+  final recentCatalog = CatalogRecent(
+    CatalogRecentFileStore.forDevice() ?? MemoryCatalogRecentStore(),
+  );
+  final recentSession = nativeHost == null
+      ? null
+      : CatalogRecentSession(nativeHost.session, recentCatalog);
+  // Read again as the account is confirmed: a SCM-only account loses the entry,
+  // and a linked one gets it back, without reopening the page.
+  final inviteSending = communities.port is CommunityInvitationSendPort
+      ? ComputedFlag(
+          account.projection,
+          () => (communities.port as CommunityInvitationSendPort)
+              .invitationSendingAvailable,
+        )
+      : null;
+  // The organization pages redraw disband when the account is confirmed
+  // SCM-only (or linked) after they were shown.
+  ComputedFlag(
+    account.projection,
+    () => relayAccountFeaturesBlocked(account.projection),
+  ).addListener(communities.entriesChanged);
   final organizationNotificationSources = nativeHost == null
       ? null
       : () => BridgeNotificationSources(nativeHost.session);
   final gameIdentity = nativeHost == null
       ? null
       : BridgeGameIdentityVerification(nativeHost.session);
+  // Old-account migration card (plan item 9); hidden while the relay does not offer it.
+  final migration = nativeHost == null
+      ? null
+      : (AccountMigrationController(
+          BridgeAccountMigration(nativeHost.session),
+          account.projection,
+        )..shareThrough(account.projection));
+  // The prompts that send SCM-only users to the account card name its current
+  // title, read from the same controller as the card itself. Both are
+  // released with the account settings registration (accountDispose).
+  final migrationOffered = migration == null
+      ? null
+      : ComputedFlag(migration, () => migration.value.offered);
+  // Disband and the four relay account features open for SCM-only accounts
+  // once the relay offers the migration.
+  AccountMigrationController.offerChangesFor(account.projection)
+      .addListener(communities.entriesChanged);
+  final scmOnly = AccountScmOnly(account.projection);
   if (nativeHost != null && shared is CommunityBridgeTransport) {
     officialFleet.communication.configureGovernance(
       owner: shared,
@@ -166,6 +233,60 @@ FeatureRegistry createAppFeatureRegistry(
     connectionMode,
     port: marketplacePortFactory?.call(),
   );
+  final leaderboard = nativeHost == null
+      ? null
+      : SwiftLeaderboardController.connected(
+          nativeHost.session,
+          account.projection,
+          connectionMode,
+        );
+  // One achievement read, shared with the profile's achievement showcase.
+  final AchievementCollectionPort achievementPort = nativeHost == null
+      ? const UnavailableAchievementCollection()
+      : BridgeAchievementCollection(
+          nativeHost.session,
+          displayHandoff: () => account.projection.value.hasDisplayHandoff
+              ? account.projection.value.displayHandoff
+              : null,
+          mode: connectionMode,
+          retainedReadId: () => account.projection.value.hasRetainedDisplayRead
+              ? account.projection.value.retainedReadId
+              : null,
+        );
+  final achievementSession = AchievementCollectionSession(
+    account: account.projection,
+    port: achievementPort,
+    mode: connectionMode,
+  );
+  leaderboard?.watchAchievements(achievementSession.collection);
+  // The SCM achievements, shared too, so the profile counts what the
+  // achievements page counts (build 65: the profile header read 0).
+  final scmAchievementSession = AchievementCollectionSession(
+    account: account.projection,
+    port: nativeHost == null
+        ? const UnavailableAchievementCollection()
+        : BridgeAchievementCollection(
+            nativeHost.session,
+            scm: true,
+            displayHandoff: () => account.projection.value.hasDisplayHandoff
+                ? account.projection.value.displayHandoff
+                : null,
+            mode: connectionMode,
+            retainedReadId: () =>
+                account.projection.value.hasRetainedDisplayRead
+                ? account.projection.value.retainedReadId
+                : null,
+          ),
+    mode: connectionMode,
+    permanentMilestones: false,
+  );
+  Future<void> reconcileUsageMode() async {
+    if (connectionMode is ConnectionModeController) {
+      await connectionMode.refresh();
+    }
+    await account.refresh();
+  }
+
   return FeatureRegistry([
     ...createFirstUseSetupFeatures(
       nativeHost?.session,
@@ -255,6 +376,23 @@ FeatureRegistry createAppFeatureRegistry(
     ),
     createOverlaySettingsFeature(overlaySettings, gameLog: gameLog),
     ...createToolsFeatures(
+      recent: recentCatalog,
+      onShown: () {
+        unawaited(recentSession?.resolve());
+      },
+      disposeRecent: () {
+        if (recentSession == null) {
+          recentCatalog.dispose();
+        } else {
+          recentSession.dispose();
+        }
+      },
+      createMissionRecords: nativeHost == null
+          ? null
+          : () => BridgeMissionRecordsPort(nativeHost.session, connectionMode),
+      createCatalog: nativeHost == null
+          ? null
+          : () => BridgeCatalogPort(nativeHost.session, connectionMode),
       createPort: nativeHost == null
           ? null
           : () => BridgeExecHangar(nativeHost.session),
@@ -265,9 +403,43 @@ FeatureRegistry createAppFeatureRegistry(
               )
           ? null
           : () => BridgeMenuWindowPreferences(nativeHost.session),
+      createKeyBindings:
+          nativeHost == null ||
+              !nativeHost.session.hostCapabilities.contains('keyBindings.read')
+          ? null
+          : () => BridgeKeyBindings(nativeHost.session),
+      readShortcuts: nativeHost == null
+          ? null
+          : () async => {
+              ...fixedStarBridgeShortcuts,
+              if ((await BridgeOverlayWorkspaceAdapter(
+                    nativeHost.session,
+                  ).read()).hotkey
+                  case final hotkey? when hotkey.enabled)
+                hotkey.binding,
+            },
     ),
     ...createSettingsFeatures(
+      accountDispose: migration == null
+          ? null
+          : () {
+              migrationOffered?.dispose();
+              migration.dispose();
+            },
+      accountScope: migrationOffered == null
+          ? null
+          : (child) => AccountCardTitle(
+              migrationOffered: migrationOffered,
+              child: child,
+            ),
       helpSupportBuilder: (_) => HelpSupportSettingsPage(
+        scmRoute:
+            nativeHost != null &&
+                nativeHost.session.hostCapabilities.contains(
+                  BridgeScmRoute.readRequest,
+                )
+            ? BridgeScmRoute(nativeHost.session)
+            : null,
         port: BridgeHelpSupport(nativeHost?.session),
         dailySupport: BridgeDailySupport(nativeHost?.session),
       ),
@@ -296,7 +468,10 @@ FeatureRegistry createAppFeatureRegistry(
       entryOpeners: {
         'account-safety': (context) => showAccountSafetyDialog(
           context,
-          BridgeAccountSafety(nativeHost?.session),
+          BridgeAccountSafety(
+            nativeHost?.session,
+            scmOnly: () => scmOnly.value,
+          ),
         ),
         'installation-update-repair': (context) =>
             showInstallationCheckDialog(context, applicationSupport),
@@ -394,32 +569,99 @@ FeatureRegistry createAppFeatureRegistry(
       },
       accountAndIdentityBuilder: (_) => AccountPage(
         module: account,
-        gameIdentity: gameIdentity,
-        localStatus: GameSessionOverview(controller: gameLog),
-        localRecognition: gameLog == null
+        openUsageMode: nativeHost == null
             ? null
-            : GameLogPanel(controller: gameLog),
+            : (context) => openUsageModeSettings(
+                context,
+                nativeHost.session,
+                onModeChanged: reconcileUsageMode,
+              ),
+        usageModeEntry:
+            nativeHost == null ||
+                !nativeHost.session.hostCapabilities.contains(
+                  BridgeOnboardingAdapter.capability,
+                )
+            ? null
+            : UsageModeSettingsEntry(
+                session: nativeHost.session,
+                onModeChanged: reconcileUsageMode,
+              ),
+        gameIdentity: gameIdentity,
+        migration: migration,
+        localStatus: GameSessionOverview(controller: gameLog),
+        localRecognition: nativeHost == null
+            ? null
+            : ValueListenableBuilder<AccountProjection>(
+                valueListenable: account.projection,
+                builder: (_, projection, _) =>
+                    projection.failure?.code == 'account.local_mode' &&
+                        nativeHost.session.hostCapabilities.contains(
+                          BridgeOnboardingAdapter.capability,
+                        )
+                    ? LocalGameLogSetupPanel(
+                        session: nativeHost.session,
+                        onConfirmed: account.refresh,
+                      )
+                    : gameLog == null
+                    ? const SizedBox.shrink()
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Same notice and review entry as the gameplay
+                          // panel: people with recording off never open it.
+                          if (gameplayTime != null)
+                            GameplayIdentityNotice(
+                              controller: gameplayTime,
+                              // The log Handle is checked in the panel right
+                              // below; this re-reads after the person looked.
+                              onConfirmIdentity: (_) => gameplayTime.retry(),
+                            ),
+                          GameLogPanel(controller: gameLog),
+                        ],
+                      ),
+              ),
         footer: const PlannedSettingsCapabilities(
           section: SettingsSection.accountIdentity,
         ),
       ),
+      screenReadingBuilder: (_) =>
+          ScreenReadingSettingsPage(preferences: preferences),
       generalDataBuilder: (_) => GeneralSettingsPage(
         preferences: preferences,
         gameplayTime: gameplayTime,
+        // Playtime waits on the same identity as Account & identity: send
+        // the person there to check the log Handle, not to the guide review.
+        openUsageMode: nativeHost == null
+            ? null
+            : (context) async {
+                Actions.maybeInvoke(
+                  context,
+                  const OpenDestinationIntent('/settings/account'),
+                );
+              },
         scmRoute:
             nativeHost != null && BridgeScmRoute.supported(nativeHost.session)
             ? BridgeScmRoute(nativeHost.session)
             : null,
       ),
       syncPrivacyBuilder: (_) => localPrivacy == null
-          ? SyncPrivacyPage(module: syncPrivacy)
+          ? SyncPrivacyPage(
+              module: syncPrivacy,
+              leaderboardSetting: leaderboard == null
+                  ? null
+                  : SwiftLeaderboardSetting(controller: leaderboard),
+            )
           : PrivacySettingsPage(
               localPrivacy: localPrivacy,
               syncPrivacy: syncPrivacy,
               directMessagePrivacy: socialPrivacy?.directMessages,
               friendRequestPrivacy: socialPrivacy?.friendRequests,
               recentlyPlayedPrivacy: socialPrivacy?.recentlyPlayed,
+              scmOnly: scmOnly,
               eventSession: nativeHost?.session,
+              leaderboardSetting: leaderboard == null
+                  ? null
+                  : SwiftLeaderboardSetting(controller: leaderboard),
             ),
       confirmPrivacyLeave: localPrivacy == null
           ? null
@@ -455,13 +697,11 @@ FeatureRegistry createAppFeatureRegistry(
             : null,
         module: friends,
         createChatPort: directMessagesPortFactory,
-        sendCommunityInvite:
-            communities.port is CommunityInvitationSendPort &&
-                (communities.port as CommunityInvitationSendPort)
-                    .invitationSendingAvailable
-            ? (context, chat) =>
-                  sendCommunityInvitationInChat(context, communities, chat)
-            : null,
+        sendCommunityInvite: inviteSending == null
+            ? null
+            : (context, chat) =>
+                  sendCommunityInvitationInChat(context, communities, chat),
+        communityInviteAvailable: inviteSending,
         openCommunityInvite: communities.port is! CommunityInvitePort
             ? null
             : (context, code) => openCommunityInvitation(
@@ -479,7 +719,10 @@ FeatureRegistry createAppFeatureRegistry(
         controller: notificationInbox,
         openSafety: () => showAccountSafetyDialog(
           context,
-          BridgeAccountSafety(nativeHost?.session),
+          BridgeAccountSafety(
+            nativeHost?.session,
+            scmOnly: () => scmOnly.value,
+          ),
         ),
       ),
     ),
@@ -508,37 +751,17 @@ FeatureRegistry createAppFeatureRegistry(
       presence: shellChrome.projection,
       gameplayTime: gameplayTime,
       tradeStrip: (_, view) => ProfileTradeStripHost(market, view: view),
+      achievements: achievementSession,
+      scmAchievements: scmAchievementSession,
     ),
     createAchievementsFeature(
       account,
       mode: connectionMode,
-      port: nativeHost == null
-          ? const UnavailableAchievementCollection()
-          : BridgeAchievementCollection(
-              nativeHost.session,
-              displayHandoff: () => account.projection.value.hasDisplayHandoff
-                  ? account.projection.value.displayHandoff
-                  : null,
-              mode: connectionMode,
-              retainedReadId: () =>
-                  account.projection.value.hasRetainedDisplayRead
-                  ? account.projection.value.retainedReadId
-                  : null,
-            ),
-      scmPort: nativeHost == null
-          ? const UnavailableAchievementCollection()
-          : BridgeAchievementCollection(
-              nativeHost.session,
-              scm: true,
-              displayHandoff: () => account.projection.value.hasDisplayHandoff
-                  ? account.projection.value.displayHandoff
-                  : null,
-              mode: connectionMode,
-              retainedReadId: () =>
-                  account.projection.value.hasRetainedDisplayRead
-                  ? account.projection.value.retainedReadId
-                  : null,
-            ),
+      port: achievementPort,
+      session: achievementSession,
+      leaderboard: leaderboard,
+      scmPort: scmAchievementSession.port,
+      scmSession: scmAchievementSession,
       ideas: nativeHost == null
           ? const UnavailableAchievementIdeas()
           : BridgeAchievementIdeas(nativeHost.session),

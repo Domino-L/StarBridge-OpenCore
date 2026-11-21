@@ -1,3 +1,4 @@
+import 'leaderboard_strings.dart';
 import 'menu_overlay_strings.dart';
 import 'room_tag_strings.dart';
 import 'community_tag_strings.dart';
@@ -17,6 +18,7 @@ import 'privacy_scope_settings_strings.dart';
 import 'legacy_migration_strings.dart';
 import 'local_profile_strings.dart';
 import 'startup_strings.dart';
+import 'account_migration_strings.dart';
 import 'gameplay_time_strings.dart';
 import 'game_log_strings.dart';
 import 'help_support_strings.dart';
@@ -26,28 +28,38 @@ import 'handle_mismatch_strings.dart';
 import 'game_identity_strings.dart';
 import 'achievements_strings.dart';
 import 'exec_hangar_strings.dart';
+import 'key_bindings_strings.dart';
+import 'catalog_strings.dart';
+import 'mission_records_strings.dart';
+import 'terminal_strings.dart';
 
 const englishAppStrings = <String, String>{
+  ...leaderboardEn,
   ...menuOverlayEn,
-  'account.error.compatibilityProofRejected': 'The linking proof is invalid or expired. Start account linking again.',
+  'account.error.compatibilityProofRejected':
+      'The linking proof is invalid or expired. Start account linking again.',
   'account.legacyLogin.retired':
       'This legacy account has moved to SCM. Sign in with your SCM account.',
   ...execHangarEn,
+  ...keyBindingsEn,
+  ...catalogEn,
+  ...missionRecordsEn,
+  ...terminalEn,
   ...achievementsEn,
   ...handleMismatchEn,
   ...gameIdentityEn,
-  'app.name': 'StarBridge',
+  'app.name': 'SCM StarBridge',
   'navigation.home': 'Home',
   'navigation.home.description': 'Current state and next steps',
   'navigation.rooms': 'Rooms',
   'navigation.rooms.description': 'Casual matchmaking and instant play',
   'navigation.operations': 'Operations',
-  'navigation.operations.description': 'Planned organization and fleet work (coming soon)',
+  'navigation.operations.description':
+      'Planned organization and fleet work (coming soon)',
   'navigation.officialFleet': 'Main fleet',
   'navigation.officialFleet.description': 'RSI main fleet workspace',
   'navigation.marketplace': 'Marketplace',
-  'navigation.marketplace.description':
-      'Items and public market listings',
+  'navigation.marketplace.description': 'Items and public market listings',
   'navigation.communities': 'Communities',
   'navigation.communities.description': 'Long-term cross-fleet organizations',
   'navigation.hangar': 'My Hangar',
@@ -55,14 +67,14 @@ const englishAppStrings = <String, String>{
   'navigation.overlay': 'Overlay',
   'navigation.overlay.description': 'In-game info sources and layout',
   'navigation.tools': 'Tools',
-  'navigation.tools.description':
-      'Countdowns, calculators and reference tools',
+  'navigation.tools.description': 'Countdowns, calculators and reference tools',
   'navigation.settings': 'Settings',
   'navigation.settings.description': 'Appearance, language, and preferences',
   'navigation.friends': 'Friends',
   'navigation.friends.description': 'Friend status and friend requests',
   'navigation.messages': 'Messages',
-  'navigation.messages.description': 'Direct messages, requests, and unread messages',
+  'navigation.messages.description':
+      'Direct messages, requests, and unread messages',
   'navigation.notifications': 'Notifications',
   'navigation.notifications.description': 'System and collaboration updates',
   'navigation.account': 'Account',
@@ -70,10 +82,12 @@ const englishAppStrings = <String, String>{
   'navigation.profile': 'Profile',
   'navigation.profile.description': 'Public identity and profile showcase',
   'navigation.achievements': 'Achievements',
-  'navigation.achievements.description': 'Your collection and journey through the stars',
+  'navigation.achievements.description':
+      'Your collection and journey through the stars',
   'navigation.personal': 'Personal',
   'deferredFeature.title': 'Coming soon',
-  'comingSoon.body': '{feature} is in development and will appear here when it launches.',
+  'comingSoon.body':
+      '{feature} is in development and will appear here when it launches.',
   'comingSoon.section': '{feature} is coming soon.',
   'deferredFeature.marketplace.body': 'Trading and services are in development and will appear here when they launch.',
   'deferredFeature.tools.body': 'Personal utilities are in development and will appear here when they launch.',
@@ -105,6 +119,7 @@ const englishAppStrings = <String, String>{
   ...englishLocalProfileStrings,
   ...englishStartupStrings,
   ...gameplayTimeEn,
+  ...accountMigrationEn,
   ...gameLogEn,
   ...helpSupportEnUs,
   ...overlaySettingsEn,
@@ -288,8 +303,7 @@ const englishAppStrings = <String, String>{
   'account.error.environmentNotEnabled': 'This client currently supports only the local integration environment and cannot connect to the production SCM website yet.',
   'account.error.reauthorizationRequired':
       'The SCM session must be authorized again.',
-  'account.error.logoutIncomplete':
-      'Sign-out did not finish: the saved sign-in on this PC could not be removed. Try again.',
+  'account.error.logoutIncomplete': 'Sign-out did not finish: the saved sign-in on this PC could not be removed. Try again.',
   'account.error.writeForbidden':
       'This account cannot edit profile preferences.',
   'account.error.profileReadForbidden': 'Access to this account profile was denied. Check your account authorization.',
@@ -299,6 +313,7 @@ const englishAppStrings = <String, String>{
   'account.error.invalidResponse': 'The local account service returned incompatible profile data. Processing stopped safely.',
   'account.error.writeRejected':
       'The profile change is invalid and was not sent.',
+  'account.error.localMode': 'You are in local mode and cannot sign in.',
   'account.error.unavailable':
       'Account data is temporarily unavailable. Please try again.',
   'account.error.compatibilityUnavailable':
@@ -316,8 +331,7 @@ const englishAppStrings = <String, String>{
   'overlay.scene.room': 'Room info',
   'overlay.scene.operation': 'Operation info',
   'overlay.hostUnavailable': 'Native Host is unavailable',
-  'overlay.capabilityUnavailable':
-      'This info source is coming soon',
+  'overlay.capabilityUnavailable': 'This info source is coming soon',
   'status.host': 'Host',
   'status.game': 'Game',
   'status.identity': 'Identity',
@@ -370,7 +384,9 @@ const englishAppStrings = <String, String>{
   'window.close': 'Close',
   'window.closeNamed': 'Close {title} window',
   'socialWindow.chatTitle': 'Chat',
-  'socialWindow.actionUnconfirmed': 'Action not confirmed. Refresh the list to check, then try again.',
-  'socialWindow.actionFailed': "Couldn't finish the action. Reopen the window to check.",
+  'socialWindow.actionUnconfirmed':
+      'Action not confirmed. Refresh the list to check, then try again.',
+  'socialWindow.actionFailed':
+      "Couldn't finish the action. Reopen the window to check.",
   'friendsWindow.openRecentChat': 'Open recent chats',
 };

@@ -99,7 +99,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('组织日志'), findsNothing);
+    expect(find.text('操作记录'), findsNothing);
     expect(tester.takeException(), isNull);
   });
   for (final (locale, width, index) in [
@@ -197,7 +197,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('community-section-manage')));
       await tester.pumpAndSettle();
-      expect(find.text('数据与日志'), findsOneWidget);
+      expect(find.text('操作记录'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-nav-logs')));
       await tester.pumpAndSettle();
       expect(find.text('1–20 / 26 条'), findsOneWidget);

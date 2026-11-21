@@ -5,7 +5,9 @@ import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'help_support_action.dart';
 import 'local_privacy_controller.dart';
+import 'local_privacy_page.dart';
 import 'local_privacy_scope_sections.dart';
+import 'local_privacy_scoped_save.dart';
 
 /// One organization's complete privacy on its own settings page: the same
 /// shared controller, draft and save as the privacy settings page, so the two
@@ -27,15 +29,33 @@ class OrganizationPrivacyPane extends StatefulWidget {
 }
 
 class _OrganizationPrivacyPaneState extends State<OrganizationPrivacyPane> {
+  late Future<bool> Function() _saveAction;
+
+  void _registerSave() {
+    final controller = widget.controller;
+    final code = widget.communityCode;
+    _saveAction = () => controller.saveOrganization(code);
+    privacyPageSaveActions[controller] = _saveAction;
+  }
+
   @override
   void initState() {
     super.initState();
+    _registerSave();
     widget.controller.open();
   }
 
   @override
   void didUpdateWidget(OrganizationPrivacyPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, widget.controller) &&
+        oldWidget.communityCode == widget.communityCode) {
+      return;
+    }
+    if (privacyPageSaveActions[oldWidget.controller] == _saveAction) {
+      privacyPageSaveActions[oldWidget.controller] = null;
+    }
+    _registerSave();
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.closeEditor();
       widget.controller.open();
@@ -44,6 +64,9 @@ class _OrganizationPrivacyPaneState extends State<OrganizationPrivacyPane> {
 
   @override
   void dispose() {
+    if (privacyPageSaveActions[widget.controller] == _saveAction) {
+      privacyPageSaveActions[widget.controller] = null;
+    }
     widget.controller.closeEditor();
     super.dispose();
   }
@@ -71,7 +94,7 @@ class _OrganizationPrivacyPaneState extends State<OrganizationPrivacyPane> {
               Text(
                 t(
                   c.status == LocalPrivacyStatus.signedOut
-                      ? 'accountChanged'
+                      ? (c.accountWaitShown ? 'accountWaiting' : 'accountChanged')
                       : 'readFailed',
                 ),
               ),
@@ -118,27 +141,30 @@ class _OrganizationPrivacyPaneState extends State<OrganizationPrivacyPane> {
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                if (c.dirty) Text(strings.text('privacy.scope.saveTogether')),
                 Text(
                   t(
                     c.saving
                         ? 'saving'
-                        : c.dirty
+                        : c.organizationDirty(code)
                         ? 'dirty'
                         : c.hasSaved
-                        ? (c.publicationSupported ? 'savedLocal' : 'saved')
+                        ? 'saved'
                         : 'defaults',
                   ),
                 ),
                 HelpSupportAction(
                   controlKey: const Key('organization-privacy-discard'),
-                  onActivate: c.dirty && !c.saving ? (_) => c.discard() : null,
+                  onActivate: c.organizationDirty(code) && !c.saving
+                      ? (_) => c.discardOrganization(code)
+                      : null,
                   child: Text(t('discard')),
                 ),
                 HelpSupportAction(
                   controlKey: const Key('organization-privacy-save'),
                   kind: StarBridgeActionKind.primary,
-                  onActivate: c.canSave ? (_) async => c.save() : null,
+                  onActivate: c.canSaveOrganization(code)
+                      ? (_) async => _saveAction()
+                      : null,
                   child: Text(t('save')),
                 ),
               ],

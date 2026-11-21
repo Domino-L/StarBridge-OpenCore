@@ -25,7 +25,8 @@ final class CommunitySharingFlow {
     this.membershipChanges,
     this.hangarSharing,
     BridgeClientSession? eventSession,
-  }) : _events =
+  }) : _discoveryScopeEpoch = privacy.scopeEpoch,
+       _events =
            eventSession?.hostCapabilities.contains('eventSharing.settings') ==
                true
            ? EventSharingController(eventSession!)
@@ -33,7 +34,7 @@ final class CommunitySharingFlow {
     privacy.addListener(_changed);
     _events?.addListener(_changed);
     membershipChanges?.addListener(_membershipChanged);
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _poll());
+    _timer = Timer.periodic(const Duration(minutes: 5), (_) => _poll());
   }
   final LocalPrivacyController privacy;
   final StartupPromptQueue queue;
@@ -45,6 +46,8 @@ final class CommunitySharingFlow {
   late final Timer _timer;
   Timer? _membershipRefresh;
   bool _discovering = false;
+  bool _discoveryPending = false;
+  int _discoveryScopeEpoch;
   bool _disposed = false, _showing = false;
   StarBridgeDialogRoute<void>? _route;
   CommunitySharingTarget? _target;
@@ -75,25 +78,51 @@ final class CommunitySharingFlow {
 
   void _membershipChanged() {
     if (_disposed) return;
+    _syncDiscoveryScope();
     _membershipRefresh?.cancel();
+    if (_discovering) {
+      // Remember the event now, even if this round ends before debounce expires.
+      unawaited(_poll());
+      return;
+    }
     _membershipRefresh = Timer(const Duration(milliseconds: 100), _poll);
   }
 
+  void _syncDiscoveryScope() {
+    if (_discoveryScopeEpoch == privacy.scopeEpoch) return;
+    _discoveryScopeEpoch = privacy.scopeEpoch;
+    _discoveryPending = false;
+    _membershipRefresh?.cancel();
+  }
+
   Future<void> _poll() async {
-    if (_disposed || !ready() || _discovering) return;
+    if (_disposed || !ready()) return;
+    _syncDiscoveryScope();
+    if (_discovering) {
+      _discoveryPending = true;
+      return;
+    }
+    final epoch = privacy.scopeEpoch;
     _discovering = true;
     try {
       await privacy.refreshCommunityTargets();
-      if (_disposed) return;
+      if (_disposed || epoch != privacy.scopeEpoch) return;
       await privacy.refreshPublication();
       _changed();
     } finally {
       _discovering = false;
+      _syncDiscoveryScope();
+      if (_discoveryPending) {
+        // A boolean coalesces all requests during this round into one reread.
+        _discoveryPending = false;
+        unawaited(_poll());
+      }
     }
   }
 
   void _changed() {
     if (_disposed) return;
+    _syncDiscoveryScope();
     if (_epoch != null &&
         (_epoch != privacy.scopeEpoch ||
             !ready() ||
@@ -224,6 +253,7 @@ final class CommunitySharingFlow {
 
   void dispose() {
     _disposed = true;
+    _discoveryPending = false;
     _timer.cancel();
     _membershipRefresh?.cancel();
     membershipChanges?.removeListener(_membershipChanged);

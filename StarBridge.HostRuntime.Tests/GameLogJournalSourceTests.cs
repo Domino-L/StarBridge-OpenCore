@@ -143,7 +143,7 @@ internal static class GameLogJournalSourceTests
         f.Add("<Join PU> connected shard[pub_sc_alpha_apse1_123]");
         f.Add("<RequestLocationInventory> Player[Pilot_A] requested inventory for Location[Stanton1_Lorville]");
         f.Add("<Player Selected Quantum Target - Local> | AUTH | ANVL_Arrow_101[1]| Player has selected point Area04 as their destination");
-        f.Add("<Quantum Drive Arrived - Arrived at Final Destination> CSCItemNavigation::OnQuantumDriveArrived");
+        f.Add("<Quantum Drive Arrived - Arrived at Final Destination> | NOT AUTH | ANVL_Arrow_101[1]|CSCItemNavigation::OnQuantumDriveArrived");
         f.Call();
         Check(sink.Notices.Single(e => e.Type == "ServerJoined").DisplayValue == "ASIA",
             "actual server parser hands the local overlay a region without the shard code");

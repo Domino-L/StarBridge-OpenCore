@@ -3,7 +3,7 @@ namespace StarBridge.HostRuntime.Notifications;
 internal enum NotificationSourceMode { Normal, ImportantOnly, DoNotDisturb }
 internal enum NotificationEventKind {
     DirectMessage, RoomInvitation, JoinRequest, OrganizationManagement,
-    OrganizationChat, PlayerOnline, PlayerOffline, GameStarted, GameStopped
+    OrganizationChat, PlayerOnline, PlayerOffline, GameStarted, GameStopped, OrganizationAnnouncement
 }
 
 // Delivery only. Never controls publishing, conversation storage or receipts.

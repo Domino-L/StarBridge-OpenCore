@@ -21,8 +21,12 @@ final class OnlineReviewView {
 
 // UI owns only waiting/drafts. All identity and mode decisions stay on Host.
 final class OnlineReviewController extends ValueNotifier<OnlineReviewView> {
-  OnlineReviewController(this.port, {this.installation, this.onInstalled})
-    : super(const OnlineReviewView()) {
+  OnlineReviewController(
+    this.port, {
+    this.installation,
+    this.onInstalled,
+    this.autoInstallRetainedAccount = true,
+  }) : super(const OnlineReviewView()) {
     _events = port.invalidations.listen((_) {
       if (_disposed) return;
       _epoch++;
@@ -40,6 +44,10 @@ final class OnlineReviewController extends ValueNotifier<OnlineReviewView> {
   final OnlineReviewPort port;
   final OnlineInstallationPort? installation;
   final Future<void> Function()? onInstalled;
+
+  /// The guide requires explicit Handle confirmation and a separate install step.
+  /// Other retained-account restoration consumers keep their existing behavior.
+  final bool autoInstallRetainedAccount;
   int? _installationRevision;
   late final StreamSubscription<void> _events;
   int _epoch = 0, _work = 0;
@@ -67,6 +75,7 @@ final class OnlineReviewController extends ValueNotifier<OnlineReviewView> {
         !value.error &&
         _installationRevision == null &&
         value.snapshot.retainsSession &&
+        autoInstallRetainedAccount &&
         installation?.supported == true &&
         (value.snapshot.state == OnlineReviewState.accountConfirmedForHandoff ||
             value.snapshot.identityConfirmed)) {
@@ -90,6 +99,7 @@ final class OnlineReviewController extends ValueNotifier<OnlineReviewView> {
         !value.error &&
         value.snapshot.retainsSession &&
         value.snapshot.canConfirm &&
+        autoInstallRetainedAccount &&
         installation?.supported == true) {
       await execute(OnlineReviewAction.confirm);
     }

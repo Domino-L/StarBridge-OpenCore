@@ -7,6 +7,7 @@ import '../../shared/diagnostics/loading_metrics.dart';
 import '../../shared/diagnostics/loading_content_probe.dart';
 import '../../shared/trade_chat_slot.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../design_system/interaction/starbridge_field_frame.dart';
@@ -44,6 +45,7 @@ class DirectMessagesPage extends StatefulWidget {
     this.sharedModule,
     this.openCommunityInvite,
     this.sendCommunityInvite,
+    this.communityInviteAvailable,
     this.openProfile,
     super.key,
   });
@@ -55,6 +57,10 @@ class DirectMessagesPage extends StatefulWidget {
   final Future<void> Function(BuildContext, String)? openCommunityInvite;
   final Future<void> Function(BuildContext, DirectMessagesModule)?
   sendCommunityInvite;
+
+  /// Whether the invitation entry is offered right now; it follows the account
+  /// (a SCM-only account cannot deliver invitations to private chats).
+  final ValueListenable<bool>? communityInviteAvailable;
   @override
   State<DirectMessagesPage> createState() => _DirectMessagesPageState();
 }
@@ -358,7 +364,9 @@ class _DirectMessagesPageState extends State<DirectMessagesPage>
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: module,
+    listenable: widget.communityInviteAvailable == null
+        ? module
+        : Listenable.merge([module, widget.communityInviteAvailable]),
     builder: (context, _) => _loadingContent(
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -622,7 +630,17 @@ class _DirectMessagesPageState extends State<DirectMessagesPage>
                     ),
                     if (conversationPresence(target.state, target.presence)
                         case final presence?)
-                      directMessagePresenceLabel(context, presence),
+                      directMessagePresenceLabel(
+                        context,
+                        presence,
+                        lastOnlineDays: target.lastOnlineDays,
+                      )
+                    else if (target.state == 'friend' &&
+                        target.lastOnlineDays != null)
+                      directMessageLastOnlineLabel(
+                        context,
+                        target.lastOnlineDays!,
+                      ),
                   ],
                 ),
               ),
@@ -718,7 +736,8 @@ class _DirectMessagesPageState extends State<DirectMessagesPage>
             onSend: () => unawaited(send()),
             connection: _connection,
           ),
-          if (widget.sendCommunityInvite != null)
+          if (widget.sendCommunityInvite != null &&
+              (widget.communityInviteAvailable?.value ?? true))
             Align(
               alignment: Alignment.centerLeft,
               child: StarBridgeActionButton(

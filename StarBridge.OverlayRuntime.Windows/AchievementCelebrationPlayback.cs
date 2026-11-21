@@ -6,6 +6,8 @@ using StarBridge.HostRuntime.Achievements;
 // without opening a window, producing sound or manufacturing cloud awards.
 internal interface IAchievementCelebrationSurface : IDisposable
 {
+    // A simple playback substitute can model its whole lifetime as entry.
+    double EntryMilliseconds => LifetimeMilliseconds;
     double LifetimeMilliseconds { get; }
     bool IsVisible { get; }
     void Show();
@@ -71,7 +73,7 @@ internal sealed class AchievementCelebrationPlayback(
             if (!allowed()) { Pause(); return; }
             if (!_surface.IsVisible)
             {
-                var restartEntrance = _elapsed < 1650;
+                var restartEntrance = _elapsed < _surface.EntryMilliseconds;
                 if (restartEntrance) _elapsed = 0;
                 _surface.UpdatePosition();
                 _surface.Advance(_elapsed, _pending.Count);
@@ -82,7 +84,14 @@ internal sealed class AchievementCelebrationPlayback(
             _elapsed += delta;
             _surface.Advance(_elapsed, _pending.Count);
             _surface.UpdatePosition();
-            if (_elapsed >= _surface.LifetimeMilliseconds) { Remove(); _gap = 220; _protectedGap = true; }
+            if (_elapsed >= _surface.LifetimeMilliseconds)
+            {
+                // The whole visible dwell has elapsed (paused time is not counted):
+                // only now is the unlock recorded as celebrated (build 105).
+                var shown = _notice;
+                Remove(); _gap = 220; _protectedGap = true;
+                shown?.MarkPresented();
+            }
             return;
         }
         if (!allowed() || (_gap = Math.Max(0, _gap - delta)) > 0) return;

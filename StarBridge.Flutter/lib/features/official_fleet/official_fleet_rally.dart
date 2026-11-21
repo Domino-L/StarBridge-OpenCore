@@ -325,7 +325,8 @@ final class BridgeOfficialFleetRallyPort implements OfficialFleetRallyPort {
 
 /// One per client run, owned by the official fleet module. It reads the rally
 /// every [interval] while bound to a fleet (the same cadence as the fleet's
-/// own refresh), so a rally reaches members within that time on any page.
+/// own refresh), so a rally reaches members within that time on any page. That
+/// read also counts the viewer as online, so it stays even with [wake] pushes.
 class OfficialFleetRallyController extends ChangeNotifier {
   OfficialFleetRallyController(
     this.port, {
@@ -351,6 +352,13 @@ class OfficialFleetRallyController extends ChangeNotifier {
   Timer? _timer;
   int _epoch = 0;
   bool _reading = false, _disposed = false, _busy = false;
+
+  /// A push carries no type, and every chat message sends one: one read at most
+  /// per gap, each of which also reaches the partner through the relay.
+  static const wakeGap = Duration(seconds: 5);
+  Timer? _wakeTimer;
+  DateTime? _lastRead;
+  bool _wakeDue = false;
   OfficialFleetRallySnapshot? _snapshot;
   OfficialFleetRallyEligibility _eligibility =
       OfficialFleetRallyEligibility.none;
@@ -409,11 +417,36 @@ class OfficialFleetRallyController extends ChangeNotifier {
     _eligibilityDue = _eligibilityKnown = false;
     _timer?.cancel();
     _timer = null;
+    _wakeTimer?.cancel();
+    _wakeTimer = null;
+    _wakeDue = false;
+    _lastRead = null;
     notifyListeners();
     // No Host support means no rally at all, and no idle timer either.
     if (sourceRef == null || !port.available) return;
     _timer = Timer.periodic(interval, (_) => unawaited(refresh()));
     unawaited(refresh(eligibility: true));
+  }
+
+  /// Something changed in this fleet: read soon instead of at the next tick.
+  void wake() {
+    if (_disposed || _source == null || _wakeTimer != null) return;
+    if (_reading) {
+      _wakeDue = true;
+      return;
+    }
+    final last = _lastRead;
+    final wait = last == null
+        ? Duration.zero
+        : wakeGap - _now().difference(last);
+    if (wait <= Duration.zero) {
+      unawaited(refresh());
+      return;
+    }
+    _wakeTimer = Timer(wait, () {
+      _wakeTimer = null;
+      unawaited(refresh());
+    });
   }
 
   Future<void> refresh({bool eligibility = false}) async {
@@ -425,6 +458,7 @@ class OfficialFleetRallyController extends ChangeNotifier {
     final askRights = _eligibilityDue;
     _eligibilityDue = false;
     _reading = true;
+    _lastRead = _now();
     var again = false, failedRights = false;
     try {
       final online = _countedOnline();
@@ -463,6 +497,10 @@ class OfficialFleetRallyController extends ChangeNotifier {
       _reading = false;
     }
     if (again) unawaited(refresh());
+    if (_wakeDue) {
+      _wakeDue = false;
+      if (epoch == _epoch) wake();
+    }
   }
 
   Future<String?> start(String text, int minutes) => _write(
@@ -548,6 +586,7 @@ class OfficialFleetRallyController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _wakeTimer?.cancel();
     unawaited(_hotkeys?.cancel());
     super.dispose();
   }

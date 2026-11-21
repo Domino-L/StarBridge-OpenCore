@@ -8,14 +8,10 @@ import 'marketplace_diagonal.dart' show MarketSlantTag;
 import 'marketplace_hall_mine.dart' show MarketVerbPrice, marketSideColor;
 import 'marketplace_port.dart';
 import 'marketplace_widgets.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 String _orderName(BuildContext context, MarketRow row) =>
-    marketName(row, marketLocale(context)).isNotEmpty
-    ? marketName(row, marketLocale(context))
-    : marketName(
-        marketRows(row['items']).firstOrNull ?? {},
-        marketLocale(context),
-      );
+    marketOrderTitle(context, row);
 String _side(MarketRow row) => row['displayType'] == 3
     ? 'barter'
     : row['creatorType'] == 0
@@ -38,7 +34,7 @@ Widget marketOrderIdentity(
           Text(
             _orderName(context, row),
             maxLines: 1,
-            overflow: TextOverflow.fade,
+            overflow: fadeOverflow(context),
             softWrap: false,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
@@ -52,7 +48,8 @@ Widget marketOrderIdentity(
                   marketText(context, _side(row)),
                   color: marketSideColor(context, _side(row)),
                 ),
-              MarketQualityBadge(row),
+              // A checklist's or buy-barter's first item is not the order.
+              if (marketShowsItemVisual(row)) MarketQualityBadge(row),
             ],
           ),
         ],
@@ -113,7 +110,7 @@ class MarketplaceMarketOrderRow extends StatelessWidget {
                       Text(
                         marketLocation(context, row),
                         maxLines: 1,
-                        overflow: TextOverflow.fade,
+                        overflow: fadeOverflow(context),
                         softWrap: false,
                         style: const TextStyle(
                           fontSize: 12.5,

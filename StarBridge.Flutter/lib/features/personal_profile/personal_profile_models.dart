@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart';
 
+import 'personal_profile_edit_models.dart';
 import 'personal_profile_presentation.dart';
 import 'personal_profile_public_header.dart';
+import 'personal_profile_showcases.dart';
+
+export 'personal_profile_action_result.dart';
+export 'personal_profile_edit_models.dart';
 
 enum PersonalProfileAvailability { loading, signedOut, unavailable, available }
 
 enum PersonalProfileOperation { none, refreshing, saving }
-
-enum PersonalProfileActionOutcome { completed, rejected, failed }
 
 enum PersonalProfileDayGroup { weekdays, weekend }
 
@@ -41,10 +44,8 @@ enum PersonalProfileVisibility {
   onlyMe('private', 'profile.visibility.private');
 
   const PersonalProfileVisibility(this.bridgeValue, this.labelKey);
-
   final String bridgeValue;
   final String labelKey;
-
   static PersonalProfileVisibility fromBridgeValue(String? value) {
     return PersonalProfileVisibility.values.firstWhere(
       (visibility) => visibility.bridgeValue == value,
@@ -59,7 +60,6 @@ enum PersonalProfileModuleSize {
   three(3);
 
   const PersonalProfileModuleSize(this.span);
-
   final int span;
 }
 
@@ -84,11 +84,9 @@ abstract final class PersonalProfileModuleIds {
   static const supportCapabilities = 'support-capabilities';
   static const participationInterests = 'participation-interests';
   static const shipWishlist = 'ship-wishlist';
-
   static bool isFavorite(String id) =>
       id == favoriteShips ||
       RegExp(r'^favorite-ships-[1-9][0-9]{0,3}$').hasMatch(id);
-
   static String typeOf(String id) => isFavorite(id) ? favoriteShips : id;
 }
 
@@ -100,6 +98,7 @@ final class PersonalProfileModuleLayoutItem {
     required this.isVisible,
     required this.position,
     this.favoriteShipIds,
+    this.showcaseExtra,
   });
 
   final String moduleId;
@@ -109,6 +108,10 @@ final class PersonalProfileModuleLayoutItem {
 
   /// Null is the pre-module selection format. Empty is an explicit selection.
   final List<String>? favoriteShipIds;
+
+  /// `favoriteShowcaseExtra`: the 4th showcase ship, never in [favoriteShipIds].
+  /// Null where the page cannot hold it (see [PersonalProfileFavoriteExtra]).
+  final List<String>? showcaseExtra;
 
   PersonalProfileModuleLayoutItem copyWith({
     PersonalProfileModuleSize? size,
@@ -122,6 +125,7 @@ final class PersonalProfileModuleLayoutItem {
       isVisible: isVisible ?? this.isVisible,
       position: position ?? this.position,
       favoriteShipIds: favoriteShipIds ?? this.favoriteShipIds,
+      showcaseExtra: showcaseExtra,
     );
   }
 }
@@ -157,12 +161,19 @@ final class PersonalProfileAvailabilityWindow {
 
 @immutable
 final class PersonalProfilePlayStyle {
-  const PersonalProfilePlayStyle({this.roles, this.interests, this.support});
+  const PersonalProfilePlayStyle({
+    this.roles,
+    this.interests,
+    this.support,
+    this.mainRole,
+  });
   final List<String>? roles, interests, support;
+  final String? mainRole; // One of [roles]; '' clears, null keeps (11-05).
   Map<String, Object?> toJson() => {
     if (roles != null) 'roles': roles,
     if (interests != null) 'interests': interests,
     if (support != null) 'support': support,
+    if (mainRole != null) 'mainRole': mainRole,
   };
 }
 
@@ -383,6 +394,8 @@ final class PersonalProfileSnapshot {
       defaultedPage = false,
       nameMasked = false,
       publicFacts = null,
+      accountFacts = null,
+      showcaseData = PersonalProfileShowcaseData.none,
       affiliationStatus = null;
 
   const PersonalProfileSnapshot.unavailable({
@@ -418,6 +431,8 @@ final class PersonalProfileSnapshot {
        defaultedPage = false,
        nameMasked = false,
        publicFacts = null,
+       accountFacts = null,
+       showcaseData = PersonalProfileShowcaseData.none,
        affiliationStatus = null;
 
   const PersonalProfileSnapshot.available({
@@ -451,12 +466,13 @@ final class PersonalProfileSnapshot {
     this.defaultedPage = false,
     this.nameMasked = false,
     this.publicFacts,
+    this.accountFacts,
+    this.showcaseData = PersonalProfileShowcaseData.none,
     this.affiliationStatus,
   }) : availability = PersonalProfileAvailability.available,
        transientReadFailure = false;
 
-  /// A visitor outside the profile's visibility: only the always-public
-  /// header (callsign, avatar, trade window) was returned.
+  /// Visitor outside the visibility: only the always-public header came back.
   final bool restricted;
   final PersonalProfilePublicTradeWindow? publicTradeWindow;
 
@@ -467,13 +483,16 @@ final class PersonalProfileSnapshot {
   final bool nameMasked;
   final PersonalProfilePublicFacts? publicFacts;
 
-  /// What a visitor's server said about the organization slot: shown, none,
-  /// hidden or unavailable; null from servers that predate it (2026-10-29).
+  /// Optional facts authorized by a full visitor page, separate from header facts.
+  final PersonalProfilePublicFacts? accountFacts;
+  final PersonalProfileShowcaseData showcaseData;
+
+  /// The visitor's organization slot state; null from older servers (10-29).
   final String? affiliationStatus;
 
   final PersonalProfileLocalView? local;
 
-  /// Original saved observation for readonly cache, never the time of rereading it.
+  // Original saved observation for readonly cache, never the reread time.
   final DateTime? cachedAtUtc;
   final PersonalProfilePresentation? presentation;
   final PersonalProfileAvailability availability;
@@ -541,6 +560,8 @@ final class PersonalProfileProjection {
     this.defaultedPage = false,
     this.nameMasked = false,
     this.publicFacts,
+    this.accountFacts,
+    this.showcaseData = PersonalProfileShowcaseData.none,
     this.affiliationStatus,
   });
 
@@ -599,18 +620,18 @@ final class PersonalProfileProjection {
   final DateTime? synchronizedAtUtc;
   final bool refreshFailed;
 
-  /// See [PersonalProfileSnapshot.restricted].
   final bool restricted;
   final PersonalProfilePublicTradeWindow? publicTradeWindow;
 
-  /// See [PersonalProfileSnapshot.defaultedPage].
   final bool defaultedPage;
 
-  /// See [PersonalProfileSnapshot.nameMasked].
   final bool nameMasked;
   final PersonalProfilePublicFacts? publicFacts;
 
-  /// See [PersonalProfileSnapshot.affiliationStatus].
+  /// Optional facts authorized by a full visitor page, separate from header facts.
+  final PersonalProfilePublicFacts? accountFacts;
+  final PersonalProfileShowcaseData showcaseData;
+
   final String? affiliationStatus;
 
   bool get isPublic => visibility == PersonalProfileVisibility.everyone;
@@ -669,6 +690,8 @@ final class PersonalProfileProjection {
       defaultedPage: defaultedPage,
       nameMasked: nameMasked,
       publicFacts: publicFacts,
+      accountFacts: accountFacts,
+      showcaseData: showcaseData,
       affiliationStatus: affiliationStatus ?? this.affiliationStatus,
     );
   }
@@ -709,76 +732,9 @@ final class PersonalProfileProjection {
       defaultedPage: snapshot.defaultedPage,
       nameMasked: snapshot.nameMasked,
       publicFacts: snapshot.publicFacts,
+      accountFacts: snapshot.accountFacts,
+      showcaseData: snapshot.showcaseData,
       affiliationStatus: snapshot.affiliationStatus,
     );
   }
-}
-
-@immutable
-final class PersonalProfileEdit {
-  const PersonalProfileEdit({
-    required this.callSign,
-    required this.about,
-    required this.avatarStyle,
-    required this.wallpaperId,
-    required this.visibility,
-    required this.moduleLayout,
-    this.favoriteShipIds,
-    this.playStyle,
-    this.schedule,
-  });
-
-  final String callSign;
-  final String about;
-  final int avatarStyle;
-  final String wallpaperId;
-  final PersonalProfileVisibility visibility;
-  final List<PersonalProfileModuleLayoutItem> moduleLayout;
-
-  /// Null preserves the existing selection, including unresolved remote refs.
-  final List<String>? favoriteShipIds;
-  final PersonalProfilePlayStyle? playStyle;
-  final PersonalProfileSchedule? schedule;
-}
-
-@immutable
-final class PersonalProfileLocalView {
-  const PersonalProfileLocalView({
-    required this.choices,
-    required this.favoriteShipIds,
-    required this.hangarAvailable,
-    required this.remoteAvailable,
-    this.needsCreation = false,
-    this.savedAt,
-    this.partial = false,
-    this.timeZones = const {},
-    this.retainedChoices = const [],
-    this.accountCallSign = false,
-  });
-  final List<PersonalProfileShipSummary> choices;
-  final List<PersonalProfileShipSummary> retainedChoices;
-  final List<String>? favoriteShipIds;
-  final bool hangarAvailable;
-  final bool remoteAvailable;
-  final bool accountCallSign;
-  final bool needsCreation;
-  final DateTime? savedAt;
-  final bool partial;
-  final Map<String, String> timeZones;
-}
-
-@immutable
-final class PersonalProfileActionResult {
-  const PersonalProfileActionResult(
-    this.outcome, {
-    this.failureKey,
-    this.requiresReload = false,
-  });
-
-  final PersonalProfileActionOutcome outcome;
-  final String? failureKey;
-
-  /// The edit lease is consumed or stale. Preserve the draft for inspection,
-  /// but do not submit it again until a newly read page is explicitly edited.
-  final bool requiresReload;
 }

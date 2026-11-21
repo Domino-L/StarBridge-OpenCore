@@ -11,6 +11,7 @@ import 'marketplace_port.dart';
 import 'marketplace_trade_copy.dart';
 import 'marketplace_widgets.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 ButtonStyle tradePrimaryStyle(BuildContext context, {bool danger = false}) =>
     FilledButton.styleFrom(
@@ -58,7 +59,7 @@ class TradeMiniCard extends StatelessWidget {
                   '${row['actorRole'] == 'seller' ? tradeText(context, '买家') : tradeText(context, '卖家')} ${row['counterpartyName']}',
               ].join(' · '),
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(
                 fontSize: 11.5,

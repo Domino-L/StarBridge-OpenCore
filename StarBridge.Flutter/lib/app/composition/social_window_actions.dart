@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../features/account/account_relay_features.dart';
 import '../../features/account/bridge_account_safety.dart';
 import '../../features/account/account_safety_dialog.dart';
 import '../../features/communities/community_invite_flow.dart';
@@ -31,7 +32,11 @@ SocialWindowBinding composeSocialWindow({
     if (route == '/account-safety') {
       await showAccountSafetyDialog(
         context,
-        BridgeAccountSafety(composition.notificationInbox.session),
+        BridgeAccountSafety(
+          composition.notificationInbox.session,
+          scmOnly: () =>
+              relayAccountFeaturesBlocked(composition.account.projection),
+        ),
       );
     } else {
       await navigate(route);
@@ -66,11 +71,16 @@ SocialWindowBinding composeSocialWindow({
           );
         }
       : null,
+  // Read again as the account is confirmed (SCM-only accounts lose it).
+  sendInviteAvailable:
+      composition.communities.port is CommunityInvitationSendPort
+      ? () => (composition.communities.port as CommunityInvitationSendPort)
+            .invitationSendingAvailable
+      : null,
+  sendInviteChanges: composition.account.projection,
   sendInvite:
       kind == 'messages' &&
-          composition.communities.port is CommunityInvitationSendPort &&
-          (composition.communities.port as CommunityInvitationSendPort)
-              .invitationSendingAvailable
+          composition.communities.port is CommunityInvitationSendPort
       ? (target) async {
           final chat = DirectMessagesModule(
             composition.createWindowMessagesPort(),

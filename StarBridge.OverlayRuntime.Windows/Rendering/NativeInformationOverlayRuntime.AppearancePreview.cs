@@ -17,7 +17,8 @@ public sealed partial class NativeInformationOverlayRuntime : IInformationOverla
         List<string> ids = [];
         CollectExtendedLivePreviewIds(ids);
         if (ids.Count > 8 || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count) return [];
-        return ids.Where(id => OverlaySkinCatalog.Listed.Any(p => p.Id.ToString() == id && p.IsPreviewAvailable)).ToArray();
+        // 0.7.3 overlay v2: a hidden appearance offers no preview (it stays listed and qualified)
+        return ids.Where(id => OverlaySkinCatalog.Listed.Any(p => p.Id.ToString() == id && p.IsPreviewAvailable && !OverlaySkinCatalog.IsHiddenUntilV2(p.Id))).ToArray();
     }
 
     public async ValueTask<string?> OpenAppearancePreviewAsync(string appearanceId,

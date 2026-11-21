@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../platform/bridge/bridge_client_session.dart';
+
 import 'onboarding_models.dart';
 import 'onboarding_port.dart';
 
@@ -25,6 +27,8 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
   final bool skipWelcomeIntro;
   late final StreamSubscription<void> _events;
   bool _refreshPending = false;
+  bool _logSearchAttempted = false;
+  final _openingReady = Completer<void>();
   final Set<String> _freshRequiredSources = {};
   bool _disposed = false, _initialized = false;
   int _operation = 0;
@@ -47,16 +51,19 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
     if (_initialized || _disposed) return;
     _initialized = true;
     await _request(_port.read, restore: true);
+    await _prepareLogStep();
     await _saveOpeningCheckpoint();
     await _checkPendingIdentity();
+    if (!_openingReady.isCompleted) _openingReady.complete();
   }
 
   bool _restored = false;
 
   /// A new user's setup must survive any exit, including tray Exit before the
   /// close button saves. Resumable Host progress outranks later device files,
-  /// so record the opening checkpoint once. Failure stays silent: the regular
-  /// close-time save still reports problems.
+  /// so record the opening checkpoint once, including identity/mode recovered
+  /// from domain facts after Host cleared stale UI progress. Failure stays
+  /// silent: the regular close-time save still reports problems.
   Future<void> _saveOpeningCheckpoint() async {
     final view = value;
     if (_disposed ||
@@ -79,12 +86,66 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
 
   void chooseMode(OnboardingMode mode) {
     if (_disposed || value.busy || value.step != OnboardingStep.mode) return;
+    if (mode == OnboardingMode.online && !value.identityReady) return;
     _publish(mode: mode);
+  }
+
+  // Reuse the original retirement handshake before the first file/identity
+  // action. The durable mode is local; no new checkpoint/storage shape exists.
+  // Opening or continuing setup only pauses a plain local session or prepares
+  // a device that has no account yet (Host checks that and switches nothing
+  // else). An online account or a pending online choice is never switched
+  // without the user's own action.
+  Future<void> _prepareLogStep({bool explicit = false}) async {
+    if (_disposed || value.step != OnboardingStep.log) return;
+    final f = value.facts;
+    if (f.activeMode == OnboardingMode.local &&
+        f.publicationSuspended &&
+        !f.onlineSetupPending) {
+      return;
+    }
+    if (f.onlineSetupPending && !explicit) {
+      _publish(mode: OnboardingMode.online);
+      return;
+    }
+    if (f.activeMode == OnboardingMode.online && !explicit) {
+      _publish(mode: OnboardingMode.local);
+      await run(OnboardingAction.prepareLog);
+      if (_disposed) return;
+      // Still online: a real account stays as it is.
+      if (!value.modeApplied) _publish(mode: OnboardingMode.online);
+      return;
+    }
+    _publish(mode: OnboardingMode.local);
+    await run(OnboardingAction.applyMode);
+    if (!value.modeApplied) _publish(error: true);
+  }
+
+  /// Online without an account installed here cannot pick a log. Only the
+  /// user's own click switches to local mode for it.
+  bool get canUseLocalForLog =>
+      !_disposed &&
+      !value.busy &&
+      value.step == OnboardingStep.log &&
+      value.facts.available &&
+      value.facts.activeMode == OnboardingMode.online &&
+      !value.facts.onlineSetupPending &&
+      !value.facts.signedIn;
+
+  Future<void> useLocalForLog() async {
+    if (!canUseLocalForLog) return;
+    _publish(error: false);
+    await _prepareLogStep(explicit: true);
+    if (_disposed || value.error || !value.modeApplied) return;
+    _logSearchAttempted = true;
+    await run(OnboardingAction.locateLogs);
   }
 
   bool get canContinue {
     if (_disposed || value.busy || value.completed || value.error) return false;
-    if (value.step.index > OnboardingStep.mode.index && !value.modeApplied) {
+    if (value.step != OnboardingStep.welcome &&
+        value.step != OnboardingStep.mode &&
+        !value.modeApplied) {
       return false;
     }
     final f = value.facts;
@@ -92,13 +153,13 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
       OnboardingStep.welcome => true,
       OnboardingStep.mode =>
         value.mode != null &&
-            (value.mode == OnboardingMode.local || f.signedIn),
-      OnboardingStep.log => f.available && f.logReady,
+            value.localSetupReady &&
+            (value.mode == OnboardingMode.local ||
+                value.identityReady && value.onlineIdentityReady),
+      OnboardingStep.log => f.available && (f.logReady || value.withoutLog),
       OnboardingStep.identity =>
-        f.hasCandidate &&
-            !value.needsFreshEvidence &&
-            (value.mode == OnboardingMode.local || value.onlineIdentityReady),
-      OnboardingStep.local => value.identityReady && f.localSettingsReady,
+        f.hasCandidate && !value.needsFreshEvidence && !f.logSetupPending,
+      OnboardingStep.local => value.localSetupReady && f.localSettingsReady,
       OnboardingStep.online =>
         value.identityReady &&
             value.onlineIdentityReady &&
@@ -142,6 +203,7 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
     }
     final steps = value.steps;
     _publish(step: steps[steps.indexOf(value.step) + 1]);
+    await _prepareLogStep();
     await _checkPendingIdentity();
   }
 
@@ -153,9 +215,15 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
     if (index > 0) _publish(step: steps[index - 1]);
   }
 
+  void returnToMode() {
+    if (!_disposed && !value.busy && !value.completed) {
+      _publish(step: OnboardingStep.mode);
+    }
+  }
+
   bool get canGoBack =>
       value.step != OnboardingStep.welcome &&
-      !(skipWelcomeIntro && value.step == OnboardingStep.mode);
+      !(skipWelcomeIntro && value.step == OnboardingStep.log);
 
   Future<void> run(OnboardingAction action) async {
     if (action == OnboardingAction.cancelLogin && canCancelLogin) {
@@ -169,17 +237,41 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
     }
     if (_disposed || value.busy || value.completed) return;
     if (!value.facts.available) return;
+    // Returning from online review to the log step must still let the user
+    // explicitly defer the log. Retire the pending candidate through the same
+    // local handshake before asking Host to save a no-log choice.
+    if (action == OnboardingAction.skipLog &&
+        value.step == OnboardingStep.log &&
+        (value.mode != OnboardingMode.local || !value.modeApplied)) {
+      if (value.facts.activeMode == OnboardingMode.online) return;
+      _publish(mode: OnboardingMode.local, error: false);
+      await _prepareLogStep(explicit: true);
+      if (_disposed || value.busy || value.error || !value.modeApplied) return;
+    }
     if (action == OnboardingAction.applyMode &&
-        (value.step != OnboardingStep.mode || value.mode == null)) {
+        (value.mode == null ||
+            value.step != OnboardingStep.mode &&
+                !(value.step == OnboardingStep.log &&
+                    value.mode == OnboardingMode.local) ||
+            value.mode == OnboardingMode.online && !value.identityReady)) {
       return;
     }
     if (action == OnboardingAction.login &&
         (value.step != OnboardingStep.mode ||
-            value.mode != OnboardingMode.online)) {
+            value.mode != OnboardingMode.online ||
+            !value.identityReady)) {
       return;
     }
-    if (action == OnboardingAction.selectLog &&
+    if ((action == OnboardingAction.selectLog ||
+            action == OnboardingAction.locateLogs ||
+            action == OnboardingAction.prepareLog) &&
         value.step != OnboardingStep.log) {
+      return;
+    }
+    if (action == OnboardingAction.skipLog &&
+        (value.step != OnboardingStep.log ||
+            value.mode != OnboardingMode.local ||
+            !value.modeApplied)) {
       return;
     }
     if (action == OnboardingAction.reviewLocalSettings &&
@@ -197,13 +289,75 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
             value.needsFreshEvidence)) {
       return;
     }
+    if (action == OnboardingAction.finishLogSetup &&
+        (value.step != OnboardingStep.identity ||
+            !value.modeApplied ||
+            !value.facts.localIdentityConfirmed ||
+            !value.facts.logSetupPending ||
+            value.needsFreshEvidence)) {
+      return;
+    }
     final checkpoint = value.checkpoint;
     _activeAction = action;
     await _request(() => _port.execute(action, checkpoint));
+    if (value.error &&
+        (action == OnboardingAction.confirmHandle ||
+            action == OnboardingAction.finishLogSetup)) {
+      await refresh();
+    }
     if (_activeAction == action) _activeAction = null;
   }
 
   Future<void> refresh() => _request(_port.read);
+
+  Future<void> searchLogsOnEntry() async {
+    if (!_initialized || _disposed) return;
+    // Opening progress and discovery share the Host state-key lane.
+    await _openingReady.future;
+    if (_logSearchAttempted ||
+        _disposed ||
+        value.busy ||
+        value.step != OnboardingStep.log ||
+        !value.facts.available ||
+        value.facts.activeMode != OnboardingMode.local ||
+        !value.facts.publicationSuspended) {
+      return;
+    }
+    _logSearchAttempted = true;
+    await run(OnboardingAction.locateLogs);
+  }
+
+  Future<void> selectLogCandidate(int index) async {
+    if (_disposed ||
+        value.busy ||
+        value.completed ||
+        value.step != OnboardingStep.log ||
+        value.facts.activeMode != OnboardingMode.local ||
+        index < 0 ||
+        index >= (value.facts.logCandidates?.length ?? 0) ||
+        _port is! OnboardingLogCandidatePort) {
+      return;
+    }
+    final checkpoint = value.checkpoint;
+    await _request(
+      () => (_port as OnboardingLogCandidatePort).selectLogCandidate(
+        index,
+        checkpoint,
+      ),
+    );
+  }
+
+  Future<void> retryLogSetup() async {
+    await refresh();
+    await _prepareLogStep();
+    if (!value.busy &&
+        !value.error &&
+        value.step == OnboardingStep.log &&
+        value.facts.activeMode == OnboardingMode.local) {
+      _logSearchAttempted = true;
+      await run(OnboardingAction.locateLogs);
+    }
+  }
 
   Future<void> _checkPendingIdentity() async {
     if (!_disposed &&
@@ -285,7 +439,8 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
           _restored = true;
           step = checkpoint.step;
           mode = checkpoint.mode;
-          if (step.index > OnboardingStep.mode.index &&
+          if (checkpoint.sourceKey != null &&
+              step != OnboardingStep.mode &&
               (checkpoint.sourceKey != f.sourceKey ||
                   checkpoint.evidenceKey != f.evidenceKey)) {
             step = OnboardingStep.log;
@@ -293,11 +448,36 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
         }
       }
       if (skipWelcomeIntro && step == OnboardingStep.welcome) {
-        step = OnboardingStep.mode;
+        step = OnboardingStep.log;
+      }
+      // log/identity checkpoints retain the old non-null mode contract.
+      // This implicit local bootstrap is not an online selection.
+      if (mode == null && step.index <= OnboardingStep.identity.index) {
+        mode = OnboardingMode.local;
       }
       final fresh =
           f.requiresFreshEvidence ||
           source != null && _freshRequiredSources.contains(source);
+      // Selecting a new source or confirming a new identity clears stale UI
+      // progress on Host. Recover from real domain state even after tray Exit.
+      if (restore &&
+          reply.restored == null &&
+          skipWelcomeIntro &&
+          f.available &&
+          f.eligibility == OnboardingEligibility.firstUse) {
+        final recovered = OnboardingView(
+          mode: mode,
+          facts: f,
+          needsFreshEvidence: fresh,
+        );
+        if (recovered.modeApplied) {
+          if (recovered.localSetupReady) {
+            step = OnboardingStep.mode;
+          } else if (f.logReady) {
+            step = OnboardingStep.identity;
+          }
+        }
+      }
       var next = OnboardingView(
         step: step,
         mode: mode,
@@ -305,20 +485,22 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
         needsFreshEvidence: fresh,
       );
       // A saved page is not proof of readiness. Clamp on changed or lost facts.
-      if (mode == null && step.index > OnboardingStep.mode.index) {
-        step = OnboardingStep.mode;
-      } else if (step.index > OnboardingStep.mode.index && !next.modeApplied) {
+      if (step.index > OnboardingStep.log.index &&
+          (!f.available || !f.logReady && !next.withoutLog)) {
+        step = OnboardingStep.log;
+        mode = OnboardingMode.local;
+      } else if (step.index > OnboardingStep.identity.index &&
+          !next.localSetupReady) {
+        step = OnboardingStep.identity;
+        mode = OnboardingMode.local;
+      } else if (step.index > OnboardingStep.mode.index &&
+          (mode == null ||
+              !next.modeApplied ||
+              mode == OnboardingMode.online && !next.onlineIdentityReady)) {
         step = OnboardingStep.mode;
       } else if (mode == OnboardingMode.local &&
           step == OnboardingStep.online) {
         step = OnboardingStep.local;
-      } else if (step.index > OnboardingStep.log.index &&
-          (!f.available || !f.logReady)) {
-        step = OnboardingStep.log;
-      } else if (step.index > OnboardingStep.identity.index &&
-          (!next.identityReady ||
-              mode == OnboardingMode.online && !next.onlineIdentityReady)) {
-        step = OnboardingStep.identity;
       } else if (step.index > OnboardingStep.local.index &&
           !f.localSettingsReady) {
         step = OnboardingStep.local;
@@ -352,9 +534,14 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
         completed: completed,
         error: save != null && !saved || finish != null && !completed,
       );
-    } on Object {
+    } on Object catch (error) {
       if (!_disposed && operation == _operation) {
-        _publish(busy: false, error: true, saved: false);
+        _publish(
+          busy: false,
+          error: true,
+          saved: false,
+          errorCode: error is BridgeClientException ? error.code : null,
+        );
       }
     } finally {
       if (!_disposed && operation == _operation && _refreshPending) {
@@ -372,7 +559,11 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
     bool? busy,
     bool? error,
     bool? saved,
+    String? errorCode,
   }) {
+    if (step != null && step != OnboardingStep.log) {
+      _logSearchAttempted = false;
+    }
     value = OnboardingView(
       step: step ?? value.step,
       mode: mode ?? value.mode,
@@ -382,12 +573,14 @@ final class OnboardingController extends ValueNotifier<OnboardingView> {
       saved: saved ?? false,
       completed: value.completed,
       needsFreshEvidence: value.needsFreshEvidence,
+      errorCode: errorCode,
     );
   }
 
   @override
   void dispose() {
     _disposed = true;
+    if (!_openingReady.isCompleted) _openingReady.complete();
     _operation++;
     unawaited(_events.cancel());
     super.dispose();

@@ -45,6 +45,10 @@ internal static class NotificationEnvironmentPolicyTests
         foreach (var state in new[] { 0, 1, 4, 8, -1 })
             if (DesktopNotificationEnvironment.AchievementDesktopAllowed(state, () => ""))
                 throw new Exception("Unknown, unavailable and presentation desktops defer achievement celebration");
+        // Build 105: nobody at an unlocked desktop is not "seeing" it; the card waits.
+        foreach (var (idle, present) in new (uint?, bool)[] { (0, true), (299_999, true), (300_000, false), (uint.MaxValue, false), (null, false) })
+            if (StarBridge.OverlayRuntime.Windows.AchievementCelebrationAttention.Present(idle) != present)
+                throw new Exception($"Achievement attention after {idle?.ToString() ?? "unknown"} ms idle must be {present}");
         foreach (var state in new[] { 2, 3, 5, 7 })
             if (DesktopNotificationEnvironment.EvaluateActivitySuppression(state, true, () => "", () => "", () => "foreground-fullscreen") != "")
                 throw new Exception("An authorized player activity must not be blocked again solely because the game is foreground/fullscreen");

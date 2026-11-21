@@ -8,6 +8,7 @@ import 'package:starbridge_flutter/features/account/account_port.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_feature.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_wall_card.dart';
 import 'package:starbridge_flutter/shared/ships/catalog_vehicle_icon.dart';
 import 'package:starbridge_flutter/shared/ships/ship_reviewed_display.dart';
 
@@ -147,14 +148,14 @@ void main() {
       expect(find.text('Saved Ship'), findsOneWidget);
       expect(port.reads, hasLength(1));
       expect(creations, 1);
-      // MPUV motion lasts longer than the old 3-second cache sentinel.
-      final motion =
-          tester
-                  .widget<CatalogVehicleIcon>(find.byType(CatalogVehicleIcon))
-                  .motion!
-              as Animation<double>;
-      expect(motion.value, 1);
-      expect((motion as AnimationController).isAnimating, isFalse);
+      // The retained wall uses a static icon, including reviewed MPUV art.
+      expect(find.byType(LocalHangarWallIcon), findsOneWidget);
+      expect(
+        tester
+            .widget<CatalogVehicleIcon>(find.byType(CatalogVehicleIcon))
+            .motion,
+        isNull,
+      );
       await tester.tap(find.byKey(const Key('local-hangar-refresh')));
       await tester.pump();
       expect(port.reads, hasLength(2));

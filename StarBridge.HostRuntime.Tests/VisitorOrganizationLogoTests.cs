@@ -11,7 +11,7 @@ internal static partial class LegacyPasswordLoginTests
     {
         var passed = 0;
         foreach (var scenario in new[] { "success", "mismatch", "hidden", "community", "unknown",
-            "inline", "failure", "timeout", "zero-id", "restricted", "denied", "self", "slow" })
+            "inline", "failure", "timeout", "zero-id", "restricted", "denied", "self", "slow", "self-stale" })
         {
             using var profile = new ScmVisitorTransport { AllowFriendIdentity = true };
             using var directory = new ScmVisitorFriendsTransport();
@@ -20,8 +20,10 @@ internal static partial class LegacyPasswordLoginTests
             var oauth = new OAuthPkceClient(new ScmHttpClient(profile), new ScmBackgroundVault(),
                 new ScmOAuthOptions("synthetic", uri, uri, uri, "synthetic", "synthetic", "openid profile.read", "/callback"));
             var calls = 0;
+            Action? duringLogo = null;
             var logos = new PublicOrganizationLogoReader(async (sid, token) => {
                 calls++;
+                duringLogo?.Invoke();
                 if (sid != "FIXTURE") throw new Exception("FleetCode must be trimmed before lookup");
                 if (scenario == "failure") throw new HttpRequestException();
                 if (scenario == "timeout") throw new OperationCanceledException();
@@ -37,6 +39,11 @@ internal static partial class LegacyPasswordLoginTests
                 initialSession: new ScmOAuthSession("synthetic", "viewer", "Pilot", "synthetic-read-token",
                     DateTimeOffset.UtcNow.AddHours(1), ["profile.read"]), friends: friends, publicOrganizationLogos: logos);
             using var dispatcher = new AccountBridgeDispatcher(host);
+            // CX-PROFILE-HEADER-073-R: the owner's read rechecks the generation after the mark's wait.
+            if (scenario == "self-stale")
+                duringLogo = () => typeof(ScmAccountBridgeHost).GetField("_generation",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .SetValue(host, host.Generation + 1);
             var owner = host.CurrentContext!;
             var peers = await host.ReadFriendsAsync(owner, BridgePayload.From(new { schemaVersion = 1 }), default);
             var document = new PersonalProfileDocumentContract(3, "opaque-public-profile", false, 7, DateTimeOffset.UtcNow,
@@ -50,19 +57,20 @@ internal static partial class LegacyPasswordLoginTests
                 schemaVersion = 1, restricted = true, visibility = "private", publicHeader = new { callsign = "Visitor" }
             });
             if (scenario == "denied") profile.Status = HttpStatusCode.Forbidden;
-            profile.AllowOwnProfile = scenario == "self";
+            profile.AllowOwnProfile = scenario is "self" or "self-stale";
             var started = System.Diagnostics.Stopwatch.StartNew();
             var response = (await dispatcher.DispatchAsync(BridgeEnvelope.Request(
-                scenario == "self" ? AccountBridgeRequestNames.GetPersonalProfile : "users.profile",
+                scenario is "self" or "self-stale" ? AccountBridgeRequestNames.GetPersonalProfile : "users.profile",
                 Guid.NewGuid().ToString("N"), host.Generation,
                 new { schemaVersion = 1, source = "friend", reference = peers.Friends.Single().TargetRef }, owner), default)).Response;
             if (started.Elapsed > TimeSpan.FromSeconds(4)) throw new Exception(scenario + ": profile waited too long for the logo");
             // SCM leaves Kind empty for the main fleet: an unmarked affiliation is the main fleet.
-            var shouldQuery = scenario is "success" or "unknown" or "mismatch" or "failure" or "timeout" or "zero-id" or "slow";
+            // User 11-11: the owner's own page ("self") gets the same fleet mark as visitors.
+            var shouldQuery = scenario is "success" or "unknown" or "mismatch" or "failure" or "timeout" or "zero-id" or "slow" or "self" or "self-stale";
             if (calls != (shouldQuery ? 1 : 0)) throw new Exception(scenario + ": unexpected logo query count");
-            if (scenario == "denied")
+            if (scenario is "denied" or "self-stale")
             {
-                if (response.Error is null) throw new Exception("Denied visitor must fail");
+                if (response.Error is null) throw new Exception(scenario + " must fail");
             }
             else
             {
@@ -76,7 +84,7 @@ internal static partial class LegacyPasswordLoginTests
                     response.Payload.GetProperty("profile").TryGetProperty("fleetAffiliation", out var affiliation);
                     var url = affiliation.ValueKind == JsonValueKind.Object && affiliation.TryGetProperty("logoUrl", out var value)
                         ? value.GetString() : null;
-                    if (url != (scenario is "success" or "unknown" ? "https://example.invalid/logo.png" : null))
+                    if (url != (scenario is "success" or "unknown" or "self" ? "https://example.invalid/logo.png" : null))
                         throw new Exception(scenario + ": incorrect bridge logoUrl");
                 }
             }

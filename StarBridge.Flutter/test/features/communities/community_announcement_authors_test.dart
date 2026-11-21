@@ -539,8 +539,8 @@ void main() {
         expect(detailReads, 1);
         // Only the injected observation clock and fake elapsed time change.
         // The held original detail request has a 15-second transport deadline.
-        now = DateTime.utc(2026, 10, 17, 12, 0, 6);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 14, milliseconds: 1));
         expect(find.text('Current'), findsOneWidget);
         expect(find.text('Authorized body'), findsOneWidget);
         _expectContent(model.page!, wire('ann-mixed-current'));
@@ -734,11 +734,24 @@ void main() {
           ),
           isEmpty,
         );
-        now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-        await tester.pump(const Duration(seconds: 1));
+        now = DateTime.utc(
+          2026,
+          10,
+          17,
+          12,
+          0,
+          15,
+        ).subtract(const Duration(microseconds: 1));
+        await tester.pump(
+          const Duration(seconds: 10, milliseconds: 999, microseconds: 999),
+        );
+        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+        expect(find.textContaining('Bridge staggered-second'), findsOneWidget);
+        now = now.add(const Duration(microseconds: 1));
+        await tester.pump(const Duration(microseconds: 1));
         expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(find.textContaining('Bridge staggered-second'), findsOneWidget);
-        now = DateTime.utc(2026, 10, 17, 12, 0, 8);
+        now = DateTime.utc(2026, 10, 17, 12, 0, 18);
         await tester.pump(const Duration(seconds: 3));
         expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(find.textContaining('Bridge staggered-second'), findsNothing);
@@ -919,8 +932,8 @@ void main() {
         expect(detailReads, 1);
         // Only the injected observation clock and fake elapsed time change.
         // The held original detail request has a 15-second transport deadline.
-        now = DateTime.utc(2026, 10, 17, 12, 0, 6);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 14, milliseconds: 1));
         expect(find.text('Current'), findsOneWidget);
         expect(find.text('Authorized body'), findsOneWidget);
         _expectContent(model.page!, wire('ann-mixed-current'));
@@ -1081,7 +1094,7 @@ void main() {
         void changed() => notifications++;
         model.addListener(changed);
         try {
-          now = DateTime.utc(2026, 10, 17, 12, 0, 6);
+          now = DateTime.utc(2026, 10, 17, 12, 0, 16);
           await tester.pump(const Duration(seconds: 5));
           expect(
             notifications,
@@ -1195,8 +1208,8 @@ void main() {
           ),
         );
         expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
-        now = DateTime.utc(2026, 10, 17, 12, 0, 6);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 14, milliseconds: 1));
         expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
         expect(find.text('Authorized body'), findsOneWidget);
         _expectContent(model.page!, raw);
@@ -2234,8 +2247,8 @@ void main() {
         expect(state.author, orderedEquals(authorPng));
         expect(state.editor, orderedEquals(editorPng));
         final retainedEditor = state.editor;
-        now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-        await tester.pump(const Duration(seconds: 1));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 12));
         expect(state.author, isNull);
         expect(state.editor, same(retainedEditor));
         expect(find.textContaining('Bridge wire-visible'), findsNothing);
@@ -2244,7 +2257,7 @@ void main() {
           find.descendant(of: bodyFinder, matching: find.byType(RawImage)),
           findsOneWidget,
         );
-        now = DateTime.utc(2026, 10, 17, 12, 0, 8);
+        now = DateTime.utc(2026, 10, 17, 12, 0, 19);
         await tester.pump(const Duration(seconds: 3));
         expect(state.author, isNull);
         expect(state.editor, isNull);
@@ -2702,8 +2715,8 @@ void main() {
             tester.state(find.byType(CommunityAnnouncementDetails)) as dynamic;
         final originalAuthor = state.author, originalEditor = state.editor;
         expect(find.textContaining('Bridge wire-visible'), findsNWidgets(2));
-        now = DateTime.utc(2026, 10, 17, 12, 0, 6);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 14, milliseconds: 1));
         model.refreshTimeLabels();
         await tester.pump();
         expect(state.author, same(originalAuthor));

@@ -375,7 +375,7 @@ void _sharedPresentation(WidgetTester tester, int expectedRows) {
   expect(find.byType(OrganizationMemberHeader), findsOneWidget);
   expect(find.byType(OrganizationMemberRow), findsNWidgets(expectedRows));
   expect(find.byType(OrganizationMemberRoleBadge), findsNWidgets(expectedRows));
-  expect(find.textContaining('组织暂时无法加载'), findsNothing);
+  expect(find.textContaining('组织列表暂时读不到'), findsNothing);
   expect(find.textContaining('组织暂時無法載入'), findsNothing);
   expect(
     find.byKey(const ValueKey('community-shortcut-$_communityRef')),

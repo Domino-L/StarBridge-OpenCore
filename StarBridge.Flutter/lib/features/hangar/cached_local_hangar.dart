@@ -1,3 +1,4 @@
+import 'local_hangar_cloud.dart';
 import 'local_hangar_port.dart';
 import 'local_hangar_reconciliation.dart';
 import 'local_hangar_images.dart';
@@ -17,7 +18,8 @@ final class CachedLocalHangar
         LocalHangarReadScopeSource,
         LocalHangarReadFailures,
         LocalHangarReconciliationPort,
-        LocalHangarViewSource {
+        LocalHangarViewSource,
+        LocalHangarCloudPort {
   CachedLocalHangar(this._source, {required this.isCurrent});
   final LocalHangarPort _source;
   final bool Function() isCurrent;
@@ -110,6 +112,26 @@ final class CachedLocalHangar
     _pending = null;
     _snapshot = null;
   }
+
+  // Account copy: forwarded only while this feature lifetime is current.
+  static const _noCloud = LocalHangarCloudState(available: false);
+
+  Future<LocalHangarCloudState> _cloud(
+    Future<LocalHangarCloudState> Function(LocalHangarCloudPort port) call,
+  ) async {
+    final source = _source;
+    if (!isCurrent() || source is! LocalHangarCloudPort) return _noCloud;
+    final result = await call(source as LocalHangarCloudPort);
+    _check();
+    return result;
+  }
+
+  @override
+  Future<LocalHangarCloudState> readCloud() => _cloud((p) => p.readCloud());
+
+  @override
+  Future<LocalHangarCloudState> acknowledgeCloud(String notice) =>
+      _cloud((p) => p.acknowledgeCloud(notice));
 
   void _check() {
     if (!isCurrent()) {

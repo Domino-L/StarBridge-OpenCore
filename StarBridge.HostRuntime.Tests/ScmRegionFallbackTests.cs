@@ -19,6 +19,21 @@ internal static class ScmRegionFallbackTests
             foreach (var name in names) Environment.SetEnvironmentVariable(name, null);
             var settings = ScmEnvironmentSettings.Load();
             Check(settings.RegionDiscoveryEnabled, "production discovery defaults on");
+            Check(!settings.HasExplicitWebBaseOverride, "default web root is not explicit");
+            Environment.SetEnvironmentVariable("STARBRIDGE_SCM_WEB_BASE_URL", "https://scm.flowcld.com/");
+            var explicitWeb = ScmEnvironmentSettings.Load();
+            Check(explicitWeb.HasExplicitWebBaseOverride, "explicit default-valued web root remains explicit");
+            Check(!explicitWeb.HasExplicitRouteOverride, "web override does not change API routing");
+            var domesticWebRoute = new ScmRegionRoute(new Uri("https://flowcld.xyz/"),
+                new Uri("https://flowcld.xyz/"), "region-api", DateTimeOffset.UnixEpoch);
+            Check(ScmOAuthOptions.Create(explicitWeb, domesticWebRoute).AuthorizeEndpoint ==
+                new Uri("https://scm.flowcld.com/oauth/authorize"), "explicit web root wins");
+            Environment.SetEnvironmentVariable("STARBRIDGE_SCM_WEB_BASE_URL", null);
+            Check(settings.RegionFallbackApiUri == new Uri("https://flowcld.xyz/app-api/region"), "production secondary default");
+            Environment.SetEnvironmentVariable("STARBRIDGE_SCM_REGION_FALLBACK_API_URL", "https://secondary.example.invalid/app-api/region");
+            Check(ScmEnvironmentSettings.Load().RegionFallbackApiUri == new Uri("https://secondary.example.invalid/app-api/region/"),
+                "explicit secondary overrides built-in default using existing URI normalization");
+            Environment.SetEnvironmentVariable("STARBRIDGE_SCM_REGION_FALLBACK_API_URL", null);
             using var transport = ScmRuntimeConfiguration.CreateRegionHttpHandler();
             Check(!transport.UseCookies && !transport.AllowAutoRedirect, "anonymous nonredirecting transport");
             using var noCalls = new Fixture("forbidden");
@@ -39,13 +54,14 @@ internal static class ScmRegionFallbackTests
                 var route = await new ScmRegionRouter(http, path, lines.Add, NeverWs).ResolveAsync(
                     settings with { RegionRequestTimeout = TimeSpan.FromMilliseconds(scenario == "timeout" ? 30 : 5000) }, default);
                 EqualEndpoints(baseline, route, scenario);
-                Check(handler.Calls == 1 && File.Exists(path), "overseas classification is remembered without a preflight");
+                var failed = scenario is "forbidden" or "transport" or "invalid-json" or "timeout" or "redirect";
+                var expectedCalls = failed ? 2 : 1;
+                Check(handler.Calls == expectedCalls && File.Exists(path), "classifiers run in order without overseas preflight");
                 var again = await new ScmRegionRouter(http, path, lines.Add, NeverWs).ResolveAsync(
                     settings with { RegionRequestTimeout = TimeSpan.FromMilliseconds(scenario == "timeout" ? 30 : 5000) }, default);
                 EqualEndpoints(baseline, again, scenario + " cached");
-                Check(handler.Calls == 1, "overseas start-up sends no further classification request while cached");
+                Check(handler.Calls == expectedCalls, "overseas start-up sends no further classification request while cached");
                 using (var saved = JsonDocument.Parse(File.ReadAllText(path))) {
-                    var failed = scenario is "forbidden" or "transport" or "invalid-json" or "timeout" or "redirect";
                     var age = DateTimeOffset.UtcNow - saved.RootElement.GetProperty("ResolvedAt").GetDateTimeOffset();
                     Check(failed ? age > settings.RegionCacheDuration - TimeSpan.FromHours(1.1) : age < TimeSpan.FromMinutes(5),
                         "classifier failures are remembered for one hour, overseas results for the full period");
@@ -94,8 +110,13 @@ internal static class ScmRegionFallbackTests
             Environment.SetEnvironmentVariable("STARBRIDGE_SCM_REGION_DISCOVERY_ENABLED", null);
             var development = ScmEnvironmentSettings.Load();
             Check(!development.RegionDiscoveryEnabled && development.ApiBaseUri.IsLoopback, "development defaults unchanged");
+            Check(development.RegionFallbackApiUri is null, "development has no secondary default");
+            Environment.SetEnvironmentVariable("STARBRIDGE_ENVIRONMENT", "local");
+            Check(ScmEnvironmentSettings.Load().RegionFallbackApiUri is null, "local has no secondary default");
             Environment.SetEnvironmentVariable("STARBRIDGE_ENVIRONMENT", null);
             await Domestic(settings, baseline, root);
+            await SecondaryClassification(settings, baseline, root);
+            await RetainedDomestic(settings, baseline, root);
             Console.WriteLine("PASS regional routing: overseas/default/cache, overrides, strict API contract, WS outcomes (offline fixtures)");
         }
         finally
@@ -178,6 +199,247 @@ internal static class ScmRegionFallbackTests
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
+    private static async Task SecondaryClassification(ScmEnvironmentSettings settings, ScmRegionRoute baseline, string root)
+    {
+        var now = DateTimeOffset.Parse("2026-11-13T12:00:00Z");
+        foreach (var cn in new[] { false, true })
+        foreach (var primary in new[] { "ok", "transport", "timeout", "forbidden", "redirect", "invalid-json" })
+        {
+            var path = Path.Combine(root, $"secondary-{primary}-{cn}");
+            using var fixture = new Fixture(primary, isCN: cn, secondaryScenario: "ok");
+            using var http = new HttpClient(fixture);
+            var probes = 0;
+            Task<ScmWebSocketProbeResult> Probe(Uri _, CancellationToken __)
+            {
+                probes++;
+                return Task.FromResult(ScmWebSocketProbeResult.FromHttpStatus(101));
+            }
+            var route = await new ScmRegionRouter(http, path, _ => { }, Probe, () => now).ResolveAsync(
+                settings with { RegionRequestTimeout = TimeSpan.FromMilliseconds(primary == "timeout" ? 30 : 5000) }, default);
+            var classifiers = fixture.Endpoints.Where(uri => uri?.AbsolutePath == "/app-api/region").ToArray();
+            Check(classifiers.SequenceEqual(primary == "ok"
+                ? new[] { settings.RegionApiUri }
+                : new[] { settings.RegionApiUri, settings.RegionFallbackApiUri }), "exact primary/secondary order, stop at first success");
+            Check(fixture.Calls == classifiers.Length + (cn ? 1 : 0) && probes == (cn ? 1 : 0),
+                "only domestic results run both preflight probes");
+            using var cache = JsonDocument.Parse(File.ReadAllText(path));
+            Check(cache.RootElement.GetProperty("IsCN").GetBoolean() == cn &&
+                cache.RootElement.GetProperty("ResolvedAt").GetDateTimeOffset() == now, "successful classification cached at current time");
+            if (cn)
+            {
+                Check(route.Source == "region-api" && route.IsCN == true &&
+                    route.ApiBaseUri == new Uri("https://flowcld.xyz/") && route.ResourceBaseUri == route.ApiBaseUri &&
+                    route.EffectiveWebSocketBaseUri == new Uri("https://ws.flowcld.xyz/"), "secondary domestic fixed endpoints");
+                Check(cache.RootElement.GetProperty("ConfirmedAt").GetDateTimeOffset() == now, "real domestic confirmation timestamp");
+            }
+            else
+            {
+                EqualEndpoints(baseline, route, "secondary overseas");
+                Check(cache.RootElement.GetProperty("ConfirmedAt").ValueKind == JsonValueKind.Null, "overseas is not domestic confirmation");
+            }
+        }
+        using var duplicate = new Fixture("transport");
+        using var duplicateHttp = new HttpClient(duplicate);
+        await new ScmRegionRouter(duplicateHttp, Path.Combine(root, "duplicate"), _ => { }, NeverWs)
+            .ResolveAsync(settings with { RegionFallbackApiUri = settings.RegionApiUri }, default);
+        Check(duplicate.Calls == 1, "identical classifier URIs attempted only once even on failure");
+
+        // A real classifier result takes precedence over an eligible stale domestic cache.
+        foreach (var cn in new[] { false, true })
+        {
+            var path = Path.Combine(root, "reclassified-" + cn);
+            WriteExpiredCache(path, now.AddDays(-2), now.AddDays(-10));
+            using var fixture = new Fixture("transport", isCN: cn, secondaryScenario: "ok");
+            using var http = new HttpClient(fixture);
+            var lines = new List<string>();
+            var route = await new ScmRegionRouter(http, path, lines.Add,
+                (_, _) => Task.FromResult(ScmWebSocketProbeResult.FromHttpStatus(101)), () => now).ResolveAsync(settings, default);
+            using var cache = JsonDocument.Parse(File.ReadAllText(path));
+            Check(cache.RootElement.GetProperty("IsCN").GetBoolean() == cn &&
+                cache.RootElement.GetProperty("ResolvedAt").GetDateTimeOffset() == now &&
+                !lines.Any(line => line.Contains("retained=")), "successful secondary replaces stale classification");
+            if (cn)
+                Check(route.Source == "region-api" && cache.RootElement.GetProperty("ConfirmedAt").GetDateTimeOffset() == now,
+                    "new domestic confirmation resets the horizon");
+            else
+                EqualEndpoints(baseline, route, "overseas confirmation supersedes stale domestic cache");
+        }
+    }
+
+    private static async Task RetainedDomestic(ScmEnvironmentSettings settings, ScmRegionRoute baseline, string root)
+    {
+        var now = DateTimeOffset.Parse("2026-11-13T12:00:00Z");
+        foreach (var legacy in new[] { false, true })
+        foreach (var preflight in new[] { "ok", "http-failure", "ws-failure" })
+        {
+            var path = Path.Combine(root, $"retained-{legacy}-{preflight}");
+            var resolved = now.AddDays(-2);
+            var confirmed = legacy ? resolved : now.AddDays(-10);
+            WriteExpiredCache(path, resolved, legacy ? null : confirmed);
+            using var fixture = new Fixture("transport", preflight == "http-failure" ? "503" : "ok");
+            using var http = new HttpClient(fixture);
+            var lines = new List<string>();
+            var probes = 0;
+            Task<ScmWebSocketProbeResult> Probe(Uri uri, CancellationToken token)
+            {
+                Check(uri == new Uri("wss://ws.flowcld.xyz/infra/ws/chat") && token.CanBeCanceled, "retained WS probe bounded");
+                probes++;
+                return Task.FromResult(ScmWebSocketProbeResult.FromHttpStatus(preflight == "ws-failure" ? 503 : 101));
+            }
+            var router = new ScmRegionRouter(http, path, lines.Add, Probe, () => now);
+            var route = await router.ResolveAsync(settings, default);
+            Check(fixture.Endpoints.SequenceEqual(new[] { settings.RegionApiUri, settings.RegionFallbackApiUri,
+                new Uri("https://flowcld.xyz/app-api/member/timezone/list") }), "retention follows both classifier failures and HTTP preflight");
+            Check(probes == (preflight == "http-failure" ? 0 : 1), "HTTP preflight precedes retained WS probe");
+            if (preflight == "ok")
+                Check(route.Source == "cache" && route.IsCN == true && route.ApiBaseUri == new Uri("https://flowcld.xyz/") &&
+                    route.ResourceBaseUri == route.ApiBaseUri && route.EffectiveWebSocketBaseUri == new Uri("https://ws.flowcld.xyz/"),
+                    "retained cache selects all domestic endpoints");
+            else
+            {
+                EqualEndpoints(baseline, route, "retained preflight failure");
+                Check(route.Source == "fallback-preflight" && route.IsCN == true, "preflight fallback is for this run only");
+            }
+            AssertRetainedCache(path, settings, now, confirmed);
+            Check(lines.Contains("failure=all-classifiers retained=domestic") &&
+                lines.All(line => !line.Contains("flowcld") && !line.Contains("https:") && !line.Contains("Synthetic")),
+                "retention diagnostic contains only categories");
+            AssertPrivateFieldsAbsent(lines);
+
+            // A fresh router models another launch inside the retry hour: no classification, both preflights again.
+            var before = File.ReadAllBytes(path);
+            using var healthy = new Fixture("transport");
+            using var healthyHttp = new HttpClient(healthy);
+            var recovered = await new ScmRegionRouter(healthyHttp, path, _ => { },
+                (_, _) => Task.FromResult(ScmWebSocketProbeResult.FromHttpStatus(101)), () => now.AddMinutes(30))
+                .ResolveAsync(settings, default);
+            Check(recovered.Source == "cache" && healthy.Calls == 1 &&
+                healthy.Endpoints.Single()?.AbsolutePath == "/app-api/member/timezone/list" &&
+                before.SequenceEqual(File.ReadAllBytes(path)), "next launch uses unchanged domestic cache after transient preflight failure");
+        }
+
+        foreach (var kind in new[] { "too-old", "legacy-too-old", "overseas", "missing", "wrong-api", "wrong-resource",
+            "wrong-ws", "untrusted", "schema", "broken", "future-resolved", "future-confirmed", "unreadable" })
+        {
+            var path = Path.Combine(root, "rejected-" + kind);
+            var current = kind == "untrusted" ? settings with
+            { TrustedRegionHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "scmk.flowcld.com" } } : settings;
+            if (kind != "missing")
+                WriteExpiredCache(path, kind == "future-resolved" ? now.AddMinutes(1) :
+                    kind == "legacy-too-old" ? now.AddDays(-31) : now.AddDays(-2),
+                    kind == "legacy-too-old" ? null : kind == "too-old" ? now.AddDays(-31) :
+                    kind == "future-confirmed" ? now.AddMinutes(1) : now.AddDays(-3),
+                    kind != "overseas", kind == "schema" ? 3 : 4,
+                    kind == "wrong-api" ? "https://scmk.flowcld.com/" : "https://flowcld.xyz/",
+                    kind == "wrong-resource" ? "https://flowcld.xyz/not-root" : "https://flowcld.xyz/",
+                    kind == "wrong-ws" ? "https://flowcld.xyz/" : "https://ws.flowcld.xyz/");
+            if (kind == "broken") File.WriteAllText(path, "{broken");
+            var original = kind == "unreadable" ? File.ReadAllBytes(path) : null;
+            using var fixture = new Fixture("transport");
+            using var http = new HttpClient(fixture);
+            var lines = new List<string>();
+            using (var held = kind == "unreadable" ? new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None) : null)
+            {
+                var route = await new ScmRegionRouter(http, path, lines.Add, NeverWs, () => now).ResolveAsync(current, default);
+                EqualEndpoints(baseline, route, kind);
+                Check(route.Source == "fallback" && fixture.Calls == 2 && !lines.Any(line => line.Contains("retained=")),
+                    "invalid retention candidate uses existing fallback: " + kind);
+            }
+            if (kind == "unreadable")
+                Check(original!.SequenceEqual(File.ReadAllBytes(path)), "unreadable cache write failure remains nonfatal and unchanged");
+            else
+            {
+                using var cache = JsonDocument.Parse(File.ReadAllText(path));
+                Check(!cache.RootElement.GetProperty("IsCN").GetBoolean() &&
+                    cache.RootElement.GetProperty("ResolvedAt").GetDateTimeOffset() + settings.RegionCacheDuration == now.AddHours(1),
+                    "invalid candidate writes overseas for one hour: " + kind);
+            }
+        }
+
+        // Caller cancellation during the retained preflight must not move the retry time.
+        var cancelRetainedPath = Path.Combine(root, "retained-cancel");
+        WriteExpiredCache(cancelRetainedPath, now.AddDays(-2), now.AddDays(-5));
+        var cancelRetainedBefore = File.ReadAllBytes(cancelRetainedPath);
+        using (var cancelRetained = new CancellationTokenSource())
+        using (var cancelRetainedFixture = new Fixture("transport"))
+        using (var cancelRetainedHttp = new HttpClient(cancelRetainedFixture))
+        {
+            try
+            {
+                await new ScmRegionRouter(cancelRetainedHttp, cancelRetainedPath, _ => { },
+                    async (_, token) =>
+                    {
+                        cancelRetained.Cancel();
+                        await Task.Delay(Timeout.Infinite, token);
+                        return ScmWebSocketProbeResult.FromHttpStatus(101);
+                    }, () => now).ResolveAsync(settings, cancelRetained.Token);
+                throw new Exception("Retained preflight cancellation was lost");
+            }
+            catch (OperationCanceledException) when (cancelRetained.IsCancellationRequested) { }
+        }
+        Check(cancelRetainedBefore.SequenceEqual(File.ReadAllBytes(cancelRetainedPath)),
+            "cancelled retained preflight leaves the domestic cache unchanged");
+
+        // Advance only the injected clock: no rewriting fixtures between retries can mask a timestamp extension bug.
+        var repeatedPath = Path.Combine(root, "repeated");
+        var originalConfirmation = now.AddDays(-2);
+        WriteExpiredCache(repeatedPath, originalConfirmation); // Old schema-4 cache without ConfirmedAt.
+        var clock = now;
+        using var repeated = new Fixture("transport");
+        using var repeatedHttp = new HttpClient(repeated);
+        var repeatedRouter = new ScmRegionRouter(repeatedHttp, repeatedPath, _ => { },
+            (_, _) => Task.FromResult(ScmWebSocketProbeResult.FromHttpStatus(101)), () => clock);
+        foreach (var age in new[] { TimeSpan.FromDays(2), TimeSpan.FromDays(3), TimeSpan.FromDays(29), TimeSpan.FromDays(30) })
+        {
+            clock = originalConfirmation + age;
+            var route = await repeatedRouter.ResolveAsync(settings, default);
+            Check(route.Source == "cache" && route.IsCN == true, "repeat failures retain through the 30-day boundary");
+            AssertRetainedCache(repeatedPath, settings, clock, originalConfirmation);
+        }
+        Check(repeated.Calls == 12, "each expired retry makes two classifications and one HTTP preflight");
+        clock = originalConfirmation.AddDays(30).AddHours(1).AddTicks(1);
+        var expiredRoute = await repeatedRouter.ResolveAsync(settings, default);
+        EqualEndpoints(baseline, expiredRoute, "past 30 days");
+        Check(expiredRoute.Source == "fallback" && repeated.Calls == 14 &&
+            ScmRegionRouter.ReadCachedClassification(repeatedPath, clock) == false, "confirmation horizon cannot be extended by repeated failures");
+    }
+
+    private static void WriteExpiredCache(string path, DateTimeOffset resolvedAt, DateTimeOffset? confirmedAt = null,
+        bool isCN = true, int schema = 4, string api = "https://flowcld.xyz/", string resource = "https://flowcld.xyz/",
+        string ws = "https://ws.flowcld.xyz/")
+    {
+        var cache = new Dictionary<string, object?>
+        {
+            ["ApiBaseUri"] = api, ["ResourceBaseUri"] = resource, ["WebSocketBaseUri"] = ws,
+            ["ResolvedAt"] = resolvedAt, ["SchemaVersion"] = schema, ["IsCN"] = isCN
+        };
+        if (confirmedAt is not null) cache["ConfirmedAt"] = confirmedAt;
+        File.WriteAllText(path, JsonSerializer.Serialize(cache));
+    }
+
+    private static void AssertRetainedCache(string path, ScmEnvironmentSettings settings, DateTimeOffset now, DateTimeOffset confirmed)
+    {
+        var text = File.ReadAllText(path);
+        using var cache = JsonDocument.Parse(text);
+        Check(cache.RootElement.GetProperty("SchemaVersion").GetInt32() == 4 && cache.RootElement.GetProperty("IsCN").GetBoolean(),
+            "retention never writes overseas or changes schema");
+        Check(cache.RootElement.GetProperty("ConfirmedAt").GetDateTimeOffset() == confirmed, "retention preserves true confirmation time");
+        Check(cache.RootElement.GetProperty("ResolvedAt").GetDateTimeOffset() + settings.RegionCacheDuration == now.AddHours(1),
+            "retained classification expires in exactly one hour");
+        Check(ScmRegionRouter.ReadCachedClassification(path, now.AddMinutes(59)) == true &&
+            ScmRegionRouter.ReadCachedClassification(path, now.AddHours(1).AddTicks(1)) is null,
+            "unchanged mirror reader sees domestic only within retry hour");
+        var oldReader = JsonSerializer.Deserialize<LegacyCache>(text);
+        Check(oldReader is { SchemaVersion: 4, IsCN: true } &&
+            oldReader.ApiBaseUri == "https://flowcld.xyz/" && oldReader.ResourceBaseUri == oldReader.ApiBaseUri &&
+            oldReader.WebSocketBaseUri == "https://ws.flowcld.xyz/" && oldReader.ResolvedAt + settings.RegionCacheDuration == now.AddHours(1),
+            "old cache record deserializes new optional unknown field without changing route or expiry");
+    }
+
+    // Exact pre-change cache shape and default System.Text.Json options used by the old client.
+    private sealed record LegacyCache(string ApiBaseUri, string ResourceBaseUri, DateTimeOffset ResolvedAt,
+        string? WebSocketBaseUri, int SchemaVersion, bool? IsCN = null);
+
     private static Task<ScmWebSocketProbeResult> NeverWs(Uri _, CancellationToken __) => throw new Exception("Unexpected WS probe");
     private static void EqualEndpoints(ScmRegionRoute expected, ScmRegionRoute actual, string label) => Check(
         expected.ApiBaseUri == actual.ApiBaseUri && expected.ResourceBaseUri == actual.ResourceBaseUri &&
@@ -203,7 +465,8 @@ internal static class ScmRegionFallbackTests
     private static void Check(bool condition, string message)
     { if (!condition) throw new InvalidOperationException("Regional fallback: " + message); }
 
-    private sealed class Fixture(string scenario, string preflight = "ok", bool? isCN = false) : HttpMessageHandler
+    private sealed class Fixture(string scenario, string preflight = "ok", bool? isCN = false,
+        string? secondaryScenario = null) : HttpMessageHandler
     {
         internal int Calls;
         internal List<Uri?> Endpoints = [];
@@ -244,9 +507,10 @@ internal static class ScmRegionFallbackTests
             }
             Check(request.Method == HttpMethod.Get && request.Headers.Authorization is null &&
                 request.RequestUri?.AbsolutePath == "/app-api/region", "discovery is anonymous and scoped");
-            if (scenario == "transport") throw new HttpRequestException("Synthetic transport failure");
-            if (scenario == "timeout") await Task.Delay(Timeout.Infinite, token);
-            var body = scenario switch
+            var classification = request.RequestUri?.Host == "flowcld.xyz" ? secondaryScenario ?? scenario : scenario;
+            if (classification == "transport") throw new HttpRequestException("Synthetic transport failure");
+            if (classification == "timeout") await Task.Delay(Timeout.Infinite, token);
+            var body = classification switch
             {
                 "invalid-json" => "<html>synthetic denial</html>",
                 "untrusted-host" => JsonSerializer.Serialize(new { apiHost = "not-trusted.example.invalid" }),
@@ -254,13 +518,13 @@ internal static class ScmRegionFallbackTests
                 "domestic-no-ws" => JsonSerializer.Serialize(new { apiHost = "flowcld.xyz" }),
                 _ => JsonSerializer.Serialize(new { country = "PrivateCountry", city = "PrivateCity", region = "PrivateRegion",
                     timezone = "PrivateTimezone", latitude = 31.234567, longitude = 121.765432, isCN = isCN,
-                    apiHost = scenario, wsHost = scenario, cacheMaxAge = 86400, timestamp = 1792627200 }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })
+                    apiHost = classification, wsHost = classification, cacheMaxAge = 86400, timestamp = 1792627200 }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })
             };
-            var response = new HttpResponseMessage(scenario == "forbidden" ? HttpStatusCode.Forbidden :
-                scenario == "redirect" ? HttpStatusCode.Found : HttpStatusCode.OK)
+            var response = new HttpResponseMessage(classification == "forbidden" ? HttpStatusCode.Forbidden :
+                classification == "redirect" ? HttpStatusCode.Found : HttpStatusCode.OK)
             { Content = new StringContent(body, Encoding.UTF8, "application/json") };
-            if (scenario == "forbidden") response.Headers.Add("cf-mitigated", "challenge");
-            if (scenario == "redirect") response.Headers.Location = new Uri("https://redirect.example.invalid/target");
+            if (classification == "forbidden") response.Headers.Add("cf-mitigated", "challenge");
+            if (classification == "redirect") response.Headers.Location = new Uri("https://redirect.example.invalid/target");
             return response;
         }
     }

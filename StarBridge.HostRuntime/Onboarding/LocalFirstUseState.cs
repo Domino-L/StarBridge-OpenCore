@@ -27,6 +27,9 @@ internal sealed record LocalFirstUseSnapshot(
 {
     [JsonRequired] public IReadOnlyList<LocalFirstUseSource> Sources { get; init; } = [];
     [JsonRequired] public string? SelectedSourceKey { get; init; }
+    public bool LogDeferred { get; init; }
+    public bool? DeferredStatisticsAllowed { get; init; }
+    public bool LogSetupPending { get; init; }
     internal static LocalFirstUseSnapshot Empty => new(0, null, null, [], null, null);
 }
 
@@ -61,7 +64,8 @@ internal static class LocalFirstUseValidation
         if (value.Revision is < 0 or long.MaxValue || value.Profiles is null || value.Sources is null || value.Profiles.Count > 128 ||
             value.Revision == 0 && (value.OperationId is not null || value.SavedAt is not null ||
                 value.Profiles.Count != 0 || value.ActiveProfileId is not null || value.Progress is not null ||
-                value.Sources.Count != 0 || value.SelectedSourceKey is not null) ||
+                value.Sources.Count != 0 || value.SelectedSourceKey is not null || value.LogDeferred ||
+                value.DeferredStatisticsAllowed is not null) ||
             value.Revision > 0 && (!Id(value.OperationId) || value.SavedAt is null ||
                 value.SavedAt.Value.Offset != TimeSpan.Zero || value.SavedAt < DateTimeOffset.UnixEpoch))
             throw new LocalFirstUseException("firstUse.invalid_state");
@@ -75,6 +79,9 @@ internal static class LocalFirstUseValidation
         if (value.ActiveProfileId is not null && !ids.Contains(value.ActiveProfileId))
             throw new LocalFirstUseException("firstUse.invalid_state");
         LocalGameEvidenceValidation.Sources(value, ids);
+        if (value.LogDeferred && (value.SelectedSourceKey is not null || value.ActiveProfileId is not null) ||
+            !value.LogDeferred && value.SelectedSourceKey is null && value.DeferredStatisticsAllowed is not null)
+            throw new LocalFirstUseException("firstUse.invalid_state");
         if (value.Progress is { } progress)
         {
             if (progress.Step is not ("welcome" or "mode" or "log" or "identity" or "local" or "online" or "summary") ||
@@ -85,7 +92,8 @@ internal static class LocalFirstUseValidation
                 progress.EvidenceKey is not null && (!Token(progress.EvidenceKey) || progress.SourceKey is null) ||
                 progress.ProfileId is not null && (!ids.Contains(progress.ProfileId) ||
                     progress.ProfileId != value.ActiveProfileId) ||
-                progress.Step is "local" or "online" or "summary" && progress.ProfileId is null)
+                progress.Step is "local" or "online" or "summary" && progress.ProfileId is null &&
+                    !(value.LogDeferred && progress.Mode == "local" && progress.Step != "online"))
                 throw new LocalFirstUseException("firstUse.invalid_state");
         }
     }

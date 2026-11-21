@@ -57,3 +57,17 @@ final class OverlayWorkspaceDraft {
         appearanceOptions: appearanceOptions,
       );
 }
+
+/// [source]'s module and chat choices on top of [saved]'s shared choice and
+/// automatic use (after the plan's own sources were configured).
+OverlayPresetSources? overlayRebasedSources(
+  OverlayPresetSources? source,
+  OverlayPresetSources saved,
+) => source == null
+    ? null
+    : OverlayPresetSources(
+        binding: saved.binding,
+        autoSwitch: saved.autoSwitch,
+        modules: source.modules,
+        chatSources: source.chatSources,
+      );

@@ -20,6 +20,7 @@ internal static partial class SharingReviewRegressionTests
         Check(provider is { IsPrivate: true, IsInitOnly: true }, "raw snapshot delegate must remain private and readonly");
         foreach (var (file, from, to) in new[] {
             ("Privacy/PrivacyPublication.Visibility.cs", "var snapshot = ReadVisibility(input);", "var snapshot = _visibilitySnapshot();"),
+            ("Privacy/PrivacyPublication.cs", "var visibility = ReadVisibility(input);", "_ = ReadVisibility(input);"),
             ("Privacy/PrivacyPublication.cs", "out var failureVisibility", "out _"),
             ("Privacy/PrivacyPublication.cs", "var snapshot = _visibilitySnapshot();", "_ = _visibilitySnapshot();"),
             ("Privacy/PrivacyPublication.cs", "ObserveVisibility(snapshot);", "// discarded snapshot"),
@@ -101,6 +102,8 @@ internal static partial class SharingReviewRegressionTests
             ],
             ["Privacy/PrivacyPublication.cs"] = [
                 "var choiceVisibility = ReadVisibility(input);",
+                // The B3 admission regressions cover this first-default commit read.
+                "var visibility = ReadVisibility(input);",
                 "var visibility = ReadVisibility(observed);",
                 "snapshot ??= ReadVisibility(input);",
                 "if (!CanRetainHeartbeat(input, saved.Revision, visibility, out var admissionVisibility))",

@@ -46,7 +46,7 @@ internal static class OverlayRosterPreferencesTests
             Check((await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
                 display = new { overflow = "scroll", rowLimit = 4, rotationIntervalSeconds = 20 } })).Error is not null &&
                   (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
-                display = new { overflow = "rotate", rowLimit = 13, rotationIntervalSeconds = 20 } })).Error is not null &&
+                display = new { overflow = "rotate", rowLimit = 21, rotationIntervalSeconds = 20 } })).Error is not null &&
                   (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2,
                 display = new { overflow = "rotate", rowLimit = 4, rotationIntervalSeconds = 3 } })).Error is not null &&
                   (await Send("overlayRoster.update", new { schemaVersion = 1, revision = 2, key, mode = "pin", display })).Error is not null,

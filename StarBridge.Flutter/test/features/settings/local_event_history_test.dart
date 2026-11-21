@@ -16,25 +16,148 @@ import 'package:starbridge_flutter/platform/bridge/bridge_connection.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 
 void main() {
-  test('background updates retain page and failed refresh retains history', () async {
-    final port = _MutableHistoryPort();
-    final controller = LocalHistoryController(port);
-    addTearDown(controller.dispose);
-    await controller.refresh();
-    await controller.next();
-    port.revision = 'B' * 64;
-    await controller.checkForUpdates();
-    expect(controller.value.hasUpdates, isTrue);
-    expect(controller.value.page!.offset, 50);
-    port.fail = true;
-    await controller.refresh();
-    expect(controller.value.failure, 'readFailed');
-    expect(controller.value.page!.offset, 50);
-    port.fail = false;
-    await controller.refresh();
-    expect(controller.value.page!.offset, 0);
-    expect(controller.value.hasUpdates, isFalse);
-  });
+  for (final (state, sources, empty) in [
+    ('ready', ['contract'], false),
+    ('ready', ['events'], false),
+    ('ready', ['contract'], true),
+    ('unavailable', ['events', 'contract'], true),
+  ]) {
+    test(
+      'bridge retains source failures: $state $sources empty=$empty',
+      () async {
+        final connection = _Connection();
+        connection.payload['state'] = state;
+        connection.payload['unavailableSources'] = sources;
+        if (empty) {
+          connection.payload['totalCount'] = 0;
+          connection.payload['filteredCount'] = 0;
+          connection.payload['entries'] = <Object?>[];
+        }
+        final session = BridgeClientSession(
+          connection: connection,
+          sessionGeneration: 2,
+        );
+        addTearDown(session.close);
+        final page = await BridgeLocalEventHistory(session)
+            .read(category: 'all', offset: 0, pageSize: 50);
+        expect(page.unavailableSources, sources);
+        expect(page.state, state);
+        expect(page.entries.length, empty ? 0 : 1);
+        expect(page.revision, 'A' * 64);
+      },
+    );
+    for (final (locale, contractText, eventsText, bothText) in [
+      (
+        const Locale('zh', 'CN'),
+        '合约记录暂时读不出来，其他记录照常显示。',
+        '部分记录暂时读不出来，合约记录照常显示。',
+        '合约记录和其他记录暂时读不出来。',
+      ),
+      (
+        const Locale('zh', 'TW'),
+        '合約記錄暫時讀不出來，其他記錄照常顯示。',
+        '部分記錄暫時讀不出來，合約記錄照常顯示。',
+        '合約記錄和其他記錄暫時讀不出來。',
+      ),
+      (
+        const Locale('en'),
+        "Contract records can't be read right now. Other records are shown as usual.",
+        "Some records can't be read right now. Contract records are shown as usual.",
+        "Contract and other records can't be read right now.",
+      ),
+    ]) {
+      testWidgets(
+        'source warning above retained list: $locale $state $sources empty=$empty',
+        (tester) async {
+          final controller = LocalHistoryController(
+            _Port()
+              ..state = state
+              ..sources = sources
+              ..empty = empty
+              ..noRecords = empty,
+          );
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(_app(controller, locale: locale));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Open'));
+          await tester.pumpAndSettle();
+          final warning = find.byKey(const Key('history-unavailable-sources'));
+          expect(
+            tester.widget<Text>(warning).data,
+            sources.length == 2
+                ? bothText
+                : sources.single == 'contract'
+                ? contractText
+                : eventsText,
+          );
+          if (!empty) {
+            expect(find.text('Event 0'), findsOneWidget);
+            expect(
+              tester.getTopLeft(warning).dy,
+              lessThan(tester.getTopLeft(find.text('Event 0')).dy),
+            );
+          }
+          if (state == 'unavailable') {
+            expect(find.byKey(const Key('history-failure')), findsOneWidget);
+          }
+          if (empty && state == 'ready') {
+            expect(
+              tester.widget<Text>(find.byKey(const Key('history-empty'))).data,
+              locale.languageCode == 'en'
+                  ? 'No records can be shown right now.'
+                  : locale.countryCode == 'TW'
+                  ? '暫時沒有可顯示的記錄。'
+                  : '暂时没有可显示的记录。',
+            );
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+  for (final invalid in [
+    null,
+    'contract',
+    ['other'],
+    ['events', 'events'],
+    [1],
+  ]) {
+    test('bridge rejects malformed unavailable sources: $invalid', () async {
+      final connection = _Connection()..payload['unavailableSources'] = invalid;
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 2,
+      );
+      addTearDown(session.close);
+      await expectLater(
+        BridgeLocalEventHistory(session)
+            .read(category: 'all', offset: 0, pageSize: 50),
+        throwsFormatException,
+      );
+    });
+  }
+  test(
+    'background updates retain page and failed refresh retains history',
+    () async {
+      final port = _MutableHistoryPort();
+      final controller = LocalHistoryController(port);
+      addTearDown(controller.dispose);
+      await controller.refresh();
+      await controller.next();
+      port.revision = 'B' * 64;
+      await controller.checkForUpdates();
+      expect(controller.value.hasUpdates, isTrue);
+      expect(controller.value.page!.offset, 50);
+      port.fail = true;
+      await controller.refresh();
+      expect(controller.value.failure, 'readFailed');
+      expect(controller.value.page!.offset, 50);
+      port.fail = false;
+      await controller.refresh();
+      expect(controller.value.page!.offset, 0);
+      expect(controller.value.hasUpdates, isFalse);
+    },
+  );
   testWidgets('embedded history reuses paging without a dialog close action', (
     tester,
   ) async {
@@ -119,6 +242,7 @@ void main() {
     final result = await BridgeLocalEventHistory(session)
         .read(category: 'all', offset: 0, pageSize: 50);
     expect(result.entries.single.title, 'Event');
+    expect(result.unavailableSources, isEmpty);
     expect(connection.sent.single.accountContext, isNull);
     expect(connection.sent.single.name, 'diagnostics.getLocalEvents');
     expect(connection.sent.single.payload, {
@@ -336,8 +460,12 @@ LocalHistoryPage _page({
   String state = 'ready',
   bool empty = false,
   bool long = false,
+  List<String> sources = const [],
+  bool noRecords = false,
 }) {
-  final total = state == 'missing' || state == 'unavailable' ? 0 : 75;
+  final total = noRecords || state == 'missing' || state == 'unavailable'
+      ? 0
+      : 75;
   final count = empty ? 0 : total;
   return LocalHistoryPage(
     state: state,
@@ -358,6 +486,7 @@ LocalHistoryPage _page({
         detail: long ? 'Long detail ' * 40 : 'detail',
       ),
     ),
+    unavailableSources: sources,
   );
 }
 
@@ -365,17 +494,33 @@ class _MutableHistoryPort implements LocalHistoryPort {
   bool fail = false;
   String revision = 'A' * 64;
   @override
-  Future<LocalHistoryPage> read({required String category, required int offset, required int pageSize, String? revision}) async {
+  Future<LocalHistoryPage> read({
+    required String category,
+    required int offset,
+    required int pageSize,
+    String? revision,
+  }) async {
     if (fail) throw const LocalHistoryException('unavailable');
     final page = _page(offset: offset);
-    return LocalHistoryPage(state: page.state, totalCount: page.totalCount, filteredCount: page.filteredCount,
-      offset: offset, pageSize: pageSize, hasMore: page.hasMore, entries: page.entries, revision: this.revision);
+    return LocalHistoryPage(
+      state: page.state,
+      totalCount: page.totalCount,
+      filteredCount: page.filteredCount,
+      offset: offset,
+      pageSize: pageSize,
+      hasMore: page.hasMore,
+      entries: page.entries,
+      revision: this.revision,
+    );
   }
 }
 
 class _Port implements LocalHistoryPort {
   String state = 'ready';
   bool changed = false, long = false;
+  bool empty = false;
+  bool noRecords = false;
+  List<String> sources = const [];
   Completer<LocalHistoryPage>? pending;
   final requests = <(String, int, String?)>[];
   @override
@@ -394,8 +539,10 @@ class _Port implements LocalHistoryPort {
     return _page(
       offset: offset,
       state: state,
-      empty: category != 'all',
+      empty: empty || category != 'all',
       long: long,
+      sources: sources,
+      noRecords: noRecords,
     );
   }
 }

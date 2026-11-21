@@ -7,6 +7,7 @@ import 'official_fleet_governance_copy.dart';
 import 'official_fleet_governance_writer.dart';
 import 'official_fleet_role_editor.dart';
 import 'official_fleet_member_role_dialog.dart';
+import '../../design_system/interaction/panel_dialog_scope.dart';
 
 class OfficialFleetRoleSettings extends StatefulWidget {
   const OfficialFleetRoleSettings({
@@ -105,12 +106,21 @@ class _RolesState extends State<OfficialFleetRoleSettings> {
     });
     if (mounted) {
       setState(() {
+        final pendingRoles = _roles.where(_hasPendingRole).toList();
         if (!next) _roles.clear();
         _roles.addAll(governanceRows(page['roles']));
+        for (final role in pendingRoles) {
+          if (!_roles.any((r) => r['roleKey'] == role['roleKey'])) {
+            _roles.add(role);
+          }
+        }
         _templates = page;
       });
     }
   }
+
+  bool _hasPendingRole(GovernanceRow role) =>
+      _writers[('role', role['roleKey'])]?.pending != null;
 
   Future<void> _readMembers({bool next = false}) async {
     final number = next ? _memberPage + 1 : 1;
@@ -166,6 +176,7 @@ class _RolesState extends State<OfficialFleetRoleSettings> {
     final key = ('role', role?['roleKey']);
     await showDialog<void>(
       context: context,
+      useRootNavigator: PanelDialogScope.allowsRoot(context),
       barrierDismissible: false,
       builder: (_) => OfficialFleetRoleEditor(
         port: widget.port,
@@ -185,6 +196,7 @@ class _RolesState extends State<OfficialFleetRoleSettings> {
     final key = ('member', member['memberRef']);
     await showDialog<void>(
       context: context,
+      useRootNavigator: PanelDialogScope.allowsRoot(context),
       barrierDismissible: false,
       builder: (_) => OfficialFleetMemberRoleDialog(
         port: widget.port,
@@ -311,7 +323,9 @@ class _RolesState extends State<OfficialFleetRoleSettings> {
             onPressed: _loading ? null : _editor,
             child: Text(t('create')),
           ),
-        for (final role in _roles)
+        for (final role in _roles.where(
+          (r) => r['enabled'] == true || _hasPendingRole(r),
+        ))
           ListTile(
             title: Text(fleetRoleName(context, role)),
             subtitle: Text(

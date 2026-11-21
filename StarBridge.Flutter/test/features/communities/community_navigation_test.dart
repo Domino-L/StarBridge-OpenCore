@@ -105,7 +105,7 @@ void main() {
       expect(tester.widget<ShellNavigationItem>(primary).selected, isFalse);
       await tester.tap(find.byKey(const ValueKey('community-section-manage')));
       await tester.pumpAndSettle();
-      expect(find.text('数据与日志'), findsOneWidget);
+      expect(find.text('操作记录'), findsOneWidget);
       expect(find.byKey(const ValueKey('disband-community')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('settings-nav-danger')));
       await tester.pumpAndSettle();

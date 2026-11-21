@@ -21,6 +21,7 @@ import 'community_logo_port.dart';
 import 'community_tag_picker.dart';
 import '../common/social_read_activity.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 class CommunityCreationDialog extends StatefulWidget {
   const CommunityCreationDialog({
@@ -596,7 +597,7 @@ class _CommunityCreationDialogState extends State<CommunityCreationDialog> {
                                       child: Text(
                                         zone.name,
                                         maxLines: 1,
-                                        overflow: TextOverflow.fade,
+                                        overflow: fadeOverflow(context),
                                         softWrap: false,
                                       ),
                                     ),

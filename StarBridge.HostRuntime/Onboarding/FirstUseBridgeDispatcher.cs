@@ -27,23 +27,29 @@ public sealed partial class FirstUseBridgeDispatcher : IBridgeRequestDispatcher
     private readonly IFirstUseLogPicker _picker;
     private readonly Action<AccountBridgeRuntime> _configure;
     private readonly Func<string> _locale;
+    private readonly LocalGameLogSearch _logSearch;
+    private IReadOnlyList<LocalGameLogCandidate>? _logCandidates;
+    private long _logCandidateGeneration = -1;
     private readonly AsyncWorkRetirement _work = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile bool _closed;
     private Issued? _issued;
     private sealed record Issued(string Key, string Fingerprint, long Generation);
     private sealed record View(Dictionary<string, object?> Facts, LocalFirstUseSnapshot Local,
-        FirstUseCompletionObservation Completion, Dictionary<string, object?>? Completed, long Generation)
+        FirstUseCompletionObservation Completion, Dictionary<string, object?>? Completed, long Generation,
+        FirstUseModeObservation Mode)
     {
-        internal string Fingerprint => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { Facts, Local, Completed, Generation })));
+        internal string Fingerprint => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { Facts, Local, Completed, Generation, Mode })));
     }
 
     internal FirstUseBridgeDispatcher(string root, AccountBridgeRuntime account, NativeAccountRuntimeBinding native,
         FirstUseStartupReader startup, IFirstUseLogPicker picker, Action<AccountBridgeRuntime> configure,
-        Func<string> locale)
+        Func<string> locale, LocalGameLogSearch? logSearch = null)
     {
         _root = account; _native = native; _startup = startup; _picker = picker; _configure = configure; _locale = locale;
+        _logSearch = logSearch ?? new();
         _mode = account.FirstUseMode ?? throw new InvalidOperationException("First-use mode owner missing.");
+        _mode.ReturningAtStartup = startup.Read().Eligibility == "returning";
         _completion = account.FirstUseCompletion ?? throw new InvalidOperationException("First-use completion owner missing.");
         _local = new(root); _completed = new(root);
         _evidence = new(_local, current: () => !_closed && _mode.AllowsLocalIdentitySetup);
@@ -80,8 +86,13 @@ public sealed partial class FirstUseBridgeDispatcher : IBridgeRequestDispatcher
                     issued.Generation != request.SessionGeneration || !cancel && view.Fingerprint != issued.Fingerprint)
                     return Error(request, "firstUse.context_changed");
                 var checkpoint = ReadCheckpoint(request.Payload.GetProperty("checkpoint"), view);
+                // Record where this user started before anything here saves, so a
+                // save cannot change the next start's answer. If it still cannot be
+                // recorded, save nothing and say it was the data folder.
+                if (!_startup.EnsureRecorded()) return Error(request, "firstUse.storage_unavailable");
                 if (request.Name == "onboarding.execute")
-                    await Execute(request.Payload.GetProperty("action").GetString()!, checkpoint, view, work.Token).ConfigureAwait(false);
+                    await Execute(request.Payload.GetProperty("action").GetString()!, checkpoint, view, work.Token,
+                        request.Payload.TryGetProperty("candidateIndex", out var index) ? index.GetInt32() : null).ConfigureAwait(false);
                 else if (request.Name == "onboarding.saveProgress")
                 {
                     SaveProgress(checkpoint, view, work.Token);
@@ -96,10 +107,19 @@ public sealed partial class FirstUseBridgeDispatcher : IBridgeRequestDispatcher
                         return Error(request, "firstUse.completion_required");
                     // Explicit finish revalidates current game evidence rather
                     // than trusting the persisted association or a stale page.
-                    var source = view.Local.SelectedSourceKey ?? throw new LocalFirstUseException("firstUse.evidence_required");
-                    var current = _evidence.Refresh(source, work.Token);
-                    if (!current.IdentityConfirmed || current.RequiresFreshEvidence)
-                        return Error(request, "firstUse.evidence_required");
+                    if (view.Local.LogDeferred)
+                    {
+                        if (checkpoint["mode"] as string != "local" || view.Local.SelectedSourceKey is not null ||
+                            view.Local.ActiveProfileId is not null || _mode.Current.State is not ("local" or "offline"))
+                            return Error(request, "firstUse.evidence_required");
+                    }
+                    else
+                    {
+                        var source = view.Local.SelectedSourceKey ?? throw new LocalFirstUseException("firstUse.evidence_required");
+                        var current = _evidence.Refresh(source, work.Token);
+                        if (!current.IdentityConfirmed || current.RequiresFreshEvidence)
+                            return Error(request, "firstUse.evidence_required");
+                    }
                     var readiness = await _completion.ReadAsync(work.Token).ConfigureAwait(false);
                     if (readiness.State == "ready") await _completion.FinishAsync(readiness.CompletionKey!, work.Token).ConfigureAwait(false);
                     else if (readiness.State != "completed") return Error(request, "firstUse.completion_required");
@@ -107,7 +127,7 @@ public sealed partial class FirstUseBridgeDispatcher : IBridgeRequestDispatcher
                 view = await Capture(work.Token).ConfigureAwait(false);
             }
             work.Token.ThrowIfCancellationRequested();
-            if (_closed) return Error(request, "firstUse.context_changed");
+            if (_closed || view.Generation != _mode.ControlGeneration) return Error(request, "firstUse.context_changed");
             _issued = new(Guid.NewGuid().ToString("N"), view.Fingerprint, view.Generation);
             return new(BridgeEnvelope.Response(request, new Dictionary<string, object?> {
                 ["schemaVersion"] = 1, ["stateKey"] = _issued.Key, ["facts"] = view.Facts,
@@ -132,6 +152,12 @@ public sealed partial class FirstUseBridgeDispatcher : IBridgeRequestDispatcher
             ? ["schemaVersion", "expectedStateKey", "checkpoint", "action"] : ["schemaVersion", "expectedStateKey", "checkpoint"];
         if (body.ValueKind != JsonValueKind.Object || body.GetRawText().Length > 4096) throw new LocalFirstUseException("firstUse.invalid_request");
         var fields = body.EnumerateObject().Select(p => p.Name).ToArray();
+        if (request.Name == "onboarding.execute" && body.TryGetProperty("candidateIndex", out var index))
+        {
+            if (body.GetProperty("action").GetString() != "selectLog" || !index.TryGetInt32(out var value) ||
+                value is < 0 or >= LocalGameLogSearch.MaximumCandidates) throw new LocalFirstUseException("firstUse.invalid_request");
+            expected = [.. expected, "candidateIndex"];
+        }
         if (fields.Length != expected.Length || fields.Distinct().Count() != fields.Length || fields.Except(expected).Any() ||
             !body.GetProperty("schemaVersion").TryGetInt32(out var schema) || schema != 1 ||
             request.Name != "onboarding.read" && body.GetProperty("expectedStateKey").ValueKind != JsonValueKind.String ||

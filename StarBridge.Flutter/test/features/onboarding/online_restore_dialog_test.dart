@@ -76,7 +76,7 @@ void main() {
         ..snapshot = OnlineReviewWire.parse(reviewWire(confirmed: true));
 
   testWidgets(
-    'failed restore keeps local result and shows a copyable bounded diagnostic',
+    'failed restore keeps local result without showing diagnostic codes',
     (tester) async {
       final review = confirmed(), port = InstallationPort();
       var refreshes = 0;
@@ -97,11 +97,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.textContaining('已返回本机模式'), findsOneWidget);
-      expect(
-        find.byKey(const Key('online-restore-diagnostic')),
-        findsOneWidget,
-      );
-      expect(find.textContaining('configureBusiness/storage'), findsOneWidget);
+      expect(find.byKey(const Key('online-restore-diagnostic')), findsNothing);
+      expect(find.textContaining('configureBusiness/storage'), findsNothing);
       expect(refreshes, 0);
       expect(port.revisions, [3]);
       await tester.pumpWidget(const SizedBox());

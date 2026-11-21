@@ -10,6 +10,7 @@ import 'marketplace_listing_copy.dart';
 import 'marketplace_listing_publish_widgets.dart';
 import 'marketplace_listings_controller.dart';
 import 'marketplace_port.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// Publish wizard step 2, browsed like 市场: the shared category tree on the
 /// left, a searchable two-column item grid on the right (live listings first,
@@ -163,7 +164,7 @@ class _ListingItemPickerState extends State<ListingItemPicker> {
                       }),
                       key: const Key('publish-picked-hidden'),
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(fontSize: 12, color: sideColor),
                     ),

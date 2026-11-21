@@ -5,7 +5,9 @@ internal static class ApplicationPreferencesSchema
     internal const int Version = 1;
     internal const string DefaultAppearanceMode = "dark";
     internal const string DefaultMotionPreference = "followSystem";
-    internal const string DefaultInteractionStyle = "standard";
+    // 0.7.3: default changed to "scan" (user: "把所有人的交互都换成扫描").
+    internal const string DefaultInteractionStyle = "scan";
+    internal const string LegacyDefaultInteractionStyle = "standard";
     internal static readonly IReadOnlySet<string> SupportedInteractionStyles =
         new HashSet<string>(StringComparer.Ordinal) { "standard", "rail", "scan", "glow" };
 
@@ -69,8 +71,16 @@ internal sealed record ApplicationPreferencesSnapshot(
     bool BackgroundHintShown,
     bool AppearancePreviewGuideSeen = false,
     string InteractionStyle = ApplicationPreferencesSchema.DefaultInteractionStyle,
-    bool HolidayAppearance = true)
+    bool HolidayAppearance = true,
+    bool PerformanceMode = false,
+    bool InteractionStyleChoiceMade = false,
+    bool InteractionStyleScanMigrated = false,
+    // "读取自己的血量": off unless the user turns it on (11-09 user decision: a separate switch, default off).
+    bool ReadOwnHealth = false,
+    // "游戏在后台时也读取": a sub-switch of ReadOwnHealth, off by default (11-13 user: "默认关"); only used while ReadOwnHealth is on.
+    bool ReadOwnHealthInBackground = false)
 {
+    // New installs start on the new default, so there is nothing to migrate.
     internal static ApplicationPreferencesSnapshot Default { get; } = new(
         ApplicationPreferencesSchema.Version,
         Revision: 0,
@@ -82,7 +92,23 @@ internal sealed record ApplicationPreferencesSnapshot(
         StartMinimized: false,
         StartupChoiceMade: false,
         CloseBehaviorChoiceMade: false,
-        BackgroundHintShown: false);
+        BackgroundHintShown: false,
+        InteractionStyleScanMigrated: true);
+
+    // One-time 0.7.3 move to the "scan" default. Every save writes the whole
+    // snapshot, so a stored "standard" usually means "never chosen". Only a
+    // style picked in settings (InteractionStyleChoiceMade) is kept as is.
+    internal ApplicationPreferencesSnapshot WithScanDefaultMigration() =>
+        InteractionStyleScanMigrated
+            ? this
+            : this with
+            {
+                InteractionStyle = !InteractionStyleChoiceMade &&
+                                   InteractionStyle == ApplicationPreferencesSchema.LegacyDefaultInteractionStyle
+                    ? ApplicationPreferencesSchema.DefaultInteractionStyle
+                    : InteractionStyle,
+                InteractionStyleScanMigrated = true
+            };
 
     // Remember the selected destination even while automatic startup is off.
     internal ApplicationPreferencesSnapshot Normalize() => this;
@@ -101,6 +127,10 @@ internal sealed record ApplicationPreferencesReadResult(
     ApplicationPreferencesSnapshot Snapshot,
     string StorageState)
 {
+    // True when Load changed the stored snapshot in memory (one-time migration)
+    // and the owner should write it back.
+    internal bool MigrationPending { get; init; }
+
     internal static ApplicationPreferencesReadResult Defaulted { get; } = new(
         ApplicationPreferencesSnapshot.Default,
         ApplicationPreferencesStorageStates.Defaulted);

@@ -31,15 +31,35 @@ internal static class MarketplaceRecords
 
     internal static object Review(JsonElement row) => new
     {
-        id = Value(row, "id"),
-        transactionId = Value(row, "transactionId", 100),
         reviewer = Mask(Value(row, "reviewerName", 100) as string),
         rating = Value(row, "rating"),
         content = Value(row, "content", 500),
-        auditStatus = Value(row, "auditStatus"),
         createTime = Value(row, "createTime", 40),
-        source = Value(row, "sourceLabel", 40),
+        sourceType = "trade",
     };
+
+    internal static object ContractReview(JsonElement row) => new
+    {
+        reviewer = Mask(Value(row, "reviewerName", 100) as string),
+        rating = Value(row, "rating"),
+        content = Value(row, "comment", 500),
+        createTime = Value(row, "createTime", 40),
+        sourceType = "contract",
+        contractTitle = Value(row, "contractTitle", 200),
+    };
+
+    internal static object ReviewPage(JsonElement trades, JsonElement contracts)
+    {
+        object[] Rows(JsonElement data, Func<JsonElement, object> project) =>
+            data.GetProperty("list").EnumerateArray().Take(20).Select(project).ToArray();
+        return new
+        {
+            rows = Rows(trades, Review).Concat(Rows(contracts, ContractReview)).ToArray(),
+            total = trades.GetProperty("total").GetInt64() + contracts.GetProperty("total").GetInt64(),
+            tradeTotal = trades.GetProperty("total").GetInt64(),
+            contractTotal = contracts.GetProperty("total").GetInt64(),
+        };
+    }
 
     internal static object Report(JsonElement row) => new
     {

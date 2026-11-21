@@ -90,7 +90,8 @@ public sealed partial class AccountBridgeRuntime
         Func<CancellationToken, Task<AccountBridgeRuntime>> createOnline, CancellationToken token = default,
         Func<FirstUseOnlineCandidateIntent, CancellationToken, Task<AccountBridgeRuntime>>? candidateFactory = null,
         TimeProvider? modeTime = null, Support.LocalGameEventJournal? eventJournal = null,
-        Func<Presence.GameProcessSession>? localGameProbe = null, bool enableFirstUseModes = true)
+        Func<Presence.GameProcessSession>? localGameProbe = null, bool enableFirstUseModes = true,
+        Support.LocalContractHistory? contractHistory = null)
     {
         token.ThrowIfCancellationRequested();
         // Official releases use the pre-experiment account lifecycle. Do not
@@ -117,7 +118,7 @@ public sealed partial class AccountBridgeRuntime
         if (blocked)
         {
             runtime = new(new EnvironmentLockedAccountBridgeHost("device-local"),
-                gameLog: new Presence.GameLogSettingsStore(root), eventJournal: eventJournal);
+                gameLog: new Presence.GameLogSettingsStore(root), eventJournal: eventJournal, contractHistory: contractHistory);
             // No account owners were installed. The sole log timer remains for
             // the confirmed independent local slot, never an account slot.
             runtime._localBusinessRetired = true;
@@ -154,7 +155,7 @@ public sealed partial class AccountBridgeRuntime
         if (_disposed || _firstUseRoot is null || !intent.IsCurrent)
             throw new LocalFirstUseException("firstUse.context_changed");
         return CreateOnlineDefaultAsync(_firstUseRoot, requireFreshSignIn: !intent.RetainSession, detectedGameIdentity: null,
-            cancellationToken: token, eventJournal: _eventJournal, candidateIntent: intent);
+            cancellationToken: token, eventJournal: _eventJournal, candidateIntent: intent, contractHistory: _contractHistory);
     }
 
     internal bool IsFirstUseOnlineCandidateFor(FirstUseOnlineCandidateIntent intent) => !_disposed &&
@@ -359,6 +360,7 @@ public sealed partial class AccountBridgeRuntime
             {
                 if (!ReceiptCurrent()) return false;
                 if (_gameLog is not null) _gameLog.CityArrival -= ObserveCityArrival;
+                if (_gameLog is not null) _gameLog.ContractQueued -= WakeContractAchievements;
                 if (_gameLog is not null) _gameLog.PublicationChanged -= WakeGamePublication;
                 _gameLog = sampler;
                 // Recovery is local-only, so it does not subscribe account publication.

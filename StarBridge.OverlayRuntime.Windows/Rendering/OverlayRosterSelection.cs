@@ -29,7 +29,7 @@ public sealed record OverlayRosterSelectionSettings(
 {
     internal const int MinimumRotationIntervalSeconds = 5;
     internal const int MaximumRotationIntervalSeconds = 60;
-    internal const int MaximumRowLimit = 12;
+    internal const int MaximumRowLimit = 20;
 
     internal static OverlayRosterSelectionSettings Default { get; } = new();
 

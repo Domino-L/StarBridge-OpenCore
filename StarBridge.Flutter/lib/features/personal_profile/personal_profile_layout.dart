@@ -1,4 +1,5 @@
 import 'personal_profile_models.dart';
+import 'personal_profile_showcases.dart';
 
 enum PersonalProfileLayoutFailure {
   none,
@@ -28,11 +29,15 @@ abstract final class PersonalProfileLayout {
     PersonalProfileModuleIds.favoriteShips,
     PersonalProfileModuleIds.hangarSummary,
     PersonalProfileModuleIds.skilledRoles,
+    ...PersonalProfileShowcaseIds.all,
   ];
 
   static List<PersonalProfileModuleSize> allowedSizes(String moduleId) {
     if (moduleId == PersonalProfileModuleIds.skilledRoles) {
       return const [PersonalProfileModuleSize.two];
+    }
+    if (PersonalProfileShowcaseIds.isShowcaseOnly(moduleId)) {
+      return const [PersonalProfileModuleSize.three];
     }
     return PersonalProfileModuleSize.values;
   }
@@ -49,21 +54,26 @@ abstract final class PersonalProfileLayout {
       canonical[moduleId] = PersonalProfileModuleLayoutItem(
         moduleId: moduleId,
         favoriteShipIds: item.favoriteShipIds,
+        showcaseExtra: item.showcaseExtra,
         size: _normalizeSize(moduleId, item.size),
         isVisible: item.isVisible,
         position: item.isVisible ? item.position : -1,
       );
     }
 
+    // Showcases the page always had (playtime, trading card) appear after
+    // the chosen ones until the owner saves a list of their own.
+    final appended = <String>[];
     for (final moduleId in displayModuleIds) {
-      canonical.putIfAbsent(
-        moduleId,
-        () => PersonalProfileModuleLayoutItem(
-          moduleId: moduleId,
-          size: _defaultSize(moduleId),
-          isVisible: false,
-          position: -1,
-        ),
+      if (canonical.containsKey(moduleId)) continue;
+      if (PersonalProfileShowcaseIds.visibleByDefault.contains(moduleId)) {
+        appended.add(moduleId);
+      }
+      canonical[moduleId] = PersonalProfileModuleLayoutItem(
+        moduleId: moduleId,
+        size: _defaultSize(moduleId),
+        isVisible: false,
+        position: -1,
       );
     }
 
@@ -86,6 +96,17 @@ abstract final class PersonalProfileLayout {
       _mark(occupied, position, span, true);
       normalized.add(item.copyWith(position: position));
     }
+    var nextRow = normalized
+        .where((e) => e.isVisible)
+        .fold<int>(0, (n, e) => n > e.position ~/ columnCount + 1 ? n : e.position ~/ columnCount + 1);
+    for (final moduleId in appended) {
+      final index = normalized.indexWhere((e) => e.moduleId == moduleId);
+      if (nextRow * columnCount >= maximumCells) break;
+      normalized[index] = normalized[index].copyWith(
+        isVisible: true,
+        position: nextRow++ * columnCount,
+      );
+    }
     // Empty rows are not user content. Collapse them while retaining column
     // choices and relative order so removed modules do not leave a tall void.
     final rows =
@@ -105,6 +126,55 @@ abstract final class PersonalProfileLayout {
               )
             : item,
     ]);
+  }
+
+  /// Single column (user, 2026-11-02): visible modules one per row in their
+  /// saved order. Saved sizes are kept as they are but no longer place
+  /// anything, so an older client still reads a valid grid.
+  static List<PersonalProfileModuleLayoutItem> singleColumn(
+    Iterable<PersonalProfileModuleLayoutItem> source,
+  ) {
+    final modules = normalize(source);
+    final visible = modules.where((item) => item.isVisible).toList()
+      ..sort((a, b) => a.position.compareTo(b.position));
+    return _sort([
+      for (final item in modules)
+        item.isVisible
+            ? item.copyWith(position: visible.indexOf(item) * columnCount)
+            : item,
+    ]);
+  }
+
+  /// Moves a visible module [delta] places up (negative) or down the column.
+  static PersonalProfileLayoutMutation step(
+    Iterable<PersonalProfileModuleLayoutItem> source,
+    String moduleId,
+    int delta,
+  ) {
+    final modules = singleColumn(source);
+    final visible = modules.where((item) => item.isVisible).toList();
+    final index = visible.indexWhere((item) => item.moduleId == moduleId);
+    if (index < 0) {
+      return PersonalProfileLayoutMutation(
+        layout: modules,
+        failure: PersonalProfileLayoutFailure.moduleNotFound,
+      );
+    }
+    final target = (index + delta).clamp(0, visible.length - 1);
+    final moving = visible.removeAt(index);
+    visible.insert(target, moving);
+    return PersonalProfileLayoutMutation(
+      layout: _sort([
+        for (final item in modules)
+          item.isVisible
+              ? item.copyWith(
+                  position:
+                      visible.indexWhere((e) => e.moduleId == item.moduleId) *
+                      columnCount,
+                )
+              : item,
+      ]),
+    );
   }
 
   static PersonalProfileLayoutMutation move(
@@ -324,7 +394,9 @@ abstract final class PersonalProfileLayout {
           left[index].isVisible != right[index].isVisible ||
           left[index].position != right[index].position ||
           left[index].favoriteShipIds?.join(',') !=
-              right[index].favoriteShipIds?.join(',')) {
+              right[index].favoriteShipIds?.join(',') ||
+          left[index].showcaseExtra?.join(',') !=
+              right[index].showcaseExtra?.join(',')) {
         return false;
       }
     }
@@ -398,6 +470,7 @@ abstract final class PersonalProfileLayout {
 
   static String? _canonicalModuleId(String moduleId) {
     if (PersonalProfileModuleIds.isFavorite(moduleId)) return moduleId;
+    if (PersonalProfileShowcaseIds.isShowcaseOnly(moduleId)) return moduleId;
     return switch (moduleId) {
       PersonalProfileModuleIds.favoriteShips =>
         PersonalProfileModuleIds.favoriteShips,

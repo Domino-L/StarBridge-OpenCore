@@ -86,7 +86,16 @@ public static class PersonalProfileContractPolicy
             ShipWishlist = NormalizeItems(content.ShipWishlist, MaximumListItems),
             FavoriteShipCodes = NormalizeItems(content.FavoriteShipCodes, MaximumFavoriteShips),
             Modules = modules,
+            Showcases = PersonalProfileShowcasePolicy.NormalizeShowcases(content.Showcases),
+            AchievementShowcase = PersonalProfileShowcasePolicy.NormalizeAchievements(content.AchievementShowcase),
+            FavoriteShowcaseExtra = PersonalProfileShowcasePolicy.NormalizeFavoriteExtra(
+                content.FavoriteShowcaseExtra, content.Modules),
+            FavoriteShowcaseExtras = PersonalProfileShowcasePolicy.NormalizeFavoriteExtras(
+                content.FavoriteShowcaseExtras, content.Modules, content.Showcases),
             AvailabilityTimeZoneId = NormalizeText(content.AvailabilityTimeZoneId, 128),
+            MainRole = content.MainRole is null ? null
+                : NormalizeItems(content.SkilledRoles, MaximumListItems).Contains(content.MainRole.Trim(), StringComparer.Ordinal)
+                    ? content.MainRole.Trim() : "",
             AvailabilityWindows = availabilityWindows,
             PresenceIntent = NormalizePresenceIntent(content.PresenceIntent)
         };
@@ -190,7 +199,23 @@ public sealed record PersonalProfileContentContract(
     PersonalProfileModuleContract[] Modules,
     string? AvailabilityTimeZoneId = null,
     PersonalProfileAvailabilityWindowContract[]? AvailabilityWindows = null,
-    string? PresenceIntent = null)
+    string? PresenceIntent = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    PersonalProfileShowcaseContract[]? Showcases = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string[]? AchievementShowcase = null,
+    // Single-column favourite showcase: at most one ship beyond the 3-ship
+    // module. Never stored in a module, so released clients never see 4.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string[]? FavoriteShowcaseExtra = null,
+    // 0.7.3 main role (user 11-05): one of SkilledRoles, "" for none. A server
+    // that predates it never sends the field, so null also means "cannot save it".
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? MainRole = null,
+    // 0.7.3 per-module fourth ships (user 11-06): favourite module id -> ship instance. The HK server
+    // always sends it ({} when empty) once it supports it; null means it cannot hold them.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    Dictionary<string, string>? FavoriteShowcaseExtras = null)
 {
     public static PersonalProfileContentContract Empty { get; } = new(
         false,
@@ -271,7 +296,16 @@ public sealed record PersonalProfileDocumentContract(
     int AvatarStyle = 0,
     string WallpaperId = "none",
     PersonalProfilePagePresentationContract? Presentation = null,
-    string FleetAffiliationStatus = "unavailable")
+    string FleetAffiliationStatus = "unavailable",
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    PersonalProfilePublicAchievementContract[]? PublicAchievements = null,
+    // HK swap 5 (user 11-11): the always-public trade window on a full visitor page, as HK sends it
+    // (days, start, end, SCM zone id); the Host validates it and never forwards the zone id.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    System.Text.Json.JsonElement? TradeWindow = null,
+    // HK swap 5: achievements HK recorded for this person, on the owner's page and a full visitor page.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? AchievementCount = null)
 {
     // Missing/null/unknown status from an older server must never imply no membership.
     public string FleetAffiliationStatus { get; init; } = FleetAffiliationStatus is "shown" or "none"

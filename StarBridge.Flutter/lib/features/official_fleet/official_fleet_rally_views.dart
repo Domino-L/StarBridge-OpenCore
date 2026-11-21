@@ -4,16 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/presence/account_presence_scope.dart';
+import '../../design_system/appearance/appearance_scope.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/host/desktop_notification_port.dart';
 import 'official_fleet_rally.dart';
+import 'official_fleet_rally_compose.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
-
-String _count(AppStrings strings, String key, int count) =>
-    strings.text(key).replaceAll('{count}', '$count');
 
 String _failure(AppStrings strings, String code) => strings.text(
   'officialFleet.rally.failed.${const {'conflict', 'rateLimited', 'notAllowed'}.contains(code) ? code : 'unavailable'}',
@@ -90,128 +90,260 @@ class _OfficialFleetRallyDialogState extends State<OfficialFleetRallyDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final strings = AppStrings.of(context), tokens = context.tokens;
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
     final text = Theme.of(context).textTheme;
-    final rights = widget.controller.eligibility;
-    final length = _text.text.trim().characters.length;
-    final valid = length > 0 && length <= 40 && rights.remainingThisHour > 0;
-    Widget label(String key) => Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
-      child: Text(
-        strings.text(key),
-        style: text.labelMedium?.copyWith(color: tokens.colors.textSecondary),
-      ),
-    );
-    Widget choice(String label, bool selected, VoidCallback onTap, Key key) =>
-        StarBridgeActionButton(
-          controlKey: key,
-          kind: selected
-              ? StarBridgeActionKind.primary
-              : StarBridgeActionKind.secondary,
-          onActivate: (_) => onTap(),
-          child: Text(label),
-        );
+    final controller = widget.controller;
+    final message = _text.text.trim();
+    final length = message.characters.length;
+    final displayName = AccountPresenceScope.maybeOf(context)
+        ?.account
+        .value
+        .profile
+        ?.displayName;
+    final muted = text.bodySmall?.copyWith(color: tokens.colors.textSecondary);
+
     return ListenableBuilder(
-      listenable: widget.controller,
-      builder: (context, _) => AlertDialog(
-        key: const Key('official-fleet-rally-dialog'),
-        title: Text(strings.text('officialFleet.rally.start')),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                strings.text('officialFleet.rally.hint'),
-                style: text.bodySmall?.copyWith(
-                  color: tokens.colors.textSecondary,
-                ),
-              ),
-              label('officialFleet.rally.text'),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final preset in _presets)
-                    choice(
-                      strings.text('officialFleet.rally.preset.$preset'),
-                      _text.text ==
-                          strings.text('officialFleet.rally.preset.$preset'),
-                      () => _text.text = strings.text(
-                        'officialFleet.rally.preset.$preset',
-                      ),
-                      Key('official-fleet-rally-preset-$preset'),
+      listenable: controller,
+      builder: (context, _) {
+        final rights = controller.eligibility;
+        final valid =
+            length > 0 && length <= 40 && rights.remainingThisHour > 0;
+        return FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: AlertDialog(
+            key: const Key('official-fleet-rally-dialog'),
+            scrollable: true,
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(child: Text(rallyCopy(strings, 'start'))),
+                const SizedBox(width: 16),
+                Flexible(
+                  child: Semantics(
+                    container: true,
+                    child: Text(
+                      rallyCopy(strings, 'comeNow'),
+                      textAlign: TextAlign.end,
+                      style: muted,
                     ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                key: const Key('official-fleet-rally-text'),
-                controller: _text,
-                maxLength: 40,
-                maxLines: 1,
-              ),
-              label('officialFleet.rally.target'),
-              Text(
-                _count(
-                  strings,
-                  'officialFleet.rally.targetValue',
-                  rights.onlineCount,
-                ),
-                key: const Key('official-fleet-rally-target'),
-              ),
-              label('officialFleet.rally.duration'),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final minutes in const [15, 30, 60])
-                    choice(
-                      _count(strings, 'officialFleet.rally.minutes', minutes),
-                      _minutes == minutes,
-                      () => setState(() => _minutes = minutes),
-                      Key('official-fleet-rally-minutes-$minutes'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                _count(
-                  strings,
-                  'officialFleet.rally.rules',
-                  rights.remainingThisHour,
-                ),
-                style: text.bodySmall?.copyWith(
-                  color: tokens.colors.textSecondary,
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _failure(strings, _error!),
-                  key: const Key('official-fleet-rally-error'),
-                  style: text.bodySmall?.copyWith(color: tokens.colors.danger),
+                  ),
                 ),
               ],
+            ),
+            content: SizedBox(
+              width: 588,
+              child: Builder(
+                builder: (context) {
+                  // AlertDialog measures intrinsic sizes, which LayoutBuilder cannot answer.
+                  final wide =
+                      rallyDialogContentWidth(context) >= 520 &&
+                      MediaQuery.textScalerOf(context).scale(14) <= 18;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      RallyPreview(
+                        message: message,
+                        fleet: controller.fleetName,
+                        displayName: displayName,
+                        minutes: _minutes,
+                      ),
+                      const SizedBox(height: 14),
+                      RallyFieldLabel(rallyCopy(strings, 'text')),
+                      _messageField(context),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(rallyCopy(strings, 'common'), style: muted),
+                          for (final (index, preset) in _presets.indexed)
+                            RallyChoice(
+                              order: index.toDouble(),
+                              controlKey: Key(
+                                'official-fleet-rally-preset-$preset',
+                              ),
+                              label: rallyCopy(strings, 'preset.$preset'),
+                              selected:
+                                  _text.text ==
+                                  rallyCopy(strings, 'preset.$preset'),
+                              pill: true,
+                              onTap: () => _text.text = rallyCopy(
+                                strings,
+                                'preset.$preset',
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(rallyCopy(strings, 'useOperations'), style: muted),
+                      const SizedBox(height: 16),
+                      RallyColumns(
+                        wide: wide,
+                        gap: 32,
+                        first: _duration(context),
+                        second: RallyAudience(count: rights.onlineCount),
+                      ),
+                      const SizedBox(height: 12),
+                      if (_error case final error?)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            _failure(strings, error),
+                            key: const Key('official-fleet-rally-error'),
+                            style: muted?.copyWith(color: tokens.colors.danger),
+                          ),
+                        ),
+                      Divider(
+                        height: 1,
+                        thickness: tokens.stroke.hairline,
+                        color: tokens.surfaces.status.border,
+                      ),
+                      const SizedBox(height: 10),
+                      RallyColumns(
+                        wide: wide,
+                        gap: 12,
+                        first: RallyQuota(remaining: rights.remainingThisHour),
+                        second: Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            FocusTraversalOrder(
+                              order: const NumericFocusOrder(8),
+                              child: StarBridgeActionButton(
+                                kind: StarBridgeActionKind.quiet,
+                                controlKey: const Key(
+                                  'official-fleet-rally-cancel',
+                                ),
+                                onActivate: (source) => dismissStarBridgeDialog(
+                                  context,
+                                  source: source,
+                                ),
+                                child: Text(
+                                  rallyCopy(strings, 'cancel'),
+                                  style: TextStyle(
+                                    color: tokens.colors.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            FocusTraversalOrder(
+                              order: const NumericFocusOrder(9),
+                              child: HolidayColorExempt(
+                                child: StarBridgeActionButton(
+                                  kind: StarBridgeActionKind.primary,
+                                  controlKey: const Key(
+                                    'official-fleet-rally-send',
+                                  ),
+                                  onActivate: !valid || controller.busy
+                                      ? null
+                                      : _send,
+                                  child: Text(rallyCopy(strings, 'send')),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        expandSecond: false,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _messageField(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
+    final length = _text.text.characters.length;
+    return FocusTraversalOrder(
+      order: const NumericFocusOrder(4),
+      child: TextField(
+        key: const Key('official-fleet-rally-text'),
+        controller: _text,
+        maxLength: 40,
+        maxLines: 1,
+        decoration: InputDecoration(
+          hintText: rallyCopy(strings, 'example'),
+          counterText: '',
+          fillColor: tokens.surfaces.panel.fill,
+          focusedBorder: OutlineInputBorder(
+            borderRadius: tokens.shape.small,
+            borderSide: BorderSide(
+              color: tokens.colors.stateAccent,
+              width: tokens.stroke.focusWidth,
+            ),
+          ),
+          suffixIconConstraints: BoxConstraints(
+            minHeight: tokens.density.controlHeight,
+          ),
+          suffixIcon: Padding(
+            padding: EdgeInsetsDirectional.only(end: tokens.space.md),
+            child: Align(
+              widthFactor: 1,
+              heightFactor: 1,
+              child: Text(
+                '$length/40',
+                key: const Key('official-fleet-rally-counter'),
+                semanticsLabel: MaterialLocalizations.of(
+                  context,
+                ).remainingTextFieldCharacterCount((40 - length).clamp(0, 40)),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: length > 40
+                      ? tokens.colors.danger
+                      : tokens.colors.textSecondary,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _duration(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RallyFieldLabel(rallyCopy(strings, 'duration')),
+        Container(
+          key: const Key('official-fleet-rally-duration-track'),
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: tokens.surfaces.panel.fill,
+            borderRadius: tokens.shape.small,
+            border: Border.all(color: tokens.surfaces.panel.border),
+          ),
+          child: Row(
+            children: [
+              for (final (index, minutes) in const [15, 30, 60].indexed)
+                Expanded(
+                  child: RallyChoice(
+                    order: 5 + index.toDouble(),
+                    controlKey: Key('official-fleet-rally-minutes-$minutes'),
+                    label: rallyCount(
+                      strings,
+                      'officialFleet.rally.minutes',
+                      minutes,
+                    ),
+                    selected: _minutes == minutes,
+                    onTap: () => setState(() => _minutes = minutes),
+                  ),
+                ),
             ],
           ),
         ),
-        actions: [
-          StarBridgeActionButton(
-            kind: StarBridgeActionKind.quiet,
-            controlKey: const Key('official-fleet-rally-cancel'),
-            onActivate: (source) =>
-                dismissStarBridgeDialog(context, source: source),
-            child: Text(strings.text('officialFleet.rally.cancel')),
-          ),
-          StarBridgeActionButton(
-            kind: StarBridgeActionKind.primary,
-            controlKey: const Key('official-fleet-rally-send'),
-            onActivate: !valid || widget.controller.busy ? null : _send,
-            child: Text(strings.text('officialFleet.rally.send')),
-          ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -336,7 +468,7 @@ class _OfficialFleetRallyStripState extends State<OfficialFleetRallyStrip> {
             count(rally.pending, 'officialFleet.rally.pending'),
             if (live)
               Text(
-                _count(
+                rallyCount(
                   strings,
                   'officialFleet.rally.left',
                   rally.minutesLeft(now),
@@ -434,7 +566,7 @@ class _OfficialFleetRallyNoticeState extends State<OfficialFleetRallyNotice> {
       desktop.show(
         officialFleetRallyTitle(strings, widget.controller.fleetName, rally),
         '「${rally.text}」 · '
-        '${_count(strings, 'officialFleet.rally.left', rally.minutesLeft(widget.controller.now()))}',
+        '${rallyCount(strings, 'officialFleet.rally.left', rally.minutesLeft(widget.controller.now()))}',
       ),
     );
   }
@@ -469,7 +601,7 @@ class _OfficialFleetRallyNoticeState extends State<OfficialFleetRallyNotice> {
               ),
               Text(
                 '「${rally.text}」 · '
-                '${_count(strings, 'officialFleet.rally.left', rally.minutesLeft(controller.now()))}',
+                '${rallyCount(strings, 'officialFleet.rally.left', rally.minutesLeft(controller.now()))}',
                 style: text.bodySmall,
               ),
               TextButton(

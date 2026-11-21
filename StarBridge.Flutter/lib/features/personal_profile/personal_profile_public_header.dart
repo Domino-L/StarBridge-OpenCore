@@ -147,8 +147,7 @@ final class PersonalProfilePublicFacts {
           ? DateTime.tryParse('${text}T00:00:00Z')
           : null;
       // tryParse rolls 2026-02-31 over to March instead of refusing it.
-      if (parsed == null ||
-          parsed.toIso8601String().substring(0, 10) != text) {
+      if (parsed == null || parsed.toIso8601String().substring(0, 10) != text) {
         throw BridgeFormatException('$key must be a date.');
       }
       return text as String;
@@ -195,32 +194,7 @@ PersonalProfileSnapshot parseRestrictedProfile(
   if (header is! Map<String, Object?>) {
     throw const BridgeFormatException('publicHeader must be an object.');
   }
-  final window = header['tradeWindow'];
-  final clock = RegExp(r'^\d{2}:\d{2}$');
-  PersonalProfilePublicTradeWindow? trade;
-  if (window != null) {
-    if (window is! Map<String, Object?>) {
-      throw const BridgeFormatException('Invalid public trade window.');
-    }
-    final days = window['days'];
-    final start = text(window, 'start');
-    final end = text(window, 'end');
-    final offset = window['ownerOffsetMinutes'];
-    if (days is! List ||
-        days.length != 7 ||
-        days.any((d) => d != 0 && d != 1) ||
-        !clock.hasMatch(start) ||
-        !clock.hasMatch(end) ||
-        (offset != null && offset is! int)) {
-      throw const BridgeFormatException('Invalid public trade window.');
-    }
-    trade = PersonalProfilePublicTradeWindow(
-      days: [for (final d in days) d == 1],
-      start: start,
-      end: end,
-      ownerOffsetMinutes: offset as int?,
-    );
-  }
+  final trade = _parseTradeWindow(header['tradeWindow']);
   final image = header['avatarAssetId'];
   if (image != null && image is! String) {
     throw const BridgeFormatException('avatarAssetId must be a string.');
@@ -272,3 +246,50 @@ PersonalProfileSnapshot parseRestrictedProfile(
     affiliationStatus: 'hidden',
   );
 }
+
+PersonalProfilePublicTradeWindow? _parseTradeWindow(Object? window) {
+  if (window == null) return null;
+  const invalid = BridgeFormatException('Invalid public trade window.');
+  if (window is! Map<String, Object?>) throw invalid;
+  final clock = RegExp(r'^\d{2}:\d{2}$');
+  final days = window['days'];
+  final start = window['start'];
+  final end = window['end'];
+  final offset = window['ownerOffsetMinutes'];
+  if (days is! List ||
+      days.length != 7 ||
+      days.any((d) => d != 0 && d != 1) ||
+      start is! String ||
+      end is! String ||
+      !clock.hasMatch(start) ||
+      !clock.hasMatch(end) ||
+      (offset != null && offset is! int)) {
+    throw invalid;
+  }
+  return PersonalProfilePublicTradeWindow(
+    days: [for (final d in days) d == 1],
+    start: start,
+    end: end,
+    ownerOffsetMinutes: offset as int?,
+  );
+}
+
+/// The always-public trade window on a full visitor page (HK swap 5, user
+/// 11-11). Unlike the public header's, a bad one only leaves the window out.
+PersonalProfilePublicTradeWindow? parseFullPageTradeWindow(
+  Map<String, Object?> profile,
+) {
+  try {
+    return _parseTradeWindow(profile['tradeWindow']);
+  } on BridgeFormatException {
+    return null;
+  }
+}
+
+/// HK swap 5 (user 11-11): the header's achievement count, the same for the
+/// owner and a visitor. Absent, negative or malformed leaves it out.
+int? parseAchievementCount(Map<String, Object?> profile) =>
+    switch (profile['achievementCount']) {
+      final int count when count >= 0 => count,
+      _ => null,
+    };

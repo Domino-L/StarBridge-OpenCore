@@ -13,7 +13,8 @@ import 'personal_profile_models.dart';
 import 'personal_profile_module_surface.dart';
 import 'personal_profile_ship_names.dart';
 
-Color _shipSliceColor(
+/// Colour of a hangar role slice, shared with the single-column showcase.
+Color profileShipSliceColor(
   BuildContext context,
   PersonalProfileHangarCategorySlice slice,
 ) {
@@ -449,7 +450,7 @@ class _CompositionPanel extends StatelessWidget {
                               '${strings.text(populated[index].labelKey)} '
                               '${populated[index].count}',
                           style: TextStyle(
-                            color: _shipSliceColor(context, populated[index]),
+                            color: profileShipSliceColor(context, populated[index]),
                           ),
                         ),
                       ],
@@ -495,7 +496,7 @@ class _CompositionPanel extends StatelessWidget {
                               key: Key(
                                 'profile-hangar-composition-segment-$index',
                               ),
-                              color: _shipSliceColor(
+                              color: profileShipSliceColor(
                                 context,
                                 populated[index],
                               ).withValues(alpha: 0.76),

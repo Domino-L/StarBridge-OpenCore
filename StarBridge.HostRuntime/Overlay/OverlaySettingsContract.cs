@@ -27,6 +27,8 @@ internal static class OverlayRequestNames
     internal const string AppearancePreviewOpen = "overlay.appearancePreview.open";
     internal const string AppearancePreviewClose = "overlay.appearancePreview.close";
     internal const string AppearanceProgressRead = "overlay.appearanceProgress.read";
+    internal const string VisorNoticeDismiss = "overlay.visorNotice.dismiss";
+    internal const string EditorPreviewContent = "overlay.editorPreview.content";
 }
 
 public sealed record OverlaySettingsSnapshot(

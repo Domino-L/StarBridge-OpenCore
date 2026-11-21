@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'personal_profile_models.dart';
 import 'personal_profile_port.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_visibility.dart';
 import 'personal_profile_wallpaper_catalog.dart';
 import 'profile_read_failure.dart';
@@ -46,6 +47,7 @@ PersonalProfileModule createPersonalProfileModule(
 final class _DefaultPersonalProfileModule
     implements
         PersonalProfileModule,
+        PersonalProfileAccountFactsReader,
         ProfileVisibilityAccess,
         PersonalProfileEditingSession,
         ProfileReadScopeOwner,
@@ -93,6 +95,22 @@ final class _DefaultPersonalProfileModule
   }
 
   final PersonalProfilePort _port;
+  @override
+  Future<PersonalProfilePublicFacts?> readAccountFacts() async {
+    final epoch = _epoch;
+    final port = _port;
+    if (!_readsAdmitted || port is! PersonalProfileAccountFactsReader) {
+      return null;
+    }
+    try {
+      final facts = await (port as PersonalProfileAccountFactsReader)
+          .readAccountFacts();
+      return _readsAdmitted && epoch == _epoch ? facts : null;
+    } on Object {
+      return null;
+    }
+  }
+
   final VoidCallback? _onSaveSettled;
   final DateTime Function() _clock;
   final bool _retainContentOnRefresh;

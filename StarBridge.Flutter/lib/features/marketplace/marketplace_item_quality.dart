@@ -8,7 +8,10 @@ import 'marketplace_port.dart';
 import 'marketplace_quality.dart';
 import 'marketplace_quality_copy.dart';
 import 'marketplace_quality_widgets.dart';
-import 'marketplace_widgets.dart' show marketMoney;
+import 'marketplace_widgets.dart' show marketMoney, MarketToggle;
+import 'marketplace_copy.dart';
+import 'marketplace_display_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 // Tier pricing on the item page (user 2026-10-23): the tier strip above the
 // sell offers, tier groups when every quality is shown, and the price per
@@ -24,7 +27,7 @@ class MarketItemTierSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = c.itemId;
     if (id == null) return const SizedBox.shrink();
-    if (c.qualityTiers.stale(id)) {
+    if (c.itemTab != 1 && c.qualityTiers.stale(id)) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(c.qualityTiers.ensure(id)),
       );
@@ -32,6 +35,25 @@ class MarketItemTierSection extends StatelessWidget {
     final tiers = c.qualityTiers.of(id);
     if (tiers == null) return const SizedBox.shrink();
     if (!tiers.hasQuality) return const SizedBox.shrink();
+    if (c.itemTab == 1) {
+      return Wrap(
+        spacing: 6, runSpacing: 6,
+        children: [
+          MarketToggle(
+            label: Text(qualityText(context, 'allTiers')),
+            selected: c.offerFilters['minQuality'] == null,
+            onSelected: (_) => unawaited(c.setOfferTier(null)),
+          ),
+          for (final tier in MarketQualityTier.values)
+            MarketToggle(
+              key: ValueKey(('market-buy-tier', tier.name)),
+              label: Text('${marketText(context, tier.name)} · ${marketDisplayText(context, 'buyCeiling', n: tier.min)}'),
+              selected: c.offerTier == tier,
+              onSelected: (_) => unawaited(c.setOfferTier(tier)),
+            ),
+        ],
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -143,7 +165,7 @@ class MarketTierGroupHeader extends StatelessWidget {
                           : marketPerPointFigure(q.bestPerPoint!),
                     ),
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: TextStyle(fontSize: 11.5, color: t.colors.textSecondary),
               ),

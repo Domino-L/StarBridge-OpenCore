@@ -8,8 +8,10 @@ import '../../app/localization/app_strings.dart';
 import '../../shared/diagnostics/loading_content_probe.dart';
 import '../../shared/diagnostics/loading_metrics.dart';
 import '../common/organization_member_board.dart';
+import '../common/organization_governance_port.dart';
 import '../communities/community_workspace_copy.dart' show workspaceText;
 import '../party_rooms/room_display.dart' show roomDate;
+import 'official_fleet_member_role_action.dart';
 import 'official_fleet_members_controls.dart';
 import 'official_fleet_members_models.dart';
 import 'official_fleet_members_module.dart';
@@ -20,6 +22,7 @@ class OfficialFleetMembersSection extends StatefulWidget {
     required this.module,
     this.retained = false,
     this.officialMemberCount,
+    this.governance,
     super.key,
   });
   final String sourceRef;
@@ -28,6 +31,9 @@ class OfficialFleetMembersSection extends StatefulWidget {
 
   /// The RSI organization's member count, shown beside the registered count.
   final int? officialMemberCount;
+
+  /// Decides whether member rows offer 设置角色; absent means they never do.
+  final OrganizationGovernancePort? governance;
 
   @override
   State<OfficialFleetMembersSection> createState() =>
@@ -39,6 +45,20 @@ class _OfficialFleetMembersSectionState
   final _searchController = TextEditingController();
   final _entries = <String, (Object, OrganizationMemberEntry)>{};
   final _rows = <String, (Object, Widget)>{};
+  OfficialFleetMemberRoleActions? _roleActions;
+
+  void _bindRoleActions() {
+    _roleActions?.dispose();
+    final governance = widget.governance;
+    _roleActions = governance == null
+        ? null
+        : (OfficialFleetMemberRoleActions(governance, widget.sourceRef)
+            ..addListener(_roleRightsChanged));
+  }
+
+  void _roleRightsChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void didChangeDependencies() {
@@ -51,8 +71,11 @@ class _OfficialFleetMembersSectionState
     OfficialFleetMember member,
     String? sourceRef,
     bool allowProfile,
+    bool retained,
   ) {
-    final key = (member, sourceRef, allowProfile);
+    final roles = _roleActions;
+    final offered = !retained && (roles?.offeredFor(member) ?? false);
+    final key = (member, sourceRef, allowProfile, offered);
     final cached = _entries[member.memberRef];
     if (cached?.$1 == key) return cached!.$2;
     final entry = officialFleetMemberEntry(
@@ -60,6 +83,9 @@ class _OfficialFleetMembersSectionState
       member,
       sourceRef: sourceRef,
       allowProfile: allowProfile,
+      actions: offered
+          ? officialFleetMemberRoleMenu(context, member, roles!)
+          : null,
     );
     _entries[member.memberRef] = (key, entry);
     return entry;
@@ -96,6 +122,7 @@ class _OfficialFleetMembersSectionState
   @override
   void initState() {
     super.initState();
+    _bindRoleActions();
     unawaited(widget.module.open(widget.sourceRef));
     _searchController.text = widget.module.projection.value.query?.search ?? '';
   }
@@ -103,6 +130,10 @@ class _OfficialFleetMembersSectionState
   @override
   void didUpdateWidget(covariant OfficialFleetMembersSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.sourceRef != widget.sourceRef ||
+        oldWidget.governance != widget.governance) {
+      _bindRoleActions();
+    }
     if (oldWidget.sourceRef != widget.sourceRef ||
         oldWidget.module != widget.module) {
       _searchController.clear();
@@ -112,6 +143,7 @@ class _OfficialFleetMembersSectionState
 
   @override
   void dispose() {
+    _roleActions?.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -185,7 +217,12 @@ class _OfficialFleetMembersSectionState
                 namespace: 'official-fleet-members',
                 rows: [
                   for (final member in projection.members)
-                    _entry(member, query?.sourceRef, allowProfile),
+                    _entry(
+                      member,
+                      query?.sourceRef,
+                      allowProfile,
+                      !available || widget.retained,
+                    ),
                 ],
                 rowBuilder: _row,
                 roleLabel: memberBoardText(context, 'rank'),

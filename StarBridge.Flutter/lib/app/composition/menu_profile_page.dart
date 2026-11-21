@@ -48,6 +48,7 @@ class _MenuProfileWindowPageState extends State<MenuProfileWindowPage> {
     child: PersonalProfilePage(
       module: module,
       isVisitor: true,
+      readOnlyOwnerImportPending: widget.view.autoImportPending,
       pageToolbar: StarBridgeActionButton(
         controlKey: const ValueKey('menu-profile-toolbar-refresh'),
         kind: StarBridgeActionKind.quiet,

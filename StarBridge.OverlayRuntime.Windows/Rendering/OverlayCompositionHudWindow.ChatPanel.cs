@@ -46,9 +46,9 @@ internal sealed partial class OverlayCompositionHudWindow
             state,
             textOpacity);
         var chatMeta = state.ChatTitle.Contains("房间", StringComparison.OrdinalIgnoreCase) ||
-                       state.ChatTitle.Equals("PARTY COMMS", StringComparison.OrdinalIgnoreCase)
-            ? "PARTY COMMS"
-            : "FLEET COMMS";
+                       state.ChatTitle.Equals("ROOM CHAT", StringComparison.OrdinalIgnoreCase)
+            ? "ROOM CHAT"
+            : "FLEET CHAT";
 
         if (DrawModuleEmptyMessage(target, state.EmptyStates.Chat, left, contentTop, contentWidth,
                 contentBottom - contentTop, state, textOpacity)) return;
@@ -121,7 +121,7 @@ internal sealed partial class OverlayCompositionHudWindow
         var fontScale = (float)(state.ChatBarrageFontSize / 16d);
         foreach (var row in state.ChatRows)
         {
-            var title = string.IsNullOrWhiteSpace(row.Title) ? "通讯消息" : row.Title;
+            var title = string.IsNullOrWhiteSpace(row.Title) ? "聊天消息" : row.Title;
             var titleWidth = MeasureBarrageTextWidth(title, _chatBarrageTitleFormat, state.ChatBarrageFontSize, 0, 9, 260);
             var detailWidth = MeasureBarrageTextWidth(row.Detail, _chatBarrageTextFormat, state.ChatBarrageFontSize, 1, 18, 980);
             var timestampWidth = string.IsNullOrWhiteSpace(row.Timestamp)

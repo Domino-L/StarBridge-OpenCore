@@ -9,6 +9,7 @@ import '../../design_system/styles/approved_appearance_thumbnail.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_projection.dart';
+import 'overlay_workspace_rules.dart';
 
 class OverlayWorkspaceAppearanceEntry extends StatelessWidget {
   const OverlayWorkspaceAppearanceEntry({
@@ -24,7 +25,7 @@ class OverlayWorkspaceAppearanceEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final snapshot = projection.snapshot!;
-    final skin = projection.settings!['skin'] as String;
+    final skin = overlayWorkspaceShownSkin(projection.settings!);
     final appearance = snapshot.appearances
         .cast<OverlayWorkspaceAppearance?>()
         .firstWhere(

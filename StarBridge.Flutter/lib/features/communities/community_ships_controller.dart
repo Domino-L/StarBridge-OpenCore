@@ -21,7 +21,7 @@ final class CommunityShipsController extends ChangeNotifier {
     DateTime Function()? now,
   }) : query = initialQuery ?? CommunityShipQuery(),
        _now = now ?? DateTime.now,
-       avatars = avatars ?? CommunityAvatarCache(),
+       avatars = avatars ?? CommunityAvatarCache(now: now ?? DateTime.now),
        _ownsAvatars = avatars == null {
     _subscription = port.invalidations.listen((_) => invalidate());
     final refreshPort = port;
@@ -206,6 +206,7 @@ final class CommunityShipsController extends ChangeNotifier {
     } catch (e) {
       if (_closed || epoch != _epoch) return;
       error = e is CommunityFailure ? e.code : 'unavailable';
+      if (error == 'readUnavailable') _clearFailedRead();
       if (error != 'unavailable') {
         page = null;
         _pages.clear();
@@ -236,7 +237,9 @@ final class CommunityShipsController extends ChangeNotifier {
   /// Reauthorize without blanking unchanged rows or moving to the first page.
   /// Transport failures retain explicitly stale rows until the next visible tick.
   /// Permission, account, reference and integrity failures still clear them.
-  Future<void> refreshVisible() async {
+  /// [force] reads every held page again even when the first page's revision
+  /// and references are unchanged.
+  Future<void> refreshVisible({bool force = false}) async {
     final previous = page;
     if (_closed ||
         invalidated ||
@@ -269,11 +272,28 @@ final class CommunityShipsController extends ChangeNotifier {
       _lastSuccessfulRead = publicationVersion == _publicationVersion
           ? _now()
           : null;
-      if (first.revision == previous.revision) {
-        if (first.totalCount != previous.totalCount ||
-            first.matchedCount != previous.matchedCount) {
-          throw const CommunityFailure('dataInvalid');
-        }
+      // Same revision is not enough: an older Host renewed lapsed references,
+      // and owners' presence no longer moves the revision (WPF-S2 now, the
+      // Relay with r50), so the held rows would keep old references or an old
+      // online dot (user report 2026-11-15; review R1).
+      final heldFirst = _pages.isEmpty ? previous : _pages.first;
+      List<Object> rows(CommunityShipsPage page) => [
+        for (final s in page.ships) ...[
+          s.shipRef,
+          s.ownerOnline,
+          s.ownerLiveStatus,
+        ],
+      ];
+      final sameRows =
+          heldFirst.offset != 0 || listEquals(rows(first), rows(heldFirst));
+      // One revision with two different counts is never one list.
+      if (first.revision == previous.revision &&
+          (first.totalCount != previous.totalCount ||
+              first.matchedCount != previous.matchedCount)) {
+        throw const CommunityFailure('dataInvalid');
+      }
+      if (!force && first.revision == previous.revision && sameRows) {
+        await _loadAvatars(previous, epoch);
         return;
       }
       final lastOffset = first.matchedCount == 0
@@ -312,6 +332,7 @@ final class CommunityShipsController extends ChangeNotifier {
     } catch (e) {
       if (!current()) return;
       error = e is CommunityFailure ? e.code : 'unavailable';
+      if (error == 'readUnavailable') _clearFailedRead();
       if (error != 'unavailable') {
         page = null;
         _pages.clear();
@@ -333,6 +354,34 @@ final class CommunityShipsController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  // Official reads must discard all presentation without retiring the account.
+  void readUnavailable() {
+    // A read already in flight answers for itself; a late failure must not cancel it.
+    if (_closed || invalidated || busy || refreshing) return;
+    _epoch++;
+    _clearFailedRead();
+    page = null;
+    _pages.clear();
+    _statistics = null;
+    _avatars.clear();
+    _pendingAvatars.clear();
+    busy = false;
+    refreshing = false;
+    error = 'readUnavailable';
+    notifyListeners();
+  }
+
+  void _clearFailedRead() {
+    _lastSuccessfulRead = null;
+    _avatarVersions.clear();
+    _inventoryOwners.clear();
+    _failedAvatars.clear();
+    avatars.clear();
+    selectedShipRef = null;
+    selectionIsDefault = false;
+    mediaFailed = false;
   }
 
   /// The complete inventory's owners, read while they are still authorized.
@@ -406,7 +455,11 @@ final class CommunityShipsController extends ChangeNotifier {
       }
     }
     final references = versions.keys.toSet();
-    _avatars.removeWhere((ref, _) => _avatarVersions[ref] != versions[ref]);
+    _avatars.removeWhere(
+      (ref, _) =>
+          _avatarVersions[ref] != versions[ref] ||
+          (versions[ref] ?? '').isEmpty && !avatars.isFresh(ref, versions[ref]),
+    );
     _avatarVersions
       ..clear()
       ..addAll(versions);

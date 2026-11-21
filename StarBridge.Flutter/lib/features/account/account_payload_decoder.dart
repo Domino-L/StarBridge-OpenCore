@@ -89,6 +89,7 @@ abstract final class AccountPayloadDecoder {
     };
     final relay = switch (_requiredString(payload, 'relayState')) {
       'ready' => AccountCompatibilityRelayState.ready,
+      'migrated' => AccountCompatibilityRelayState.migrated,
       'notApplicable' => AccountCompatibilityRelayState.notApplicable,
       'notEstablished' => AccountCompatibilityRelayState.notEstablished,
       'accountMismatch' => AccountCompatibilityRelayState.accountMismatch,

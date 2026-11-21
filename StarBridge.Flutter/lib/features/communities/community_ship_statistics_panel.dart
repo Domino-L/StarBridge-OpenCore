@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/interaction/starbridge_dialog.dart';
 import 'community_fleet_statistics_dialog.dart';
+import 'communities_module.dart';
 import 'community_image_decoder.dart';
 import 'community_ship_statistics.dart';
 import 'community_ships_port.dart';
@@ -23,6 +24,7 @@ class CommunityShipStatisticsPanel extends StatefulWidget {
     required this.firstPage,
     this.initial,
     this.onStatistics,
+    this.onReadUnavailable,
     this.avatarOf,
     this.decoder,
     super.key,
@@ -36,6 +38,7 @@ class CommunityShipStatisticsPanel extends StatefulWidget {
 
   /// Null again whenever the inventory is invalidated or read from nothing.
   final ValueChanged<CommunityShipStatistics?>? onStatistics;
+  final VoidCallback? onReadUnavailable;
   final Uint8List? Function(String memberRef)? avatarOf;
   final CommunityImageDecoder? decoder;
   @override
@@ -160,7 +163,7 @@ class _CommunityShipStatisticsPanelState
         return;
       }
       _publish(result);
-    } catch (_) {
+    } catch (error) {
       if (mounted && epoch == request) {
         // The held answer is known to be old by now: say so, with the retry.
         dismissDetails();
@@ -170,6 +173,19 @@ class _CommunityShipStatisticsPanelState
           loading = false;
         });
         _publish(null);
+        // Only a failure about the page still on screen may clear the list:
+        // a newer successful read (another first page) supersedes it.
+        if (error is CommunityFailure &&
+            error.code == 'readUnavailable' &&
+            identical(widget.firstPage, started)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted &&
+                epoch == request &&
+                identical(widget.firstPage, started)) {
+              widget.onReadUnavailable?.call();
+            }
+          });
+        }
       }
     }
   }

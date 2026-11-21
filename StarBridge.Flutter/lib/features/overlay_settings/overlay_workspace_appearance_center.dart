@@ -25,18 +25,24 @@ import 'overlay_appearance_configuration_panel.dart';
 import 'overlay_appearance_collection_panel.dart';
 import 'overlay_appearance_preview_page.dart';
 import 'overlay_appearance_qualification.dart';
+import 'overlay_workspace_rules.dart';
+import 'overlay_workspace_global_group.dart';
 
 class OverlayWorkspaceAppearanceCenter extends StatefulWidget {
   const OverlayWorkspaceAppearanceCenter({
     required this.projection,
     required this.module,
     required this.onBack,
+    this.onOpenGlobal,
     super.key,
   });
 
   final OverlayWorkspaceProjection projection;
   final OverlayWorkspaceModule module;
   final VoidCallback onBack;
+
+  /// Leaves for the global group, where the whole-visor settings are now.
+  final VoidCallback? onOpenGlobal;
 
   @override
   State<OverlayWorkspaceAppearanceCenter> createState() =>
@@ -51,6 +57,11 @@ class _OverlayWorkspaceAppearanceCenterState
       .projection
       .snapshot!
       .appearances
+      // 0.7.3 overlay v2: the other appearances are put away until v2.
+      .where(
+        (appearance) =>
+            !overlayAppearancesHiddenUntilV2.contains(appearance.id),
+      )
       .where(
         (appearance) =>
             const {
@@ -69,7 +80,7 @@ class _OverlayWorkspaceAppearanceCenterState
   OverlayWorkspaceAppearance? get _selectedAppearance {
     final appearances = _publishedAppearances;
     if (appearances.isEmpty) return null;
-    final currentId = widget.projection.settings!['skin'] as String;
+    final currentId = overlayWorkspaceShownSkin(widget.projection.settings!);
     final selectedId = _selectedId ?? currentId;
     return appearances.cast<OverlayWorkspaceAppearance?>().firstWhere(
       (appearance) => appearance?.id == selectedId,
@@ -85,12 +96,7 @@ class _OverlayWorkspaceAppearanceCenterState
       (preset) => preset.id == snapshot.activePresetId,
     );
     final appearanceFields = overlayWorkspaceFieldSpecs
-        .where(
-          (field) =>
-              field.group == 'appearance' &&
-              field.field != 'skin' &&
-              field.field != 'opacity',
-        )
+        .where((field) => field.group == 'appearance' && field.field != 'skin')
         .toList(growable: false);
     return SingleChildScrollView(
       key: const Key('overlay-appearance-center'),
@@ -118,19 +124,29 @@ class _OverlayWorkspaceAppearanceCenterState
                     if (config.preview != null)
                       config.appearanceId: config.preview!.bytes,
                 },
-                currentId: widget.projection.settings!['skin'] as String,
+                currentId: overlayWorkspaceShownSkin(
+                  widget.projection.settings!,
+                ),
                 selectedId: _selectedAppearance?.id,
                 onSelected: (id) => setState(() => _selectedId = id),
               );
               final details = _AppearanceDetails(
                 appearance: _selectedAppearance,
-                currentId: widget.projection.settings!['skin'] as String,
+                currentId: overlayWorkspaceShownSkin(
+                  widget.projection.settings!,
+                ),
                 busy: widget.projection.busy,
                 onApply: (appearance) {
                   widget.module.updateSetting('skin', appearance.id);
                   setState(() => _selectedId = appearance.id);
                 },
                 settings: OverlayWorkspaceSettingsGroup(
+                  header: OverlayWorkspaceGlobalLink(
+                    key: const Key('overlay-appearance-global-link'),
+                    text: AppStrings.of(context)
+                        .text('overlay.workspace.global.fromAppearance'),
+                    onOpen: widget.onOpenGlobal,
+                  ),
                   group: 'appearance',
                   editOwner: (widget.module, snapshot),
                   currentEditOwner: () =>

@@ -18,7 +18,8 @@ internal sealed partial class ScmAccountBridgeHost
         _ = RequireSession(context); // No legacy/compatibility identity for official images.
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token); budget.CancelAfter(TimeSpan.FromSeconds(12));
         var generation = Generation; var session = RequireRelaySession(context);
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable) throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired) throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired) throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var accountScope = FriendScope(context, generation);
         var clock = _oauth.OfficialFleetIdentityObservationClock;
@@ -38,7 +39,7 @@ internal sealed partial class ScmAccountBridgeHost
             if (bound is null || descriptor is null || descriptor.Owner != context || descriptor.Generation != generation || descriptor.SourceRef != bound.SourceRef ||
                 descriptor != Volatile.Read(ref _fleetPublicSource)) throw new AccountBridgeHostException("communities.identityUnavailable");
             if (client.LookupOfficialShipImage(payload, accountScope, clock, action == "report") != bound) throw new AccountBridgeHostException("communities.refreshRequired");
-            OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, clock.GetUtcNow());
+            OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, clock);
         }
         CurrentOwner();
         if (action != "status")

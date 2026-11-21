@@ -33,6 +33,13 @@ public sealed class LocalPrivacyStore(string root)
     internal bool IsPublicationPaused(BridgeAccountContext owner) => ReadFile(owner)?.PublicationPaused == true;
     internal bool IsPublicationRevoked(BridgeAccountContext owner) => ReadFile(owner)?.ConsentVersion == 0;
 
+    internal sealed record PublicationMetadata(int? ConsentVersion, bool PublicationPaused);
+    internal PublicationMetadata ReadPublicationMetadata(BridgeAccountContext owner)
+    {
+        var file = ReadFile(owner);
+        return new(file?.ConsentVersion, file?.PublicationPaused == true);
+    }
+
     // null = not asked; 0 = declined/revoked; 1 = confirmed. A refusal is a
     // completed choice, never permission to publish or a reason to ask again.
     internal bool NeedsFirstChoice(BridgeAccountContext owner) => ReadFile(owner) is null &&
@@ -125,10 +132,12 @@ public sealed class LocalPrivacyStore(string root)
             if (!canCommit()) throw new LocalPrivacyException("privacy_local.account_changed");
             if (current.OperationId == operationId) return current;
             var next = new LocalPrivacySnapshot(expectedRevision + 1, DateTimeOffset.UtcNow, operationId, settings);
-            // Turning sharing off revokes remembered consent even if it is turned
-            // back on before the publication timer observes the disabled revision.
-            var consent = settings.PublicationEnabled ? ReadFile(owner)?.ConsentVersion : 0;
-            var paused = ReadFile(owner)?.PublicationPaused == true;
+            // Only an enabled-to-disabled transition revokes remembered consent.
+            // Organization saves with sharing already off retain even unasked consent.
+            var saved = ReadFile(owner);
+            var consent = current.Settings?.PublicationEnabled == true && !settings.PublicationEnabled
+                ? 0 : saved?.ConsentVersion;
+            var paused = saved?.PublicationPaused == true;
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new SavedFile(1, hash, next, Integrity(hash, next, consent, paused), consent, paused), Json);
             if (bytes.Length > MaximumBytes) throw new LocalPrivacyException("privacy_local.invalid_request");
             temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -140,6 +149,10 @@ public sealed class LocalPrivacyStore(string root)
             if (current.Revision == 0) File.Move(temporary, path);
             else if (!StoreFileCommit.ReplaceIfUnchanged(temporary, path, CommitStillAllowed(path, canCommit), MaximumBytes, "Local privacy commit did not complete."))
                 throw new LocalPrivacyException(canCommit() ? "privacy_local.conflict" : "privacy_local.account_changed");
+            // A saved main fleet choice other than the refused one lifts the persisted
+            // block here, whatever the publication, pause or visibility state is.
+            if (ReadRefusedOfficial(hash) is { } refused && settings.OfficialFleet?.OperationId != refused)
+                SetRefusedOfficial(hash, null);
             return next;
         }
         catch (Exception e) when (StorageError(e)) { throw new LocalPrivacyException("privacy_local.write_failed"); }
@@ -159,8 +172,16 @@ public sealed class LocalPrivacyStore(string root)
         => SetPublicationConsentAsync(owner, revision, enabled, canCommit, cancellation).GetAwaiter().GetResult();
 
     internal Task SetPublicationConsentAsync(BridgeAccountContext owner, long revision, bool enabled, Func<bool> canCommit,
-        CancellationToken cancellation = default, bool withdrawalRequired = false)
-        => SetPublicationMetadataAsync(owner, revision, enabled, false, canCommit, cancellation, withdrawalRequired);
+        CancellationToken cancellation = default, bool withdrawalRequired = false, PublicationMetadata? expectedMetadata = null,
+        bool firstOfficialDefault = false, Action? requireFirstDefaultAllowed = null)
+        => SetPublicationMetadataAsync(owner, revision, enabled, false, canCommit, cancellation, withdrawalRequired, expectedMetadata,
+            firstOfficialDefault, requireFirstDefaultAllowed);
+
+    internal static bool IsFirstOfficialDefault(LocalPrivacySettings settings) =>
+        settings.PublicationEnabled && settings.OfficialFleet is { MaximumRankValue: null } choice &&
+        choice.Fields == CommunityRealtimeScope.SupportedFields &&
+        settings.Fleet.Fields == PlayerSharedStateFields.None && settings.Room.Fields == PlayerSharedStateFields.None &&
+        settings.Communities is not { Length: > 0 } && settings.Events is null;
 
     internal void SetPublicationPaused(BridgeAccountContext owner, long revision, bool paused, Func<bool> canCommit)
         => SetPublicationPausedAsync(owner, revision, paused, canCommit).GetAwaiter().GetResult();
@@ -170,7 +191,8 @@ public sealed class LocalPrivacyStore(string root)
         => SetPublicationMetadataAsync(owner, revision, null, paused, canCommit, cancellation);
 
     private async Task SetPublicationMetadataAsync(BridgeAccountContext owner, long revision, bool? enabled, bool paused,
-        Func<bool> canCommit, CancellationToken cancellation, bool withdrawalRequired = false)
+        Func<bool> canCommit, CancellationToken cancellation, bool withdrawalRequired = false, PublicationMetadata? expectedMetadata = null,
+        bool firstOfficialDefault = false, Action? requireFirstDefaultAllowed = null)
     {
         using var admission = await PositiveAdmission.EnterAsync(cancellation).ConfigureAwait(false);
         var hash = ResolvedHash(owner);
@@ -198,6 +220,29 @@ public sealed class LocalPrivacyStore(string root)
             if ((file?.Snapshot.Revision ?? 0) != revision ||
                 enabled == true && file?.Snapshot.Settings?.PublicationEnabled != true)
                 throw new LocalPrivacyException("privacy_local.conflict");
+            // Organization apply must compare the metadata observed before it
+            // waited for admission. Pause/revocation do not increment revision.
+            // Keep the comparison under the same file lock as the final write.
+            if (expectedMetadata is not null && (file?.ConsentVersion != expectedMetadata.ConsentVersion ||
+                (file?.PublicationPaused == true) != expectedMetadata.PublicationPaused))
+                throw new LocalPrivacyException("privacy_local.conflict");
+            if (firstOfficialDefault && (enabled != true || file?.ConsentVersion is not null ||
+                file?.PublicationPaused == true || file?.Snapshot.Settings is not { } firstSettings ||
+                !IsFirstOfficialDefault(firstSettings)))
+                throw new LocalPrivacyException("privacy_publication.consent_required");
+            if (firstOfficialDefault && requireFirstDefaultAllowed is not null)
+            {
+                // Preserve durable metadata conflict precedence. Then check live
+                // observations under this same write lock and at every commit retry.
+                var ownerCanCommit = canCommit;
+                canCommit = () =>
+                {
+                    if (!ownerCanCommit()) return false;
+                    requireFirstDefaultAllowed();
+                    return true;
+                };
+                if (!canCommit()) throw new LocalPrivacyException("privacy_local.account_changed");
+            }
             var creating = file is null;
             if (file is null)
             {
@@ -289,6 +334,46 @@ public sealed class LocalPrivacyStore(string root)
         ? Hash(JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, owner, snapshot }, Json))
         : Hash(JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, owner, snapshot, consentVersion = consent }, Json));
     private string PathFor(string hash) => Path.Combine(_directory, hash + ".json");
+
+    // The main fleet operation the relay refused as out of date, kept in a side file so
+    // the block survives a Host restart. Older versions never read it (the policy file
+    // format is unchanged). Only an operation ID is stored; a missing or damaged file
+    // means "no block", which at worst costs one more refused send.
+    private string RefusedOfficialPathFor(string hash) => Path.Combine(_directory, hash + ".official-refused");
+    internal string? ReadRefusedOfficialOperation(BridgeAccountContext owner)
+    {
+        try { return ReadRefusedOfficial(ResolvedHash(owner)); }
+        catch (Exception e) when (StorageError(e) || e is LocalPrivacyException) { return null; }
+    }
+    internal void SetRefusedOfficialOperation(BridgeAccountContext owner, string? operationId)
+    {
+        try { SetRefusedOfficial(ResolvedHash(owner), operationId); }
+        catch (Exception e) when (StorageError(e) || e is LocalPrivacyException) { /* Memory still blocks this session. */ }
+    }
+    // Hash-based forms: the save path already holds the owner hash and must not resolve it again.
+    private string? ReadRefusedOfficial(string hash)
+    {
+        try {
+            var path = RefusedOfficialPathFor(hash);
+            if (!CheckPath(_directory, true) || !CheckPath(path, false) || new FileInfo(path).Length > 64) return null;
+            var value = File.ReadAllText(path).Trim();
+            return Guid.TryParseExact(value, "N", out _) ? value : null;
+        } catch (Exception e) when (StorageError(e)) { return null; }
+    }
+    private void SetRefusedOfficial(string hash, string? operationId)
+    {
+        if (operationId is not null && !Guid.TryParseExact(operationId, "N", out _)) return;
+        try {
+            var path = RefusedOfficialPathFor(hash);
+            if (operationId is null) { if (CheckPath(path, false)) File.Delete(path); return; }
+            CheckPath(_directory, true);
+            Directory.CreateDirectory(_directory);
+            CheckPath(path, false);
+            var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try { File.WriteAllText(temporary, operationId); File.Move(temporary, path, overwrite: true); }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        } catch (Exception e) when (StorageError(e)) { /* Memory still blocks this session. */ }
+    }
     private static bool StorageError(Exception e) => e is IOException or UnauthorizedAccessException or JsonException or
         System.Security.SecurityException or ArgumentException or NotSupportedException;
 }

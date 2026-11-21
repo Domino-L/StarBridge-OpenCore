@@ -27,7 +27,9 @@ internal sealed partial class FirstUseModeRuntime
         {
             var (state, scope) = CaptureIdentityScope(revision);
             if (scope is null)
-                return new(state == "signInRequired" && _candidateStart is null &&
+                return state == "needsLocalIdentity" && _candidateStart is { IsCompletedSuccessfully: true } candidate
+                    ? candidate.Result.FirstUseAccountDisplay(OnlineIntent(_accepted!))
+                    : new(state == "signInRequired" && _candidateStart is null &&
                     store.ReadOnlineOrigin()?.CandidateStarted == true ? "recoveryRequired" : state);
             if (_handoffPreparing || _preparedOnline is { IsCurrent: true }) return new("operationInProgress", scope.Local?.Profile.Handle);
             if (scope.Candidate.FirstUseAuthenticationSealed) return new("operationInProgress", scope.Local?.Profile.Handle);
@@ -35,8 +37,10 @@ internal sealed partial class FirstUseModeRuntime
                 return View(ConfirmedState(confirmed.Scope), confirmed.Scope, confirmed.Facts);
             if (_issuedIdentity is { } issued && IsReviewCurrent(issued))
                 return View(ReviewState(issued.Scope), issued.Scope, issued.Facts) with { ConfirmationKey = issued.Key };
-            return new(scope.Candidate.RequiresFirstUseGameIdentityReauthorization(OnlineIntent(scope.Pending))
-                ? "reauthorizationRequired" : scope.Candidate.FirstUseSignInState(OnlineIntent(scope.Pending)), scope.Local?.Profile.Handle);
+            var display = scope.Candidate.FirstUseAccountDisplay(OnlineIntent(scope.Pending));
+            return display with { LocalHandle = scope.Local?.Profile.Handle,
+                State = scope.Candidate.RequiresFirstUseGameIdentityReauthorization(OnlineIntent(scope.Pending))
+                    ? "reauthorizationRequired" : scope.Candidate.FirstUseSignInState(OnlineIntent(scope.Pending)) };
         }
         catch (LocalFirstUseException) { return new("unavailable"); }
     }
@@ -54,7 +58,7 @@ internal sealed partial class FirstUseModeRuntime
                 return CurrentOnlineIdentity(revision);
             _issuedIdentity = null; _confirmedIdentity = null;
             var (state, scope) = CaptureIdentityScope(revision);
-            if (scope is null) return new(state);
+            if (scope is null) return state == "needsLocalIdentity" ? CurrentOnlineIdentity(revision) : new(state);
             return await ReviewIdentityCoreAsync(scope, token).ConfigureAwait(false);
         }
         catch (LocalFirstUseException) { return new("unavailable"); }
@@ -120,7 +124,7 @@ internal sealed partial class FirstUseModeRuntime
         // Retained account-only restoration does not require a local Handle,
         // but still requires verified SCM authority before entering online.
         // Explicit game verification keeps its stricter local identity review.
-        if (assessed != "match" && !HasExplicitGameIdentityReview(scope) &&
+        if (assessed != "match" && !store.SetupCompleted && !HasExplicitGameIdentityReview(scope) &&
             OnlineIntent(scope.Pending).RetainSession && scope.Candidate.RetainsFirstUseSession)
         {
             scope = scope with { AccountOnly = true };
@@ -151,7 +155,7 @@ internal sealed partial class FirstUseModeRuntime
         if (!start.IsCompletedSuccessfully || !start.Result.IsFirstUseOnlineCandidateFor(OnlineIntent(pending)))
             return ("unavailable", null);
         var local = CaptureLocalIdentity();
-        if (local is null && !OnlineIntent(pending).RetainSession) return ("needsLocalIdentity", null);
+        if (local is null && (store.SetupCompleted || !OnlineIntent(pending).RetainSession)) return ("needsLocalIdentity", null);
         var scope = new IdentityScope(pending, start.Result, local, local is null);
         return IsIdentityScopeCurrent(scope) ? ("observed", scope) : ("contextChanged", null);
     }
@@ -167,6 +171,25 @@ internal sealed partial class FirstUseModeRuntime
             LocalFirstUseValidation.Handle(profile.Handle) ? new(source, profile) : null;
     }
 
+    // Which check above failed, as a reason code for diagnostics only (no Handle).
+    private string LocalIdentityGap()
+    {
+        try
+        {
+            var saved = identities.Read();
+            var source = saved.Sources.SingleOrDefault(value => value.SourceKey == saved.SelectedSourceKey);
+            if (source is null) return "no-source";
+            if (source.NeedsFreshGameEvidence) return "fresh-evidence";
+            var profile = saved.Profiles.SingleOrDefault(value => value.Id == source.ConfirmedProfileId);
+            if (profile is null) return "no-profile";
+            if (saved.ActiveProfileId != profile.Id) return "inactive";
+            var now = _identityTime.GetUtcNow();
+            if (source.ConfirmedObservedAt is not { } observed || observed > now || profile.ConfirmedAt > now) return "no-observed";
+            return LocalFirstUseValidation.Handle(profile.Handle) ? "unknown" : "invalid-handle";
+        }
+        catch { return "read-failed"; }
+    }
+
     private bool IsIdentityScopeCurrent(IdentityScope scope)
     {
         try
@@ -174,7 +197,7 @@ internal sealed partial class FirstUseModeRuntime
             return !_closed && !_changing && _accepted == scope.Pending && store.Read() == scope.Pending && LocalMode().Active &&
                 _candidateCancel is null && _candidateStart is { IsCompletedSuccessfully: true } start &&
                 ReferenceEquals(start.Result, scope.Candidate) && scope.Candidate.IsFirstUseOnlineCandidateFor(OnlineIntent(scope.Pending)) &&
-                (scope.AccountOnly || CaptureLocalIdentity() == scope.Local);
+                (scope.AccountOnly ? !store.SetupCompleted : CaptureLocalIdentity() == scope.Local);
         }
         catch (LocalFirstUseException) { return false; }
     }

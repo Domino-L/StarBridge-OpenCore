@@ -141,14 +141,17 @@ class FriendSharingController extends ChangeNotifier {
 
   Future<void> change(int bit, bool enabled) async {
     if (!canEdit || !const {1, 2, 4, 8, 16, 32}.contains(bit)) return;
-    final next = enabled ? fields | bit : fields & ~bit;
+    final mask = bit == 1 ? 33 : bit;
+    final next = enabled ? fields | mask : fields & ~mask;
     await saveFields(next);
   }
 
-  Future<void> saveFields(int next) async {
+  Future<void> saveFields(int next, {int? expectedRevision}) async {
     if (!canEdit || next < 0 || next > 63) return;
+    final revision = expectedRevision ?? snapshot!['revision'] as int;
+    if (snapshot!['revision'] != revision) return;
     // A save supersedes older background reads, including their errors.
-    final epoch = ++_epoch, revision = snapshot!['revision'] as int;
+    final epoch = ++_epoch;
     _refreshing = false;
     final random = Random.secure();
     final operation = List.generate(

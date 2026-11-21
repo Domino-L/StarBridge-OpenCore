@@ -8,6 +8,7 @@ import '../../platform/bridge/bridge_account_access.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import 'notification_settings_models.dart';
+import 'notification_organization_options.dart';
 
 final _deliveryEpochs = Expando<ValueNotifier<int>>();
 ValueNotifier<int> notificationSourceDeliveryEpoch(
@@ -15,13 +16,26 @@ ValueNotifier<int> notificationSourceDeliveryEpoch(
 ) => _deliveryEpochs[session] ??= ValueNotifier(0);
 
 class NotificationSourcesValue {
-  NotificationSourcesValue(this.revision, List<NotificationSourceRule> sources)
-    : sources = List.unmodifiable(sources);
+  NotificationSourcesValue(
+    this.revision,
+    List<NotificationSourceRule> sources, {
+    this.supportsOrganizationOptions = false,
+  }) : sources = List.unmodifiable(sources);
   final int revision;
+  final bool supportsOrganizationOptions;
   final List<NotificationSourceRule> sources;
   Map<String, NotificationSourceMode> get modes => {
     for (final source in sources) source.sourceRef: source.mode,
   };
+}
+
+abstract interface class OrganizationNotificationSourcesPort
+    implements NotificationSourcesPort {
+  Future<NotificationSourcesValue> saveOrganizationOptions(
+    NotificationSourcesValue original,
+    Map<String, NotificationSourceMode> modes,
+    Map<String, NotificationOrganizationOptions> options,
+  );
 }
 
 abstract interface class NotificationSourcesPort {
@@ -36,7 +50,7 @@ abstract interface class NotificationSourcesPort {
 
 /// The Host owns membership, identities and storage; Flutter only holds an
 /// expiring editor lease. Uncertain saves reuse their operation identifier.
-class BridgeNotificationSources implements NotificationSourcesPort {
+class BridgeNotificationSources implements OrganizationNotificationSourcesPort {
   BridgeNotificationSources(this.session) {
     _events = session.events.listen((event) {
       if (event.name == 'account.changed' ||
@@ -62,6 +76,9 @@ class BridgeNotificationSources implements NotificationSourcesPort {
   bool get _supportsV2 =>
       session.hostCapabilities.contains('notificationPolicies.readV2') &&
       session.hostCapabilities.contains('notificationPolicies.saveV2');
+  bool get _supportsV3 =>
+      session.hostCapabilities.contains('notificationPolicies.readV3') &&
+      session.hostCapabilities.contains('notificationPolicies.saveV3');
   bool _closed = false;
   @override
   Stream<void> get invalidations => _invalidations.stream;
@@ -82,9 +99,15 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     if (!hasRelayAccount(account)) {
       throw const BridgeClientException('account.signed_out');
     }
-    final version = _supportsV2 ? 2 : 1;
+    final version = _supportsV3
+        ? 3
+        : _supportsV2
+        ? 2
+        : 1;
     final response = await session.request(
-      version == 2
+      version == 3
+          ? 'notificationPolicies.readV3'
+          : version == 2
           ? 'notificationPolicies.readV2'
           : 'notificationPolicies.read',
       accountContext: account.accountContext,
@@ -104,11 +127,30 @@ class BridgeNotificationSources implements NotificationSourcesPort {
   Future<NotificationSourcesValue> save(
     NotificationSourcesValue original,
     Map<String, NotificationSourceMode> modes,
+  ) => saveOrganizationOptions(original, modes, const {});
+
+  @override
+  Future<NotificationSourcesValue> saveOrganizationOptions(
+    NotificationSourcesValue original,
+    Map<String, NotificationSourceMode> modes,
+    Map<String, NotificationOrganizationOptions> options,
   ) async {
     if (!identical(original, _value) ||
         _owner == null ||
         _generation == null ||
         _schemaVersion == 2 && !_supportsV2 ||
+        _schemaVersion == 3 && !_supportsV3 ||
+        options.isNotEmpty && _schemaVersion != 3 ||
+        options.entries.any(
+          (e) =>
+              !e.value.valid ||
+              !original.sources.any(
+                (s) =>
+                    s.sourceRef == e.key &&
+                    (s.kind == NotificationSourceKind.community ||
+                        s.kind == NotificationSourceKind.officialFleet),
+              ),
+        ) ||
         modes.length != original.sources.length ||
         original.sources.any((s) => !modes.containsKey(s.sourceRef))) {
       throw const BridgeClientException('notificationPolicies.stale_editor');
@@ -117,7 +159,12 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     _check(epoch, generation);
     final keys = modes.keys.toList()..sort();
     final rules = [
-      for (final key in keys) {'sourceRef': key, 'mode': modes[key]!.name},
+      for (final key in keys)
+        {
+          'sourceRef': key,
+          'mode': modes[key]!.name,
+          if (options[key] case final value?) ...value.toWire(),
+        },
     ];
     final signature = jsonEncode(rules);
     final operation = _pending.putIfAbsent(
@@ -129,7 +176,9 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     );
     notificationSourceDeliveryEpoch(session).value++;
     final response = await session.request(
-      _schemaVersion == 2
+      _schemaVersion == 3
+          ? 'notificationPolicies.saveV3'
+          : _schemaVersion == 2
           ? 'notificationPolicies.saveV2'
           : 'notificationPolicies.save',
       accountContext: _owner,
@@ -144,7 +193,12 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     final next = parse(response.payload, schemaVersion: _schemaVersion);
     if (next.revision != original.revision + 1 ||
         response.payload['operationId'] != operation ||
-        keys.any((key) => next.modes[key] != modes[key])) {
+        keys.any((key) => next.modes[key] != modes[key]) ||
+        options.entries.any(
+          (e) => !next.sources.any(
+            (s) => s.sourceRef == e.key && s.organizationOptions == e.value,
+          ),
+        )) {
       throw const BridgeFormatException('Invalid source rule receipt.');
     }
     final codes = {
@@ -154,7 +208,7 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     final held = NotificationSourcesValue(next.revision, [
       for (final source in next.sources)
         source.copyWith(organizationCode: codes[source.sourceRef]),
-    ]);
+    ], supportsOrganizationOptions: next.supportsOrganizationOptions);
     _value = held;
     _pending.clear();
     return held;
@@ -171,12 +225,12 @@ class BridgeNotificationSources implements NotificationSourcesPort {
               throw const BridgeFormatException('Invalid source mode.'),
         );
     final revision = body['revision'], raw = body['sources'];
-    if ((schemaVersion != 1 && schemaVersion != 2) ||
+    if ((schemaVersion < 1 || schemaVersion > 3) ||
         body['schemaVersion'] != schemaVersion ||
         revision is! int ||
         revision < 0 ||
         raw is! List ||
-        raw.length > (schemaVersion == 2 ? 65 : 64)) {
+        raw.length > (schemaVersion >= 2 ? 65 : 64)) {
       throw const BridgeFormatException('Invalid source rules.');
     }
     final sources = <NotificationSourceRule>[
@@ -201,7 +255,7 @@ class BridgeNotificationSources implements NotificationSourcesPort {
     var communities = 0, officials = 0;
     for (final row in raw) {
       final official =
-          schemaVersion == 2 && row is Map && row['kind'] == 'officialFleet';
+          schemaVersion >= 2 && row is Map && row['kind'] == 'officialFleet';
       if (row is! Map ||
           row['sourceRef'] is! String ||
           !RegExp(
@@ -232,10 +286,17 @@ class BridgeNotificationSources implements NotificationSourcesPort {
           mode: mode(row['mode']),
           logoImageData: row['logoImageData'] as String?,
           organizationCode: row['organizationCode'] as String?,
+          organizationOptions: schemaVersion == 3
+              ? NotificationOrganizationOptions.parse(row)
+              : const NotificationOrganizationOptions(),
         ),
       );
     }
-    return NotificationSourcesValue(revision, sources);
+    return NotificationSourcesValue(
+      revision,
+      sources,
+      supportsOrganizationOptions: schemaVersion == 3,
+    );
   }
 
   @override

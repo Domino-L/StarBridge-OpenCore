@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Auth;
+using StarBridge.HostRuntime.Marketplace;
 using StarBridge.NativeBridge;
 
 // 0.7.2 G1: SCM contracts. Masked names, chat references instead of member ids, plain-text
@@ -17,6 +18,10 @@ internal static class MarketplaceContractsTests
     {
         internal readonly List<(string Method, string PathAndQuery, string? Body)> Requests = [];
         internal bool RefuseApply;
+        internal bool RefuseRemove;
+        internal long Self = 4242000000000042;
+        internal long? Reputation = 60;
+        internal int Status = 1, ParticipantStatus = 4, Taken = 1, PeopleTotal = 1;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(token);
@@ -25,28 +30,31 @@ internal static class MarketplaceContractsTests
             var contract = new
             {
                 id = 17, contractNumber = "CT-2026102100017", contractType = "BOUNTY", creatorId = 9090000000000009, creatorNickname = "Kestrel",
-                creatorAvatar = "https://cdn/k.png", creatorReputation = 80, creatorStatus = 1, creatorType = 0, title = "拦截货船",
+                creatorAvatar = "https://cdn/k.png", creatorReputation = 80, creatorStatus = 1, creatorType = 1, organizationSid = "TESTFLEET", title = "拦截货船",
                 description = "<p>目标周六 20:00 出发&nbsp;<b>哈索</b></p><p>需要截图</p><script>x</script>", locationDescription = "哈索",
-                rewardType = "UEC", rewardUec = 2500000, maxParticipants = 3, currentParticipants = 0, minReputation = 50, status = 1,
-                expireTime = 1761000000000, applyCount = 2, isCreator = false, isApplied = false, meetReputationRequirement = true,
+                rewardType = "UEC", rewardUec = 2500000, maxParticipants = 3, currentParticipants = Taken, minReputation = 50, status = Status,
+                expireTime = 1761000000000, applyCount = 2,
             };
             if (RefuseApply && request.RequestUri.AbsolutePath == "/app-api/trade/contract/apply")
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { code = 1_008_009_001, msg = "信誉不足" })) };
+            if (RefuseRemove && request.RequestUri.AbsolutePath == "/app-api/trade/contract/participant/remove")
+                throw new HttpRequestException("fixture response lost");
             object data = request.RequestUri.AbsolutePath switch
             {
+                "/app-api/member/user/get" => new { id = Self, reputation = Reputation },
                 "/app-api/trade/contract/page" or "/app-api/trade/contract/my-page" => new { total = 1, list = new[] { contract } },
                 "/app-api/trade/contract/get" => contract,
                 "/app-api/trade/contract/milestones" => new object[] { new { id = 1, contractId = 17, participantId = 5, milestoneOrder = 1, title = "确认航线", status = 1, confirmedBy = 9090000000000009 } },
                 "/app-api/trade/contract/participants/page" => new
                 {
-                    total = 1,
+                    total = PeopleTotal,
                     list = new object[] { new { id = 5, userId = 7770000000000007, userNickname = "Aster", userAvatar = "https://cdn/a.png", userReputation = 60,
-                        applyMessage = "有 Hornet", applyShipNames = new[] { "F7C Hornet" }, status = 0, workProof = new[] { "https://cdn/p.png" } } },
-                    extra = new { viewerParticipant = new { id = 6, userId = 4242000000000042, userNickname = "Self", status = 0 } },
+                        applyMessage = "有 Hornet", applyShipNames = new[] { "F7C Hornet" }, status = ParticipantStatus, isReviewedByCreator = false, workProof = new[] { "https://cdn/p.png" } } },
+                    extra = new { viewerParticipant = new { id = 6, userId = 4242000000000042, userNickname = "Self", status = ParticipantStatus, isReviewedByParticipant = false } },
                 },
                 "/app-api/trade/contract/create" => 99,
                 "/app-api/trade/contract/apply" => 6,
-                "/app-api/trade/contract/start" or "/app-api/trade/contract/cancel" => true,
+                "/app-api/trade/contract/participant/remove" or "/app-api/trade/contract/start" or "/app-api/trade/contract/cancel" => true,
                 "/app-api/trade/contract/review" => 3,
                 _ => throw new Exception("Unexpected route " + path),
             };
@@ -64,6 +72,7 @@ internal static class MarketplaceContractsTests
 
     internal static async Task Run()
     {
+        await RealShapesAndRemoval();
         var handler = new Handler();
         var uri = new Uri("https://fixture.invalid/");
         var client = new OAuthPkceClient(new ScmHttpClient(handler), new Vault(), new("fixture", uri, uri, uri, "desktop", "starbridge-api", "", "/callback"));
@@ -90,7 +99,7 @@ internal static class MarketplaceContractsTests
         var detail = await Call(new { schemaVersion = 1, operation = "detail", id = 17 });
         var person = detail.GetProperty("participants").GetProperty("rows")[0];
         Check(person.GetProperty("name").GetString() == "A*****r" && person.GetProperty("ships")[0].GetString() == "F7C Hornet", "participant projected");
-        Check(detail.GetProperty("me").GetProperty("id").GetInt32() == 6, "viewer participation kept");
+        Check(detail.GetProperty("me").GetProperty("reference").GetString()!.Length == 32, "viewer participation kept");
         var detailText = detail.GetRawText();
         Check(!detailText.Contains("7770000000000007") && !detailText.Contains("4242000000000042") && !detailText.Contains("cdn/") && !detailText.Contains("confirmedBy"),
             "no member ids, avatars or proof URLs");
@@ -110,7 +119,7 @@ internal static class MarketplaceContractsTests
         Check(handler.Requests[^1] is ("POST", "/app-api/trade/contract/start?contractId=17", null), "start by query parameter");
         await Call(new { schemaVersion = 1, operation = "cancel", id = 17, reason = "人数不够" });
         Check(handler.Requests[^1].PathAndQuery.StartsWith("/app-api/trade/contract/cancel?contractId=17&reason=%E4%BA%BA", StringComparison.Ordinal), "cancel reason encoded");
-        await Call(new { schemaVersion = 1, operation = "review", participantId = 5, rating = 5, comment = "靠谱" });
+        await Call(new { schemaVersion = 1, operation = "review", id = 17, participantRef = person.GetProperty("reference").GetString(), rating = 5, comment = "靠谱" });
 
         handler.RefuseApply = true;
         var applies = handler.Requests.Count(r => r.PathAndQuery.EndsWith("/apply", StringComparison.Ordinal));
@@ -139,5 +148,84 @@ internal static class MarketplaceContractsTests
         try { await Call(new { schemaVersion = 1, operation = "apply", id = 17 }, readOnly); throw new Exception("FAIL apply without trade.write"); }
         catch (AccountBridgeHostException e) when (e.Code == "marketplace.reauthorize_required") { }
         Console.WriteLine("PASS marketplace contracts: masked people with chat references, plain text, validated publish, one-shot writes");
+    }
+    private static async Task RealShapesAndRemoval()
+    {
+        var handler = new Handler { Self = 9090000000000009, Reputation = 49, Status = 3, PeopleTotal = 51 };
+        var uri = new Uri("https://fixture.invalid/");
+        var client = new OAuthPkceClient(new ScmHttpClient(handler), new Vault(), new("fixture", uri, uri, uri, "desktop", "starbridge-api", "", "/callback"));
+        var session = new ScmOAuthSession("fixture", "owner-a", "Fixture", "synthetic", DateTimeOffset.UtcNow.AddHours(1),
+            ["profile.read", "trade.read", "trade.write"]);
+        async Task<JsonElement> Call(object input, ScmOAuthSession? account = null) => BridgePayload.From(
+            (await client.MarketplaceContractsAsync(account ?? session, BridgePayload.From(input), () => true, default)).Data);
+        var list = await Call(new { operation = "list" });
+        var row = list.GetProperty("rows")[0];
+        Check(row.GetProperty("mine").GetBoolean() && !row.GetProperty("eligible").GetBoolean(), "OT2 ownership and reputation derived from real profile");
+        Check(!row.TryGetProperty("applied", out _) && !row.TryGetProperty("myStatus", out _) && row.GetProperty("fleetSid").GetString() == "TESTFLEET", "OT2 no invented list fields; SID");
+        var mine = (await Call(new { operation = "mine" })).GetProperty("rows")[0];
+        // The list never reads participants per completed contract (read volume); review-due shows on the detail.
+        Check(!mine.GetProperty("attention").GetBoolean() && mine.GetProperty("attentionComplete").GetBoolean() &&
+            !handler.Requests.Any(r => r.PathAndQuery.StartsWith("/app-api/trade/contract/participants/page?")), "OT7 list makes no participant reads");
+        var detail = await Call(new { operation = "detail", id = 17 });
+        Check(detail.GetProperty("contract").GetProperty("applied").GetBoolean() && detail.GetProperty("contract").GetProperty("myStatus").GetInt32() == 4, "OT2 viewerParticipant is authoritative");
+        Check(handler.Requests.Count(r => r.PathAndQuery == "/app-api/member/user/get") == 1, "self profile cached for owner");
+        var person = detail.GetProperty("participants").GetProperty("rows")[0];
+        var reference = person.GetProperty("reference").GetString();
+        Check(!person.TryGetProperty("id", out _), "participant identifier stays in Host");
+        await Call(new { operation = "remove", id = 17, participantRef = reference, reason = "  中途退出  " });
+        Check(handler.Requests.Count(r => r.PathAndQuery.StartsWith("/app-api/trade/contract/participant/remove?")) == 1 &&
+            handler.Requests[^1].PathAndQuery == "/app-api/trade/contract/participant/remove?participantId=5&reason=%E4%B8%AD%E9%80%94%E9%80%80%E5%87%BA", "remove once with encoded trimmed reason");
+        foreach (var bad in new object[] {
+            new { operation = "remove", id = 18, participantRef = reference },
+            new { operation = "remove", id = 17, participantRef = reference, reason = new string('x', 201) },
+            new { operation = "remove", id = 17, participantId = 5 },
+        })
+        {
+            var before = handler.Requests.Count;
+            try { await Call(bad); throw new Exception("FAIL invalid removal accepted"); }
+            catch (AccountBridgeHostException e) when (e.Code == "marketplace.invalid_request") { }
+            Check(handler.Requests.Count == before, "invalid removal sends nothing");
+        }
+        var beforeScope = handler.Requests.Count;
+        try { await Call(new { operation = "remove", id = 17, participantRef = reference }, session with { Capabilities = ["trade.read"] }); throw new Exception("FAIL remove without scope"); }
+        catch (AccountBridgeHostException e) when (e.Code == "marketplace.reauthorize_required") { }
+        Check(handler.Requests.Count == beforeScope, "remove scope checked before sending");
+        // One client never serves a second subject mid-test ("SCM account changed during
+        // request"), so the owner binding and A → B → A voiding are checked on the table itself.
+        var table = new MarketplaceContractReferences();
+        table.Touch("A");
+        var refA = table.Reference("A", 17, 5);
+        Check(table.Resolve("A", 17, refA) == 5, "reference resolves for its owner and contract");
+        foreach (var (owner, contract) in new[] { ("B", 17L), ("A", 18L) })
+        {
+            try { table.Resolve(owner, contract, refA); throw new Exception("FAIL reference crossed owner or contract"); }
+            catch (AccountBridgeHostException e) when (e.Code == "marketplace.invalid_request") { }
+        }
+        table.Touch("B");
+        table.Touch("A");
+        try { table.Resolve("A", 17, refA); throw new Exception("FAIL stale reference after account switch"); }
+        catch (AccountBridgeHostException e) when (e.Code == "marketplace.invalid_request") { }
+        handler.RefuseRemove = true;
+        var writes = handler.Requests.Count;
+        try { await Call(new { operation = "remove", id = 17, participantRef = reference }); throw new Exception("FAIL uncertain removal hidden"); }
+        catch (HttpRequestException) { }
+        Check(handler.Requests.Count == writes + 1, "uncertain removal never replayed");
+        handler.Self = 4242000000000042; handler.Reputation = null;
+        // Another account signs in on its own client (one client keeps one subject).
+        var clientB = new OAuthPkceClient(new ScmHttpClient(handler), new Vault(), new("fixture", uri, uri, uri, "desktop", "starbridge-api", "", "/callback"));
+        var sessionB = session with { Subject = "owner-b" };
+        async Task<JsonElement> CallB(object input) => BridgePayload.From(
+            (await clientB.MarketplaceContractsAsync(sessionB, BridgePayload.From(input), () => true, default)).Data);
+        var other = (await CallB(new { operation = "list" })).GetProperty("rows")[0];
+        Check(!other.GetProperty("mine").GetBoolean() && (!other.TryGetProperty("eligible", out var eligible) || eligible.ValueKind == JsonValueKind.Null), "unknown reputation stays unknown; another account reads its own self");
+        handler.Status = 3;
+        var joined = (await CallB(new { operation = "mine", scope = "participated" })).GetProperty("rows")[0];
+        Check(!joined.GetProperty("attention").GetBoolean(), "OT7 completed contract: review-due is a detail matter");
+        // A recruiting contract of my own can be started: that is "待我处理" (owner-a's cached self id).
+        handler.Status = 1; handler.Self = 9090000000000009; handler.Reputation = 49;
+        var recruiting = (await Call(new { operation = "mine" })).GetProperty("rows")[0];
+        Check(recruiting.GetProperty("mine").GetBoolean() && recruiting.GetProperty("attention").GetBoolean(), "OT7 own recruiting contract counted");
+        Check(!handler.Requests.Any(r => r.PathAndQuery.StartsWith("/app-api/trade/contract/participants/page?") &&
+            !r.PathAndQuery.Contains("contractId=17&")), "OT7 lists never read participants per row");
     }
 }

@@ -17,7 +17,7 @@ void main() {
           'MSVC otherwise decodes UTF-8 C++ source through the active Windows '
           'code page and corrupts Chinese tray and notification text.',
     );
-    expect(lifecycleSource, contains('星海舰桥仍在运行'));
+    expect(lifecycleSource, contains('SCM 星海舰桥仍在运行'));
     expect(lifecycleSource, contains('打开星海舰桥'));
     expect(lifecycleSource, contains('完全退出'));
     expect(lifecycleSource, contains('Shell_NotifyIconW'));

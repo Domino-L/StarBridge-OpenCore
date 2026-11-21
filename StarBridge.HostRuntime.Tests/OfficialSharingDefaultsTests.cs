@@ -9,6 +9,7 @@ internal static class OfficialSharingDefaultsTests
     internal static async Task Run()
     {
         await OfficialFleetAudienceTests.Run();
+        await OfficialFleetContextCacheTests.Run();
         Check(AccountBridgeRuntime.OfficialRealtimeEnabledByConfiguration(null), "absent flag enables protocol");
         Check(AccountBridgeRuntime.OfficialRealtimeEnabledByConfiguration("tRuE"), "case-insensitive true");
         foreach (var value in new[] { "false", "FALSE", "", "1", "invalid" })
@@ -37,6 +38,8 @@ internal static class OfficialSharingDefaultsTests
         var previous = new LocalPrivacySettings(false, new(PlayerSharedStateFields.None, false, false, []),
             new(PlayerSharedStateFields.None, false), []);
         store.Save(owner, 0, Guid.NewGuid().ToString("N"), previous, () => true);
+        // This fixture represents an explicit refusal, not an unasked disabled save.
+        store.SetPublicationConsent(owner, store.Read(owner).Revision, false, () => true);
         Check((await Read()).Payload.GetProperty("fields").GetInt32() == 15, "community and manual pause do not determine fleet draft");
         foreach (var mask in new[] { 15, 5, 0 })
         {
@@ -89,7 +92,7 @@ internal static class OfficialSharingDefaultsTests
         Check(!visibilityStore.HasPublicationConsent(owner) && sent == 0,
             "invisible unconfirmed choice does not grant consent or publish");
         var observedStore = new LocalPrivacyStore(root + "-observed");
-        var observedSaved = observedStore.Save(owner, 0, Guid.NewGuid().ToString("N"), visibilitySaved.Settings!, () => true);
+        var observedSaved = observedStore.Save(owner, 0, Guid.NewGuid().ToString("N"), (visibilitySaved.Settings! with { OfficialFleet = visibilitySaved.Settings!.OfficialFleet! with { Fields = CommunityRealtimeScope.SupportedFields } }), () => true);
         await observedStore.SetPublicationConsentAsync(owner, observedSaved.Revision, true, () => true, default);
         using var observedPublisher = new PrivacyPublication(observedStore, () => input, (_, _, _) => {
             sent++; return Task.CompletedTask;
@@ -98,11 +101,11 @@ internal static class OfficialSharingDefaultsTests
         Check(observedStore.IsPublicationPaused(owner) && sent == 0,
             "first-choice visibility read durably pauses previously consented sharing");
         var onlineStore = new LocalPrivacyStore(root + "-online");
-        var onlineSaved = onlineStore.Save(owner, 0, Guid.NewGuid().ToString("N"), visibilitySaved.Settings!, () => true);
+        var onlineSaved = onlineStore.Save(owner, 0, Guid.NewGuid().ToString("N"), (visibilitySaved.Settings! with { OfficialFleet = visibilitySaved.Settings!.OfficialFleet! with { Fields = CommunityRealtimeScope.SupportedFields } }), () => true);
         using var onlinePublisher = new PrivacyPublication(onlineStore, () => input, (_, _, _) => {
             sent++; return Task.CompletedTask;
         }, startTimer: false, visibility: () => PlayerPresenceVisibilityMode.Online);
-        await onlinePublisher.ApplyAsync(owner, 1, onlineSaved.Revision, default, preservePause: true);
+        await onlinePublisher.ApplyAsync(owner, 1, onlineSaved.Revision, default, preservePause: true, firstOfficialDefault: true);
         Check(onlineStore.HasPublicationConsent(owner) && sent > 0, "online fresh official-only choice can grant consent and publish");
         sent = 0;
         var unaskedStore = new LocalPrivacyStore(root + "-unasked");
@@ -114,7 +117,7 @@ internal static class OfficialSharingDefaultsTests
         }, startTimer: false);
         var waiting = await unaskedPublisher.ApplyAsync(owner, 1, unasked.Revision, default, preservePause: true);
         Check(!unaskedStore.HasPublicationConsent(owner) && sent == 0 &&
-            waiting.ErrorCode == "privacy_publication.existing_scope_confirmation_required",
+            waiting.ErrorCode == "privacy_publication.consent_required",
             "official choice cannot grant never-confirmed ordinary scopes");
         var racingStore = new LocalPrivacyStore(root + "-race");
         var racing = racingStore.Save(owner, 0, Guid.NewGuid().ToString("N"), enabled with {

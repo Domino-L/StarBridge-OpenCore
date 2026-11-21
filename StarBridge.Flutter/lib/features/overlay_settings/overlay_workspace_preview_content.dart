@@ -6,6 +6,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_preview_identity.dart';
 import 'overlay_preview_sources.dart';
+import 'overlay_visor_layout.dart';
 import 'overlay_workspace_models.dart';
 
 /// Preview-only fixtures. Nothing here enters the workspace mutation or feed.
@@ -119,7 +120,7 @@ class OverlayPreviewContent extends StatelessWidget {
       );
     }
 
-    return KeyedSubtree(
+    final sample = KeyedSubtree(
       key: Key('overlay-simulated-structure-$moduleKey'),
       child: switch (moduleKey) {
         'Notice' => _NoticePreview(copy: copy, settings: settings, room: room),
@@ -144,6 +145,16 @@ class OverlayPreviewContent extends StatelessWidget {
         'Events' => _EventPreview(copy: copy),
         _ => Center(child: Text(moduleTitle())),
       },
+    );
+    // A visor block is sized by the visor (S/M/L), not by this sample: the
+    // sample keeps its own height and is cut at the block edge.
+    if (!OverlayVisorLayout.fixedSize(settings, moduleKey)) return sample;
+    return ClipRect(
+      child: OverflowBox(
+        alignment: AlignmentDirectional.topStart,
+        maxHeight: double.infinity,
+        child: sample,
+      ),
     );
   }
 }
@@ -418,6 +429,9 @@ class _MembersPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final identity = previewIdentity;
+    // 11-11 user ("预览示例对齐面罩"): the visor shows the fleet overview on top
+    // of several members, in fixed columns (no name column width setting)
+    final visor = OverlayVisorLayout.active(settings);
     var rows =
         <
               ({
@@ -438,17 +452,36 @@ class _MembersPreview extends StatelessWidget {
                   ship: '${copy('shipLabel')}: ${copy('notInGame')}',
                   self: true,
                 ),
+              if (visor)
+                for (final callsign in const [
+                  'Aster',
+                  'Cinder',
+                  'Comet',
+                  'Dusk',
+                ])
+                  (
+                    callsign: callsign,
+                    handle: callsign,
+                    status: copy('inGame'),
+                    location: copy('memberLocation'),
+                    ship: copy('memberShip'),
+                    self: false,
+                  ),
             ]
             .where((row) => !(settings['hideSelfMember'] == true && row.self))
             .toList();
     final availableRows = math.max(
       0,
-      ((referenceSize.height - 44) / 35).floor(),
+      ((referenceSize.height - 44 - (visor ? 18 : 0)) / 35).floor(),
     );
     rows = rows.take(availableRows).toList(growable: false);
-    final ratio = ((settings['memberNameColumnRatio']! as num).toDouble() * 100)
-        .round();
-    final hideStatus = settings['hideMemberOnlineStatus'] == true;
+    final ratio = visor
+        ? 60
+        : ((settings['memberNameColumnRatio']! as num).toDouble() * 100)
+              .round();
+    // 11-10 user: "去掉“隐藏成员在线状态”"; an old saved true no longer hides the
+    // status marks (the setting has no control any more to undo it)
+    const hideStatus = false;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 7),
@@ -465,6 +498,17 @@ class _MembersPreview extends StatelessWidget {
               weight: FontWeight.w600,
             ),
           ),
+          if (visor)
+            SizedBox(
+              key: const Key('overlay-preview-members-fleet-overview'),
+              height: 18,
+              child: _previewText(
+                context,
+                copy('fleetOverview'),
+                size: 9.5,
+                color: tokens.colors.textSecondary,
+              ),
+            ),
           const SizedBox(height: 8),
           for (final row in rows)
             SizedBox(
@@ -623,7 +667,9 @@ class _ChatPreview extends StatelessWidget {
                                 weight: FontWeight.w600,
                               ),
                             ),
-                            if (settings['chatShowTimestamp'] == true)
+                            // the visor's list shows no time (11-10)
+                            if (settings['chatShowTimestamp'] == true &&
+                                !OverlayVisorLayout.active(settings))
                               _previewText(
                                 context,
                                 sample.time,

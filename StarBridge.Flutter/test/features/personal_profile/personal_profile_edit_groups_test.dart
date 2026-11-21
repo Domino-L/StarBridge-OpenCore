@@ -56,11 +56,23 @@ void main() {
     visibility: PersonalProfileVisibility.onlyMe,
     presenceIntent: PersonalProfilePresenceIntent.busy,
     affiliations: const [],
-    availabilityWindows: const [],
-    timeZoneLabel: '',
+    availabilityWindows: const [
+      PersonalProfileAvailabilityWindow(
+        days: [2],
+        startTime: '20:00',
+        endTime: '21:00',
+      ),
+    ],
+    timeZoneLabel: 'UTC',
     gameplayMinutes: 0,
     activityRhythm: PersonalProfileActivityRhythm.casual,
-    roles: const [],
+    roles: const [
+      PersonalProfileTagValue(
+        labelKey: '',
+        displayLabel: 'Existing role',
+        category: PersonalProfileTagCategory.command,
+      ),
+    ],
     participationInterests: const [],
     supportCapabilities: const [],
     shipWishlist: const [],

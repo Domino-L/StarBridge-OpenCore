@@ -25,6 +25,7 @@ import 'achievement_collection_controller.dart';
 import 'achievement_collection_session.dart';
 import 'achievement_collection_port.dart';
 import 'achievement_detail.dart';
+import 'swift_leaderboard.dart';
 import 'achievement_idea_form.dart';
 import 'achievement_ideas_port.dart';
 import '../onboarding/connection_mode_port.dart';
@@ -40,11 +41,13 @@ class AchievementsPage extends StatefulWidget {
     this.session,
     this.scmSession,
     this.scmPort,
+    this.leaderboard,
     super.key,
   });
 
   final ValueListenable<AccountProjection> account;
   final AchievementCollectionPort port;
+  final SwiftLeaderboardController? leaderboard;
   final AchievementCollectionPort? scmPort;
   final AchievementCollectionSession? scmSession;
   final List<AchievementDefinition> catalog;
@@ -349,6 +352,7 @@ class _AchievementsPageState extends State<AchievementsPage> {
                       _catalog.where((d) => d.id == current.id).firstOrNull ??
                       current,
                   collection: _state,
+                  leaderboard: widget.leaderboard,
                   index: index,
                   total: order.length,
                   onPrevious: index <= 0

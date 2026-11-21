@@ -17,7 +17,9 @@ public sealed record ScmOAuthOptions(
         ScmEnvironmentSettings settings,
         ScmRegionRoute? route = null) => new(
         settings.AuthorityId,
-        settings.WebBaseUri,
+        settings.AccountAccessEnabled && !settings.IsDevelopment && !settings.HasExplicitWebBaseOverride &&
+            ScmWebsiteRouting.IsDomestic(route)
+            ? ScmWebsiteRouting.DomesticRoot : settings.WebBaseUri,
         route?.ApiBaseUri ?? settings.ApiBaseUri,
         route?.ResourceBaseUri ?? settings.ResourceBaseUri,
         "starbridge-desktop",

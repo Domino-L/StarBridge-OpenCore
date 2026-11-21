@@ -96,6 +96,8 @@ final class CommunityInviteOutcome {
               'requestChanged',
               'inviteInvalid',
               'identityUnavailable',
+              'identityRequired',
+              'identityAmbiguous',
               'notAllowed',
               'membershipConflict',
               'outcomeUnknown',

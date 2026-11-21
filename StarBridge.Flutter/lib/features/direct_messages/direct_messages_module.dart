@@ -307,6 +307,7 @@ final class DirectMessagesModule extends ChangeNotifier {
         conversationKey: row.conversationKey,
         gameId: row.gameId,
         presence: row.presence,
+        lastOnlineDays: row.lastOnlineDays,
       );
       rows = List.unmodifiable(
         rows.map(
@@ -667,7 +668,9 @@ final class DirectMessagesModule extends ChangeNotifier {
         throw const DirectReadFailure('data_invalid');
       }
       if (trimmed) {
-        merged = before > 0 ? merged.sublist(0, 1000) : merged.sublist(merged.length - 1000);
+        merged = before > 0
+            ? merged.sublist(0, 1000)
+            : merged.sublist(merged.length - 1000);
       }
       messages = List.unmodifiable(merged);
       // History advances the summary; directory/receipts own unread counts.
@@ -687,6 +690,7 @@ final class DirectMessagesModule extends ChangeNotifier {
                 conversationKey: row.conversationKey,
                 gameId: row.gameId,
                 presence: row.presence,
+                lastOnlineDays: row.lastOnlineDays,
               );
         rows = List.unmodifiable(rows.map(advance));
         selected = advance(selected!);
@@ -715,7 +719,8 @@ final class DirectMessagesModule extends ChangeNotifier {
         // a unique, Host-issued target with the same scoped identity, and retry
         // the read once without carrying cursors across capabilities. Never
         // retry a send or discard the user's draft as part of read recovery.
-        if (!older && recoverTarget &&
+        if (!older &&
+            recoverTarget &&
             _failure(e) == 'target_changed' &&
             target.conversationKey?.isNotEmpty == true) {
           try {
@@ -727,6 +732,8 @@ final class DirectMessagesModule extends ChangeNotifier {
             if (matches.length == 1 && matches.single.ref != target.ref) {
               rows = List.unmodifiable(directory);
               selected = matches.single;
+              // Failed bubbles keep id and time; retries use the new target.
+              outbox.renewReference(matches.single);
               messages = [];
               hasOlder = false;
               hasNewer = false;

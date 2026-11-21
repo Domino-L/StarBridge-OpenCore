@@ -77,6 +77,8 @@ final class CommunityAdmissionOutcome {
               'refreshRequired',
               'requestChanged',
               'identityUnavailable',
+              'identityRequired',
+              'identityAmbiguous',
               'notAllowed',
               'unavailable',
               'dataInvalid',

@@ -638,7 +638,7 @@ void main() {
           if (section == 'roles') {
             expect(find.byKey(const ValueKey('role-name')), findsOneWidget);
             expect(
-              tester.getTopLeft(find.text('身份组与权限')).dy,
+              tester.getTopLeft(find.text('成员角色').last).dy,
               greaterThanOrEqualTo(0),
             );
           }

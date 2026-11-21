@@ -63,6 +63,7 @@ internal sealed record ScmRuntimeConfiguration(
                 DateTimeOffset.UtcNow,
                 settings.EffectiveWebSocketBaseUri);
         state.SetActive(route);
+        ScmWebsiteRouting.SetActive(route);
         ScmRegionDiagnostics.WriteRoute(route, diagnostic);
         return new ScmRuntimeConfiguration(
             settings.EnvironmentName,

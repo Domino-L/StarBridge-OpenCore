@@ -45,7 +45,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
   testWidgets(
-    'each former instance stays selectable without substituting another of the same model',
+    'each former instance stays selectable on its own; one per model',
     (tester) async {
       viewport(tester, const Size(800, 900));
       await tester.pumpWidget(
@@ -90,18 +90,17 @@ void main() {
             .value,
         isTrue,
       );
-      await tester.ensureVisible(find.byKey(const Key('profile-favorite-a')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('profile-favorite-a')));
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widgetList<StarBridgeCheckboxTile>(
-              find.byType(StarBridgeCheckboxTile),
-            )
-            .where((tile) => tile.value),
-        hasLength(2),
+      // User 11-07: one ship per model, so the other Carrack is now closed.
+      final other = tester.widget<StarBridgeCheckboxTile>(
+        find.byWidgetPredicate(
+          (w) =>
+              w is StarBridgeCheckboxTile &&
+              w.controlKey == const Key('profile-favorite-a'),
+        ),
       );
+      expect(other.value, isFalse);
+      expect(other.onChanged, isNull);
+      expect(other.subtitle, '本模块已选同型号');
       expect(tester.takeException(), isNull);
     },
   );

@@ -58,6 +58,7 @@ final class CommunityDisbandController extends ChangeNotifier {
   Future<void> confirm(String password) async {
     if (!canConfirm ||
         !preview!.isExample &&
+            !preview!.scmRevalidation &&
             (password.trim().isEmpty || password.length > 4096)) {
       return;
     }
@@ -70,7 +71,12 @@ final class CommunityDisbandController extends ChangeNotifier {
       final result = await port.disband(
         targetRef,
         selected.confirmationRef,
-        selected.isExample ? 'example-only' : password,
+        selected.isExample
+            ? 'example-only'
+            // The relay re-confirms the SCM sign-in; no password is sent.
+            : selected.scmRevalidation
+            ? ''
+            : password,
       );
       if (!_current(epoch)) return;
       outcome = result;

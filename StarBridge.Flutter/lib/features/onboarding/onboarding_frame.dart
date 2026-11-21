@@ -86,7 +86,12 @@ class OnboardingFrame extends StatelessWidget {
                       view.busy
                           ? 'busy'
                           : view.error
-                          ? 'error'
+                          ? switch (view.errorCode) {
+                              'firstUse.source_invalid' => 'sourceInvalid',
+                              'firstUse.storage_unavailable' =>
+                                'storageUnavailable',
+                              _ => 'error',
+                            }
                           : 'unavailable',
                     ),
                     style: TextStyle(

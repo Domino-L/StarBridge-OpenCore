@@ -10,6 +10,7 @@ import 'package:starbridge_flutter/features/hangar/cached_local_hangar.dart';
 import 'package:starbridge_flutter/features/onboarding/connection_mode_port.dart';
 
 import 'hangar_reader_test.dart' as fixtures;
+import '../../_support/hangar_test_actions.dart';
 
 class _Inventory implements LocalHangarPort {
   int reads = 0;
@@ -208,24 +209,9 @@ void main() {
               .text,
           'Ship',
         );
-        expect(
-          tester
-              .widget<ChoiceChip>(find.byKey(const Key('hangar-former')))
-              .selected,
-          isTrue,
-        );
-        expect(
-          tester
-              .widget<FilterChip>(find.byKey(const Key('hangar-favorites')))
-              .selected,
-          isTrue,
-        );
-        expect(
-          tester
-              .widget<IconButton>(find.byKey(const Key('hangar-list')))
-              .isSelected,
-          isTrue,
-        );
+        expect(hangarChoice(tester, 'hangar-former').selected, isTrue);
+        expect(hangarChoice(tester, 'hangar-favorites').selected, isTrue);
+        expect(hangarChoice(tester, 'hangar-list').selected, isTrue);
         expect(
           tester
               .widget<StarBridgeCompactSelect<String>>(
@@ -252,18 +238,8 @@ void main() {
               .text,
           isEmpty,
         );
-        expect(
-          tester
-              .widget<ChoiceChip>(find.byKey(const Key('hangar-current')))
-              .selected,
-          isTrue,
-        );
-        expect(
-          tester
-              .widget<IconButton>(find.byKey(const Key('hangar-grid')))
-              .isSelected,
-          isTrue,
-        );
+        expect(hangarChoice(tester, 'hangar-current').selected, isTrue);
+        expect(hangarChoice(tester, 'hangar-grid').selected, isTrue);
         expect(tester.widget<CustomScrollView>(viewport).controller!.offset, 0);
         expect(tester.takeException(), isNull);
       } finally {

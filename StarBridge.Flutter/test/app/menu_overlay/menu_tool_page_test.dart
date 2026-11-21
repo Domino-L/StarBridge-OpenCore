@@ -74,6 +74,14 @@ void main() {
       expect(await incoming('openHudSettings', {'opening': 7}), true);
       expect(await incoming('openHudSettings', {'opening': 7}), true);
       expect(routes, ['/overlay', '/overlay']);
+      // "Do this in the client" opens the main fleet or organization page.
+      expect(await incoming('openFleetPage', {'opening': 7}), true);
+      expect(await incoming('openCommunitiesPage', {'opening': 7}), true);
+      expect(routes, ['/overlay', '/overlay', '/fleet', '/communities']);
+      await expectLater(
+        incoming('openFleetPage', {'opening': 6}),
+        throwsA(isA<PlatformException>()),
+      );
       await expectLater(
         incoming('openExecHangar', {'opening': 7}),
         throwsA(isA<PlatformException>()),
@@ -104,7 +112,8 @@ void main() {
 
       unbind();
       lifetime.toolPages.hudSettings.value++;
-      expect(routes, hasLength(2));
+      lifetime.toolPages.requested.value = ('/fleet', 99);
+      expect(routes, hasLength(4));
       window.dispose();
       navigation.dispose();
       await tester.pump();

@@ -67,7 +67,7 @@ internal sealed partial class ScmAccountBridgeHost
         finally { if (!_disposed) _mutationGate.Release(); }
     }
 
-    private static bool PageEditMatches(PersonalProfilePageEditContract edit, PersonalProfileDocumentContract profile)
+    internal static bool PageEditMatches(PersonalProfilePageEditContract edit, PersonalProfileDocumentContract profile)
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var expected = JsonSerializer.SerializeToElement(edit.Content, options);
@@ -78,14 +78,31 @@ internal sealed partial class ScmAccountBridgeHost
             if (group == "wallpaper") { if (edit.WallpaperId != profile.WallpaperId) return false; continue; }
             string[] fields = group switch
             {
-                "introduction" => ["introduction"], "layout" => ["modules"],
+                "introduction" => ["introduction"],
+                "layout" => ["modules", "showcases", "achievementShowcase", "favoriteShowcaseExtra", "favoriteShowcaseExtras"],
                 "favorites" => ["favoriteShipCodes"], "wishlist" => ["shipWishlist"],
-                "playStyle" => ["skilledRoles", "supportCapabilities", "participationInterests"],
+                "playStyle" => ["skilledRoles", "supportCapabilities", "participationInterests", "mainRole"],
                 "schedule" => ["showOnlineTime", "onlineTimeStart", "onlineTimeEnd", "activityRhythm", "availabilityTimeZoneId", "availabilityWindows"],
                 _ => throw new InvalidOperationException("Unsupported page group")
             };
-            if (fields.Any(field => expected.GetProperty(field).GetRawText() != actual.GetProperty(field).GetRawText())) return false;
+            // Missing additive fields from an older client are not edits or clears.
+            if (fields.Any(field => expected.TryGetProperty(field, out var requested) &&
+                (!actual.TryGetProperty(field, out var confirmed) || requested.GetRawText() != confirmed.GetRawText()) &&
+                // The server writes the per-module map in module order; compare it as pairs.
+                !(field == "favoriteShowcaseExtras" && actual.TryGetProperty(field, out var map) && SamePairs(requested, map)) &&
+                // The server does not serialize a cleared extra: [] reads back absent.
+                !(field == "favoriteShowcaseExtra" && requested.GetArrayLength() == 0 &&
+                  (!actual.TryGetProperty(field, out var cleared) || cleared.ValueKind is JsonValueKind.Null ||
+                   cleared.ValueKind is JsonValueKind.Array && cleared.GetArrayLength() == 0)))) return false;
         }
         return true;
+    }
+
+    private static bool SamePairs(JsonElement left, JsonElement right)
+    {
+        if (left.ValueKind != JsonValueKind.Object || right.ValueKind != JsonValueKind.Object) return false;
+        var a = left.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetRawText(), StringComparer.Ordinal);
+        var b = right.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetRawText(), StringComparer.Ordinal);
+        return a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var value) && value == pair.Value);
     }
 }

@@ -20,28 +20,40 @@ class PersonalProfileLayoutToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return StarBridgeSurface(
-      role: SurfaceRole.status,
-      padding: EdgeInsets.symmetric(
-        horizontal: tokens.space.md,
-        vertical: tokens.space.sm,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              AppStrings.of(context).text('profile.favorites.hint'),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: tokens.colors.textSecondary),
-            ),
-          ),
-          SizedBox(width: tokens.space.md),
-          PersonalProfileAddModuleButton(
+    // Plan A (11-05): one line of small text, no box around it.
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: tokens.space.xxs),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final hint = Text(
+            AppStrings.of(context).text('profile.favorites.hint'),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: tokens.colors.textSecondary),
+          );
+          final add = PersonalProfileAddModuleButton(
             key: const Key('profile-layout-add-module'),
             hiddenModuleIds: hiddenModuleIds,
             onSelected: onAdd,
-          ),
-        ],
+          );
+          // A narrow column puts the add button under the hint.
+          if (constraints.maxWidth < 420) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                hint,
+                SizedBox(height: tokens.space.sm),
+                add,
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: hint),
+              SizedBox(width: tokens.space.md),
+              add,
+            ],
+          );
+        },
       ),
     );
   }

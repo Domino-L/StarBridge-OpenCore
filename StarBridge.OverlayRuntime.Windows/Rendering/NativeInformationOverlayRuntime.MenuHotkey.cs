@@ -121,6 +121,7 @@ public sealed partial class NativeInformationOverlayRuntime : IMenuHotkeyRuntime
         }
         // Menu focus is not the game going into background. Keep current HUD
         // visibility and authority refresh; only the HWND stacking changes.
+        OverlayVisorRefreshCounts.Menu();
         RefreshWindow();
         return true;
     }

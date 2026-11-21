@@ -4,6 +4,7 @@ import 'dart:ui' show SemanticsAction;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'marketplace_confirm_location_fixture.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_dialog.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_interaction_theme.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_controller.dart';
@@ -278,13 +279,16 @@ void main() {
           await tester.pumpAndSettle();
           final route = ModalRoute.of(tester.element(find.byType(Dialog)))!;
           final label = find.text('查看订单详情');
+          // m99 C/D: the confirm dialog reads the order and shows one
+          // quantity row ("可交易 N" / loading / quantity unknown); the
+          // fixture read fails, so the unknown row adds one line (+13).
           expect(
             tester.getRect(find.byKey(const Key('market-confirm-details'))),
-            const Rect.fromLTRB(430, 647.5, 522, 695.5),
+            const Rect.fromLTRB(430, 689.5, 522, 737.5),
           );
           expect(
             tester.getRect(label),
-            const Rect.fromLTRB(440, 665.5, 512, 677.5),
+            const Rect.fromLTRB(440, 707.5, 512, 719.5),
           );
           Focus.of(tester.element(label)).requestFocus();
           await tester.pump();
@@ -324,6 +328,7 @@ void main() {
           await tester.tap(find.text('购买'));
           await tester.pumpAndSettle();
           final route = ModalRoute.of(tester.element(find.byType(Dialog)))!;
+          await chooseConfirmLocation(tester);
           await tester.tap(find.byKey(const Key('market-confirm-submit')));
           await tester.pump();
           write.completeError(TimeoutException('fixture write receipt lost'));
@@ -387,6 +392,7 @@ void main() {
           await tester.pump();
           await tester.pump();
           final route = ModalRoute.of(tester.element(find.byType(Dialog)))!;
+          await chooseConfirmLocation(tester);
           Focus.of(tester.element(find.text('确认发起'))).requestFocus();
           await tester.pump();
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -438,6 +444,7 @@ void main() {
             find.byKey(const Key('market-confirm-quantity-add')),
           );
           await tester.pump();
+          await chooseConfirmLocation(tester);
           await tester.tap(find.byKey(const Key('market-confirm-submit')));
           await tester.pumpAndSettle();
           Focus.of(tester.element(find.text('完善交易资料'))).requestFocus();
@@ -470,7 +477,7 @@ void main() {
             reason: 'Keyboard profile Done must complete route exit within two frames.',
           );
           expect(find.byType(TradeProfileForm), findsNothing);
-          expect(find.text('2'), findsOneWidget);
+          expect(find.text('2 件'), findsOneWidget);
           expect(find.text('完善交易资料'), findsNothing);
           expect(port.saves, 1);
           expect(port.writes, 1);
@@ -506,6 +513,7 @@ void main() {
             find.byKey(const Key('market-confirm-quantity-add')),
           );
           await tester.pump();
+          await chooseConfirmLocation(tester);
           await tester.tap(find.byKey(const Key('market-confirm-submit')));
           await tester.pumpAndSettle();
           expect(port.writes, 1);
@@ -533,7 +541,7 @@ void main() {
           await tester.tap(find.byKey(const Key('market-trade-profile-close')));
           await tester.pumpAndSettle();
           expect(find.byType(TradeProfileForm), findsNothing);
-          expect(find.text('2'), findsOneWidget);
+          expect(find.text('2 件'), findsOneWidget);
           expect(
             Focus.of(tester.element(find.text('完善交易资料'))).hasFocus,
             isTrue,

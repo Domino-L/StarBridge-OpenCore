@@ -6,6 +6,7 @@ import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import 'starbridge_interaction_theme.dart';
 import 'starbridge_activation_origin.dart';
+import '../surfaces/light_visual_text.dart';
 
 @immutable
 class StarBridgeSegment<T> {
@@ -306,7 +307,7 @@ class _StarBridgeSegmentedControlState<T>
               child: Text(
                 segment.label,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: visual.foreground,

@@ -8,6 +8,7 @@ import '../../design_system/interaction/starbridge_checkbox_tile.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_field_frame.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'personal_profile_favorite_modules.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_ship_names.dart';
 
@@ -30,6 +31,29 @@ class ProfileFavoriteDialog extends StatefulWidget {
 class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
   late final _selected = widget.selected.toList();
   String _query = '';
+  Map<String, String> _models = const {};
+
+  String _model(String id) => _models[id] ?? id;
+
+  /// [ProfileFavoriteDialog.reserved] holds models (see
+  /// [ProfileFavoriteModules.reserved]); a plain ship ID also counts.
+  bool _reserved(String id) =>
+      widget.reserved.contains(_model(id)) || widget.reserved.contains(id);
+
+  /// Another selected ship of the same model (this module's picks).
+  bool _modelTakenHere(String id) {
+    final model = _model(id);
+    return _selected.any((other) => other != id && _model(other) == model);
+  }
+
+  bool get _valid {
+    final models = <String>{};
+    return _selected.length <= widget.capacity &&
+        _selected.every(
+          (id) =>
+              !_reserved(id) && models.add(_model(id)),
+        );
+  }
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
@@ -41,6 +65,12 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
     // a selected historical ID for another ship merely sharing its model.
     final effectiveChoices = widget.local.choices;
     final known = effectiveChoices.map((e) => e.identity.runtimeId).toSet();
+    // User 11-07: one ship per model on the page, so a model already picked
+    // here or in another module closes its other ships as well.
+    _models = ProfileFavoriteModules.modelsOf([
+      ...widget.local.retainedChoices,
+      ...effectiveChoices,
+    ]);
     final missing = _selected.where((id) => !known.contains(id)).toList();
     final choices = effectiveChoices
         .where(
@@ -117,9 +147,7 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
         StarBridgeActionButton(
           kind: StarBridgeActionKind.primary,
           controlKey: const Key('profile-favorites-apply'),
-          onActivate:
-              _selected.length > widget.capacity ||
-                  _selected.any(widget.reserved.contains)
+          onActivate: !_valid
               ? null
               : (source) => dismissStarBridgeDialog<List<String>>(
                   context,
@@ -135,7 +163,8 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
   Widget _choice(BuildContext context, PersonalProfileShipSummary ship) {
     final id = ship.identity.runtimeId;
     final checked = _selected.contains(id);
-    final reserved = widget.reserved.contains(id);
+    final reserved = !checked && _reserved(id);
+    final takenHere = !checked && !reserved && _modelTakenHere(id);
     final strings = AppStrings.of(context);
     final index = widget.local.choices.indexOf(ship) + 1;
     return StarBridgeCheckboxTile(
@@ -147,10 +176,15 @@ class _FavoriteDialogState extends State<ProfileFavoriteDialog> {
           '${PersonalProfileShipNames.primary(context, ship.identity)}${ship.formerlyOwned ? ' · ${LocalHangarCopy(context).formerlyOwned}' : ''}',
       subtitle: reserved
           ? strings.text('profile.favorites.used')
+          : takenHere
+          ? strings.text('profile.favorites.sameModel')
           : index > 0
           ? '${PersonalProfileShipNames.secondary(context, ship.identity) ?? ship.manufacturer} · #$index'
           : ship.manufacturer,
-      onChanged: reserved || (!checked && _selected.length >= widget.capacity)
+      onChanged:
+          reserved ||
+              takenHere ||
+              (!checked && _selected.length >= widget.capacity)
           ? null
           : (value) => setState(() {
               if (value == true) {

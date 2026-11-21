@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/app/diagnostics/frame_pace_recorder.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
 import 'package:starbridge_flutter/design_system/style_registry.dart';
@@ -87,6 +88,40 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+  testWidgets('smoothness switch appears only where the client records', (
+    tester,
+  ) async {
+    final module = createApplicationSupportModule(_ApplicationSupportPort());
+    addTearDown(module.dispose);
+    await tester.pumpWidget(_app(DiagnosticsSettingsPage(support: module)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('frame-pace-switch')), findsNothing);
+    final temp = Directory.systemTemp.createTempSync('sb-frame-pace-page-');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final recorder = FramePaceRecorder(
+      directory: temp,
+      clockUs: () => 0,
+      addTimings: (_) {},
+      removeTimings: (_) {},
+      readActivity: () async => null,
+    );
+    addTearDown(recorder.dispose);
+    await tester.pumpWidget(
+      _app(
+        FramePaceScope(
+          recorder: recorder,
+          child: DiagnosticsSettingsPage(support: module),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('frame-pace-switch')),
+      200,
+    );
+    expect(find.byKey(const Key('frame-pace-switch')), findsOneWidget);
+    expect(recorder.enabled.value, isFalse);
+  });
   testWidgets(
     'diagnostics page embeds history and runs checks only on request',
     (tester) async {

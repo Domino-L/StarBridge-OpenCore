@@ -1,4 +1,5 @@
-import '../../features/overlay_settings/overlay_workspace_layout_item.dart';
+import '../../features/overlay_settings/overlay_visor_layout.dart';
+import '../../features/overlay_settings/overlay_workspace_models.dart';
 
 /// Wire view of the in-game quick-adjust panel. The primary engine owns all
 /// workspace state; this only carries display rows and the action keys the
@@ -19,6 +20,33 @@ typedef MenuHudQuickPreset = ({
   bool active,
 });
 typedef MenuHudQuickSource = ({String id, String label, bool enabled});
+
+/// The whole-visor settings the quick panel offers (11-11 user: calm display
+/// and the visor's depth, the depth only on the visor; the overall opacity
+/// went with its retirement, 11-12).
+final class MenuHudQuickGlobal {
+  const MenuHudQuickGlobal({required this.calm, this.tilt});
+
+  static const maxTilt = 60.0;
+
+  final bool calm;
+  final double? tilt;
+
+  static MenuHudQuickGlobal? parse(Object? value) {
+    if (value == null) return null;
+    if (value is! Map || value['calm'] is! bool) throw const FormatException();
+    // an old save outside today's range shows clamped, never breaks the panel
+    double number(Object? v, double min, double max) => switch (v) {
+      final num n when n.isFinite => n.toDouble().clamp(min, max),
+      _ => throw const FormatException(),
+    };
+    return MenuHudQuickGlobal(
+      calm: value['calm'] as bool,
+      tilt: value['tilt'] == null ? null : number(value['tilt'], 0, maxTilt),
+    );
+  }
+}
+
 typedef MenuHudQuickNote = ({
   String kind,
   Map<String, String> args,
@@ -45,7 +73,17 @@ final class MenuHudQuickView {
     this.layout = const [],
     this.eventSide = 'Right',
     this.eventY = 0.3,
+    this.visor,
+    this.global,
   });
+
+  /// Null on a client without the global group's quick settings.
+  final MenuHudQuickGlobal? global;
+
+  /// While placing on the visor (11-11 user: "Alt+M 按面罩排布"): the whole
+  /// settings, so placement shows and moves the blocks as the visor places
+  /// them. Null for any other appearance or outside placement.
+  final OverlayWorkspaceSettings? visor;
 
   /// Placement mode: the menu shows only the on-screen editing layer.
   final bool placing, canUndo, canRedo;
@@ -214,6 +252,17 @@ final class MenuHudQuickView {
       },
       eventY: switch ((value['events'] as Map?)?['y'] ?? 0.3) {
         final num y when y.isFinite && y >= 0 && y <= 1 => y.toDouble(),
+        _ => throw const FormatException(),
+      },
+      global: MenuHudQuickGlobal.parse(value['global']),
+      visor: switch (value['settings']) {
+        null => null,
+        final Map map => switch (OverlayWorkspaceSettings.fromMap(
+          map.cast<String, Object?>(),
+        )) {
+          final settings when OverlayVisorLayout.active(settings) => settings,
+          _ => null,
+        },
         _ => throw const FormatException(),
       },
     );

@@ -7,8 +7,17 @@ import '../../platform/window/native_viewport_visibility.dart';
 /// A bounded idle delay, never a polling loop. Native children share the same
 /// opacity target and report interaction through their existing status lane.
 class MenuPanelIdle extends StatefulWidget {
-  const MenuPanelIdle({super.key, required this.shown, required this.child});
+  const MenuPanelIdle({
+    super.key,
+    required this.shown,
+    this.coversPanel = false,
+    required this.child,
+  });
   final bool shown;
+
+  /// Lies over another open panel: stays opaque instead of fading, so the
+  /// panel below never shows through it.
+  final bool coversPanel;
   final Widget child;
   @override
   State<MenuPanelIdle> createState() => _MenuPanelIdleState();
@@ -52,6 +61,7 @@ class _MenuPanelIdleState extends State<MenuPanelIdle>
     if (!mounted) return;
     final active =
         !widget.shown ||
+        widget.coversPanel ||
         _hovered ||
         _pressed ||
         _nativeActive ||

@@ -13,6 +13,7 @@ import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/personal_profile/bridge_personal_profile_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_module.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_module_grid.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_page.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_public_header.dart';
@@ -211,6 +212,17 @@ void main() {
     // No owner tools, no module grid.
     expect(find.byKey(const Key('profile-edit')), findsNothing);
     expect(find.byKey(const Key('profile-preview')), findsNothing);
+    // User 11-08: the visibility is the profile's one privacy setting. Outside
+    // it the whole showcase column is hidden: no showcase of any kind, the
+    // playtime included, and no stats about the page.
+    expect(find.byType(PersonalProfileModuleGrid), findsNothing);
+    for (final key in const [
+      'profile-showcase-gameplay',
+      'profile-showcase-hours',
+      'profile-rail-stats',
+    ]) {
+      expect(find.byKey(Key(key)), findsNothing, reason: key);
+    }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

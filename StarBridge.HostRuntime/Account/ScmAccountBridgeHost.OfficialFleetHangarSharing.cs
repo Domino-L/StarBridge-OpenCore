@@ -52,7 +52,9 @@ internal sealed partial class ScmAccountBridgeHost
             if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
             {
                 entryCode = _reauthorizationRequired ? "reauthorization-required" : "credential-unavailable";
-                throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+                throw new AccountBridgeHostException(_reauthorizationRequired
+                    ? AccountBridgeStableErrors.ReauthorizationRequired
+                    : AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: !_reauthorizationRequired);
             }
             entryCode = "communities-unavailable";
             var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");

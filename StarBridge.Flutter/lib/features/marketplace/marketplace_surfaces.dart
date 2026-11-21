@@ -1,3 +1,5 @@
+// Marketplace pages cut fading names with an ellipsis while a game runs.
+export '../../design_system/surfaces/light_visual_text.dart' show fadeOverflow;
 import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/interaction/starbridge_choice_navigation.dart';
 import '../../design_system/interaction/starbridge_tracked_navigation.dart';

@@ -78,15 +78,20 @@ void main() {
       // 32 high, separated by slanted dividers; since layout A (2026-10-23)
       // they follow the section title "交易" on one row.
       expect(segment('进行中'), const Rect.fromLTRB(48.5, 0, 134.5, 32));
+      // 2026-11-14 TR5: a 待评价 tab sits between 进行中 and 已结束.
+      expect(
+        segment('待评价'),
+        within(distance: .05, from: const Rect.fromLTRB(142.7, 0, 240.2, 32)),
+      );
       expect(
         segment('已结束'),
-        within(distance: .05, from: const Rect.fromLTRB(142.73, 0, 205.73, 32)),
+        within(distance: .05, from: const Rect.fromLTRB(248.5, 0, 311.5, 32)),
       );
       expect(segment('全部').width, closeTo(50, .05));
       expect(segment('我买的').width, closeTo(63, .05));
       expect(
         segment('我卖的'),
-        within(distance: .05, from: const Rect.fromLTRB(349.2, 0, 412.2, 32)),
+        within(distance: .05, from: const Rect.fromLTRB(454.9, 0, 517.9, 32)),
       );
       await _failRead(c, port);
       await tester.pumpAndSettle();

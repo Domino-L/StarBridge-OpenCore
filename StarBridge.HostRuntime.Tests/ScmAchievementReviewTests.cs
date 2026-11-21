@@ -23,8 +23,10 @@ internal static class ScmAchievementReviewTests
             var clock = new CelebrationTestClock(); var realStart = clock.GetUtcNow();
             if (scenario == "before-start") clock.ShiftWall(TimeSpan.FromMinutes(-55));
             var delivered = 0;
-            using var runtime = new ScmAchievementUnlockRuntime(Path.Combine(root, scenario), () => (Owner, 1),
-                (_, _) => Task.CompletedTask, (_, _) => Task.FromResult(Catalog()), (_, _, _) => delivered++, clock,
+            var path = Path.Combine(root, scenario);
+            using var runtime = new ScmAchievementUnlockRuntime(path, () => (Owner, 1),
+                (_, _) => Task.CompletedTask, (_, _) => Task.FromResult(Catalog()),
+                (_, _, receipt) => { delivered++; ScmAchievementUnlockTests.Shown(path, Owner, receipt); }, clock,
                 scenario is "before-start" or "untrusted-no-rollback" ? null : realStart);
             if (scenario == "during-run") clock.ShiftWall(TimeSpan.FromMinutes(-55));
             if (scenario == "trusted-mismatch") clock.ShiftWall(TimeSpan.FromMinutes(5));
@@ -37,6 +39,8 @@ internal static class ScmAchievementReviewTests
         }
         Console.WriteLine("PASS R2 ClockRollback: before-start, runtime drift, trusted mismatch, consistent trusted anchor");
     }
+    // Build 105: a card counts as celebrated only after its visible dwell. A card
+    // handed over but never shown (exit, crash, account switch) comes back once.
     private static async Task DeliveryRetry(string root)
     {
         var attempts = new List<string>(); var displays = new List<string>();
@@ -46,36 +50,47 @@ internal static class ScmAchievementReviewTests
             (_, _) => Task.FromResult(Catalog()), (generation, item, receipt) => {
                 attempts.Add(item.Id);
                 delivery.ScmEarned(generation, item.Id, item.UnlockedAtUtc!.Value, item.Name, null, receipt);
-                if (item.Id == "scm-1") throw new IOException("Synthetic throw after acceptance");
+                if (item.Id == "scm-1") throw new IOException("Synthetic throw after hand-over");
             }))
         {
-            delivery.Configure(new AcceptingSink(displays));
+            // scm-1 is handed over but the process ends before its dwell completes.
+            delivery.Configure(new PresentingSink(displays, never: "scm-1"));
             await runtime.ObserveAsync(Owner, 1, Catalog());
             await runtime.ObserveAsync(Owner, 1, Catalog(Item(3), Item(1), Item(2)));
             Check(attempts.SequenceEqual(new[] { "scm-1", "scm-2", "scm-3" }), "R4 ThrowingCallbackContinuesSiblings: all cards receive their turn");
-            using var lease = new ScmAchievementUnlockStore(path).Open(Owner);
-            var state = lease.Read();
-            Check(state.Confirmed.Length == 3 && state.Pending?.Single().Item.Id == "scm-1", "Only the unacknowledged receipt remains pending");
+            await CelebrationTestClock.Until(() => ScmAchievementUnlockTests.Pending(path, Owner).Length == 1);
+            await runtime.ObserveAsync(Owner, 1, Catalog(Item(1), Item(2), Item(3)));
+            Check(displays.Count(id => id == "scm-1") == 1 && attempts.Count(id => id == "scm-1") == 2,
+                "Within one process a card already handed over is not admitted again");
+            Check(ScmAchievementUnlockTests.Pending(path, Owner).Single().Item.Id == "scm-1", "Only the card never shown remains pending");
+            await runtime.RetireAsync();
         }
         using var restartedDelivery = new AchievementCelebrationDelivery(() => (Owner, 2), path);
-        restartedDelivery.Configure(new AcceptingSink(displays));
+        restartedDelivery.Configure(new PresentingSink(displays));
         using var restarted = new ScmAchievementUnlockRuntime(path, () => (Owner, 2), (_, _) => Task.CompletedTask,
-            (_, _) => Task.FromResult(Catalog()), (generation, item, receipt) => {
+            (_, _) => Task.FromResult(Catalog(Item(1), Item(2), Item(3))), (generation, item, receipt) => {
                 attempts.Add(item.Id);
                 restartedDelivery.ScmEarned(generation, item.Id, item.UnlockedAtUtc!.Value, item.Name, null, receipt);
             });
         await restarted.ObserveAsync(Owner, 2, Catalog(Item(1), Item(2), Item(3)));
+        await CelebrationTestClock.Until(() => ScmAchievementUnlockTests.Pending(path, Owner).Length == 0);
         await restarted.ObserveAsync(Owner, 2, Catalog(Item(1), Item(2), Item(3)));
-        Check(attempts.SequenceEqual(new[] { "scm-1", "scm-2", "scm-3", "scm-1" }) && displays.Count == 3,
-            "Stable receipt retries across restart without duplicating accepted cards");
+        Check(displays.Count(id => id == "scm-1") == 2 && displays.Count(id => id == "scm-2") == 1 && displays.Count(id => id == "scm-3") == 1,
+            "After restart only the never-shown card plays again, once; shown cards never repeat");
         await restarted.RetireAsync();
-        Console.WriteLine("PASS R4 ThrowingCallbackContinuesSiblings: durable pending, retry, idempotent receipt");
+        Console.WriteLine("PASS R4 ThrowingCallbackContinuesSiblings: pending until shown, one admission per process, retry after restart");
     }
-    private sealed class AcceptingSink(List<string> displays) : IAchievementCelebrationSink
+    private sealed class PresentingSink(List<string> displays, string? never = null) : IAchievementCelebrationSink
     {
+        private readonly HashSet<string> _admitted = new(StringComparer.Ordinal);
         public void Submit(AchievementCelebration notice)
-        { if (notice.TryAcceptReceipt()) displays.Add(notice.AchievementId); }
-        public void Clear() { }
+        {
+            // The native queue's own per-process receipt set, then its dwell.
+            if (!notice.TryAcceptReceipt() || notice.Receipt is { } receipt && !_admitted.Add(receipt)) return;
+            lock (displays) displays.Add(notice.AchievementId);
+            if (notice.AchievementId != never) notice.MarkPresented();
+        }
+        public void Clear() => _admitted.Clear();
     }
     private static async Task InvalidationDuringDelivery(string root)
     {

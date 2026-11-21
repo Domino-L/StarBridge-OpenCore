@@ -78,6 +78,7 @@ internal sealed partial class OverlayCompositionHudWindow
             StartTopmostGuard();
 
             _frameScheduler = new OverlayFrameScheduler(_renderDispatcher, RenderAnimationFrame);
+            StartVisorOpeningFrames();
 
             _started.Set();
             LogPerformance("dcomp-hud-render-ready", readyStopwatch);

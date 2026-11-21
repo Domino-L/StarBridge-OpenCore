@@ -120,13 +120,25 @@ internal sealed partial class ScmAccountBridgeHost
                 (payload.GetProperty("appPresenceConfirmed").GetBoolean() || payload.GetProperty("gameObserved").GetBoolean()))
                 throw new AccountBridgeHostException("official_fleet.runtime_unavailable");
             var officialAppOnly = PrivacyPublicationPayload.IsOfficialAppOnly(payload);
-            if ((expected ?? "") != input.Handle) throw new AccountBridgeHostException("privacy_publication.account_changed");
+            var lane = officialChoice is not null ? "official" : payload.TryGetProperty("communities", out _) ? "communities" : "ordinary";
+            if ((expected ?? "") != input.Handle)
+            {
+                Support.IdentityGateJournal.Event("publication-local", $"lane={lane} code=handle-mismatch expectedEmpty={expected is null} inputEmpty={input.Handle.Length == 0}");
+                throw new AccountBridgeHostException("privacy_publication.account_changed");
+            }
             if (officialAppOnly && payload.GetProperty("online").GetBoolean() &&
                 !HasObservedAppPresence(input))
+            {
+                Support.IdentityGateJournal.Event("publication-local", $"lane={lane} code=app-presence-not-observed");
                 throw new AccountBridgeHostException("privacy_publication.identity_required");
+            }
             if (payload.GetProperty("online").GetBoolean() && !officialAppOnly &&
-                !(await GetGameIdentityPolicyAsync(input.Owner, token)).SensitiveWritesAllowed)
+                await GetGameIdentityPolicyAsync(input.Owner, token) is { SensitiveWritesAllowed: false } blockedPolicy)
+            {
+                Support.IdentityGateJournal.Event("publication-local",
+                    $"lane={lane} code=sensitive-writes-denied policyState={blockedPolicy.State} scmBinding={blockedPolicy.ScmBindingState} detected={blockedPolicy.DetectedHandle is not null}");
                 throw new AccountBridgeHostException("privacy_publication.identity_required");
+            }
             var writer = _privacyWriter ?? throw new AccountBridgeHostException("privacy_publication.unavailable");
             Record();
             phase = "publication-send";

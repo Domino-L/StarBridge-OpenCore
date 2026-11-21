@@ -5,6 +5,7 @@ import '../icons/icon_semantic.dart';
 import '../icons/starbridge_icon.dart';
 import 'starbridge_action_row.dart';
 import 'starbridge_menu_anchor.dart';
+import '../surfaces/light_visual_text.dart';
 
 @immutable
 class StarBridgeSelectOption<T> {
@@ -85,7 +86,7 @@ class StarBridgeSelectField<T> extends StatelessWidget {
                     color: enabled ? null : Theme.of(context).disabledColor,
                   ),
                   maxLines: 1,
-                  overflow: TextOverflow.fade,
+                  overflow: fadeOverflow(context),
                   softWrap: false,
                 ),
               ),

@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
+import '../account/account_migration_controller.dart';
 import '../account/account_models.dart';
+import '../account/account_relay_features.dart';
 
 final class GameplayHistoryScanProgress {
   const GameplayHistoryScanProgress(
@@ -38,8 +40,13 @@ final class GameplayTimeView {
     this.visible = true,
     this.busy = false,
     this.consent = 'unknown',
+    this.consentPending,
     this.seconds,
     this.savedSeconds,
+    this.accountTotalState = 'unavailable',
+    this.accountTotalSeconds,
+    this.accountTotalStale = false,
+    this.pauseReason,
     this.recording = false,
     this.gameState = 'unknown',
     this.showOnProfile = true,
@@ -53,12 +60,20 @@ final class GameplayTimeView {
     this.error,
     this.resetState,
     this.scanProgress,
+    this.scmOnly = false,
   });
   final bool visible;
   final bool busy;
   final String consent;
+  final String? consentPending;
   final int? seconds;
   final int? savedSeconds;
+  final String accountTotalState;
+  final int? accountTotalSeconds;
+  final bool accountTotalStale;
+  final String? pauseReason;
+  bool get connectionUnavailable =>
+      pauseReason == 'connection' || pauseReason == 'connectionPaused';
   final bool recording;
   final String gameState;
   final bool showOnProfile;
@@ -72,6 +87,10 @@ final class GameplayTimeView {
   final String? error;
   final String? resetState;
   final GameplayHistoryScanProgress? scanProgress;
+
+  /// The relay keeps no account playtime for a SCM account without a linked
+  /// legacy account, so the account total is explained instead of failing.
+  final bool scmOnly;
 
   GameplayTimeView copyWith({
     bool? busy,
@@ -87,12 +106,19 @@ final class GameplayTimeView {
     String? resetState,
     GameplayHistoryScanProgress? scanProgress,
     bool clearScanProgress = false,
+    bool clearAccountTotal = false,
+    bool? scmOnly,
   }) => GameplayTimeView(
     visible: visible,
     busy: busy ?? this.busy,
     consent: consent,
+    consentPending: consentPending,
     seconds: seconds,
     savedSeconds: savedSeconds,
+    accountTotalState: clearAccountTotal ? 'unavailable' : accountTotalState,
+    accountTotalSeconds: clearAccountTotal ? null : accountTotalSeconds,
+    accountTotalStale: accountTotalStale,
+    pauseReason: pauseReason,
     recording: recording ?? this.recording,
     gameState: gameState ?? this.gameState,
     showOnProfile: showOnProfile,
@@ -106,6 +132,7 @@ final class GameplayTimeView {
     error: error ?? this.error,
     resetState: resetState ?? this.resetState,
     scanProgress: clearScanProgress ? null : scanProgress ?? this.scanProgress,
+    scmOnly: scmOnly ?? this.scmOnly,
   );
 }
 
@@ -114,6 +141,9 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
   GameplayTimeController(this._session, this._account)
     : super(const GameplayTimeView(visible: false)) {
     _account.addListener(_accountChanged);
+    // An offered migration opens the account playtime to SCM-only accounts.
+    _migrationOffer = AccountMigrationController.offerChangesFor(_account)
+      ..addListener(_accountChanged);
     _events = _session.events.listen((event) {
       if (event.name != 'account.changed' &&
           event.name != 'bootstrap.invalidated') {
@@ -125,6 +155,7 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     _accountChanged();
   }
   final BridgeClientSession _session;
+  late final Listenable _migrationOffer;
   final ValueListenable<AccountProjection> _account;
   late final StreamSubscription<BridgeEnvelope> _events;
   (AccountSessionState, int)? _accountKey;
@@ -163,7 +194,10 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
   void _accountChanged() {
     final account = _account.value;
     final key = (account.sessionState, account.generation);
-    if (_accountKey == key) return;
+    if (_accountKey == key) {
+      if (value.scmOnly != _scmOnly) value = value.copyWith(scmOnly: _scmOnly);
+      return;
+    }
     _accountKey = key;
     _epoch++;
     _context = null;
@@ -183,6 +217,7 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
       error: _session.hostCapabilities.contains('gameplayTime.local')
           ? null
           : 'unsupported',
+      scmOnly: _scmOnly,
     );
     if (value.visible && value.error == null) unawaited(_run());
   }
@@ -203,8 +238,10 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
   bool get _canStart =>
       !_disposed && !_inFlight && value.visible && value.error != 'unsupported';
 
+  bool get _scmOnly => relayAccountFeaturesBlocked(_account);
+
   bool get resetSupported =>
-      _session.hostCapabilities.contains('gameplayTime.reset');
+      _session.hostCapabilities.contains('gameplayTime.reset') && !_scmOnly;
 
   Future<void> resetTime(Future<bool> Function() confirm) async {
     if (!_canStart ||
@@ -334,6 +371,10 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
       final body = response.payload;
       final seconds = body['seconds'];
       final saved = body['savedSeconds'];
+      final accountState = body['accountTotalState'] ?? 'unavailable';
+      final accountSeconds = body['accountTotalSeconds'];
+      final pauseReason = body['pauseReason'];
+      final accountStale = body['accountTotalStale'] ?? false;
       final consent = body['consent'];
       final shown = body['showOnProfile'] ?? true;
       final history = body['historyState'] ?? 'unchecked';
@@ -343,13 +384,20 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
           response.accountContext?.authority != context.authority ||
           response.accountContext?.subject != context.subject ||
           body['schemaVersion'] != 1 ||
+          !const [null, 'connection', 'connectionPaused', 'identity'].contains(pauseReason) ||
+          accountStale is! bool ||
+          !const ['available', 'empty', 'unavailable'].contains(accountState) ||
+          (accountState == 'available'
+              ? accountSeconds is! int || accountSeconds < 0
+              : accountSeconds != null) ||
           !const ['unknown', 'allowed', 'declined'].contains(consent) ||
           seconds != null && (seconds is! int || seconds < 0) ||
           saved != null && (saved is! int || saved < 0) ||
           (seconds == null) != (saved == null) ||
           seconds is int && saved is int && saved > seconds ||
           body['recording'] == true &&
-              (consent != 'allowed' || body['error'] != null) ||
+              (consent != 'allowed' ||
+                  body['error'] != null) ||
           body['recording'] is! bool ||
           !const [
             'unknown',
@@ -379,8 +427,17 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
       }
       value = GameplayTimeView(
         consent: consent as String,
+        consentPending:
+            consent == 'unknown' && body['consentPending'] == 'identity'
+            ? 'identity'
+            : null,
         seconds: seconds as int?,
         savedSeconds: saved as int?,
+        accountTotalState: accountState as String,
+        scmOnly: _scmOnly,
+        accountTotalSeconds: accountSeconds as int?,
+        accountTotalStale: accountStale,
+        pauseReason: pauseReason as String?,
         recording: body['recording'] as bool,
         gameState: body['gameState'] as String,
         showOnProfile: shown,
@@ -403,6 +460,7 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
         value = value.copyWith(
           recording: false,
           gameState: 'unknown',
+          clearAccountTotal: true,
           error: _pendingConsent == false
               ? 'stopUnconfirmed'
               : _pendingVisibility != null
@@ -707,6 +765,7 @@ final class GameplayTimeController extends ValueNotifier<GameplayTimeView> {
     _epoch++;
     _timer?.cancel();
     _account.removeListener(_accountChanged);
+    _migrationOffer.removeListener(_accountChanged);
     unawaited(_events.cancel());
     super.dispose();
   }

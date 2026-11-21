@@ -105,6 +105,7 @@ class CommunityShipLoaners extends StatelessWidget {
                       width: 48,
                       height: 48,
                       child: CommunityCatalogShipImage(
+                        model: item.code,
                         asset: item.catalogThumbnailAsset,
                       ),
                     ),

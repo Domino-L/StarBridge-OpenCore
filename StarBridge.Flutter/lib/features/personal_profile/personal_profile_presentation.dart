@@ -18,37 +18,31 @@ final class PersonalProfilePresentation {
   final int avatarStyle;
   final String wallpaperId;
 
+  bool canAutoImport(String group) =>
+      origins[group] == 'default' || origins[group] == 'linkedLegacy';
+
   /// A caller must identify actual user edits, not pass an entire projected
-  /// page. Empty edits perform no write; an explicit empty value still writes
-  /// and becomes custom even when it equals the inherited display value.
+  /// page. Empty edits perform no write; an explicitly cleared group can
+  /// become custom.
   Map<String, Object?>? editRequest(Map<String, Map<String, Object?>> edits) {
     if (edits.isEmpty) return null;
-    const fields = {
-      'introduction': {'introduction'},
-      'layout': {'modules'},
-      'favorites': {'favoriteShipCodes'},
-      'wishlist': {'shipWishlist'},
-      'playStyle': {
-        'skilledRoles',
-        'supportCapabilities',
-        'participationInterests',
-      },
-      'schedule': {
-        'showOnlineTime',
-        'onlineTimeStart',
-        'onlineTimeEnd',
-        'activityRhythm',
-        'availabilityTimeZoneId',
-        'availabilityWindows',
-      },
-      'avatarStyle': {'avatarStyle'},
-      'wallpaper': {'wallpaperId'},
-    };
-    final nextContent = <String, Object?>{...content}..remove('presenceIntent');
+    // The 4th showcase ship is sent only as an explicit layout edit: omitted,
+    // the server keeps the saved value.
+    final nextContent = <String, Object?>{...content}
+      ..remove('presenceIntent')
+      ..remove('favoriteShowcaseExtra')
+      // Likewise the per-module 4th ships (user 11-06) and the main role:
+      // sent only when the owner changed them.
+      ..remove('favoriteShowcaseExtras')
+      ..remove('mainRole');
+    // WhenWritingNull omits these nullable record properties on a Host read,
+    // but the page write contract requires both keys in the content object.
+    nextContent.putIfAbsent('availabilityTimeZoneId', () => null);
+    nextContent.putIfAbsent('availabilityWindows', () => const <Object?>[]);
     Object? nextStyle = avatarStyle;
     Object? nextWallpaper = wallpaperId;
     for (final entry in edits.entries) {
-      final allowed = fields[entry.key];
+      final allowed = _fields[entry.key];
       if (allowed == null ||
           entry.value.isEmpty ||
           entry.value.keys.any((field) => !allowed.contains(field))) {
@@ -59,7 +53,21 @@ final class PersonalProfilePresentation {
       } else if (entry.key == 'wallpaper') {
         nextWallpaper = entry.value['wallpaperId'];
       } else {
-        nextContent.addAll(entry.value);
+        for (final field in entry.value.entries) {
+          final previous = content[field.key];
+          final draft = field.value;
+          if (_orderedTags.contains(field.key) &&
+              previous is List &&
+              draft is List) {
+            final kept = {...draft};
+            nextContent[field.key] = [
+              ...previous.where(kept.remove),
+              ...draft.where(kept.remove),
+            ];
+          } else {
+            nextContent[field.key] = draft;
+          }
+        }
       }
     }
     return _freeze({
@@ -73,15 +81,75 @@ final class PersonalProfilePresentation {
     }) as Map<String, Object?>;
   }
 
-  static const groups = {
-    'introduction',
-    'layout',
-    'favorites',
-    'schedule',
-    'playStyle',
-    'wishlist',
-    'avatarStyle',
-    'wallpaper',
+  bool sameGroup(String group, PersonalProfilePresentation other) =>
+      origins[group] == other.origins[group] &&
+      switch (group) {
+        'avatarStyle' => avatarStyle == other.avatarStyle,
+        'wallpaper' => wallpaperId == other.wallpaperId,
+        _ => _fields[group]!.every(
+          (field) =>
+              content.containsKey(field) == other.content.containsKey(field) &&
+              (group == 'playStyle'
+                  ? samePlayStyleField(content[field], other.content[field])
+                  : sameValue(content[field], other.content[field])),
+        ),
+      };
+
+  static bool samePlayStyleField(Object? left, Object? right) =>
+      left is List && right is List
+      ? left.toSet().length == right.toSet().length &&
+            left.toSet().containsAll(right)
+      : sameValue(left, right);
+
+  static bool sameValue(Object? left, Object? right) {
+    if (left is List && right is List) {
+      return left.length == right.length &&
+          left.indexed.every((item) => sameValue(item.$2, right[item.$1]));
+    }
+    if (left is Map && right is Map) {
+      return left.length == right.length &&
+          left.entries.every(
+            (entry) =>
+                right.containsKey(entry.key) &&
+                sameValue(entry.value, right[entry.key]),
+          );
+    }
+    return left == right;
+  }
+
+  static final groups = Set<String>.unmodifiable(_fields.keys);
+  static const _orderedTags = {
+    'skilledRoles',
+    'participationInterests',
+    'supportCapabilities',
+  };
+  static const _fields = {
+    'introduction': {'introduction'},
+    'layout': {
+      'modules',
+      'showcases',
+      'achievementShowcase',
+      'favoriteShowcaseExtra',
+      'favoriteShowcaseExtras',
+    },
+    'favorites': {'favoriteShipCodes'},
+    'wishlist': {'shipWishlist'},
+    'playStyle': {
+      'skilledRoles',
+      'supportCapabilities',
+      'participationInterests',
+      'mainRole',
+    },
+    'schedule': {
+      'showOnlineTime',
+      'onlineTimeStart',
+      'onlineTimeEnd',
+      'activityRhythm',
+      'availabilityTimeZoneId',
+      'availabilityWindows',
+    },
+    'avatarStyle': {'avatarStyle'},
+    'wallpaper': {'wallpaperId'},
   };
 
   static PersonalProfilePresentation? fromProfile(

@@ -1,6 +1,6 @@
 {
     "schemaVersion":  1,
-    "revision":  "2026-10-14.1",
+    "revision":  "2026-11-02.1",
     "entries":  [
                     {
                         "runtimeId": "RSI_Constellation_Mk5_Centaurus",
@@ -1240,8 +1240,10 @@
                         "englishName":  "Dragonfly Pink",
                         "chineseName":  "蜻蜓 星空猫",
                         "aliases":  [
-                                        "德雷克 蜻蜓 星空猫"
-                                    ]
+                                        "德雷克 蜻蜓 星空猫",
+                                          "Dragonfly Star Kitten Edition",
+                                          "Dragonfly Star Kitten"
+                                      ]
                     },
                     {
                         "runtimeId":  "DRAK_Dragonfly_Yellow",
@@ -2236,24 +2238,27 @@
                         "englishName":  "Constellation Andromeda",
                         "chineseName":  "星座 仙女座",
                         "aliases":  [
-                                        "RSI 星座 仙女座"
-                                    ]
+                                        "RSI 星座 仙女座",
+                                          "Constellation Mk IV Andromeda"
+                                      ]
                     },
                     {
                         "runtimeId":  "RSI_Constellation_Aquila",
                         "englishName":  "Constellation Aquila",
                         "chineseName":  "星座 天鹰座",
                         "aliases":  [
-                                        "RSI 星座 天鹰座"
-                                    ]
+                                        "RSI 星座 天鹰座",
+                                          "Constellation Mk IV Aquila"
+                                      ]
                     },
                     {
                         "runtimeId":  "RSI_Constellation_Phoenix",
                         "englishName":  "Constellation Phoenix",
                         "chineseName":  "星座 凤凰座",
                         "aliases":  [
-                                        "RSI 星座 凤凰座"
-                                    ]
+                                        "RSI 星座 凤凰座",
+                                          "Constellation Mk IV Phoenix"
+                                      ]
                     },
                     {
                         "runtimeId":  "RSI_Constellation_Phoenix_Emerald",
@@ -2268,8 +2273,9 @@
                         "englishName":  "Constellation Taurus",
                         "chineseName":  "星座 金牛座",
                         "aliases":  [
-                                        "RSI 星座 金牛座"
-                                    ]
+                                        "RSI 星座 金牛座",
+                                          "Constellation Mk IV Taurus"
+                                      ]
                     },
                     {
                         "runtimeId":  "RSI_Constellation_Taurus_Collector_Military",

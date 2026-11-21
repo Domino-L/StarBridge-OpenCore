@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
+
 import '../tokens/color_tokens.dart';
 import '../tokens/starbridge_tokens.dart';
 
@@ -20,7 +22,11 @@ class StarBridgeSurface extends StatelessWidget {
   final double fillOpacity;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     final tokens = context.tokens;
     final surface = tokens.surfaces.resolve(role);
     return DecoratedBox(
@@ -28,7 +34,7 @@ class StarBridgeSurface extends StatelessWidget {
         color: surface.fill.withValues(alpha: surface.fill.a * fillOpacity),
         border: Border.all(color: surface.border, width: tokens.stroke.regular),
         borderRadius: borderRadius ?? tokens.shape.medium,
-        boxShadow: surface.shadows,
+        boxShadow: lightOnly ? const [] : surface.shadows,
       ),
       child: Padding(
         padding: padding ?? EdgeInsets.all(tokens.density.panelPadding),

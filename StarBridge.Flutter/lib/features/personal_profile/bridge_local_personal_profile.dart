@@ -1,27 +1,34 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
 
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
 import '../../platform/bridge/bridge_account_access.dart';
 import '../hangar/local_hangar_port.dart';
+import 'personal_profile_auto_import.dart';
 import 'personal_profile_local_projection.dart';
 import 'personal_profile_models.dart';
-import 'personal_profile_edit_groups.dart';
 import 'personal_profile_favorite_modules.dart';
+import 'personal_profile_edit_groups.dart';
+import 'personal_profile_owner_lock.dart';
 import 'personal_profile_port.dart';
+import 'bridge_personal_profile_account_facts.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_visibility.dart';
 import 'profile_read_failure.dart';
 import 'profile_read_scope.dart';
+import 'bridge_local_personal_profile_rebase.dart';
+import 'bridge_local_personal_profile_save.dart';
+import 'bridge_local_personal_profile_visibility.dart';
 
 /// Local presentation writer. Legacy background publication is a separate,
 /// narrow bridge contract; the whole-profile remote port remains read-only.
 final class BridgeLocalPersonalProfile
     implements
         PersonalProfilePort,
+        PersonalProfileAccountFactsReader,
         ProfileVisibilityAccess,
         PersonalProfileContentChanges,
+        PersonalProfileDisplayReader,
         ProfileReadScopeOwner,
         ProfileReadGenerationOwner,
         ProfileReadAccountAdvanceOwner {
@@ -35,6 +42,14 @@ final class BridgeLocalPersonalProfile
        // ignore: prefer_initializing_formals
        _hangar = hangar {
     _invalidationGeneration = _session.activeGeneration;
+    _saves = _ownerLocks.saves.listen((event) {
+      final (owner, source) = event;
+      if (!identical(source, this) &&
+          owner.generation == activeReadGeneration &&
+          _ownerLocks.isCurrent(owner)) {
+        _contentChanged();
+      }
+    });
     _events = _session.events.listen((event) {
       if (const {
         'account.changed',
@@ -48,20 +63,24 @@ final class BridgeLocalPersonalProfile
         _invalidationGeneration = _session.activeGeneration;
         _epoch++;
         _readScope = null;
+        _displayUpdate = null;
         _visibilityLease = null;
         _lease = null;
-        _pending = null;
         _invalidations.add(null);
       } else if (const {
         'account.avatarChanged',
         'personalProfile.changed',
         'hangarReader.changed',
       }.contains(event.name)) {
-        _changes.add(null);
+        _contentChanged();
       }
     });
   }
   final BridgeClientSession _session;
+  late final _ownerLocks = PersonalProfileOwnerLocks.of(_session);
+  @override
+  Future<PersonalProfilePublicFacts?> readAccountFacts() =>
+      _closed ? Future.value(null) : readProfileAccountFacts(_session);
   @override
   int get activeReadGeneration => _session.activeGeneration;
   late int _invalidationGeneration;
@@ -77,9 +96,21 @@ final class BridgeLocalPersonalProfile
   final _changes = StreamController<void>.broadcast();
   late final StreamSubscription<BridgeEnvelope> _events;
   _LocalLease? _lease;
+  _LocalLease? _savingLease;
+  bool _readDuringSave = false;
+  late final StreamSubscription<(PersonalProfileOwnerLock, Object)> _saves;
+  ({
+    int epoch,
+    int generation,
+    Future<PersonalProfileSnapshot> result,
+    Future<PersonalProfileSnapshot>? initial,
+  })?
+  _reading;
+  ({int epoch, int generation, PersonalProfileSnapshot snapshot})?
+  _displayUpdate;
+  int _contentVersion = 0;
   // Observed capability for this owner, not an inferred historical origin.
   BridgeAccountContext? _versionedPageOwner;
-  ({String content, String operation})? _pending;
   int _epoch = 0;
   bool _closed = false;
   ({ProfileVisibilityState state, int epoch})? _visibilityLease;
@@ -111,62 +142,16 @@ final class BridgeLocalPersonalProfile
       throw StateError('unsupported visibility');
     }
     _visibilityLease = null;
-    final response = await _session.request(
-      expected == null
-          ? 'personalProfile.readVisibility'
-          : 'personalProfile.saveVisibility',
-      accountContext: lease.owner,
-      timeout: _timeout,
-      payload: {
-        'schemaVersion': 1,
-        if (expected != null) 'expectedRevision': expected.revision,
-        if (visibility != null) 'visibility': visibility.bridgeValue,
-      },
+    final response = await requestLocalProfileVisibility(
+      _session,
+      lease.owner,
+      _timeout,
+      expected,
+      visibility,
     );
     _validate(response, lease.owner);
     if (!_current(lease.epoch, lease.generation)) throw StateError('stale');
-    final revision = response.payload['revision'];
-    final scope = response.payload['visibility'];
-    final rawChoices = response.payload['availableVisibilities'];
-    final List<PersonalProfileVisibility> choices;
-    if (rawChoices == null) {
-      choices = ProfileVisibilityState.legacyVisibilities;
-    } else {
-      if (rawChoices is! List ||
-          rawChoices.isEmpty ||
-          rawChoices.length > 5 ||
-          rawChoices.toSet().length != rawChoices.length ||
-          rawChoices.any(
-            (v) => !PersonalProfileVisibility.values.any(
-              (known) => known.bridgeValue == v,
-            ),
-          )) {
-        throw const FormatException();
-      }
-      choices = List.unmodifiable(
-        rawChoices.map(
-          (v) => PersonalProfileVisibility.fromBridgeValue(v as String),
-        ),
-      );
-    }
-    if (revision is! int ||
-        revision < 0 ||
-        !const {
-          'public',
-          'friendsAndMainFleet',
-          'friendsFleetAndOrganizations',
-          'friendsOnly',
-          'private',
-        }.contains(scope) ||
-        !choices.any((v) => v.bridgeValue == scope) ||
-        visibility != null && scope != visibility.bridgeValue) {
-      throw const FormatException();
-    }
-    final state = ProfileVisibilityState(
-      revision,
-      PersonalProfileVisibility.fromBridgeValue(scope as String),
-      availableVisibilities: choices,
-    );
+    final state = parseLocalProfileVisibility(response.payload, visibility);
     _visibilityLease = (state: state, epoch: _epoch);
     return state;
   }
@@ -189,12 +174,78 @@ final class BridgeLocalPersonalProfile
   bool _ownerPending = false;
 
   @override
-  Future<PersonalProfileSnapshot> read() async {
+  Future<PersonalProfileSnapshot> read() => _read(false);
+
+  @override
+  Future<PersonalProfileSnapshot> readForDisplay() => _read(true);
+
+  void _contentChanged() {
+    if (_closed) return;
+    _contentVersion++;
+    _displayUpdate = null;
+    _changes.add(null);
+  }
+
+  Future<PersonalProfileSnapshot> _read(bool progressive) async {
+    if (_closed) return _staleSnapshot;
+    final saving = _savingLease;
+    if (saving != null &&
+        _current(saving.epoch, saving.generation) &&
+        _ownerLocks.isCurrent(saving.ownerLock)) {
+      _readDuringSave = true;
+      return saving.displayed;
+    }
+    final reading = _reading;
+    if (reading != null && _current(reading.epoch, reading.generation)) {
+      return progressive ? reading.initial ?? reading.result : reading.result;
+    }
+    final update = _displayUpdate;
+    _displayUpdate = null;
+    if (progressive &&
+        update != null &&
+        _current(update.epoch, update.generation)) {
+      return update.snapshot;
+    }
+    final epoch = _epoch, generation = activeReadGeneration;
+    final contentVersion = _contentVersion;
+    final initial = progressive ? Completer<PersonalProfileSnapshot>() : null;
+    final result = _readWithOwnerRetry(initial?.complete);
+    _reading = (
+      epoch: epoch,
+      generation: generation,
+      result: result,
+      initial: initial?.future,
+    );
+    final settled = result.then((snapshot) {
+      if (identical(_reading?.result, result)) _reading = null;
+      if (initial != null) {
+        if (!initial.isCompleted) {
+          initial.complete(snapshot);
+        } else if (_current(epoch, generation)) {
+          // Publish the settled read once without starting another import.
+          if (_contentVersion == contentVersion) {
+            _displayUpdate = (
+              epoch: epoch,
+              generation: generation,
+              snapshot: snapshot,
+            );
+          }
+          _changes.add(null);
+        }
+      }
+      return snapshot;
+    });
+    return initial?.future ?? settled;
+  }
+
+  Future<PersonalProfileSnapshot> _readWithOwnerRetry(
+    void Function(PersonalProfileSnapshot)? onPending,
+  ) async {
     for (var attempt = 0; ; attempt++) {
       final epoch = _epoch;
       final generation = _session.activeGeneration;
       _ownerPending = false;
-      final snapshot = await _readOnce();
+      final snapshot = await _readOnce(onPending);
       if (!_ownerPending ||
           attempt >= ownerPendingRetryDelays.length ||
           !_current(epoch, generation)) {
@@ -205,7 +256,9 @@ final class BridgeLocalPersonalProfile
     }
   }
 
-  Future<PersonalProfileSnapshot> _readOnce() async {
+  Future<PersonalProfileSnapshot> _readOnce(
+    void Function(PersonalProfileSnapshot)? onPending,
+  ) async {
     _readScope = null;
     _lease = null;
     _visibilityLease = null;
@@ -229,6 +282,11 @@ final class BridgeLocalPersonalProfile
       if (!hasRelayAccount(account) || account.accountContext == null) {
         return const PersonalProfileSnapshot.unavailable();
       }
+      final owner = _ownerLocks.forOwner(
+        account.accountContext!,
+        account.sessionGeneration,
+      );
+      final readStamp = owner.importStamp;
       // Observe errors on each future immediately; one failing source cannot
       // leave another asynchronous error unhandled.
       final results = await Future.wait<Object?>([
@@ -246,20 +304,19 @@ final class BridgeLocalPersonalProfile
       if (!_current(epoch, account.sessionGeneration)) return _staleSnapshot;
       final response = results[0] as BridgeEnvelope;
       _validate(response, account.accountContext!);
-      final revision = response.payload['revision'] as int;
-      if (revision < 0) throw const FormatException();
-      final content = (response.payload['content'] as Map?)
-          ?.cast<String, Object?>();
-      if ((revision == 0) != (content == null)) throw const FormatException();
+      final local = parseLocalProfileRevision(response.payload);
+      final (:revision, :content) = local;
       final remote = results[1] as PersonalProfileSnapshot;
       final scope = ProfileReadScope.fromLocalResponse(
         account,
         response,
         _session.activeGeneration,
       );
+      bool sameRemoteOwner() =>
+          _remote is! ProfileReadScopeOwner ||
+          scope.sameOwner((_remote as ProfileReadScopeOwner).readScope);
       if (remote.availability == PersonalProfileAvailability.available &&
-          _remote is ProfileReadScopeOwner &&
-          !scope.sameOwner((_remote as ProfileReadScopeOwner).readScope)) {
+          !sameRemoteOwner()) {
         throw const FormatException(
           'Profile sources belong to different owners.',
         );
@@ -271,8 +328,17 @@ final class BridgeLocalPersonalProfile
       if (remote.availability == PersonalProfileAvailability.signedOut) {
         return remote;
       }
-      final snapshot = projectLocalProfile(
-        remote,
+      if (remote.availability != PersonalProfileAvailability.available) {
+        return const PersonalProfileSnapshot.unavailable(
+          failureKey: 'profile.error.ownerReadFailed',
+        );
+      }
+      PersonalProfileSnapshot project(
+        PersonalProfileSnapshot source,
+        Set<String> preferLocal,
+        bool pending,
+      ) => projectLocalProfile(
+        source,
         content,
         results[2] as LocalHangarSnapshot?,
         DateTime.tryParse(response.payload['savedAt'] as String? ?? ''),
@@ -281,6 +347,8 @@ final class BridgeLocalPersonalProfile
         accountAvatarImageData: account.payload['avatarImageData'] as String?,
         legacyAccount: account.payload['state'] == 'legacySignedIn',
         accountCallSign: account.payload['state'] == 'signedIn',
+        preferLocalGroups: preferLocal,
+        autoImportPending: pending,
         timeZones: {
           for (final zone
               in (response.payload['timeZones'] as List? ?? const [])
@@ -288,21 +356,53 @@ final class BridgeLocalPersonalProfile
             zone['id'] as String: zone['label'] as String,
         },
       );
-      // A successful read establishes the next edit revision, including a
-      // save whose response was lost. Do not reuse that completed operation.
-      _pending = null;
+      final writer = _remote;
+      bool current() =>
+          _current(epoch, account.sessionGeneration) &&
+          _ownerLocks.isCurrent(owner);
+      final snapshot =
+          account.payload['state'] == 'signedIn' &&
+              revision > 0 &&
+              content != null &&
+              remote.presentation != null
+          ? await autoImportPersonalProfile(
+              remote: remote,
+              content: content,
+              owner: owner,
+              readStamp: readStamp,
+              writer: writer is PersonalProfilePresentationWriter
+                  ? writer as PersonalProfilePresentationWriter
+                  : null,
+              project: project,
+              current: current,
+              sameOwner: () =>
+                  activeReadGeneration == owner.generation &&
+                  _ownerLocks.isCurrent(owner),
+              onPending: onPending,
+              onCommitted: () => _ownerLocks.notifySave(owner, this),
+              refresh: () async {
+                final latest = await _readRemote();
+                if (!current() ||
+                    !sameRemoteOwner() ||
+                    latest.availability !=
+                        PersonalProfileAvailability.available ||
+                    latest.presentation == null) {
+                  return null;
+                }
+                return latest;
+              },
+            )
+          : project(remote, const {}, false);
+      if (!current()) return _staleSnapshot;
       if (snapshot.allowEditing) {
         _lease = _LocalLease(
-          account.accountContext!,
-          account.sessionGeneration,
+          owner,
           epoch,
-          revision,
-          snapshot.local!.favoriteShipIds,
-          content,
+          LocalProfileSaveBaseline(local),
           snapshot.callSign,
-          remote.availability == PersonalProfileAvailability.available
-              ? remote.callSign
-              : null,
+          account.payload['state'] == 'signedIn'
+              ? snapshot.callSign
+              : remote.callSign,
           snapshot,
         );
       }
@@ -317,7 +417,7 @@ final class BridgeLocalPersonalProfile
           error.code == 'profile_local.account_changed' &&
           _current(epoch, generation);
       return PersonalProfileSnapshot.unavailable(
-        failureKey: _failure(error),
+        failureKey: localProfileFailureKey(error),
         transientReadFailure:
             _current(epoch, generation) && profileReadIsTransient(error),
       );
@@ -328,8 +428,8 @@ final class BridgeLocalPersonalProfile
     try {
       return await _remote.read();
     } on Object {
-      // Optional online details cannot turn a successful local read into an
-      // empty-file claim or prevent an explicitly requested local save.
+      // The owner read keeps this failure distinct from a valid remote default.
+      // No edit lease may be issued from a failed remote observation.
       return const PersonalProfileSnapshot.unavailable();
     }
   }
@@ -351,13 +451,27 @@ final class BridgeLocalPersonalProfile
       );
     }
     final lease = _lease;
-    if (lease == null || !_current(lease.epoch, lease.generation)) {
+    if (lease == null ||
+        !_current(lease.epoch, lease.generation) ||
+        !_ownerLocks.isCurrent(lease.ownerLock) ||
+        identical(lease, _savingLease)) {
       return _stale;
     }
+    bool currentLease() =>
+        identical(_lease, lease) &&
+        _current(lease.epoch, lease.generation) &&
+        _ownerLocks.isCurrent(lease.ownerLock);
+    _savingLease = lease;
+    _readDuringSave = false;
+    final operation = lease.ownerLock.beginSave();
     var callSignConfirmed = false;
     var callSignAttempted = false;
-    var pageConfirmed = false;
+    final baseline = lease.versionedEdit;
+    var pageConfirmed = baseline?.hasConfirmedGroups == true;
+    var keepLease = false;
     try {
+      if (operation.previous case final previous?) await previous;
+      if (!currentLease()) return _stale;
       final account = await _session.request(
         'account.getCurrent',
         payload: const {'schemaVersion': 1},
@@ -365,12 +479,13 @@ final class BridgeLocalPersonalProfile
       );
       if (!hasRelayAccount(account) ||
           !_same(account.accountContext, lease.owner) ||
-          !identical(_lease, lease) ||
-          !_current(lease.epoch, lease.generation)) {
+          !currentLease()) {
         return _stale;
       }
       final syncBackground = account.payload['state'] == 'legacySignedIn';
-      final rename = !syncBackground && edit.callSign.trim() != lease.callSign;
+      final rename =
+          !syncBackground &&
+          edit.callSign.trim() != (lease.confirmedCallSign ?? lease.callSign);
       // Reject a known unavailable step before committing any page fields.
       // This is capability preflight, not a substitute for Host authorization.
       if (rename &&
@@ -394,23 +509,30 @@ final class BridgeLocalPersonalProfile
         _lease = null;
         return _stale;
       }
-      if (!syncBackground && presentation != null) {
-        final groups = personalProfileEditGroups(lease.displayed, edit);
-        if (groups.isNotEmpty) {
-          final writer = _remote;
-          if (writer is! PersonalProfilePresentationWriter) return _stale;
-          final result = await (writer as PersonalProfilePresentationWriter)
-              .savePresentation(presentation, groups);
-          if (result.outcome != PersonalProfileActionOutcome.completed) {
-            _lease = null;
-            return result;
-          }
-          pageConfirmed = true;
-          if (!identical(_lease, lease) ||
-              !_current(lease.epoch, lease.generation)) {
-            return _stale;
-          }
+      final groups = personalProfileEditGroups(lease.displayed, edit);
+      final remoteGroups = baseline?.pendingGroups(edit, groups) ?? groups;
+      if (!syncBackground && baseline != null && remoteGroups.isNotEmpty) {
+        final writer = _remote;
+        if (writer is! PersonalProfilePresentationWriter) return _stale;
+        final result = await baseline.save(
+          owner: lease.ownerLock,
+          writer: writer as PersonalProfilePresentationWriter,
+          readLatest: _readRemote,
+          current: currentLease,
+          sameOwner: () =>
+              writer is! ProfileReadScopeOwner ||
+              _readScope?.sameOwner(
+                    (writer as ProfileReadScopeOwner).readScope,
+                  ) ==
+                  true,
+          groups: remoteGroups,
+        );
+        if (result.outcome != PersonalProfileActionOutcome.completed) {
+          if (result.requiresReload && identical(_lease, lease)) _lease = null;
+          keepLease = !result.requiresReload;
+          return result;
         }
+        pageConfirmed = true;
       }
       if (rename) {
         callSignAttempted = true;
@@ -420,19 +542,17 @@ final class BridgeLocalPersonalProfile
           timeout: _timeout,
           payload: {
             'schemaVersion': 1,
-            'expectedCallSign': lease.remoteCallSign,
+            'expectedCallSign': lease.confirmedCallSign ?? lease.remoteCallSign,
             'callSign': edit.callSign.trim(),
           },
         );
         _validate(confirmed, lease.owner);
-        if (!identical(_lease, lease) ||
-            !_current(lease.epoch, lease.generation)) {
-          return _stale;
-        }
+        if (!currentLease()) return _stale;
         if (confirmed.payload['callSign'] != edit.callSign.trim()) {
           throw const FormatException();
         }
         callSignConfirmed = true;
+        lease.confirmedCallSign = edit.callSign.trim();
       }
       ({int revision, String wallpaper})? background;
       if (syncBackground) {
@@ -441,73 +561,31 @@ final class BridgeLocalPersonalProfile
         } on Object {
           // Online failure must not prevent the explicitly requested local save.
         }
-        if (!identical(_lease, lease) ||
-            !_current(lease.epoch, lease.generation)) {
-          return _stale;
-        }
+        if (!currentLease()) return _stale;
       }
-      final content = <String, Object?>{
-        'callSign': edit.callSign.trim(),
-        'introduction': edit.about.trim(),
-        'avatarStyle': edit.avatarStyle,
-        'wallpaperId': edit.wallpaperId,
-        'preserveEmptyFields': true,
-        'favoriteShipIds':
-            edit.favoriteShipIds ??
-            ProfileFavoriteModules.selections(edit.moduleLayout) ??
-            lease.favorites,
-        if (edit.playStyle != null || lease.content?['playStyle'] != null)
-          'playStyle': {
-            ...?(lease.content?['playStyle'] as Map?)?.cast<String, Object?>(),
-            ...?edit.playStyle?.toJson(),
-          },
-        if (edit.schedule != null || lease.content?['schedule'] != null)
-          'schedule': edit.schedule?.toJson() ?? lease.content?['schedule'],
-        'modules': [
-          for (final item in edit.moduleLayout)
-            {
-              'id': item.moduleId,
-              'span': item.size.span,
-              'isVisible': item.isVisible,
-              'position': item.position,
-              if (item.favoriteShipIds != null && edit.favoriteShipIds == null)
-                'favoriteShipIds': item.favoriteShipIds,
-            },
-        ],
-      };
-      final encoded = jsonEncode(content);
-      if (_pending?.content != encoded) {
-        final random = Random.secure();
-        _pending = (
-          content: encoded,
-          operation: List.generate(
-            16,
-            (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-          ).join(),
-        );
-      }
-      final response = await _session.request(
-        'personalProfile.localSave',
-        accountContext: lease.owner,
-        timeout: _timeout,
-        payload: {
-          'schemaVersion': 1,
-          'expectedRevision': lease.revision,
-          'operationId': _pending!.operation,
-          'content': content,
+      final localResult = await lease.localEdit.save(
+        displayed: lease.displayed,
+        edit: edit,
+        groups: groups,
+        legacyRelay: syncBackground,
+        current: currentLease,
+        request: (name, payload) async {
+          final response = await _session.request(
+            name,
+            accountContext: lease.owner,
+            timeout: _timeout,
+            payload: {'schemaVersion': 1, ...payload},
+          );
+          _validate(response, lease.owner);
+          return response.payload;
         },
       );
-      _validate(response, lease.owner);
-      if (!identical(_lease, lease) ||
-          !_current(lease.epoch, lease.generation)) {
-        return _stale;
+      if (localResult != null) {
+        keepLease = !localResult.requiresReload;
+        return localResult;
       }
-      if (response.payload['operationId'] != _pending!.operation ||
-          response.payload['revision'] != lease.revision + 1) {
-        throw const FormatException();
-      }
+      if (!currentLease()) return _stale;
       _lease = null;
-      _pending = null;
       if (syncBackground) {
         if (background == null) return _backgroundPending;
         try {
@@ -526,8 +604,11 @@ final class BridgeLocalPersonalProfile
         }
         if (!_current(lease.epoch, lease.generation)) return _stale;
       }
-      return const PersonalProfileActionResult(
+      return PersonalProfileActionResult(
         PersonalProfileActionOutcome.completed,
+        messageKey: !syncBackground && presentation == null
+            ? 'profile.local.onlySaved'
+            : null,
       );
     } on Object catch (error) {
       return PersonalProfileActionResult(
@@ -543,13 +624,26 @@ final class BridgeLocalPersonalProfile
                       error is BridgeRemoteException &&
                           error.code == 'bridge.disconnected')
             ? 'profile.callsign.unconfirmed'
-            : _failure(error),
+            : localProfileFailureKey(error),
       );
     } finally {
+      operation.finish();
+      _ownerLocks.notifySave(lease.ownerLock, this);
       // A rename may have committed even when its response or the later local
       // save failed. A fresh read, not another send from this edit lease, must
       // establish the next expected account presentation.
-      if (pageConfirmed || callSignAttempted) _lease = null;
+      if (!keepLease &&
+          (pageConfirmed || callSignAttempted) &&
+          identical(_lease, lease)) {
+        _lease = null;
+      }
+      if (identical(_savingLease, lease)) {
+        _savingLease = null;
+        if (_readDuringSave && _current(lease.epoch, lease.generation)) {
+          _contentChanged();
+        }
+        _readDuringSave = false;
+      }
     }
   }
 
@@ -606,69 +700,42 @@ final class BridgeLocalPersonalProfile
     }
   }
 
-  static String _failure(Object error) => switch (error) {
-    BridgeRemoteException(code: 'account.callsign_conflict') =>
-      'profile.error.refreshBeforeSave',
-    BridgeRemoteException(code: 'account.callsign_invalid') =>
-      'profile.collab.invalid',
-    BridgeRemoteException(code: 'account.callsign_unconfirmed') =>
-      'profile.callsign.unconfirmed',
-    BridgeRemoteException(code: 'account.callsign_unavailable') =>
-      'profile.callsign.unavailable',
-    BridgeRemoteException(code: 'personal_profile.write_forbidden') =>
-      'profile.callsign.forbidden',
-    BridgeCancelledException() => 'profile.callsign.cancelled',
-    BridgeRemoteException(code: 'profile_local.conflict') =>
-      'profile.error.refreshBeforeSave',
-    BridgeRemoteException(code: 'profile_local.account_changed') ||
-    BridgeStaleGenerationException() => 'profile.error.refreshBeforeSave',
-    BridgeRemoteException(code: 'profile_local.hangar_changed') =>
-      'profile.local.hangarChanged',
-    BridgeRemoteException(code: 'profile_local.read_failed') =>
-      'profile.local.readFailed',
-    BridgeRemoteException(code: 'profile_local.invalid_request') =>
-      'profile.collab.invalid',
-    _ => 'profile.local.failed',
-  };
-  static const _stale = PersonalProfileActionResult(
-    PersonalProfileActionOutcome.rejected,
-    requiresReload: true,
-    failureKey: 'profile.error.refreshBeforeSave',
-  );
+  static const _stale = staleProfileEdit;
   static const _staleSnapshot = PersonalProfileSnapshot.unavailable(
     failureKey: 'profile.error.refreshBeforeSave',
   );
 
   @override
   Future<void> close() async {
+    if (_closed) return;
     _closed = true;
     _epoch++;
     _lease = null;
-    _pending = null;
-    await _events.cancel();
-    await _remote.close();
+    await Future.wait([_events.cancel(), _saves.cancel(), _remote.close()]);
     await _invalidations.close();
     await _changes.close();
   }
 }
 
 final class _LocalLease {
-  const _LocalLease(
-    this.owner,
-    this.generation,
+  _LocalLease(
+    this.ownerLock,
     this.epoch,
-    this.revision,
-    this.favorites,
-    this.content,
+    this.localEdit,
     this.callSign,
     this.remoteCallSign,
     this.displayed,
   );
-  final BridgeAccountContext owner;
-  final int generation, epoch, revision;
-  final List<String>? favorites;
-  final Map<String, Object?>? content;
+  final PersonalProfileOwnerLock ownerLock;
+  BridgeAccountContext get owner => ownerLock.owner;
+  int get generation => ownerLock.generation;
+  final int epoch;
+  final LocalProfileSaveBaseline localEdit;
   final String callSign;
   final String? remoteCallSign;
+  String? confirmedCallSign;
   final PersonalProfileSnapshot displayed;
+  late final versionedEdit = displayed.presentation == null
+      ? null
+      : VersionedProfileEditBaseline(displayed.presentation!);
 }

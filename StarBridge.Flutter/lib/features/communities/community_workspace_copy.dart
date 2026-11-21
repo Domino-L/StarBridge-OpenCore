@@ -12,6 +12,11 @@ const communityWorkspaceCopy = <String, (String, String, String)>{
   'lowConfidenceLocation': ('低可信度位置', '低可信度位置', 'Low-confidence location'),
   'timeZoneUnavailable': ('时区待确认', '時區待確認', 'Time zone unconfirmed'),
   'standardTime': ('标准时', '標準時間', 'standard time'),
+  'viewerTimeApproximate': (
+    '约（按组织标准时换算，未计组织夏令时）：',
+    '約（按組織標準時間換算，未計組織夏令時間）：',
+    'Approximate (organization standard time; organization daylight saving not included):',
+  ),
   'refreshFailed': (
     '更新未完成，显示上次读取的资料。',
     '更新未完成，顯示上次讀取的資料。',

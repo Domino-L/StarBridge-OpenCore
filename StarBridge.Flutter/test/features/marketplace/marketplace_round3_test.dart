@@ -115,9 +115,12 @@ void main() {
                 ? tokens.colors.textSecondary
                 : tokens.colors.textDisabled,
           );
+          // A bare minimum reads as a requirement (需要), whose tag keeps the
+          // tier name in its tooltip only (user choice 2026-11-12).
+          expect(find.textContaining('Inferior'), findsNothing);
           expect(
-            find.textContaining('Inferior'),
-            value < 200 ? findsOneWidget : findsNothing,
+            tester.widget<Tooltip>(find.byType(Tooltip)).message,
+            value < 200 ? 'Inferior' : isNot('Inferior'),
           );
         }
       }

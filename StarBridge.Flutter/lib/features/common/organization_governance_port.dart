@@ -210,3 +210,24 @@ final class UnavailableOrganizationGovernance
   @override
   Future<void> close() async {}
 }
+
+/// Optional capability: older Hosts and other governance providers omit it.
+abstract interface class OrganizationEvidenceRefreshPort {
+  bool get canRefreshEvidence;
+  Future<OrganizationEvidenceRefreshResult> refreshEvidence();
+}
+
+final class OrganizationEvidenceRefreshResult {
+  const OrganizationEvidenceRefreshResult(this.state, [this.remainingMinutes]);
+  final String state;
+  final int? remainingMinutes;
+  static const states = {
+    'requested',
+    'cached',
+    'rateLimited',
+    'globalBusy',
+    'verificationRequired',
+    'signInRequired',
+    'unavailable',
+  };
+}

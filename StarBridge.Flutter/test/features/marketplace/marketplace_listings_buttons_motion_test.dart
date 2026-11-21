@@ -104,7 +104,8 @@ void main() {
       c.writeUncertain = true;
       c.notifyListeners();
       await tester.pumpAndSettle();
-      expect(tester.getRect(_readBack), const Rect.fromLTRB(0, 106, 1280, 154));
+      // Fix 2 explains the lock above the read-back button (20 px line).
+      expect(tester.getRect(_readBack), const Rect.fromLTRB(0, 126, 1280, 174));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       c.dispose();

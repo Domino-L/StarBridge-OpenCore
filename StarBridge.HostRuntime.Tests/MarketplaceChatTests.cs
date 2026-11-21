@@ -27,11 +27,12 @@ internal static class MarketplaceChatTests
             lock (Requests) Requests.Add((request.Method.Method, path, body));
             if (path == "/app-api/member/user/get" && ProfileFails)
                 return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
-            var snapshot = JsonSerializer.Serialize(new { type = "order", orderId = 88, orderNo = "SO88", itemName = "Aurora", amount = 1200000, buyerId = 4242000000000042, sellerId = 9090000000000009, senderId = 9090000000000009, buyerNickname = "Self", mainImage = "https://cdn/x.png" });
+            var snapshot = JsonSerializer.Serialize(new { type = "order", orderId = 88, orderNo = "SO88", itemName = "Aurora", amount = 1200000, buyerId = 4242000000000042, sellerId = 9090000000000009, senderId = 9090000000000009, buyerNickname = "Self", displayType = 2, status = "1", qualityData = "{}", mainImage = "https://fixture.invalid/x.png" });
             object data = request.RequestUri.AbsolutePath switch
             {
                 "/app-api/member/user/get" => new { id = 4242000000000042 },
                 "/app-api/sc/order-reviews/page" => new { list = Array.Empty<object>(), total = 0 },
+                "/app-api/trade/contract/review-page" => new { list = Array.Empty<object>(), total = 0 },
                 "/app-api/member/chat/conversations/list" => new object[] {
                     new { id = 31, otherUserId = 9090000000000009, otherUserNickname = "Trader_Long_Handle_9000", otherUserAvatar = "https://cdn/a.png", otherUserSignInStatus = 1,
                           lastMessageContent = "还在吗", lastMessageTime = 1760000000000, unreadCount = 2, isBlockedByOther = false, hasBlockedOther = true,
@@ -39,8 +40,9 @@ internal static class MarketplaceChatTests
                 "/app-api/member/user-blacklist/remove" => true,
                 "/app-api/member/chat/unread/count" => 2,
                 "/app-api/member/chat/messages/history" => new object[] {
-                    new { id = 501, fromUserId = 9090000000000009, toUserId = 4242000000000042, content = "看下这个", quoteType = "order", quoteId = "88", quoteSnapshot = snapshot, hasRiskyLink = 0, isRead = 1, createTime = 1760000000001 },
-                    new { id = 502, fromUserId = 4242000000000042, toUserId = 9090000000000009, content = "好", hasRiskyLink = 1, isRead = 0, createTime = 1760000000002 } },
+                    new { id = 501, fromUserId = 9090000000000009, toUserId = 4242000000000042, content = "看下这个", quoteType = "order", quoteId = "SO88", quoteSnapshot = snapshot, hasRiskyLink = 0, isRead = 1, createTime = 1760000000001 },
+                    new { id = 502, fromUserId = 4242000000000042, toUserId = 9090000000000009, content = "好", hasRiskyLink = 1, isRead = 0, createTime = 1760000000002 },
+                    new { id = 503, fromUserId = 9090000000000009, toUserId = 4242000000000042, content = "坏快照", quoteType = "order", quoteId = "SO89", quoteSnapshot = "{broken", hasRiskyLink = 0, isRead = 1, createTime = 1760000000003 } },
                 "/app-api/member/chat/conversations/31/mark-read" => true,
                 "/app-api/member/chat/ws-ticket" => "ticket-1",
                 "/app-api/sc/orders/get" => new { orderNumber = "SO88", orderOwnerId = 9090000000000009, creatorId = 1 },
@@ -80,6 +82,12 @@ internal static class MarketplaceChatTests
         internal static string Reply = "accept";
         private readonly Channel<string?> _inbox = Channel.CreateUnbounded<string?>();
         internal static Socket? Live;
+        internal static void Reset()
+        {
+            lock (Sent) { Sent.Clear(); Connected.Clear(); }
+            Reply = "accept";
+            Live = null;
+        }
         public Task ConnectAsync(Uri endpoint, CancellationToken token) { lock (Sent) Connected.Add(endpoint); Live = this; return Task.CompletedTask; }
         public Task SendAsync(string text, CancellationToken token)
         {
@@ -124,7 +132,22 @@ internal static class MarketplaceChatTests
         Check(response.Error?.Code == "marketplace.offline", "closed device network gate rejects openScm before host/browser work");
     }
 
+    // The full Host run shares one process: restore the chat reply timeout
+    // and the fake socket's statics however this class ends
+    // (CX-HALL-CHECKLIST-A2-REVIEW P3).
     internal static async Task Run()
+    {
+        var timeout = ScmChatConnection.ReplyTimeout;
+        Socket.Reset();
+        try { await RunCore(); }
+        finally
+        {
+            ScmChatConnection.ReplyTimeout = timeout;
+            Socket.Reset();
+        }
+    }
+
+    private static async Task RunCore()
     {
         await VerifyOffline();
         var openedUris = new List<Uri>();
@@ -202,9 +225,15 @@ internal static class MarketplaceChatTests
             Check(second.GetProperty("risky").GetBoolean(), "risky link flag kept");
             var quote = first.GetProperty("quote");
             Check(quote.GetProperty("orderNo").GetString() == "SO88" && quote.GetProperty("itemName").GetString() == "Aurora", "order quote projected");
+            Check(quote.GetProperty("mainImage").GetString() == "https://fixture.invalid/x.png" &&
+                quote.GetProperty("qualityData").GetString() == "{}", "public snapshot image and quality retained");
+            // An order quote without a usable snapshot is no attachment: the client then says 订单没有附上.
+            var broken = history.GetProperty("rows")[2];
+            Check(!broken.TryGetProperty("quote", out var brokenQuote) || brokenQuote.ValueKind == JsonValueKind.Null,
+                "broken order snapshot projects no quote");
             var historyText = history.GetRawText();
-            Check(!historyText.Contains("4242000000000042") && !historyText.Contains("9090000000000009") && !historyText.Contains("cdn/x.png") && !historyText.Contains("Self"),
-                "no sender/buyer/seller ids, names or images from the snapshot");
+            Check(!historyText.Contains("4242000000000042") && !historyText.Contains("9090000000000009") && !historyText.Contains("Self"),
+                "no sender/buyer/seller ids or names from the snapshot");
 
             // 订单详情「联系卖家」: the Host finds the seller; the client only ever sees the reference.
             var opened = await Call(new { schemaVersion = 1, operation = "openOrder", orderNumber = "SO88" });
@@ -233,7 +262,20 @@ internal static class MarketplaceChatTests
                 catch (AccountBridgeHostException e) when (e.Code == "marketplace.invalid_request") { }
                 lock (Socket.Sent) Check(Socket.Sent.Count == before, "invalid bridge id sent a frame");
             }
-            var sent = await Call(new { schemaVersion = 1, operation = "send", @ref = reference, content = "  成交  ", orderId = 88, clientMessageId = "bridge-stable-001" });
+            foreach (var input in new object[] {
+                new { schemaVersion = 1, operation = "send", @ref = reference, content = "hello", orderId = 88 },
+                new { schemaVersion = 1, operation = "send", @ref = reference, content = "hello", orderNumber = (object)88 },
+                new { schemaVersion = 1, operation = "send", @ref = reference, content = "hello", orderNumber = (object)"SO88\n" },
+                new { schemaVersion = 1, operation = "send", @ref = reference, content = "hello", orderNumber = (object)new string('a', 65) },
+            }) {
+                int before; lock (Socket.Sent) before = Socket.Sent.Count;
+                try { await Call(input); throw new Exception("FAIL invalid order attachment accepted"); }
+                catch (AccountBridgeHostException e) when (e.Code == "marketplace.invalid_request") { }
+                lock (Socket.Sent) Check(Socket.Sent.Count == before, "invalid order sent no frame");
+            }
+            Check(history.GetProperty("rows")[0].GetProperty("quote").GetProperty("displayType").GetInt32() == 2,
+                "SCM snapshot display type projected");
+            var sent = await Call(new { schemaVersion = 1, operation = "send", @ref = reference, content = "  成交  ", orderNumber = "SO88", clientMessageId = "bridge-stable-001" });
             Check(sent.GetProperty("status").GetString() == "sent" && sent.GetProperty("message").GetProperty("mine").GetBoolean(), "send confirmed by SCM");
             Check(Socket.Connected.Single().Query == "?ticket=ticket-1" && Socket.Connected.Single().AbsolutePath == "/infra/ws/chat", "chat socket uses a one-time ticket");
             string[] frames;
@@ -245,7 +287,7 @@ internal static class MarketplaceChatTests
             Check(send.GetProperty("clientMessageId").GetString() == "bridge-stable-001", "bridge retains client id");
             Check(send.GetProperty("toUserId").GetInt64() == 9090000000000009, "send carries the SCM id only on the wire");
             Check(send.GetProperty("content").GetString() == "成交" && send.GetProperty("quoteType").GetString() == "order" &&
-                  send.GetProperty("quoteId").GetString() == "88", "trimmed content with order quote");
+                  send.GetProperty("quoteId").GetString() == "SO88", "trimmed content with order quote");
 
             Socket.Reply = "reject";
             var rejected = await Call(new { schemaVersion = 1, operation = "send", @ref = reference, content = "再问一次" });

@@ -172,7 +172,7 @@ internal static partial class FirstUseBusinessOwnerTests
         var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
         using var release = new ManualResetEventSlim(); var entered = Signal();
         var physical = native.InstallConfirmedOnlineAsync(3, _ => { entered.TrySetResult();
-            Check(release.Wait(TimeSpan.FromSeconds(5)), "Test releases original synchronous composition."); });
+            Check(release.Wait(FirstUseTestWait.Bound), "Test releases original synchronous composition."); });
         await Finish(entered.Task);
         var exit = native.DisposeAsync().AsTask();
         try

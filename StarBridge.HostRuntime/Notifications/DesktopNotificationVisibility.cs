@@ -19,6 +19,7 @@ public static class DesktopNotificationVisibility
         // Process existence cannot distinguish foreground gameplay from an idle
         // desktop with the game in the background. Native OS/foreground guards
         // run before this policy; an uncertain process observation still blocks.
+        if (notice.ContinuousPlay != null) return "";
         if (notice.Activity is null && gameState is not ("notRunning" or "running"))
             return "game-active-or-unknown";
         if (!notice.Test && notice.BackgroundOnly && appForeground != false) return "main-window-active-or-unknown";

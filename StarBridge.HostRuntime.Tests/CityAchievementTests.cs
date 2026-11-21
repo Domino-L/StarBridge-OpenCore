@@ -4,7 +4,7 @@ using StarBridge.HostRuntime.Achievements;
 using StarBridge.HostRuntime.Presence;
 using StarBridge.NativeBridge;
 
-internal static class CityAchievementTests
+internal static partial class CityAchievementTests
 {
     private static readonly BridgeAccountContext Owner = new("test", "scm", "synthetic-city-owner");
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-28T12:00:30Z");
@@ -16,7 +16,7 @@ internal static class CityAchievementTests
     }
     private sealed class Cloud : IAchievementRemote
     {
-        internal bool Offline, LoseReceipt, IncludeStanton, HangarOffline;
+        internal bool Offline, LoseReceipt, IncludeStanton, IncludePyro, HangarOffline;
         internal int Reports, Reads;
         internal int HangarReports;
         internal Exception? CityFailure;
@@ -51,10 +51,13 @@ internal static class CityAchievementTests
             var id = JourneyAchievementPolicy.Id(observation.City);
             if (earned.TryAdd(id, Now)) added.Add(id);
             if (IncludeStanton && earned.TryAdd(JourneyAchievementPolicy.StantonId, Now)) added.Add(JourneyAchievementPolicy.StantonId);
+            if (IncludePyro)
+                foreach (var aggregate in new[] { JourneyAchievementPolicy.PyroMajorsId, JourneyAchievementPolicy.PyroAllId })
+                    if (earned.TryAdd(aggregate, Now)) added.Add(aggregate);
             BeforeReceipt?.Invoke();
             if (LoseReceipt) { LoseReceipt = false; throw new IOException("synthetic lost receipt"); }
             return Task.FromResult(new CityAchievementReceipt(1, new(earned), added.ToArray(),
-                new() { [JourneyAchievementPolicy.StantonId] = earned.Keys.Count(k => k != JourneyAchievementPolicy.StantonId) }));
+                new() { [JourneyAchievementPolicy.StantonId] = JourneyAchievementPolicy.Cities.Count(city => earned.ContainsKey(JourneyAchievementPolicy.Id(city))) }));
         }
     }
     private sealed class Harness : IDisposable
@@ -105,14 +108,18 @@ internal static class CityAchievementTests
             ("Stanton2_Orison", "orison"), ("Hospital_Stanton2_Orison", "orison"),
             ("VisionCenter", "orison"), ("VisionCenter_Analytics", "orison"),
             ("Stanton4_NewBabbage", "new-babbage"), ("Hospital_Stanton4_NewBabbage", "new-babbage"),
-            ("TobinExpoCenter", "new-babbage")
+            ("TobinExpoCenter", "new-babbage"), ("Nyx_Levski", "levski"), ("Hospital_Nyx_Levski", "levski"),
+            ("GrimHEX", "grimhex"), ("Stanton2_housing_grimhex_clinic", "grimhex"),
+            ("RR_P2_L4_CLINIC", "station-rr-p2-l4"), ("Hospital_Pyro_Pyro6_L1", "station-rr-p6-l1"),
+            ("Pyro6_L1_Habs", "station-rr-p6-l1"), ("ContestedZone_RR_P2_L4", "station-rr-p2-l4"),
+            ("ContestedZone_RR_P3_LEO", "station-rr-p3-leo"), ("ContestedZone_RR_P6_LEO", "station-rr-p6-leo")
         };
         foreach (var (code, city) in cases)
         {
             Require(index.FindCity(code) == city, "catalog " + code);
             Require(index.FindCity(" loc_" + code.ToUpperInvariant() + " [42] ") == city, "normalization " + code);
         }
-        foreach (var code in new[] { "EverusHarbor", "PortTressler", "GrimHEX", "Stanton1", "Synthetic_Lorville_Hospital" })
+        foreach (var code in new[] { "EverusHarbor", "PortTressler", "Kareah", "Stanton1", "Synthetic_Lorville_Hospital", "RR_JP_PyroStanton", "RR_P1_L1", "RR_P2_L4_FAKE" })
             Require(index.FindCity(code) is null, "non-city " + code);
         using var input = new MemoryStream(Encoding.UTF8.GetBytes("""
             {"schemaVersion":1,"entries":[
@@ -136,11 +143,10 @@ internal static class CityAchievementTests
         h.Append(Inventory("Stanton3_Area18", "Other_Pilot") + Explicit("Stanton4_NewBabbage", "Other_Pilot"));
         Require(h.Evidence.Count == 2, "other player");
         var route = Stamp + "<Calculate Route> | AUTH | AEGS_Avenger_Titan_123[1]| Projected Start Location is Stanton4_NewBabbage for route to destination Stanton3_Area18\n";
-        var arrival = Stamp + "<Quantum Drive Arrived - Arrived at Final Destination> CSCItemNavigation::OnQuantumDriveArrived\n";
+        var arrival = Stamp + "<Quantum Drive Arrived - Arrived at Final Destination> | NOT AUTH | AEGS_Avenger_Titan_123[1]|CSCItemNavigation::OnQuantumDriveArrived\n";
         var parser = new StarBridge.Core.Parsing.RegexLogEventParser();
         Require(parser.TryParse(route)?.LocationEvidenceScore == 60 && parser.TryParse(arrival)?.LocationEvidenceScore == 45, "negative fixtures exercise real parser scores");
-        h.Append(route +
-            Stamp + "<Quantum Drive Arrived - Arrived at Final Destination> CSCItemNavigation::OnQuantumDriveArrived\n");
+        h.Append(route + arrival);
         Require(h.Evidence.Count == 2, "60 route and 45 arrival cannot grant");
         h.Expected = "Other_Pilot"; h.Append(Inventory("Stanton4_NewBabbage"));
         Require(h.Evidence.Count == 2, "verified handle mismatch");
@@ -336,15 +342,28 @@ internal static class CityAchievementTests
         {
             try { invalid.Validate(); throw new Exception("invalid receipt accepted"); } catch (InvalidDataException) { }
         }
+        foreach (var token in JourneyAchievementPolicy.Tokens.Where(t => t.StartsWith("station-", StringComparison.Ordinal)))
+        {
+            var marker = JourneyAchievementPolicy.Id(token);
+            new CityAchievementReceipt(1, new() { [marker] = Now, [JourneyAchievementPolicy.PyroMajorsId] = Now,
+                [JourneyAchievementPolicy.PyroAllId] = Now }, [marker, JourneyAchievementPolicy.PyroMajorsId, JourneyAchievementPolicy.PyroAllId]).Validate();
+            Require(!new AchievementCelebration(marker, Now, 1, () => true).CanPresent, "hidden marker cannot present");
+        }
         var notices = new Sink();
         using var delivery = new AchievementCelebrationDelivery(() => (Owner, 1));
+        foreach (var token in JourneyAchievementPolicy.Tokens)
+            if (JourneyAchievementPolicy.IsStationMarker(JourneyAchievementPolicy.Id(token)))
+                delivery.SeriesEarned(1, JourneyAchievementPolicy.Id(token), 0, Now);
         delivery.Configure(notices);
-        foreach (var id in JourneyAchievementPolicy.Ids)
+        Require(notices.Items.Count == 0, "station markers never enter the pending celebration queue");
+        delivery.SeriesEarned(1, "journey-station-rr-p2-l4", 0, Now);
+        Require(notices.Items.Count == 0, "station markers never reach a configured sink");
+        foreach (var id in JourneyAchievementPolicy.AwardIds)
         {
             delivery.SeriesEarned(1, id, 0, Now);
             delivery.SeriesEarned(1, id, 0, Now);
         }
-        Require(notices.Items.Select(n => n.AchievementId).SequenceEqual(JourneyAchievementPolicy.Ids) &&
+        Require(notices.Items.Select(n => n.AchievementId).SequenceEqual(JourneyAchievementPolicy.AwardIds) &&
             notices.Items.All(n => n.CanPresent && n.Rank == 0), "all journey ids reach existing delivery once");
         return Task.CompletedTask;
     }
@@ -569,6 +588,83 @@ internal static class CityAchievementTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+    internal static async Task NewDestinationsAndGuards()
+    {
+        foreach (var code in new[] { "GrimHEX", "Stanton2_housing_grimhex_clinic" })
+        {
+            using var arrival = new Harness(history: Inventory(code));
+            arrival.Select(); arrival.Game.Sample();
+            Require(arrival.Evidence.Count == 0, "Grim HEX history is not replayed: " + code);
+            arrival.Append(Inventory(code)); await arrival.Runtime.TickAsync(true);
+            Require(arrival.Evidence.Single().Observation.City == "grimhex" &&
+                arrival.Celebrated.SequenceEqual(new[] { JourneyAchievementPolicy.GrimhexId }), "live Grim HEX award: " + code);
+            arrival.Append(Inventory(code)); await arrival.Runtime.TickAsync(true);
+            Require(arrival.Remote.Reports == 1 && arrival.Celebrated.Count == 1, "Grim HEX once for this account");
+            arrival.Current = (Owner with { Subject = "synthetic-grimhex-other" }, 2);
+            arrival.Select(); arrival.Game.Sample(); arrival.Append(Inventory(code));
+            await arrival.Runtime.TickAsync(true);
+            Require(arrival.Remote.Reports == 2 && arrival.Celebrated.Count == 2, "Grim HEX separately for another account");
+        }
+        // Existing parser format and 95-point inventory signal; only catalog ancestors expand.
+        var inventory = Inventory("RR_P2_L4_CLINIC") + Inventory("Nyx_Levski") +
+            Inventory("GrimHEX") + Inventory("Stanton2_housing_grimhex_clinic");
+        using var h = new Harness(history: inventory);
+        h.Select(); h.Game.Sample();
+        Require(h.Evidence.Count == 0, "new destinations never replay history");
+        h.Append(Inventory("RR_JP_PyroStanton") + Inventory("RR_P1_L1"));
+        Require(h.Evidence.Count == 0, "gates and unlisted stations never observe");
+        h.Append(Inventory("RR_P2_L4_CLINIC", "Other_Pilot") + Inventory("Nyx_Levski", "Other_Pilot") +
+            Inventory("GrimHEX", "Other_Pilot") + Inventory("Stanton2_housing_grimhex_clinic", "Other_Pilot"));
+        Require(h.Evidence.Count == 0, "new destinations require local identity");
+        h.Expected = "Other_Pilot"; h.Append(inventory);
+        Require(h.Evidence.Count == 0, "new destinations require verified handle");
+        h.Expected = "Pilot_A";
+        h.Append(Stamp + "<Channel Disconnection> gamerules=\"SC_Default\" reason=\"Player requested disconnect\"\n" + inventory);
+        Require(h.Evidence.Count == 0, "new destinations require connected game server");
+        h.Append(Join + inventory);
+        Require(h.Evidence.Select(e => e.Observation.City).SequenceEqual(new[] { "station-rr-p2-l4", "levski", "grimhex" }), "inventory to catalog to observation");
+        Require(h.Evidence.All(e => e.Observation.Evidence == "RequestLocationInventory"), "same inventory signal");
+        h.Remote.Offline = true; await h.Runtime.TickAsync(true);
+        Require(h.Read().Pending.Length == 3 && h.Remote.Reports == 0 && h.Celebrated.Count == 0, "network outage retains evidence without local grants");
+        h.Remote.Offline = false; h.Remote.IncludePyro = true;
+        await h.Runtime.TickAsync(true);
+        Require(h.Read().Confirmed.Length == 3 && h.Read().Pending.Length == 0, "station marker acknowledges and drains");
+        Require(h.Celebrated.SequenceEqual(new[] { JourneyAchievementPolicy.PyroMajorsId, JourneyAchievementPolicy.PyroAllId, JourneyAchievementPolicy.LevskiId, JourneyAchievementPolicy.GrimhexId }),
+            "only server-granted visible awards celebrate");
+        h.Append(inventory); await h.Runtime.TickAsync(true);
+        Require(h.Remote.Reports == 3 && h.Celebrated.Count == 4, "all tokens deduplicate per account");
+        using var offline = new Harness();
+        offline.Current = (null, 2); offline.Select(); offline.Append(inventory);
+        Require(offline.Evidence.Count == 0, "no account produces no new journey observations");
+        using var noServer = new Harness(history: Stamp + "<Channel Disconnection> gamerules=\"SC_Default\" reason=\"Player requested disconnect\"\n");
+        noServer.Select(); noServer.Game.Sample(); noServer.Append(inventory);
+        Require(noServer.Evidence.Count == 0, "not connected since selection produces no observations");
+    }
+    internal static async Task AllTokensAreBounded()
+    {
+        using var h = new Harness(); h.Select(); h.Game.Sample();
+        var codes = JourneyAchievementPolicy.Roots.GroupBy(p => p.Value).Select(g => g.First().Key).ToArray();
+        Require(codes.Length == 29, "exact observation capacity");
+        var inventory = string.Concat(codes.Select(code => Inventory(code)));
+        for (var round = 0; round < 3; round++)
+        {
+            h.Append(inventory + new string('x', 16 * 1024 * 1024) + "\n");
+            RequireReading(h);
+            Require(CandidateCount(h) == 29, "repeated tokens stay bounded without eviction");
+        }
+        FinishLiveChunk(h);
+        Require(h.Evidence.Count == 29 && h.Read().Pending.Length == 29, "all destinations survive live chunk verification");
+        var paths = Directory.GetFiles(Path.Combine(h.Root, "achievements-city-pending-v1"), "*.json");
+        Require(paths.Length == 2 && paths.All(path => new FileInfo(path).Length <= 8192), "split pending outboxes fit byte caps");
+        CityOutboxCompatibilityTests.AssertLegacy(h.Root, Owner, 4, 0);
+        await h.Runtime.TickAsync(true);
+        Require(h.Read().Confirmed.Length == 29 && h.Read().Pending.Length == 0 && h.Remote.Reports == 29, "full queue drains and reloads");
+        CityOutboxCompatibilityTests.AssertLegacy(h.Root, Owner, 0, 4);
+        Require(h.Celebrated.Count == 6 && !h.Remote.Earned[Owner].ContainsKey(JourneyAchievementPolicy.PyroMajorsId), "markers do not celebrate or infer collections locally");
+        using var lease = new CityAchievementOutbox(h.Root).Open(Owner);
+        try { lease.Save(new([], JourneyAchievementPolicy.Tokens.Append("station-rr-p1-l1").ToArray()), () => true); throw new Exception("unknown token accepted"); }
+        catch (InvalidDataException) { }
+    }
     private sealed class Sink : IAchievementCelebrationSink
     {
         internal readonly List<AchievementCelebration> Items = [];
@@ -578,6 +674,8 @@ internal static class CityAchievementTests
     internal static async Task Run()
     {
         var tests = new (string Name, Func<Task> Run)[] {
+            ("outbox downgrade compatibility", CityOutboxCompatibilityTests.Run),
+            ("new destination evidence and guards", NewDestinationsAndGuards), ("all tokens bounded and persisted", AllTokensAreBounded),
             ("catalog hierarchy and aliases", Catalog), ("live identity/evidence", EvidenceGuards),
             ("catch-up and partial tail", CatchupAndPartialLines), ("durable multi-city and accounts", DurableQueueAndCelebration),
             ("lost receipt and owner race", LostReceiptAndOwnerRace), ("receipt and delivery", ReceiptValidationAndDelivery),

@@ -7,13 +7,12 @@ import '../common/user_input_idle_watcher.dart';
 import 'community_activity_port.dart';
 import 'community_author_projection_port.dart';
 import 'community_chat_controller.dart';
-import 'community_chat_seen_authors.dart';
 
 /// When the main fleet chat reads, apart from reads a push already triggers.
 ///
 /// Names are confirmed about once a minute while someone is looking, without
-/// the channel read; between reads the chat shows what it last saw, up to five
-/// minutes (user 2026-10-31). An author not seen yet is read at once by the
+/// the channel read; a former name ends at the proof's validUntil + 10 seconds.
+/// An author not seen yet is read at once by the
 /// chat itself, not on this pace. New messages and the unread count come
 /// from the push; a slow reconciliation covers a missed event, and a push that
 /// is not healthy falls back to the old fast read so nothing arrives later.
@@ -86,8 +85,7 @@ final class CommunityChatReadSchedule {
 
   Duration _paced(Duration base, int failures) {
     if (failures == 0) return base;
-    final scaled =
-        _backoffBase * math.pow(2, math.min(failures, 10)).toInt();
+    final scaled = _backoffBase * math.pow(2, math.min(failures, 10)).toInt();
     final capped = scaled > maximumBackoff ? maximumBackoff : scaled;
     return capped > base ? capped : base;
   }
@@ -102,9 +100,7 @@ final class CommunityChatReadSchedule {
     final gap = userActive()
         ? (healthy ? reconcileInterval : fallbackInterval)
         : (healthy ? null : idleFallbackInterval);
-    return gap == null
-        ? null
-        : _lastContent.add(_paced(gap, _contentFailures));
+    return gap == null ? null : _lastContent.add(_paced(gap, _contentFailures));
   }
 
   /// No names to keep alive for someone who is not there.
@@ -197,9 +193,6 @@ final class CommunityChatReadDriver {
         _schedule?.poke();
       },
     );
-    _seenSweep = Timer.periodic(CommunityChatSeenAuthors.sweepEvery, (_) {
-      if (model().seenAuthors.sweep()) onInputChanged();
-    });
     _schedule = CommunityChatReadSchedule(
       canRead: canRead,
       pushHealthy: () {
@@ -226,7 +219,7 @@ final class CommunityChatReadDriver {
     );
   }
 
-  Timer? _poll, _seenSweep;
+  Timer? _poll;
   UserInputIdleWatcher? _idle;
   CommunityChatReadSchedule? _schedule;
   bool get userActive => _idle?.active ?? true;
@@ -255,7 +248,6 @@ final class CommunityChatReadDriver {
 
   void dispose() {
     _poll?.cancel();
-    _seenSweep?.cancel();
     _idle?.dispose();
     _schedule?.dispose();
   }

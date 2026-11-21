@@ -8,7 +8,7 @@ internal sealed record OfficialRealtimeCellWire(string State, string? Value, str
 internal sealed record OfficialRealtimeMemberWire(string OwnerBusinessSubjectId, string Presence,
     OfficialRealtimeCellWire Server, OfficialRealtimeCellWire Ship, OfficialRealtimeCellWire Location,
     bool ArrivalPending, string? ArrivalTargetCode, string? ServerRegion = null,
-    bool? HasServerSession = null, string? LocationHiddenReason = null);
+    bool? HasServerSession = null, string? LocationHiddenReason = null, string? LastOnlineHour = null);
 internal sealed partial class PrivacyRelayWriter
 {
     internal async Task<IReadOnlyDictionary<string,OfficialRealtimeMemberWire>> ReadOfficialRuntimeAsync(
@@ -16,6 +16,7 @@ internal sealed partial class PrivacyRelayWriter
     {
         if (subjects.Count > 100 || subjects.Distinct(StringComparer.Ordinal).Count() != subjects.Count) throw Invalid();
         using var request = Request(HttpMethod.Post, OfficialUri("read"), bearer);
+        Support.LastOnlineDays.Apply(request);
         request.Content = JsonContent.Create(new { schemaVersion = 4, sourceRef, ownerBusinessSubjectIds = subjects });
         current();
         AccountReadTiming.Checkpoint(MemberReadCheckpoint.Relay);
@@ -36,22 +37,31 @@ internal sealed partial class PrivacyRelayWriter
                 capabilities.GetProperty("onlineCount").GetBoolean() || capabilities.GetProperty("inGameCount").GetBoolean()) throw Invalid();
             var result = new Dictionary<string,OfficialRealtimeMemberWire>(StringComparer.Ordinal);
             foreach (var raw in root.GetProperty("members").EnumerateArray()) {
-                if (raw.EnumerateObject().Count() != 10) throw Invalid();
+                if (raw.EnumerateObject().Count() != (raw.TryGetProperty(Support.LastOnlineDays.HourField, out _) ? 11 : 10)) throw Invalid();
                 var member = raw.Deserialize<OfficialRealtimeMemberWire>(LocalPrivacyStore.Json);
-                if (member is null || !subjects.Contains(member.OwnerBusinessSubjectId, StringComparer.Ordinal) ||
+                if (member is null || member.LastOnlineHour is not null && Support.LastOnlineDays.ParseHour(member.LastOnlineHour) is null || !subjects.Contains(member.OwnerBusinessSubjectId, StringComparer.Ordinal) ||
                     member.Presence is not ("offline" or "online" or "away" or "inGame") || !result.TryAdd(member.OwnerBusinessSubjectId, member)) throw Invalid();
                 foreach (var cell in new[] { member.Server, member.Ship, member.Location }) {
                     if (cell is null || cell.State is not ("value" or "unknown" or "notShared" or "notInGame") ||
-                        (cell.State == "value" ? string.IsNullOrWhiteSpace(cell.Value) || cell.Value.Length > 512 || cell.Value.Any(char.IsControl) : cell.Value is not null)) throw Invalid();
+                        (cell.State == "value" ? string.IsNullOrWhiteSpace(cell.Value) || cell.Value.Any(char.IsControl) : cell.Value is not null)) throw Invalid();
                 }
                 bool Bounded(string? value, int max) => value is null || value.Length <= max && !value.Any(char.IsControl);
-                if (!Bounded(member.ServerRegion, 32) || !Bounded(member.ArrivalTargetCode, 512) ||
+                if (member.ServerRegion?.Any(char.IsControl) == true || member.ArrivalTargetCode?.Any(char.IsControl) == true ||
                     member.LocationHiddenReason is not (null or "lowConfidence") ||
                     member.Server.State == "notShared" && (member.ServerRegion is not null || member.HasServerSession is not null) ||
                     member.Location.State == "notShared" && (member.ArrivalPending || member.ArrivalTargetCode is not null || member.LocationHiddenReason is not null)) throw Invalid();
                 if (member.Presence != "inGame" && (member.Server.State != "notInGame" || member.Ship.State != "notInGame" ||
                     member.Location.State != "notInGame" || member.ArrivalPending || member.ArrivalTargetCode is not null ||
                     member.ServerRegion is not null || member.HasServerSession is not null || member.LocationHiddenReason is not null)) throw Invalid();
+                // Normalize only after all state/privacy invariants have been checked.
+                // Oversize display text cannot invalidate another field or another member.
+                OfficialRealtimeCellWire Display(OfficialRealtimeCellWire cell) => cell.Value?.Length > 512
+                    ? new("unknown", null, null) : cell;
+                result[member.OwnerBusinessSubjectId] = member with {
+                    Server = Display(member.Server), Ship = Display(member.Ship), Location = Display(member.Location),
+                    ServerRegion = Bounded(member.ServerRegion, 32) ? member.ServerRegion : null,
+                    ArrivalTargetCode = Bounded(member.ArrivalTargetCode, 512) ? member.ArrivalTargetCode : null
+                };
             }
             return result;
         } catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException) { throw Invalid(); }

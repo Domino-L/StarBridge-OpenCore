@@ -20,6 +20,14 @@ abstract interface class AppPreferencesPort {
 
   Future<bool> setHolidayAppearance(bool enabled);
 
+  Future<bool> setPerformanceMode(bool enabled);
+
+  /// 读取自己的血量（默认关）。
+  Future<bool> setReadOwnHealth(bool enabled);
+
+  /// 游戏在后台时也读取（读血的子开关，默认关）。
+  Future<bool> setReadOwnHealthInBackground(bool enabled);
+
   Future<bool> retry();
 
   void dispose();

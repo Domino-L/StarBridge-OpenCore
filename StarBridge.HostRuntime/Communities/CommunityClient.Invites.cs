@@ -205,6 +205,8 @@ internal sealed partial class CommunityClient
             }
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             current();
+            if (!response.IsSuccessStatusCode && await CommunityRelayRefusal.ReasonAsync(response, token) is { } refusal)
+                return Finish(new("rejected", refusal));
             if (!response.IsSuccessStatusCode) return Finish(response.StatusCode switch
             {
                 HttpStatusCode.NotFound => new("rejected", "inviteInvalid"),

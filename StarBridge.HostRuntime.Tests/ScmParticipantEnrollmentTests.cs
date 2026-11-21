@@ -8,6 +8,7 @@ internal static partial class LegacyPasswordLoginTests
 {
     internal static async Task ScmParticipantEnrollment()
     {
+        await VerifyParticipantPollingReduction();
         await BackgroundEnrollmentWaitsForBusyMutationLane();
         await CancelQueuedBackgroundEnrollment();
         await OpaqueIssuerParticipantEnrollment();
@@ -166,6 +167,7 @@ internal static partial class LegacyPasswordLoginTests
     {
         internal int Registrations;
         internal int Refreshes;
+        internal int IdentityReads;
         internal string Mode = "ok";
         internal string? Issuer = "http://127.0.0.1:9/";
         internal TaskCompletionSource IdentityReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -176,6 +178,7 @@ internal static partial class LegacyPasswordLoginTests
         {
             Check(request.Headers.Authorization?.Parameter == "read-token", "registration uses current SCM bearer only");
             if (request.RequestUri!.AbsolutePath == "/app-api/starbridge/v1/business-identity") {
+                IdentityReads++;
                 IdentityReadStarted.TrySetResult();
                 if (Mode == "cancel-before-write") await Task.Delay(Timeout.InfiniteTimeSpan, token);
                 return Reply(new { schemaVersion = 1, issuer = Issuer, subject = "owner",

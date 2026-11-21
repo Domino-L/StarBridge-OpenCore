@@ -1,6 +1,10 @@
 abstract interface class PrivacyPublicationPort {
   bool get publicationSupported;
-  Future<PrivacyPublicationView> publication(String action, {int? revision});
+  Future<PrivacyPublicationView> publication(
+    String action, {
+    int? revision,
+    bool firstOfficialDefault = false,
+  });
 }
 
 /// Optional push of publication status changes. When supported, the status
@@ -22,4 +26,17 @@ class PrivacyPublicationView {
   final String? errorCode;
   // Unknown/older Hosts cannot initiate an automatic consent prompt.
   final bool? firstUseRequired;
+
+  /// Ordinary organization saves can only reapply an existing sharing choice.
+  bool allowsOrganizationApply({bool firstDefault = false}) =>
+      !const {'withdrawn', 'withdrawalPending'}.contains(state) &&
+      (firstDefault &&
+              (firstUseRequired == true ||
+                  errorCode == 'privacy_publication.consent_required') ||
+          firstUseRequired != true &&
+              errorCode != 'privacy_publication.consent_required' &&
+              (firstUseRequired == false || state != 'inactive'));
+
+  bool confirmsSharing(int expectedRevision) =>
+      state == 'applied' && revision == expectedRevision && errorCode == null;
 }

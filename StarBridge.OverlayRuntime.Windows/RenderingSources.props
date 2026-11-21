@@ -49,6 +49,7 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.SharedActivity.cs" Link="Rendering/NativeInformationOverlayRuntime.SharedActivity.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.Status.cs" Link="Rendering/NativeInformationOverlayRuntime.Status.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.AppearancePreview.cs" Link="Rendering/NativeInformationOverlayRuntime.AppearancePreview.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.EditorPreview.cs" Link="Rendering/NativeInformationOverlayRuntime.EditorPreview.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/NativeInformationOverlayRuntime.LivePreview.cs" Link="Rendering/NativeInformationOverlayRuntime.LivePreview.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayAppearancePreviewSurface.cs" Link="Rendering/OverlayAppearancePreviewSurface.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayAppearancePreviewPlayback.cs" Link="Rendering/OverlayAppearancePreviewPlayback.cs" />
@@ -59,6 +60,13 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayAppearanceActivity.cs" Link="Rendering/OverlayAppearanceActivity.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayBarrageTextMeasurementCache.cs" Link="Rendering/OverlayBarrageTextMeasurementCache.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.AppearanceRuntime.cs" Link="Rendering/OverlayCompositionHudWindow.AppearanceRuntime.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.Visor.cs" Link="Rendering/OverlayCompositionHudWindow.Visor.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.EditorPreview.cs" Link="Rendering/OverlayCompositionHudWindow.EditorPreview.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayVisorScene.cs" Link="Rendering/OverlayVisorScene.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayVisorPainter.cs" Link="Rendering/OverlayVisorPainter.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayVisorDraw.cs" Link="Rendering/OverlayVisorDraw.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayVisorRenderer.cs" Link="Rendering/OverlayVisorRenderer.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayVisorSelfRingWatch.cs" Link="Rendering/OverlayVisorSelfRingWatch.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.cs" Link="Rendering/OverlayCompositionHudWindow.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.RenderThread.cs" Link="Rendering/OverlayCompositionHudWindow.RenderThread.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionHudWindow.FrameState.cs" Link="Rendering/OverlayCompositionHudWindow.FrameState.cs" />
@@ -81,6 +89,7 @@
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayCompositionStartupTransitionWindow.cs" Link="Rendering/OverlayCompositionStartupTransitionWindow.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEntitlementPolicy.cs" Link="Rendering/OverlayEntitlementPolicy.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEventShipPresentation.cs" Link="Rendering/OverlayEventShipPresentation.cs" />
+    <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayPlaceholderText.cs" Link="Rendering/OverlayPlaceholderText.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayEventStackLayout.cs" Link="Rendering/OverlayEventStackLayout.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayFrameScheduler.cs" Link="Rendering/OverlayFrameScheduler.cs" />
     <Compile Include="$(StarBridgeWindowsRenderingSourceRoot)/OverlayGameEventNotificationPolicy.cs" Link="Rendering/OverlayGameEventNotificationPolicy.cs" />

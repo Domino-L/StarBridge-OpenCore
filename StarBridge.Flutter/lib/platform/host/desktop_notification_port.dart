@@ -166,6 +166,15 @@ final class BridgeDesktopNotificationPort
             ? (destination: destination as String, ref: ref)
             : (destination: 'myTrades', ref: null);
       }
+      if (destination == 'communityAnnouncements' ||
+          destination == 'officialFleetAnnouncements') {
+        return ref is String &&
+                (destination == 'communityAnnouncements'
+                    ? _ref.hasMatch(ref)
+                    : RegExp(r'^officialFleet:[1-9][0-9]{0,18}$').hasMatch(ref))
+            ? (destination: destination as String, ref: ref)
+            : null;
+      }
       return destination == 'roomReminders' ||
               destination == 'notificationInbox' ||
               destination == 'directMessages' ||

@@ -35,6 +35,8 @@ internal sealed record OverlayOverviewProjectionResult(
 {
     // Organization sources only; rooms keep their sentence layout.
     public OverlayOverviewFacts? Facts { get; init; }
+    /// <summary>Every member's realtime state is unknown (the source read went stale): "实时状态未知".</summary>
+    public bool RealtimeStatusUnknown { get; init; }
 }
 
 /// <summary>
@@ -46,6 +48,14 @@ internal sealed record OverlayOverviewProjectionResult(
 internal static class OverlayOverviewProjection
 {
     // User-facing shard wording lives only in this file; a Desktop test holds the rest of the client to it.
+    /// <summary>
+    /// Every member's realtime state is unknown: the source read went stale, not one member the source does not know.
+    /// The source says so before the local self row is filled in from the game log (review CX-VISOR-UNKNOWN-073-R1);
+    /// the rows themselves are the fallback for scenes built without it.
+    /// </summary>
+    internal static bool AllRealtimeUnknown(IReadOnlyCollection<PlayerRow> players, OverlaySceneContext context) =>
+        players.Count > 0 && (context.RealtimeUnknown || players.All(player => player.RealtimeStateUnknown));
+
     internal static string ShardLabel(bool zh) => zh ? "分线" : "Shard";
 
     internal static string OtherShardsLabel(bool zh) => zh ? "其他分线" : "Other shards";
@@ -63,17 +73,19 @@ internal static class OverlayOverviewProjection
 
         var players = closedPlayers as PlayerRow[] ?? closedPlayers.ToArray();
         var zh = language?.StartsWith("zh", StringComparison.OrdinalIgnoreCase) == true;
-        if (hasFleet && players.Any(player => player.RealtimeStateUnknown))
-            return new(sceneContext.Kind == OverlaySceneKind.PartyRoom ? zh ? "房间概况" : "PARTY OVERVIEW"
+        // 11-14 (agreed with the scheduler): only when every member is unknown (the read went stale) does the overview say
+        // so; a member the room does not know is just that member's "未知", the overview counts the rest as usual
+        if (hasFleet && AllRealtimeUnknown(players, sceneContext))
+            return new(sceneContext.Kind == OverlaySceneKind.PartyRoom ? zh ? "房间概况" : "ROOM OVERVIEW"
                     : zh ? "组织概况" : "ORGANIZATION OVERVIEW",
                 zh ? "实时状态未知" : "Realtime status unknown",
                 zh ? $"成员 {players.Length}" : $"Members {players.Length}", "—", "", "", "—", "",
-                StatusPalette.DisabledBrush, [], ShowsPlaceholder: false);
+                StatusPalette.DisabledBrush, [], ShowsPlaceholder: false) { RealtimeStatusUnknown = true };
         if (!hasFleet && sceneContext.Kind is OverlaySceneKind.Community or OverlaySceneKind.PartyRoom)
         {
             var organization = sceneContext.Kind == OverlaySceneKind.Community;
             var traditional = language is "zh-Hant" or "zh-TW";
-            return new(organization ? zh ? "组织概况" : "ORGANIZATION OVERVIEW" : zh ? "房间概况" : "PARTY OVERVIEW",
+            return new(organization ? zh ? "组织概况" : "ORGANIZATION OVERVIEW" : zh ? "房间概况" : "ROOM OVERVIEW",
                 traditional ? organization ? "組織資訊暫不可用" : "房間資訊暫不可用"
                     : zh ? organization ? "组织信息暂不可用" : "房间信息暂不可用"
                     : organization ? "Organization information unavailable" : "Room information unavailable",
@@ -315,7 +327,7 @@ internal static class OverlayOverviewProjection
             zh);
 
         return new OverlayOverviewProjectionResult(
-            zh ? "房间概况" : "PARTY OVERVIEW",
+            zh ? "房间概况" : "ROOM OVERVIEW",
             zh
                 ? $"成员 {Number(memberCount)} / {(sceneContext.RoomCapacity > 0 ? Number(sceneContext.RoomCapacity) : "—")}"
                 : $"Members {Number(memberCount)} / {(sceneContext.RoomCapacity > 0 ? Number(sceneContext.RoomCapacity) : "—")}",

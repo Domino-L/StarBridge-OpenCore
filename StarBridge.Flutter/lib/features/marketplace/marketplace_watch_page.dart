@@ -357,7 +357,7 @@ class _WatchRow extends StatelessWidget {
               Text(
                 name,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: TextStyle(
                   fontSize: 13.5,

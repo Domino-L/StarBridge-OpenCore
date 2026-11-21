@@ -260,7 +260,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets(
-    'the original identity deadline retires the proof while its worker hangs, keeping the seen name',
+    'the original identity deadline withdraws the author while its worker hangs',
     (tester) async {
       var now = DateTime.utc(2026, 10, 17, 12);
       final pixel = (await tester.runAsync(syntheticPixel))!;
@@ -304,19 +304,19 @@ void main() {
       expect(model.loading, isTrue);
       final requestsBeforeDeadline = port.authorReads;
       final detailsBeforeDeadline = port.detailReads;
-      now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-      await tester.pump(const Duration(seconds: 5));
+      now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+      await tester.pump(const Duration(seconds: 15));
       await tester.pump();
-      // User decision 2026-10-30: a hanging read holds the seen name and avatar
-      // until it ends; the received proof itself has still retired.
-      expect(
-        find.textContaining('Bridge wire-visible'),
-        findsOneWidget,
-      );
-      expect(find.byType(RawImage), findsOneWidget);
+      // A hanging read cannot extend the original name/avatar budget.
+      // The authorized body and attachment stay.
+      expect(find.textContaining('Bridge wire-visible'), findsNothing);
+      expect(find.byType(RawImage), findsNothing);
       {
         final heldName = model.presentAuthor(model.messages.single);
-        expect(heldName.authorIdentity!.state, CommunityAuthorState.lastSeen);
+        expect(
+          heldName.authorIdentity!.state,
+          CommunityAuthorState.unavailable,
+        );
         expect(model.authorIsCurrent(heldName), isFalse);
       }
       expect(find.text('Authorized expiry body'), findsOneWidget);
@@ -336,9 +336,9 @@ void main() {
       port.pageGate!.complete();
       await held;
       await tester.pumpAndSettle();
-      // The read answered visible with a proof already lapsed: it confirms the
-      // seen name (user 2026-10-31) but is still no current author.
-      expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+      // The read answered visible with a proof already lapsed: it cannot revive the
+      // name or restore a current author.
+      expect(find.textContaining('Bridge wire-visible'), findsNothing);
       expect(
         model.authorIsCurrent(model.presentAuthor(model.messages.single)),
         isFalse,
@@ -959,11 +959,11 @@ void main() {
         expect(model.loading, isTrue);
         final pagesBeforeDeadline = port.authorReads,
             detailsBeforeDeadline = port.detailReads;
-        now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 16, milliseconds: 1));
         await tester.pump();
-        // User decision 2026-10-30: the seen name stays until a read ends.
-        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+        // The original hard deadline also ends the held name.
+        expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(find.byType(RawImage), findsNothing);
         expect(find.byType(OverlaySharedPresetCard), findsOneWidget);
         expect(find.text('Authorized expiry body'), findsOneWidget);
@@ -976,13 +976,16 @@ void main() {
         await tester.pump();
         {
           final heldName = model.presentAuthor(model.messages.single);
-          expect(heldName.authorIdentity!.state, CommunityAuthorState.lastSeen);
+          expect(
+            heldName.authorIdentity!.state,
+            CommunityAuthorState.unavailable,
+          );
           expect(model.authorIsCurrent(heldName), isFalse);
         }
         expect(
           find.textContaining('Bridge wire-visible'),
-          findsOneWidget,
-          reason: 'A retired proof stays retired when the clock rolls back; only the seen name shows.',
+          findsNothing,
+          reason: 'A retired identity cannot reappear after clock rollback.',
         );
         expect(find.byType(RawImage), findsNothing);
         expect(find.byType(OverlaySharedPresetCard), findsOneWidget);
@@ -1118,14 +1121,13 @@ void main() {
           orderedEquals(expected.buffer.asUint8List()),
         );
         final pages = port.authorReads, details = port.detailReads;
-        now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-        await tester.pump(const Duration(seconds: 1));
-        // User decision 2026-10-30: the seen name stays until a read ends; the
-        // proof, its avatar and the peer's own proof still retire separately.
-        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 12));
+        // Each sender retires at its own original validUntil + 10s deadline.
+        expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(
           model.presentAuthor(model.messages.first).authorIdentity!.state,
-          CommunityAuthorState.lastSeen,
+          CommunityAuthorState.unavailable,
         );
         expect(find.textContaining('Bridge independent-peer'), findsOneWidget);
         expect(
@@ -1143,18 +1145,18 @@ void main() {
         expect(retained.preview, same(preview));
         expect(port.authorReads, pages);
         expect(port.detailReads, details);
-        now = DateTime.utc(2026, 10, 17, 12, 0, 8);
+        now = DateTime.utc(2026, 10, 17, 12, 0, 19);
         await tester.pump(const Duration(seconds: 3));
-        expect(find.textContaining('Bridge independent-peer'), findsOneWidget);
+        expect(find.textContaining('Bridge independent-peer'), findsNothing);
         expect(
           model.presentAuthor(model.messages.last).authorIdentity!.state,
-          CommunityAuthorState.lastSeen,
+          CommunityAuthorState.unavailable,
         );
         now = DateTime.utc(2026, 10, 17, 12, 0, 4);
         repaint.value++;
         await tester.pump();
-        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
-        expect(find.textContaining('Bridge independent-peer'), findsOneWidget);
+        expect(find.textContaining('Bridge wire-visible'), findsNothing);
+        expect(find.textContaining('Bridge independent-peer'), findsNothing);
         for (final message in model.messages) {
           expect(model.authorIsCurrent(model.presentAuthor(message)), isFalse);
         }
@@ -1273,11 +1275,11 @@ void main() {
         expect(model.loading, isTrue);
         final pagesBeforeDeadline = port.authorReads,
             detailsBeforeDeadline = port.detailReads;
-        now = DateTime.utc(2026, 10, 17, 12, 0, 5);
-        await tester.pump(const Duration(seconds: 5));
+        now = DateTime.utc(2026, 10, 17, 12, 0, 16);
+        await tester.pump(const Duration(seconds: 16, milliseconds: 1));
         await tester.pump();
-        // User decision 2026-10-30: the seen name stays until a read ends.
-        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+        // The original hard deadline also ends the held name.
+        expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(find.byType(RawImage), findsNothing);
         expect(find.byType(OverlaySharedPresetCard), findsOneWidget);
         expect(find.text('Authorized expiry body'), findsOneWidget);
@@ -1290,13 +1292,16 @@ void main() {
         await tester.pump();
         {
           final heldName = model.presentAuthor(model.messages.single);
-          expect(heldName.authorIdentity!.state, CommunityAuthorState.lastSeen);
+          expect(
+            heldName.authorIdentity!.state,
+            CommunityAuthorState.unavailable,
+          );
           expect(model.authorIsCurrent(heldName), isFalse);
         }
         expect(
           find.textContaining('Bridge wire-visible'),
-          findsOneWidget,
-          reason: 'A retired proof stays retired when the clock rolls back; only the seen name shows.',
+          findsNothing,
+          reason: 'A retired identity cannot reappear after clock rollback.',
         );
         expect(find.byType(RawImage), findsNothing);
         expect(find.byType(OverlaySharedPresetCard), findsOneWidget);
@@ -1315,8 +1320,8 @@ void main() {
         await tester.pump();
         expect(model.loading, isFalse);
         expect(model.error, isNull);
-        // Its lapsed proof confirms the seen name, and no more than that.
-        expect(find.textContaining('Bridge wire-visible'), findsOneWidget);
+        // A lapsed response cannot revive the retired name.
+        expect(find.textContaining('Bridge wire-visible'), findsNothing);
         expect(
           model.authorIsCurrent(model.presentAuthor(model.messages.single)),
           isFalse,

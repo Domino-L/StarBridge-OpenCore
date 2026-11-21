@@ -11,7 +11,9 @@ internal sealed partial class ScmAccountBridgeHost
         var input = AccountSafetyRequest.Appeal(payload);
         var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _accountSafety ?? throw new AccountBridgeHostException("accountSafety.read_unavailable");
         void Current()
@@ -31,7 +33,9 @@ internal sealed partial class ScmAccountBridgeHost
         AccountSafetyRequest.Read(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _accountSafety ?? throw new AccountBridgeHostException("accountSafety.read_unavailable");
         try

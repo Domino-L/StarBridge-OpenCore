@@ -28,6 +28,7 @@ import '../../features/notifications/notification_inbox_page.dart';
 import 'social_window_codec.dart';
 import 'social_window_frame.dart';
 import 'social_window_ports.dart';
+import '../runtime/frame_governor.dart';
 
 void runSocialWindow(String kind) {
   final surface = switch (kind) {
@@ -36,7 +37,7 @@ void runSocialWindow(String kind) {
     _ => null,
   };
   if (surface == null) {
-    WidgetsFlutterBinding.ensureInitialized();
+    StarBridgeBinding.ensureInitialized(FrameSurface.messages);
     runApp(SocialWindowApp(kind: kind));
     return;
   }
@@ -172,6 +173,8 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
       _revision = revision;
       _view = view;
       _presentation = WindowPresentation.decode(payload['presentation']);
+      // This engine has its own frame governor: follow the user's setting.
+      performanceModePreference.value = _presentation.performanceMode;
       _failed = false;
       if (changed) {
         _messages?.dispose();
@@ -217,9 +220,9 @@ class _SocialWindowAppState extends State<SocialWindowApp> {
       final request = view['tradeRequest'] as Map;
       _trade!.requestOpen(
         ref,
-        attach: request['orderId'] is int && request['label'] is String
+        attach: request['orderNumber'] is String && request['label'] is String
             ? MarketChatAttachment(
-                request['orderId'] as int,
+                request['orderNumber'] as String,
                 request['label'] as String,
               )
             : null,

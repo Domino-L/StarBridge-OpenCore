@@ -7,7 +7,10 @@ internal static class AchievementCelebrationTests
     {
         internal readonly List<AchievementCelebration> Notices = [];
         internal int Clears;
-        public void Submit(AchievementCelebration notice) => Notices.Add(notice);
+        public void Submit(AchievementCelebration notice)
+        {
+            if (notice.TryAcceptReceipt()) Notices.Add(notice);
+        }
         public void Clear() => Clears++;
     }
     internal static void Run()
@@ -42,6 +45,63 @@ internal static class AchievementCelebrationTests
         Require(sink.Notices.Count == 2, "Disposed producer cannot deliver");
         SeriesDelivery();
         ScmDelivery();
+        ReceiptRarityParity().GetAwaiter().GetResult();
+    }
+
+    private static async Task ReceiptRarityParity()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "sb-rarity-parity-" + Guid.NewGuid().ToString("N"));
+        var owner = new BridgeAccountContext("fixture", "scm", "synthetic-rarity-parity");
+        var at = DateTimeOffset.UnixEpoch.AddDays(1);
+        try
+        {
+            async Task<byte[]> Present(string root, string? tier)
+            {
+                var store = new ScmAchievementUnlockStore(root);
+                ScmAchievementUnlockStore.PendingUnlock[] pending;
+                using (var lease = store.Open(owner))
+                {
+                    var empty = lease.Read();
+                    pending = Enumerable.Range(1, 3).Select(i =>
+                    {
+                        var item = new ScmAchievementItem($"scm-{i}", $"Fixture {i}", null, null, null, null,
+                            "EPIC", "HOLIDAY", true, at, null, null, i);
+                        return new ScmAchievementUnlockStore.PendingUnlock(empty.OwnerHash + ":" + item.Id,
+                            ScmAchievementUnlockStore.ForCard(item, at));
+                    }).ToArray();
+                    lease.Save(empty with { Pending = pending, Confirmed = pending.Select(p => p.Item.Id).ToArray(), Baseline = true }, () => true);
+                }
+                var persisted = Directory.GetFiles(root, "*.json", SearchOption.AllDirectories).Single();
+                var before = File.ReadAllBytes(persisted);
+                var sink = new Sink();
+                using var delivery = new AchievementCelebrationDelivery(() => (owner, 1), root);
+                delivery.Configure(sink);
+                var single = pending[0];
+                delivery.ScmEarned(1, single.Item.Id, at, single.Item.Name, null, single.Receipt, tier);
+                delivery.ScmEarned(1, single.Item.Id, at, single.Item.Name, null, single.Receipt, "RARE");
+                delivery.ScmSummary(1, pending.Select(p => p.Receipt).ToArray(), at);
+                delivery.ScmSummary(1, pending.Select(p => p.Receipt).ToArray(), at);
+                Require(sink.Notices.Count == 2 && sink.Notices.All(n => n.CanPresent && n.TryAcceptReceipt()),
+                    "Exactly one single and one deduplicated summary reach the sink with or without rarity");
+                var (card, summary) = (sink.Notices[0], sink.Notices[1]);
+                Require(card.RarityTier == tier && card.RarityBasisPoints is null && summary.SummaryCount == 2 &&
+                    summary.RarityTier is null && summary.RarityBasisPoints is null, "Only the individual notice carries its optional rarity");
+                Require(File.ReadAllBytes(persisted).SequenceEqual(before), "Admission must leave the durable queue byte-for-byte unchanged");
+                card.MarkPresented();
+                await CelebrationTestClock.Until(() => ScmAchievementUnlockTests.Pending(root, owner).Length == 2);
+                Require(!card.TryAcceptReceipt() && summary.TryAcceptReceipt(), "Only the fully presented single is acknowledged");
+                summary.MarkPresented();
+                await CelebrationTestClock.Until(() => ScmAchievementUnlockTests.Pending(root, owner).Length == 0);
+                Require(!summary.TryAcceptReceipt(), "Presenting a summary acknowledges its remaining member receipts");
+                return File.ReadAllBytes(persisted);
+            }
+
+            var omitted = await Present(Path.Combine(parent, "omitted"), null);
+            var supplied = await Present(Path.Combine(parent, "supplied"), "EPIC");
+            Require(omitted.SequenceEqual(supplied), "Acknowledged SCM storage is byte-for-byte identical with and without notice rarity");
+            Console.WriteLine("PASS SCM receipt rarity parity: admission, deduplication, summary, acknowledgement and durable state");
+        }
+        finally { if (Directory.Exists(parent)) Directory.Delete(parent, true); }
     }
     private static void ScmDelivery()
     {
@@ -56,6 +116,23 @@ internal static class AchievementCelebrationTests
         delivery.ScmEarned(1, "scm-3", at, "", null);
         Require(sink.Notices.Count == 1 && sink.Notices[0].CanPresent && sink.Notices[0].DisplayName == "星际圣诞" &&
             sink.Notices[0].LocalImagePath!.EndsWith("christmas-512.webp"), "Only validated SCM display notices join the existing trusted sink");
+        // Build 105: one summary card stands for unlocks past the single-card cap.
+        delivery.ScmSummary(1, ["r-4", "r-5", "r-6"], at);
+        delivery.ScmSummary(1, ["r-4", "r-5", "r-6"], at);
+        delivery.ScmEarned(1, "scm-5", at, "星际圣诞", null, "r-5");
+        delivery.ScmEarned(1, "scm-9", at, "星际圣诞", null, "r-9");
+        delivery.ScmSummary(1, ["r-4", "r-5", "r-6", "r-8", "r-9"], at);
+        delivery.ScmSummary(1, ["r-4", "r-6"], at);
+        Require(sink.Notices.Count == 4 && sink.Notices[1].AchievementId == "scm-summary" && sink.Notices[1].SummaryCount == 3 &&
+            sink.Notices[1].CanPresent && sink.Notices[2].AchievementId == "scm-9" &&
+            sink.Notices[3].SummaryCount == 1 && sink.Notices[3].Receipt == "r-8",
+            "R1 P2: a receipt queued once (single or inside a summary) is never queued again; a later summary stands only for the rest");
+        delivery.Invalidate(2);
+        Require(!new AchievementCelebration("scm-summary", at, 1, () => true).CanPresent, "An empty summary is never presented");
+        var presented = 0;
+        new AchievementCelebration("scm-1", at, 1, () => true, DisplayName: "星际圣诞") { Presented = () => presented++ }.MarkPresented();
+        new AchievementCelebration("scm-1", at, 1, () => true, DisplayName: "星际圣诞") { Presented = () => throw new IOException() }.MarkPresented();
+        Require(presented == 1, "MarkPresented reports once and never throws into the receiver");
     }
     private static void SeriesDelivery()
     {

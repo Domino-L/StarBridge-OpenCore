@@ -53,28 +53,32 @@ void main() {
   ) async {
     final (c, _) = await _editor(tester, InteractionSuite.standard);
     try {
+      // The new expiry explanation grows the centered dialog by this height.
+      final hintHeight = tester.getSize(find.text('保存后有效期从现在重新计算')).height;
+      final beforeHint = Offset(0, -hintHeight / 2);
+      final afterHint = Offset(0, hintHeight / 2);
       expect(
         tester.getRect(_k('market-listing-edit-close')),
-        const Rect.fromLTRB(802, 241, 850, 289),
+        const Rect.fromLTRB(802, 241, 850, 289).shift(beforeHint),
       );
       expect(
         tester.getRect(_k('market-listing-qty-dec')),
-        const Rect.fromLTRB(717, 396, 757, 436),
+        const Rect.fromLTRB(717, 396, 757, 436).shift(beforeHint),
       );
       expect(
         tester.getRect(_k('market-listing-qty-inc')),
-        const Rect.fromLTRB(809, 396, 849, 436),
+        const Rect.fromLTRB(809, 396, 849, 436).shift(beforeHint),
       );
       expect(
         tester.getRect(_k('market-listing-days')),
-        within(distance: .001, from: const Rect.fromLTRB(430, 501, 647.2, 541)),
+        within(distance: .001, from: const Rect.fromLTRB(430, 501, 647.2, 541).shift(beforeHint)),
       );
       expect(
         tester.getRect(_k('market-listing-visible')),
-        const Rect.fromLTRB(430, 551, 470, 591),
+        const Rect.fromLTRB(430, 551, 470, 591).shift(afterHint),
       );
       final listed = find.text('上架');
-      expect(tester.getRect(listed), const Rect.fromLTRB(470, 561, 498.5, 581));
+      expect(tester.getRect(listed), const Rect.fromLTRB(470, 561, 498.5, 581).shift(afterHint));
       final style = tester
           .widget<RichText>(
             find.descendant(of: listed, matching: find.byType(RichText)),
@@ -85,15 +89,15 @@ void main() {
       expect(style.color?.toARGB32(), 0xffe7eef2);
       expect(
         tester.getRect(_k('market-listing-delete')),
-        const Rect.fromLTRB(430, 609, 498, 657),
+        const Rect.fromLTRB(430, 609, 498, 657).shift(afterHint),
       );
       expect(
         tester.getRect(_k('market-listing-edit-cancel')),
-        const Rect.fromLTRB(682, 609, 754, 657),
+        const Rect.fromLTRB(682, 609, 754, 657).shift(afterHint),
       );
       expect(
         tester.getRect(_k('market-listing-save')),
-        const Rect.fromLTRB(762, 609, 850, 657),
+        const Rect.fromLTRB(762, 609, 850, 657).shift(afterHint),
       );
       await tester.tap(_k('market-listing-delete'));
       await tester.pumpAndSettle();

@@ -44,8 +44,31 @@ internal static class MarketplaceNoticesTests
         public void DeleteRefreshToken(string key) { }
     }
 
+    private static void NoticeItemCopy()
+    {
+        var snapshot = BridgePayload.From(new {
+            providedItems = new[] { new { name = "A", quantity = 1, qualityData = "{}" }, new { name = "B", quantity = 2, qualityData = "{}" } },
+            wantedItems = new[] { new { name = "C", quantity = 3 } }
+        });
+        var bundle = BridgePayload.From(new {
+            providedItems = new[] { new { name = "A", quantity = 1 }, new { name = "B", quantity = 2 } }
+        });
+        Check(StarBridge.HostRuntime.Marketplace.MarketplaceNoticeItem.Describe(bundle,
+            "清单【补给】，包含物品：A×1、B×2", "zh-CN") == "补给（共 2 件）", "bundle name and complete item count");
+        Check(StarBridge.HostRuntime.Marketplace.MarketplaceNoticeItem.Describe(snapshot, "", "zh-CN") ==
+            "给出 A、B 换取 C", "barter retains both sides");
+        Check(StarBridge.HostRuntime.Marketplace.MarketplaceNoticeItem.Describe(snapshot, "", "zh-TW") ==
+            "給出 A、B 換取 C", "traditional barter copy");
+        Check(StarBridge.HostRuntime.Marketplace.MarketplaceNoticeItem.Describe(snapshot, "", "en") ==
+            "Give A、B for C", "English barter copy");
+        Check(StarBridge.HostRuntime.Marketplace.MarketplaceNoticeItem.Describe(default,
+            "清单【补给】，包含物品：A×1、B×2 换取 C", "zh-CN") ==
+            "给出 补给（共 2 件） 换取 C", "no quality snapshot preserves both sides");
+    }
+
     internal static async Task Run()
     {
+        NoticeItemCopy();
         var handler = new Handler();
         var uri = new Uri("https://fixture.invalid/");
         var client = new OAuthPkceClient(new ScmHttpClient(handler), new Vault(), new("fixture", uri, uri, uri, "desktop", "starbridge-api", "", "/callback"));

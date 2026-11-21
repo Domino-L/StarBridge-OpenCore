@@ -5,6 +5,7 @@ import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_icon_action.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_ships_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// The ships page's title row, as the approved preview (2026-10-29): back,
 /// the organization's name, the scope note beside it, then the sharing entry
@@ -51,7 +52,7 @@ class CommunityShipsHeader extends StatelessWidget {
     final title = Text(
       '$name · ${t('title')}',
       maxLines: 1,
-      overflow: TextOverflow.fade,
+      overflow: fadeOverflow(context),
       softWrap: false,
       style: text.titleMedium?.copyWith(
         fontWeight: FontWeight.w700,

@@ -12,6 +12,9 @@ import 'personal_profile_module.dart';
 import '../gameplay_time/gameplay_time_controller.dart';
 import 'personal_profile_page.dart';
 import 'personal_profile_trade_strip.dart';
+import 'personal_profile_achievement_showcase.dart';
+import 'personal_profile_achievement_sources.dart';
+import '../achievements/achievement_collection_session.dart';
 import '../onboarding/connection_mode_port.dart';
 import 'personal_profile_port.dart';
 import 'offline_personal_profile_page.dart';
@@ -27,7 +30,20 @@ FeatureDescriptor createPersonalProfileFeature(
   PersonalProfilePort Function()? offlineFactory,
   PersonalProfilePort Function(String readId)? retainedFactory,
   ProfileTradeStripBuilder? tradeStrip,
+  AchievementCollectionSession? achievements,
+  AchievementCollectionSession? scmAchievements,
 }) {
+  // Listed: this app's catalog. Counted: plus the SCM ones, as on the
+  // achievements page. Neither listens (so neither reads) until shown.
+  final achievementSources = achievements == null
+      ? null
+      : ProfileAchievementSources(achievements.collection, null);
+  final countedAchievements = achievements == null || scmAchievements == null
+      ? null
+      : ProfileAchievementSources(
+          achievements.collection,
+          scmAchievements.collection,
+        );
   final display = connectionMode == null || offlineFactory == null
       ? null
       : PersonalProfileDisplaySession(
@@ -45,7 +61,11 @@ FeatureDescriptor createPersonalProfileFeature(
     icon: StarBridgeIconSemantic.profile,
     navigationRegion: NavigationRegion.accountMenu,
     order: 10,
-    onDispose: display?.dispose,
+    onDispose: () {
+      display?.dispose();
+      achievementSources?.dispose();
+      countedAchievements?.dispose();
+    },
     buildDestination: (_) {
       Widget page = PersonalProfilePage(
         module: module,
@@ -54,6 +74,17 @@ FeatureDescriptor createPersonalProfileFeature(
       );
       if (tradeStrip != null) {
         page = ProfileTradeStripScope(builder: tradeStrip, child: page);
+      }
+      if (achievements != null) {
+        page = ProfileAchievementsScope(
+          collection: achievementSources!,
+          counted: countedAchievements,
+          activate: () => Future.wait([
+            achievements.activate(),
+            ?scmAchievements?.activate(),
+          ]),
+          child: page,
+        );
       }
       if (connectionMode != null && offlineFactory != null) {
         page = OfflinePersonalProfilePage(

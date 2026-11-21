@@ -20,10 +20,14 @@ public sealed class HangarSandboxDispatcher : IBridgeRequestDispatcher
             throw new ArgumentException("Invalid sandbox credentials");
         _http = http; _a = a; _b = b; _generation = generation;
     }
-    public static HangarSandboxDispatcher? FromEnvironment(Func<long> generation)
+    public static HangarSandboxDispatcher? FromEnvironment(Func<long> generation) =>
+        FromLocation(HangarSandboxLocation.Resolve(Environment.GetEnvironmentVariable, out _), generation);
+
+    /// <summary>The folder comes from <see cref="HangarSandboxLocation"/>; none is built in.</summary>
+    public static HangarSandboxDispatcher? FromLocation(HangarSandboxLocation? location, Func<long> generation)
     {
-        if (Environment.GetEnvironmentVariable("STARBRIDGE_HANGAR_SANDBOX") != "1") return null;
-        const string path = @"G:\Development\tools\starbridge-profile-mysql\instance-hangar-20260903\client.dpapi";
+        if (location is null) return null;
+        var path = location.Manifest;
         if (new FileInfo(path).Length > 16384) throw new InvalidOperationException("Invalid sandbox configuration");
         byte[] clear = ProtectedData.Unprotect(File.ReadAllBytes(path), null, DataProtectionScope.CurrentUser);
         try {

@@ -20,6 +20,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../localization/app_strings.dart';
 import '../menu_overlay/menu_friends_view.dart';
+import '../runtime/frame_governor.dart';
 import '../social_windows/window_presentation.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
@@ -97,6 +98,8 @@ class _FriendsWindowAppState extends State<FriendsWindowApp> {
       _hasSnapshot = true;
       _failed = false;
     });
+    // This engine has its own frame governor: follow the user's setting.
+    performanceModePreference.value = _presentation.performanceMode;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && opening == _opening && revision == _revision) {
         unawaited(_painted(opening));

@@ -39,10 +39,19 @@ final class GuideTourStep {
 }
 
 final class GuideTourSpec {
-  const GuideTourSpec(this.id, this.kind, this.steps, {this.route});
+  const GuideTourSpec(
+    this.id,
+    this.kind,
+    this.steps, {
+    this.route,
+    this.interactiveAnchors = const [],
+  });
   final String id;
   final GuideTourKind kind;
   final List<GuideTourStep> steps;
+
+  /// Explicit escape actions that stay clickable during this tour's barriers.
+  final List<String> interactiveAnchors;
 
   /// Auto-start on the first visit of this route (eligible profiles only).
   /// Do-it tours have none: their first step's event starts them.
@@ -82,32 +91,37 @@ const guideTours = <String, GuideTourSpec>{
     GuideTourStep('fleet.share'),
   ]),
   // Starts when the reader opens on the user's own Read hangar (at step 2).
-  'hangar': GuideTourSpec('hangar', GuideTourKind.doIt, [
-    // Entering the reader also opens the RSI page.
-    GuideTourStep('hangar.read', until: 'hangar.readerOpened'),
-    // Sign-in and the avatar click happen inside the RSI page, which the
-    // reader cannot observe before reading starts: explained, not awaited.
-    GuideTourStep(
-      'hangar.browser',
-      interactive: true,
-      card: 'hangar.results',
-      flow: _reader,
-    ),
-    GuideTourStep(
-      'hangar.browser',
-      interactive: true,
-      card: 'hangar.results',
-      flow: _reader,
-    ),
-    GuideTourStep(
-      'hangar.action',
-      until: 'hangar.readDone',
-      card: 'hangar.results',
-      flow: _reader,
-    ),
-    GuideTourStep('hangar.results', card: 'hangar.results', flow: _reader),
-    GuideTourStep('hangar.save', until: 'hangar.saved', flow: _reader),
-  ]),
+  'hangar': GuideTourSpec(
+    'hangar',
+    GuideTourKind.doIt,
+    [
+      // Entering the reader also opens the RSI page.
+      GuideTourStep('hangar.read', until: 'hangar.readerOpened'),
+      // Sign-in and the avatar click happen inside the RSI page, which the
+      // reader cannot observe before reading starts: explained, not awaited.
+      GuideTourStep(
+        'hangar.browser',
+        interactive: true,
+        card: 'hangar.results',
+        flow: _reader,
+      ),
+      GuideTourStep(
+        'hangar.browser',
+        interactive: true,
+        card: 'hangar.results',
+        flow: _reader,
+      ),
+      GuideTourStep(
+        'hangar.action',
+        until: 'hangar.readDone',
+        card: 'hangar.results',
+        flow: _reader,
+      ),
+      GuideTourStep('hangar.results', card: 'hangar.results', flow: _reader),
+      GuideTourStep('hangar.save', until: 'hangar.saved', flow: _reader),
+    ],
+    interactiveAnchors: ['hangar.clear'],
+  ),
   // Starts when the create form opens on the user's own click (at step 2).
   'rooms': GuideTourSpec('rooms', GuideTourKind.doIt, [
     GuideTourStep('rooms.create', until: 'rooms.formOpened'),

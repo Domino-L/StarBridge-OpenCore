@@ -13,6 +13,7 @@ import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'onboarding_controller.dart';
+import 'game_log_search_panel.dart';
 import 'onboarding_copy.dart';
 import 'onboarding_models.dart';
 import 'app_behavior_choice_controller.dart';
@@ -88,6 +89,8 @@ class OnboardingStepBody extends StatelessWidget {
           ? null
           : view.step == OnboardingStep.identity
           ? controller.checkEvidence
+          : view.step == OnboardingStep.log
+          ? controller.retryLogSetup
           : controller.refresh,
     ),
     child: Text(copy.text('retry')),
@@ -103,21 +106,40 @@ class OnboardingStepBody extends StatelessWidget {
         children: [Text(testBuildNoticeBody(copy.locale))],
       ),
       OnboardingStep.mode => _mode(context),
-      OnboardingStep.log => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _fact(context, 'version', f.version ?? copy.text('unknown')),
-          SizedBox(height: t.space.md),
-          Text(copy.text(f.logReady ? 'logReady' : 'notChecked')),
-          SizedBox(height: t.space.lg),
-          Wrap(
-            spacing: t.space.md,
-            runSpacing: t.space.sm,
-            children: [
-              _action('pickLog', OnboardingAction.selectLog),
-              _refresh(),
-            ],
-          ),
+      OnboardingStep.log => GameLogSearchPanel(
+        copy: copy,
+        candidates: f.logCandidates,
+        blocked: f.logSearchBlocked,
+        busy: view.busy,
+        enabled: !view.busy && f.available && onlineReview?.value.busy != true,
+        searchEnabled:
+            f.activeMode == OnboardingMode.local && f.publicationSuspended,
+        onEnter: controller.searchLogsOnEntry,
+        onSelect: controller.selectLogCandidate,
+        onManual: () => controller.run(OnboardingAction.selectLog),
+        onSearch: controller.retryLogSetup,
+        manualKey: const Key('onboarding-action-selectLog'),
+        searchKey: const Key('onboarding-refresh'),
+        extra: [
+          // Deferring the log needs local mode; never offer it as a way to
+          // switch an online account off.
+          if (f.activeMode != OnboardingMode.online)
+            _action('skipLog', OnboardingAction.skipLog),
+          if (controller.canUseLocalForLog) ...[
+            Text(copy.text('logNeedsLocalBody')),
+            StarBridgeActionButton(
+              controlKey: const Key('onboarding-action-useLocalForLog'),
+              kind: StarBridgeActionKind.secondary,
+              onActivate: _tap(
+                onlineReview?.value.busy == true
+                    ? null
+                    : controller.useLocalForLog,
+              ),
+              child: Text(copy.text('useLocalForLog')),
+            ),
+          ],
+          if (view.withoutLog) Text(copy.text('logDeferredBody')),
+          if (f.logReady) Text(copy.text('logReady')),
         ],
       ),
       OnboardingStep.identity => _identity(context),
@@ -131,7 +153,7 @@ class OnboardingStepBody extends StatelessWidget {
               enabled:
                   !view.busy &&
                   f.available &&
-                  view.identityReady &&
+                  view.localSetupReady &&
                   view.modeApplied &&
                   deviceReview?.value.busy != true,
               onSaved: () async {
@@ -148,7 +170,7 @@ class OnboardingStepBody extends StatelessWidget {
             enabled:
                 !view.busy &&
                 f.available &&
-                view.identityReady &&
+                view.localSetupReady &&
                 view.modeApplied &&
                 localStatistics?.value.busy != true,
             onEdit: editDeviceSettings,
@@ -160,10 +182,11 @@ class OnboardingStepBody extends StatelessWidget {
             LocalStatisticsPanel(
               copy: copy,
               controller: localStatistics,
+              showIdentityDetails: !view.withoutLog,
               enabled:
                   !view.busy &&
                   f.available &&
-                  view.identityReady &&
+                  view.localSetupReady &&
                   view.modeApplied &&
                   deviceReview?.value.busy != true &&
                   localHistory?.value.busy != true,
@@ -179,7 +202,7 @@ class OnboardingStepBody extends StatelessWidget {
           if (view.mode == OnboardingMode.online) ...[
             Text(copy.text('history.onlineLater')),
             SizedBox(height: t.space.lg),
-          ] else if (localHistory != null) ...[
+          ] else if (localHistory != null && !view.withoutLog) ...[
             LocalHistoryPanel(
               copy: copy,
               controller: localHistory!,
@@ -198,7 +221,7 @@ class OnboardingStepBody extends StatelessWidget {
             ),
             SizedBox(height: t.space.lg),
           ],
-          if (nativeOverlay != null) ...[
+          if (nativeOverlay != null && !view.withoutLog) ...[
             NativeOverlayCheckPanel(
               controller: nativeOverlay!,
               copy: copy,
@@ -232,7 +255,7 @@ class OnboardingStepBody extends StatelessWidget {
           ),
           SizedBox(height: t.space.lg),
           _action('reviewOnline', OnboardingAction.reviewOnlineChoices),
-          _refresh(),
+          if (onlineReview == null) _refresh(),
         ],
       ),
       OnboardingStep.verify =>
@@ -263,9 +286,16 @@ class OnboardingStepBody extends StatelessWidget {
             title: Text(copy.text(mode.name)),
             subtitle: Text(copy.text('${mode.name}Description')),
             toggleable: false,
-            enabled: !view.busy && onlineReview?.value.busy != true,
+            enabled:
+                !view.busy &&
+                onlineReview?.value.busy != true &&
+                (mode == OnboardingMode.local || view.identityReady),
           ),
           SizedBox(height: t.space.md),
+          if (mode == OnboardingMode.online &&
+              !view.identityReady &&
+              view.withoutLog)
+            Text(copy.text('onlineNeedsLog')),
         ],
         if (view.mode == OnboardingMode.online) ...[
           if (onlineReview != null)
@@ -274,6 +304,10 @@ class OnboardingStepBody extends StatelessWidget {
               copy: copy,
               enabled: !view.busy && view.facts.available && view.modeApplied,
               onChanged: controller.refresh,
+              accountCard: true,
+              retainedAccountCard: true,
+              autoReview: true,
+              onContinue: controller.canContinue ? controller.next : null,
             )
           else ...[
             if (controller.canCancelLogin)
@@ -340,47 +374,12 @@ class OnboardingStepBody extends StatelessWidget {
             Text(copy.text('enterGame')),
           ],
         ],
-        if (view.mode == OnboardingMode.online &&
-            !view.onlineIdentityReady) ...[
-          SizedBox(height: t.space.md),
-          if (!f.localIdentityConfirmed &&
-              f.hasCandidate &&
-              !view.needsFreshEvidence)
-            StarBridgeActionButton(
-              controlKey: const Key('onboarding-confirm-local-handle'),
-              kind: StarBridgeActionKind.primary,
-              onActivate: _tap(
-                controller.canConfirmLocalIdentity &&
-                        onlineReview?.value.busy != true
-                    ? () => controller.run(OnboardingAction.confirmHandle)
-                    : null,
-              ),
-              child: Text(copy.text('onlineReview.confirmLocal')),
-            ),
-          if (onlineReview != null)
-            OnlineReviewPanel(
-              controller: onlineReview!,
-              copy: copy,
-              enabled: !view.busy && f.available && view.identityReady,
-              onChanged: controller.refresh,
-            )
-          else
-            Text(copy.text('onlineReview.checkRequired')),
-        ] else if (view.mode == OnboardingMode.online &&
-            onlineReview != null) ...[
-          SizedBox(height: t.space.md),
-          OnlineReviewPanel(
-            controller: onlineReview!,
-            copy: copy,
-            enabled: !view.busy && f.available && view.identityReady,
-            onChanged: controller.refresh,
-          ),
-        ],
         SizedBox(height: t.space.lg),
-        if (!(view.mode == OnboardingMode.online &&
-            onlineReview != null &&
-            view.identityReady))
-          _refresh(),
+        if (view.facts.logSetupPending) ...[
+          Text(copy.text('logSetupPending')),
+          _action('finishLogSetup', OnboardingAction.finishLogSetup),
+        ],
+        _refresh(),
       ],
     );
   }

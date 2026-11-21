@@ -31,7 +31,16 @@ public sealed partial class GameplayTimeRuntime
                 owner = _active;
             }
             if (pending) await ResetAsync(owner.Context!, owner.Generation, null, remote, work.Token).ConfigureAwait(false);
-            else await ObserveAccountResetAsync(owner.Context!, owner.Generation, remote, work.Token).ConfigureAwait(false);
+            else
+            {
+                try { await ObserveAccountResetAsync(owner.Context!, owner.Generation, remote, work.Token).ConfigureAwait(false); }
+                catch (Exception error) when (error is not OutOfMemoryException)
+                {
+                    // Recovery already tried Japan. Preserve its failure path without adding another Japan request.
+                    QueueVisitorGameplayTime(owner, null, work.Token, localAllowed: false);
+                    throw;
+                }
+            }
             await PublishCurrentGameplayAsync(work.Token).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OutOfMemoryException)

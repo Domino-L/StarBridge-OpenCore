@@ -1,6 +1,7 @@
 namespace StarBridge.HostRuntime;
 
 using StarBridge.NativeBridge;
+using StarBridge.HostRuntime.Support;
 
 /// <summary>
 /// Routes lifecycle and account requests while presenting one dispatcher seam
@@ -31,6 +32,7 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
     private readonly IBridgeRequestDispatcher? _localEventClear;
     private readonly IBridgeRequestDispatcher? _playReminder;
     private readonly IBridgeRequestDispatcher? _execHangar;
+    private readonly IBridgeRequestDispatcher? _keyBindings;
     private readonly IBridgeRequestDispatcher? _firstUseDeviceReview;
     private readonly IBridgeRequestDispatcher? _firstUseStatistics;
     private readonly IBridgeRequestDispatcher? _guideState;
@@ -78,7 +80,8 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         IBridgeRequestDispatcher? firstUseOnlineInstallation = null,
         IBridgeRequestDispatcher? firstUseStartup = null,
         IBridgeRequestDispatcher? firstUse = null,
-        IBridgeRequestDispatcher? guideState = null)
+        IBridgeRequestDispatcher? guideState = null,
+        IBridgeRequestDispatcher? keyBindings = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _account = account ?? throw new ArgumentNullException(nameof(account));
@@ -108,6 +111,7 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         _localEventClear = localEventClear;
         _playReminder = playReminder;
         _execHangar = execHangar;
+        _keyBindings = keyBindings;
         _firstUseDeviceReview = firstUseDeviceReview;
         _firstUseStatistics = firstUseStatistics;
         _guideState = guideState;
@@ -162,7 +166,8 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
             or Storage.StorageMigrationBridgeDispatcher.ResultRequest or Storage.StorageMigrationBridgeDispatcher.AcknowledgeRequest)
             return _storageMigration.DispatchAsync(request, cancellationToken);
         if (_updates != null && request.Name is Updates.FlutterUpdateBridgeDispatcher.RequestName or Updates.FlutterUpdateBridgeDispatcher.ReadyRequestName
-            or Updates.FlutterUpdateBridgeDispatcher.PrepareRequestName or Updates.FlutterUpdateBridgeDispatcher.HandoffRequestName)
+            or Updates.FlutterUpdateBridgeDispatcher.PrepareRequestName or Updates.FlutterUpdateBridgeDispatcher.HandoffRequestName
+            or Updates.FlutterUpdateBridgeDispatcher.HeroReadRequestName)
             return _updates.DispatchAsync(request, cancellationToken);
         if (_playerActivity != null && Notifications.PlayerActivityRuntime.Capabilities.Contains(request.Name))
             return _playerActivity.DispatchAsync(request, cancellationToken);
@@ -183,6 +188,8 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
             return _playReminder.DispatchAsync(request, cancellationToken);
         if (_execHangar != null && Tools.ExecHangarBridgeDispatcher.Capabilities.Contains(request.Name))
             return _execHangar.DispatchAsync(request, cancellationToken);
+        if (_keyBindings != null && Tools.KeyBindingsBridgeDispatcher.Capabilities.Contains(request.Name))
+            return _keyBindings.DispatchAsync(request, cancellationToken);
         if (_support != null && request.Name.StartsWith("diagnostics.", StringComparison.Ordinal))
             return _support.DispatchAsync(request, cancellationToken);
         if (request.Name == Account.AccountBridgeRequestNames.GetPartyRooms && (_audio != null || _notifications != null))
@@ -224,12 +231,14 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
             request.Name is "eventSharing.read" or "eventSharing.save" or
                 "friendSharing.read" or "friendSharing.save" or
                 "gameIdVisibility.read" or "gameIdVisibility.save" or
+                "gameIdVisibility.saveCallsign" or "gameIdVisibility.retrySync" or
                 "friendRequests.privacyRead" or "friendRequests.privacyWrite" or
                 "recentlyPlayed.privacyRead" or "recentlyPlayed.privacyWrite" ||
             request.Name is "presence.read" or "presence.set" or "presence.activity" ||
             request.Name.StartsWith("gameIdentity.", StringComparison.Ordinal) ||
             request.Name.StartsWith("gameplayTime.", StringComparison.Ordinal) ||
             request.Name.StartsWith("gameLog.", StringComparison.Ordinal) ||
+            MissionRecordsRuntime.Handles(request.Name) ||
             request.Name.StartsWith("achievements.", StringComparison.Ordinal) ||
             request.Name.StartsWith("scmAchievements.", StringComparison.Ordinal) ||
             request.Name == "achievementIdeas.pickImage" ||
@@ -239,7 +248,7 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
             request.Name.StartsWith("communities.", StringComparison.Ordinal) ||
             request.Name.StartsWith("partyRooms.", StringComparison.Ordinal) ||
             Images.RemoteImageCacheBridge.Requests.Contains(request.Name) ||
-            request.Name == "ships.specifications" ||
+            request.Name == "ships.specifications" || AccountBridgeRuntime.IsCatalogRequest(request.Name) ||
             request.Name is "marketplace.read" or "marketplace.preferences" or "marketplace.trade" or
                 "marketplace.records" or "marketplace.contracts" or "marketplace.warehouse" or "marketplace.notices" or "marketplace.chat" or "marketplace.listings" or "tradeProfile.read" or "tradeProfile.write" ||
             request.Name.StartsWith("hangarReader.", StringComparison.Ordinal))
@@ -336,6 +345,7 @@ public sealed class CompositeBridgeDispatcher : IBridgeRequestDispatcher
         _localEventClear?.Dispose();
         _playReminder?.Dispose();
         _execHangar?.Dispose();
+        _keyBindings?.Dispose();
         _firstUseDeviceReview?.Dispose();
         _firstUseStatistics?.Dispose();
         _guideState?.Dispose();

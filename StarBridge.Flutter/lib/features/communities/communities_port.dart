@@ -13,6 +13,10 @@ abstract interface class CommunitiesPort {
     String? after,
     String? filters,
   });
+
+  /// `accepted`, `rejected` or `unknown`; or a definite relay refusal the page
+  /// explains instead: `identityRequired` (game identity not verified) or
+  /// `identityAmbiguous` (a name in the organization maps to several accounts).
   Future<String> execute(String action, String targetRef);
   Future<void> close();
 }

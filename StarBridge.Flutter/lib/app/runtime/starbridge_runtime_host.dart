@@ -35,13 +35,17 @@ import 'example_scene_control.dart';
 import 'runtime_example_composition.dart';
 import 'startup_prompt_queue.dart';
 import 'first_use_privacy_flow.dart';
+import 'migration_result_flow.dart';
 import 'test_build_notice_flow.dart';
+import 'rsi_tool_notice_flow.dart';
+import '../../platform/window/rsi_tool_notice_receipt.dart';
 import 'update_startup_receipt.dart';
 import 'application_update_flow.dart';
 import 'menu_tool_page_navigation.dart';
 import '../routing/open_destination_intent.dart';
 import '../../features/settings/local_privacy_page.dart';
 import 'storage_result_flow.dart';
+import '../diagnostics/frame_pace_recorder.dart';
 import 'storage_result_retry.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
@@ -70,6 +74,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   final MenuWindowLifetime _menuLifetime = MenuWindowLifetime();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final StartupSession _startup = StartupSession();
+  // One recorder for the client's life, across host reconnects.
+  late final _framePace = FramePaceRecorder.fromEnvironment(widget.environment);
   late final WindowChromePort _windowChrome;
   late final NativeHostConnector _nativeHostConnector;
   late final ApplicationLifecyclePort _applicationLifecycle;
@@ -100,7 +106,12 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   bool _behaviorPromptDeferred = false;
   late final StartupPromptQueue _prompts;
   FirstUsePrivacyFlow? _privacyFlow;
+  MigrationResultFlow? _migrationFlow;
   TestBuildNoticeFlow? _noticeFlow;
+  late final RsiToolNoticeFlow _rsiNoticeFlow;
+  bool get _blocksStartupPrompts =>
+      (_noticeFlow?.blocksPrompts ?? false) ||
+      (_noticeFlow != null && _rsiNoticeFlow.blocksPrompts);
   ApplicationUpdateFlow? _updateFlow;
   final _shownUpdateVersions = <String>{};
   final _navigationRequests = ValueNotifier<OpenDestinationIntent?>(null);
@@ -130,18 +141,37 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
                 : null,
             privacy: privacy,
             queue: _prompts,
-            ready: () => _promptReady && !(_noticeFlow?.blocksPrompts ?? false),
+            ready: () => _promptReady && !_blocksStartupPrompts,
             onAdjust: () => _navigationRequests.value = OpenDestinationIntent(
               '/settings/privacy',
             ),
           );
     _privacyFlow?.wake();
+    _migrationFlow?.dispose();
+    _migrationFlow = session == null
+        ? null
+        : MigrationResultFlow(
+            account: _composition.account,
+            session: session,
+            queue: _prompts,
+            ready: () => _promptReady && !_blocksStartupPrompts,
+          );
   }
 
   @override
   void initState() {
     super.initState();
     _prompts = StartupPromptQueue();
+    _rsiNoticeFlow = RsiToolNoticeFlow(
+      receipt: const MethodChannelRsiToolNoticeReceipt(),
+      queue: _prompts,
+      ready: () =>
+          _promptReady && _noticeFlow != null && !_noticeFlow!.blocksPrompts,
+      onChanged: () {
+        if (mounted && !_disposed) setState(() {});
+        _scheduleStartupChoice();
+      },
+    );
     _windowChrome = widget.windowChrome ?? MethodChannelWindowChrome();
     _nativeHostConnector =
         widget.nativeHostConnector ??
@@ -218,7 +248,9 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   late final _firstUseHold = FirstUseChoiceHold(_scheduleStartupChoice);
   void _scheduleStartupChoice() {
     _noticeFlow?.wake();
+    _rsiNoticeFlow.wake();
     _privacyFlow?.wake();
+    _migrationFlow?.wake();
     _updateFlow?.wake();
     _prompts.wake();
     if (_disposed ||
@@ -239,7 +271,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
       priority: 200,
       eligible: () =>
           _promptReady &&
-          !(_noticeFlow?.blocksPrompts ?? false) &&
+          !_blocksStartupPrompts &&
           !_firstUseHold.active &&
           !_startupChoiceVisible &&
           !(_privacyFlow?.blocksOptionalPrompt ?? false) &&
@@ -313,7 +345,10 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         await _applicationLifecycle.cancelCloseRequest();
         return;
       }
-      if (privacy != null && (privacy.dirty || privacy.saving)) {
+      if (privacy != null &&
+          (privacy.dirty ||
+              privacy.saving ||
+              privacyPageLeaveGuards[privacy] != null)) {
         final context = _navigatorKey.currentContext;
         if (context == null ||
             !context.mounted ||
@@ -427,26 +462,30 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
           },
         ),
       },
-      child: StarBridgeApp(
-        taskbarAttentionScope: _menuLifetime.taskbarAttentionScope,
-        key: ObjectKey(_composition),
-        navigatorKey: _navigatorKey,
-        navigatorObservers: [_prompts],
-        promptQueue: _prompts,
-        canPresentIdentityPrompt: () =>
-            _promptReady && !(_noticeFlow?.blocksPrompts ?? false),
-        usageTermsPending: _noticeFlow?.blocksPrompts ?? false,
-        onFirstUseOwnsDeviceChoices: _firstUseHold.set,
-        navigationRequests: _navigationRequests,
-        composition: _composition,
-        // 调试用：STARBRIDGE_HOLIDAY_PREVIEW=xmas 启动即预览圣诞外观，不用改系统日期。
-        initialHolidayPreview: widget.environment['STARBRIDGE_HOLIDAY_PREVIEW'],
-        onRetryConnection: _retryHostConnection,
-        startupSession: _startup,
-        onRetryStartup: _retryStartup,
-        exampleSceneControl: ExampleSceneControl.available(
-          active: _exampleScene,
-          onToggle: _toggleExampleScene,
+      child: FramePaceScope(
+        recorder: _framePace,
+        child: StarBridgeApp(
+          taskbarAttentionScope: _menuLifetime.taskbarAttentionScope,
+          key: ObjectKey(_composition),
+          navigatorKey: _navigatorKey,
+          navigatorObservers: [_prompts],
+          promptQueue: _prompts,
+          canPresentIdentityPrompt: () =>
+              _promptReady && !_blocksStartupPrompts,
+          usageTermsPending: _noticeFlow?.blocksPrompts ?? false,
+          onFirstUseOwnsDeviceChoices: _firstUseHold.set,
+          navigationRequests: _navigationRequests,
+          composition: _composition,
+          // 调试用：STARBRIDGE_HOLIDAY_PREVIEW=xmas 启动即预览圣诞外观，不用改系统日期。
+          initialHolidayPreview:
+              widget.environment['STARBRIDGE_HOLIDAY_PREVIEW'],
+          onRetryConnection: _retryHostConnection,
+          startupSession: _startup,
+          onRetryStartup: _retryStartup,
+          exampleSceneControl: ExampleSceneControl.available(
+            active: _exampleScene,
+            onToggle: _toggleExampleScene,
+          ),
         ),
       ),
     );
@@ -459,6 +498,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     _noticeFlow = null;
     _privacyFlow?.dispose();
     _privacyFlow = null;
+    _migrationFlow?.dispose();
+    _migrationFlow = null;
     _observeStartupAccount(null);
     final nextIsExample = !_exampleScene;
     _hostRevision++;
@@ -602,7 +643,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
         queue: _prompts,
         ready: () => _promptReady && revision == _hostRevision,
         canPresent: () =>
-            !(_noticeFlow?.blocksPrompts ?? false) &&
+            !_blocksStartupPrompts &&
             !(_privacyFlow?.blocksOptionalPrompt ?? false),
         shownVersions: _shownUpdateVersions,
       );
@@ -670,6 +711,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     _updateFlow = null;
     _privacyFlow?.dispose();
     _privacyFlow = null;
+    _migrationFlow?.dispose();
+    _migrationFlow = null;
     _observeStartupAccount(null);
     _startup.hostUnavailable();
     _noticeFlow?.dispose();
@@ -713,6 +756,8 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
   @override
   void dispose() {
     _disposed = true;
+    _framePace?.dispose();
+    _rsiNoticeFlow.dispose();
     _updateFlow?.dispose();
     _noticeFlow?.dispose();
     _unbindToolPages();
@@ -720,6 +765,7 @@ class _StarBridgeRuntimeHostState extends State<StarBridgeRuntimeHost> {
     _menuLifetime.execHangarRequests.removeListener(_openMenuExecHangar);
     _menuLifetime.execHangarRequests.dispose();
     _privacyFlow?.dispose();
+    _migrationFlow?.dispose();
     _prompts.dispose();
     _storageResultRetry.dispose();
     _hostRevision++;

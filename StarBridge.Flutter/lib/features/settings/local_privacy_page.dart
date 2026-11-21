@@ -18,6 +18,8 @@ import 'local_privacy_scope_sections.dart';
 import 'privacy_live_sharing_panel.dart';
 
 final privacyPageLeaveGuards = Expando<Future<bool> Function()>();
+// The visible editor owns the save scope; navigation and runtime close share it.
+final privacyPageSaveActions = Expando<Future<bool> Function()>();
 
 class LocalPrivacyPage extends StatefulWidget {
   const LocalPrivacyPage({
@@ -32,6 +34,8 @@ class LocalPrivacyPage extends StatefulWidget {
 }
 
 class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
+  late final Future<bool> Function() _saveAction = _saveChanges;
+  Future<bool> _saveChanges() => widget.controller.save();
   InteractionSource _waitSource = InteractionSource.programmatic;
   int _waitPhase = 0;
   bool _wasSaving = false;
@@ -53,12 +57,18 @@ class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
 
   Future<void> _save(InteractionSource source) =>
       runStarBridgeActivation<void>(source, () async {
-        await widget.controller.save();
+        await _saveAction();
       });
 
   @override
   void didUpdateWidget(LocalPrivacyPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (privacyPageSaveActions[oldWidget.controller] == _saveAction) {
+      privacyPageSaveActions[oldWidget.controller] = null;
+    }
+    if (widget.showSaveBar) {
+      privacyPageSaveActions[widget.controller] = _saveAction;
+    }
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.removeListener(_observeWait);
       widget.controller.addListener(_observeWait);
@@ -73,6 +83,9 @@ class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
 
   @override
   void dispose() {
+    if (privacyPageSaveActions[widget.controller] == _saveAction) {
+      privacyPageSaveActions[widget.controller] = null;
+    }
     widget.controller.removeListener(_observeWait);
     widget.controller.closeEditor();
     super.dispose();
@@ -81,6 +94,9 @@ class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.showSaveBar) {
+      privacyPageSaveActions[widget.controller] = _saveAction;
+    }
     widget.controller.addListener(_observeWait);
     widget.controller.open();
   }
@@ -130,7 +146,7 @@ class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
                   Text(
                     t(
                       c.status == LocalPrivacyStatus.signedOut
-                          ? 'accountChanged'
+                          ? (c.accountWaitShown ? 'accountWaiting' : 'accountChanged')
                           : 'readFailed',
                     ),
                   ),
@@ -323,8 +339,9 @@ class _LocalPrivacyPageState extends State<LocalPrivacyPage> {
 
 Future<bool> confirmLocalPrivacyLeave(
   BuildContext context,
-  LocalPrivacyController c,
-) {
+  LocalPrivacyController c, {
+  Future<bool> Function()? save,
+}) {
   final guard = privacyPageLeaveGuards[c];
   if (guard != null) return guard();
   final completeActivation = captureStarBridgeActivationCompletion();
@@ -334,6 +351,7 @@ Future<bool> confirmLocalPrivacyLeave(
     if (c.saving || c.publicationBusy) return false;
     if (!c.dirty) return true;
     final draft = c.draft;
+    final saveAction = save ?? privacyPageSaveActions[c];
     final strings = AppStrings.of(context);
     String t(String key) => strings.text('privacy.local.$key');
     final choice = await showStarBridgeDialog<String>(
@@ -364,7 +382,7 @@ Future<bool> confirmLocalPrivacyLeave(
             ),
             child: Text(t('discard')),
           ),
-          if (c.canSave)
+          if (c.canSave && saveAction != null)
             HelpSupportAction(
               controlKey: const Key('privacy-leave-save'),
               kind: StarBridgeActionKind.primary,
@@ -380,8 +398,11 @@ Future<bool> confirmLocalPrivacyLeave(
     );
     completeActivation(currentStarBridgeActivationSource);
     // An old confirmation must never save a newly signed-in account's defaults.
-    if (!identical(draft, c.draft)) return false;
-    if (choice == 'save') return c.save();
+    if (!identical(draft, c.draft) ||
+        save == null && privacyPageSaveActions[c] != saveAction) {
+      return false;
+    }
+    if (choice == 'save' && saveAction != null) return saveAction();
     if (choice == 'discard') {
       c.discard();
       return true;

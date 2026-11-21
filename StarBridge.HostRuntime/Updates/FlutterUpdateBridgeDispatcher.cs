@@ -8,9 +8,15 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
     FlutterUpdateStartupReporter? startupReporter = null,
     FlutterUpdateInstallation? installation = null,
     Func<long, object, BridgeEnvelope>? progressEvent = null,
-    Action? firstFrameReady = null, Lifecycle.DeviceNetworkAdmission? network = null) : IBridgeRequestDispatcher
+    Action? firstFrameReady = null, Lifecycle.DeviceNetworkAdmission? network = null,
+    Support.TestBuildNoticeStore? terms = null) : IBridgeRequestDispatcher
 {
+    // Manual update work uses current terms; automatic work keeps the device gate.
+    private readonly Lifecycle.DeviceNetworkAdmission? _manualNetwork = terms is null ? network : new(terms.IsAcknowledged);
     public const string RequestName = "applicationUpdates.check";
+    public const string HeroReadRequestName = "applicationUpdates.heroRead";
+    public static IReadOnlyList<string> SourceCapabilities(IApplicationUpdateSource? source) =>
+        source is FlutterInstallerUpdateSource ? new[] { HeroReadRequestName } : Array.Empty<string>();
     public const string ReadyRequestName = "applicationUpdates.firstFrameReady";
     public const string PrepareRequestName = "applicationUpdates.prepare";
     public const string HandoffRequestName = "applicationUpdates.handoff";
@@ -29,19 +35,40 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
             BridgeEnvelopeValidator.RequireCurrentVersion(request);
             if (_disposed || request.SessionGeneration != generation()) return Error(request);
             var installing = request.Name is PrepareRequestName or HandoffRequestName;
-            if (request.Name is not (RequestName or ReadyRequestName or PrepareRequestName or HandoffRequestName) || request.MessageType != BridgeMessageTypes.Request ||
+            var hero = request.Name == HeroReadRequestName;
+            var hasAutomatic = request.Payload.ValueKind == JsonValueKind.Object &&
+                request.Payload.TryGetProperty("automatic", out _);
+            var automatic = hasAutomatic && request.Payload.GetProperty("automatic").ValueKind == JsonValueKind.True;
+            if (request.Name is not (RequestName or ReadyRequestName or PrepareRequestName or HandoffRequestName or HeroReadRequestName) || request.MessageType != BridgeMessageTypes.Request ||
                 request.AccountContext is not null || request.Payload.ValueKind != JsonValueKind.Object ||
-                request.Payload.EnumerateObject().Count() != (installing ? 2 : 1) ||
+                hasAutomatic && (request.Name is not (RequestName or HeroReadRequestName) ||
+                    request.Payload.GetProperty("automatic").ValueKind is not (JsonValueKind.True or JsonValueKind.False)) ||
+                request.Payload.EnumerateObject().Count() != (hero ? 3 : installing ? 2 : 1) + (hasAutomatic ? 1 : 0) ||
                 !request.Payload.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.Number ||
                 !schema.TryGetInt32(out var version) || version != 1)
                 return new(BridgeEnvelope.ErrorResponse(request,
                     new BridgeError(BridgeErrorCodes.InvalidEnvelope, "Invalid update check request.")), []);
-            if (request.Name is RequestName or PrepareRequestName)
+            if (request.Name is RequestName or PrepareRequestName or HeroReadRequestName)
             {
-                networkWork = network?.Enter(cancellationToken);
-                if (network is not null && networkWork is null) return Error(request);
+                var admission = automatic ? network : _manualNetwork;
+                networkWork = admission?.Enter(cancellationToken);
+                if (admission is not null && networkWork is null) return Error(request);
                 networkDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, networkWork?.Token ?? CancellationToken.None);
                 cancellationToken = networkDeadline.Token;
+            }
+            if (hero)
+            {
+                if (runtime is not FlutterInstallerUpdateSource installer ||
+                    !request.Payload.TryGetProperty("version", out var expected) || expected.ValueKind != JsonValueKind.String ||
+                    !request.Payload.TryGetProperty("offset", out var offset) || offset.ValueKind != JsonValueKind.Number ||
+                    !offset.TryGetInt32(out var start) || start < 0) return Error(request);
+                var chunk = await installer.ReadHeroAsync(expected.GetString()!, start, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                networkWork?.RequireCurrent();
+                if (chunk is null || _disposed || request.SessionGeneration != generation()) return Error(request);
+                return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, version = chunk.Version,
+                    mediaType = chunk.MediaType, sha256 = chunk.Sha256, length = chunk.Length, offset = chunk.Offset,
+                    nextOffset = chunk.NextOffset, chunk = chunk.Chunk, done = chunk.Done }, preserveRequestAccountContext: false), []);
             }
             if (installing)
             {
@@ -139,5 +166,5 @@ public sealed class FlutterUpdateBridgeDispatcher(IApplicationUpdateSource? runt
     }
     private static BridgeDispatchBatch Error(BridgeEnvelope request) => new(
         BridgeEnvelope.ErrorResponse(request, new BridgeError("applicationUpdates.unavailable", "Update check unavailable.", true)), []);
-    public void Dispose() { _disposed = true; runtime?.Dispose(); }
+    public void Dispose() { _disposed = true; if (terms is not null) _ = _manualNetwork!.RetireAsync(); runtime?.Dispose(); }
 }

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../design_system/interaction/starbridge_activation_origin.dart';
@@ -24,19 +27,26 @@ class SyncPrivacyPage extends StatefulWidget {
     this.directMessagePrivacy,
     this.friendRequestPrivacy,
     this.recentlyPlayedPrivacy,
+    this.scmOnly,
+    this.accountSectionSelected = false,
     this.showLegacyEvents = true,
     this.friendSharing,
     this.gameIdVisibility,
+    this.leaderboardSetting,
     super.key,
   });
 
   final SyncPrivacyModule module;
   final Widget? friendSharing;
   final Widget? gameIdVisibility;
+  final Widget? leaderboardSetting;
   final bool showLegacyEvents;
+  // The combined privacy page keeps this section mounted in its IndexedStack.
+  final bool accountSectionSelected;
   final DirectMessagePrivacyModule? directMessagePrivacy;
   final FriendRequestPrivacyModule? friendRequestPrivacy;
   final RecentlyPlayedPrivacyModule? recentlyPlayedPrivacy;
+  final ValueListenable<bool>? scmOnly;
 
   @override
   State<SyncPrivacyPage> createState() => _SyncPrivacyPageState();
@@ -76,6 +86,13 @@ class _SyncPrivacyPageState extends State<SyncPrivacyPage> {
     super.initState();
     module.projection.addListener(_observeWait);
     _observeWait();
+    _refreshUnavailableSettings();
+  }
+
+  void _refreshUnavailableSettings() {
+    unawaited(friendRequestPrivacy?.refreshIfUnavailable());
+    unawaited(directMessagePrivacy?.refreshIfUnavailable());
+    unawaited(recentlyPlayedPrivacy?.refreshIfUnavailable());
   }
 
   @override
@@ -89,6 +106,9 @@ class _SyncPrivacyPageState extends State<SyncPrivacyPage> {
       _lastAvailability = null;
       _lastOperation = null;
       _observeWait();
+    }
+    if (widget.accountSectionSelected && !oldWidget.accountSectionSelected) {
+      _refreshUnavailableSettings();
     }
   }
 
@@ -116,15 +136,18 @@ class _SyncPrivacyPageState extends State<SyncPrivacyPage> {
         SyncPrivacyAvailability.unavailable => _SyncPrivacyUnavailableOverview(
           friendSharing: friendSharing,
           gameIdVisibility: gameIdVisibility,
+          leaderboardSetting: widget.leaderboardSetting,
           showLegacyEvents: showLegacyEvents,
           module: module,
           failure: projection.failure,
           directMessagePrivacy: directMessagePrivacy,
           friendRequestPrivacy: friendRequestPrivacy,
           recentlyPlayedPrivacy: recentlyPlayedPrivacy,
+          scmOnly: widget.scmOnly,
         ),
         SyncPrivacyAvailability.available => _SyncPrivacyContent(
           waitSource: _waitSource,
+          leaderboardSetting: widget.leaderboardSetting,
           waitPhase: _waitPhase,
           showLegacyEvents: showLegacyEvents,
           module: module,
@@ -132,6 +155,7 @@ class _SyncPrivacyPageState extends State<SyncPrivacyPage> {
           directMessagePrivacy: directMessagePrivacy,
           friendRequestPrivacy: friendRequestPrivacy,
           recentlyPlayedPrivacy: recentlyPlayedPrivacy,
+          scmOnly: widget.scmOnly,
         ),
       },
     );
@@ -153,22 +177,26 @@ class _SyncPrivacyUnavailableOverview extends StatelessWidget {
   const _SyncPrivacyUnavailableOverview({
     this.friendSharing,
     this.gameIdVisibility,
+    this.leaderboardSetting,
     required this.showLegacyEvents,
     required this.module,
     required this.failure,
     required this.directMessagePrivacy,
     required this.friendRequestPrivacy,
     required this.recentlyPlayedPrivacy,
+    required this.scmOnly,
   });
 
   final SyncPrivacyModule module;
   final SyncPrivacyFailure? failure;
   final Widget? friendSharing;
   final Widget? gameIdVisibility;
+  final Widget? leaderboardSetting;
   final bool showLegacyEvents;
   final DirectMessagePrivacyModule? directMessagePrivacy;
   final FriendRequestPrivacyModule? friendRequestPrivacy;
   final RecentlyPlayedPrivacyModule? recentlyPlayedPrivacy;
+  final ValueListenable<bool>? scmOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -217,7 +245,6 @@ class _SyncPrivacyUnavailableOverview extends StatelessWidget {
                       'settings.privacy.field.serverDetails',
                       'settings.privacy.field.ship',
                       'settings.privacy.field.location',
-                      'settings.privacy.field.lastOnline',
                     ],
                   ),
               SizedBox(height: tokens.space.md),
@@ -235,6 +262,7 @@ class _SyncPrivacyUnavailableOverview extends StatelessWidget {
                   ],
                 ),
               SizedBox(height: tokens.space.md),
+              ?leaderboardSetting,
               if (gameIdVisibility != null) ...[
                 gameIdVisibility!,
                 SizedBox(height: tokens.space.md),
@@ -250,7 +278,10 @@ class _SyncPrivacyUnavailableOverview extends StatelessWidget {
                     const Divider(height: 1),
                     DirectMessagePrivacySetting(module: directMessagePrivacy),
                     const Divider(height: 1),
-                    RecentlyPlayedPrivacySetting(module: recentlyPlayedPrivacy),
+                    RecentlyPlayedPrivacySetting(
+                      module: recentlyPlayedPrivacy,
+                      scmOnly: scmOnly,
+                    ),
                   ],
                 ),
               ),
@@ -324,6 +355,7 @@ class _UnavailableSettingsGroup extends StatelessWidget {
 class _SyncPrivacyContent extends StatelessWidget {
   const _SyncPrivacyContent({
     required this.waitSource,
+    this.leaderboardSetting,
     required this.waitPhase,
     required this.showLegacyEvents,
     required this.module,
@@ -331,6 +363,7 @@ class _SyncPrivacyContent extends StatelessWidget {
     required this.directMessagePrivacy,
     required this.friendRequestPrivacy,
     required this.recentlyPlayedPrivacy,
+    required this.scmOnly,
   });
 
   final SyncPrivacyModule module;
@@ -339,7 +372,9 @@ class _SyncPrivacyContent extends StatelessWidget {
   final DirectMessagePrivacyModule? directMessagePrivacy;
   final FriendRequestPrivacyModule? friendRequestPrivacy;
   final RecentlyPlayedPrivacyModule? recentlyPlayedPrivacy;
+  final ValueListenable<bool>? scmOnly;
   final InteractionSource waitSource;
+  final Widget? leaderboardSetting;
   final int waitPhase;
 
   @override
@@ -395,6 +430,7 @@ class _SyncPrivacyContent extends StatelessWidget {
                       ?.copyWith(color: tokens.colors.textSecondary),
                 ),
                 SizedBox(height: tokens.space.lg),
+                ?leaderboardSetting,
                 SyncPrivacyVisibilityMap(settings: settings),
                 SizedBox(height: tokens.space.md),
                 SyncPrivacySettingsPanel(
@@ -478,6 +514,7 @@ class _SyncPrivacyContent extends StatelessWidget {
                           settings.copyWith(
                             friendDefaults: settings.friendDefaults.copyWith(
                               presence: value,
+                              lastOnline: value,
                             ),
                           ),
                         ),
@@ -543,21 +580,6 @@ class _SyncPrivacyContent extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ),
-                      SyncPrivacySettingRow(
-                        settingKey: const Key('privacy-friends-last-online'),
-                        titleKey: 'settings.privacy.field.lastOnline',
-                        descriptionKey:
-                            'settings.privacy.field.lastOnlineDescription',
-                        value: settings.friendDefaults.lastOnline,
-                        enabled: enabled,
-                        onChanged: (value) => save(
-                          settings.copyWith(
-                            friendDefaults: settings.friendDefaults.copyWith(
-                              lastOnline: value,
-                            ),
-                          ),
-                        ),
                         showDivider: false,
                       ),
                       SizedBox(height: tokens.space.sm),
@@ -615,6 +637,7 @@ class _SyncPrivacyContent extends StatelessWidget {
                       const Divider(height: 1),
                       RecentlyPlayedPrivacySetting(
                         module: recentlyPlayedPrivacy,
+                        scmOnly: scmOnly,
                       ),
                       const Divider(height: 1),
                       SyncPrivacySettingRow(

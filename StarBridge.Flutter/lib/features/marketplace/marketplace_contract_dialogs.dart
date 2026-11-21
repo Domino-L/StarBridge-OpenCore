@@ -12,6 +12,7 @@ import 'marketplace_trade_style.dart';
 List<Widget> contractDialogActions<T>(
   BuildContext dialog, {
   required T? Function() result,
+  bool danger = false,
 }) => [
   marketButtonAction(
     key: const Key('market-contract-dialog-cancel'),
@@ -26,7 +27,7 @@ List<Widget> contractDialogActions<T>(
   marketButtonAction(
     key: const Key('market-contract-dialog-confirm'),
     FilledButton(
-      style: tradePrimaryStyle(dialog),
+      style: tradePrimaryStyle(dialog, danger: danger),
       onPressed: result() == null
           ? null
           : () => dismissStarBridgeDialog<T>(
@@ -46,9 +47,15 @@ class ContractTextDialog extends StatefulWidget {
     required this.title,
     required this.hint,
     required this.required,
+    this.message,
+    this.maxLength = 1000,
+    this.danger = false,
   });
   final String title, hint;
   final bool required;
+  final String? message;
+  final int maxLength;
+  final bool danger;
   @override
   State<ContractTextDialog> createState() => ContractTextDialogState();
 }
@@ -66,18 +73,25 @@ class ContractTextDialogState extends State<ContractTextDialog> {
     title: Text(widget.title),
     content: SizedBox(
       width: 420,
-      child: TextField(
-        key: const Key('market-contract-input'),
-        controller: _field,
-        autofocus: true,
-        maxLength: 1000,
-        maxLines: 4,
-        onChanged: (_) => setState(() {}),
-        decoration: InputDecoration(hintText: widget.hint),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.message != null) Text(widget.message!),
+          TextField(
+            key: const Key('market-contract-input'),
+            controller: _field,
+            autofocus: true,
+            maxLength: widget.maxLength,
+            maxLines: 4,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(hintText: widget.hint),
+          ),
+        ],
       ),
     ),
     actions: contractDialogActions<String>(
       context,
+      danger: widget.danger,
       result: () =>
           widget.required && _field.text.trim().isEmpty ? null : _field.text,
     ),

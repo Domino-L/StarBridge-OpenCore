@@ -2,7 +2,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'last_online_days.dart';
 import 'organization_holo.dart';
 import 'organization_member_copy.dart';
 import 'organization_member_runtime_cells.dart';
@@ -43,6 +45,7 @@ class OrganizationMemberEntry {
     required this.role,
     this.roleColor,
     this.presence = OrganizationMemberPresence.unknown,
+    this.lastOnlineDays,
     this.runtime = const MemberRuntimeCells.empty(),
     this.actions,
   });
@@ -54,6 +57,7 @@ class OrganizationMemberEntry {
   final Widget identity;
   final Color? roleColor;
   final OrganizationMemberPresence presence;
+  final int? lastOnlineDays;
   final Widget? actions;
 }
 
@@ -91,7 +95,10 @@ class OrganizationMemberRow extends StatelessWidget {
         label: entry.role,
         color: entry.roleColor,
       ),
-      'presence': OrganizationMemberStatus(presence: presence),
+      'presence': OrganizationMemberStatus(
+        presence: presence,
+        lastOnlineDays: entry.lastOnlineDays,
+      ),
       'server': Text(runtime.server.text),
       'ship': Text(runtime.ship.text),
       'location': Text(runtime.location.text),
@@ -427,19 +434,31 @@ class OrganizationMemberRoleBadge extends StatelessWidget {
 }
 
 class OrganizationMemberStatus extends StatelessWidget {
-  const OrganizationMemberStatus({required this.presence, super.key});
+  const OrganizationMemberStatus({
+    required this.presence,
+    this.lastOnlineDays,
+    super.key,
+  });
   final OrganizationMemberPresence presence;
+  final int? lastOnlineDays;
   @override
   Widget build(BuildContext context) {
     final visible = _visiblePresence(presence);
     final color = _presenceColor(context, visible);
     final label = Text(
-      memberBoardText(
-        context,
-        visible == OrganizationMemberPresence.online
-            ? 'appOnline'
-            : visible.name,
+      offlineWithLastOnline(
+        memberBoardText(
+          context,
+          visible == OrganizationMemberPresence.online
+              ? 'appOnline'
+              : visible.name,
+        ),
+        visible == OrganizationMemberPresence.offline ? lastOnlineDays : null,
+        AppStrings.of(context).locale,
       ),
+      maxLines: 1,
+      overflow: TextOverflow.fade,
+      softWrap: false,
       style: TextStyle(color: color),
     );
     if (!OrganizationHolo.of(context)) return label;

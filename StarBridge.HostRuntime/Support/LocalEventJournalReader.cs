@@ -15,7 +15,7 @@ public sealed record LocalEventEntry(string Id, DateTimeOffset OccurredAt,
 }
 
 public sealed record LocalEventJournalSnapshot(string State, IReadOnlyList<LocalEventEntry> Entries,
-    string? ContentRevision = null)
+    string? ContentRevision = null, IReadOnlyList<string>? UnavailableSources = null)
 {
     public bool Available => State is "ready" or "missing" or "recovered";
 }
@@ -28,24 +28,50 @@ public sealed class LocalEventJournalReader
     public const int MaximumFileBytes = 8 * 1024 * 1024;
     public static readonly TimeSpan Retention = TimeSpan.FromDays(30);
     private static readonly HashSet<string> Categories = new(StringComparer.Ordinal)
-        { "session", "identity", "server", "ship", "location", "life", "other" };
+        { "session", "identity", "server", "ship", "location", "life", "contract", "other" };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
         { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 8 };
     private readonly string _path;
     private readonly Func<DateTimeOffset> _now;
+    private readonly Func<string?>? _contractDataRoot;
+    internal const string ContractFileName = "local-contract-history.v1.json";
 
-    public LocalEventJournalReader(string dataRoot, Func<DateTimeOffset>? now = null)
+    public LocalEventJournalReader(string dataRoot, Func<DateTimeOffset>? now = null,
+        Func<string?>? contractDataRoot = null)
     {
         if (!Path.IsPathFullyQualified(dataRoot)) throw new ArgumentException("An absolute data root is required.");
         _path = Path.Combine(Path.GetFullPath(dataRoot), "local-event-log.json");
         _now = now ?? (() => DateTimeOffset.UtcNow);
+        _contractDataRoot = contractDataRoot;
     }
 
     public LocalEventJournalSnapshot Read()
     {
-        var primary = ReadFile(_path);
+        var legacy = ReadJournal(_path);
+        var contractRoot = _contractDataRoot?.Invoke();
+        var contracts = contractRoot is null ? new LocalEventJournalSnapshot("missing", []) : ReadContract(contractRoot);
+        // An absent pilot file leaves the v1 reader's behavior and revision unchanged.
+        if (contracts.State == "missing") return legacy;
+        var unavailable = new List<string>();
+        if (!legacy.Available) unavailable.Add("events");
+        if (!contracts.Available) unavailable.Add("contract");
+        var state = !legacy.Available && (contractRoot is null || !contracts.Available) ? "unavailable" :
+            legacy.State == "recovered" || contracts.State == "recovered" ? "recovered" : "ready";
+        var revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            legacy.State + "|" + legacy.ContentRevision + "|" + contracts.State + "|" + contracts.ContentRevision)));
+        return new(state, legacy.Entries.Concat(contracts.Entries)
+            .OrderByDescending(e => e.OccurredAt).ThenBy(e => e.Id, StringComparer.Ordinal)
+            .GroupBy(e => e.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .Take(MaximumEntries).ToArray(), revision, unavailable.Count == 0 ? null : unavailable);
+    }
+
+    internal LocalEventJournalSnapshot ReadContract(string directory) => ReadJournal(Path.Combine(directory, ContractFileName));
+
+    private LocalEventJournalSnapshot ReadJournal(string path)
+    {
+        var primary = ReadFile(path);
         if (primary.State == "ready") return Present(primary, "ready");
-        var backup = ReadFile(_path + ".bak");
+        var backup = ReadFile(path + ".bak");
         if (backup.State == "ready") return Present(backup, "recovered");
         return new(primary.State == "missing" && backup.State == "missing" ? "missing" : "unavailable", []);
     }

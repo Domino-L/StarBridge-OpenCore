@@ -18,8 +18,13 @@ internal static class JourneyAchievementCelebrationTests
                     ["journey-area18"] = ["霓虹十八区", "霓虹十八區", "Neon Area18"],
                     ["journey-orison"] = ["云上奥里森", "雲上奧里森", "Orison Above the Clouds"],
                     ["journey-new-babbage"] = ["雪落新巴贝奇", "雪落新巴貝奇", "Snowfall over New Babbage"],
-                    ["journey-stanton"] = ["巡礼斯坦顿", "巡禮斯坦頓", "Stanton Pilgrimage"]
+                    ["journey-stanton"] = ["巡礼斯坦顿", "巡禮斯坦頓", "Stanton Pilgrimage"],
+                    ["journey-levski"] = ["岩中列夫斯基", "岩中列夫斯基", "Levski in the Rock"],
+                    ["journey-pyro-majors"] = ["初探派罗", "初探派羅", "First Steps in Pyro"],
+                    ["journey-pyro-all"] = ["火海行者", "火海行者", "Walker of the Fire Sea"],
+                    ["journey-grimhex"] = ["法外六角湾", "法外六角灣", "Lawless Grim HEX"]
                 };
+                Require(names.Keys.SequenceEqual(JourneyAchievementPolicy.AwardIds), "visible catalog order");
                 var locales = new[] { "zh-CN", "zh-TW", "en-US" };
                 foreach (var (id, labels) in names)
                 foreach (var light in new[] { false, true })
@@ -28,9 +33,24 @@ internal static class JourneyAchievementCelebrationTests
                     var card = new AchievementCelebrationCard(locales[locale], light, false, id);
                     Require(card.HasArtwork && System.Windows.Automation.AutomationProperties.GetName(card).EndsWith(labels[locale]),
                         "exact localized name and bundled PNG pair: " + id);
-                    Require(!Draw(card, 650).SequenceEqual(Draw(card, 1400)), "locked to earned reveal: " + id);
+                    Require(!Draw(card, 450).SequenceEqual(Draw(card, 1400)), "locked to earned reveal: " + id);
                     RequireFits(card, id + " " + locales[locale]);
                     Require(new AchievementCelebrationCard(locales[locale], light, false, id).Memory.Length > 0, "journey cards carry their existing line: " + id);
+                    if (id == JourneyAchievementPolicy.GrimhexId)
+                        Require(card.Memory == new[] { "环中暗礁，自成一港", "環中暗礁，自成一港", "A hidden reef in the ring, a harbour of its own" }[locale], "exact Grim HEX memory");
+                }
+                // 11-05 paired art (seven), 11-07 Grim HEX and Open for Business: each carries its own earned and locked PNGs.
+                foreach (var id in new[] { "journey-levski", "journey-pyro-majors", "journey-pyro-all", "journey-grimhex",
+                    "contract-tsg-lead", "contract-tsg-complete", "contract-tsg-swift", "contract-tsg-deathless", "contract-first" })
+                {
+                    foreach (var state in new[] { "earned", "locked" })
+                    {
+                        BitmapImage? own = null;
+                        try { own = new BitmapImage(new Uri($"pack://application:,,,/StarBridge.OverlayRuntime.Windows;component/Assets/Achievements/{id}-{state}.png")); }
+                        catch (System.IO.IOException) { }
+                        Require(own is { PixelWidth: 512, PixelHeight: 512 }, $"own {state} artwork bundled: " + id);
+                    }
+                    Require(new AchievementCelebrationCard("zh-CN", false, false, id).HasArtwork, "paired artwork: " + id);
                 }
                 foreach (var locale in locales)
                 {
@@ -51,19 +71,20 @@ internal static class JourneyAchievementCelebrationTests
         using var playback = new AchievementCelebrationPlayback(n => {
             started.Add(n.AchievementId); var surface = new Surface(); surfaces.Add(surface); return surface;
         }, () => allowed, check => check(), () => { });
-        foreach (var id in JourneyAchievementPolicy.Ids)
+        foreach (var id in JourneyAchievementPolicy.AwardIds)
             playback.Submit(new(id, DateTimeOffset.UtcNow, 1, () => true, Receipt: "synthetic-" + id));
         playback.Advance(250); playback.Advance(500);
         allowed = false; playback.Advance(50); playback.Advance(100000);
         Require(started.Count == 1 && surfaces[0].Elapsed == 500, "blocked desktop pauses current city without skipping");
         allowed = true; playback.Advance(250);
-        for (var i = 0; i < 90; i++) playback.Advance(500);
-        Require(started.SequenceEqual(JourneyAchievementPolicy.Ids) && surfaces.All(s => s.Disposed),
-            "five journey cards use existing complete FIFO playback");
-        Console.WriteLine("PASS CITYHOST artwork/playback: 1 group, 0 failed (30 offscreen cards, five-card FIFO)");
+        for (var i = 0; i < 120; i++) playback.Advance(500);
+        Require(started.SequenceEqual(JourneyAchievementPolicy.AwardIds) && surfaces.All(s => s.Disposed),
+            "nine journey cards use existing complete FIFO playback");
+        Console.WriteLine("PASS CITYHOST artwork/playback: 1 group, 0 failed (54 offscreen cards, nine-card FIFO)");
     }
     private sealed class Surface : IAchievementCelebrationSurface
     {
+        public double EntryMilliseconds => 760;
         public double LifetimeMilliseconds => 5980;
         public bool IsVisible { get; private set; }
         internal double Elapsed;
@@ -85,19 +106,9 @@ internal static class JourneyAchievementCelebrationTests
     // Long names and wrapped lines must end inside the card, clear of its edges.
     private static void RequireFits(AchievementCelebrationCard card, string label)
     {
-        var pixels = Draw(card, 3000);
-        var width = (int)card.Width; var height = (int)card.Height;
-        var background = pixels.AsSpan((height - 1) * width * 4 + (width - 1) * 4, 4).ToArray();
-        bool Clear(int x, int y) => pixels.AsSpan((y * width + x) * 4, 4).SequenceEqual(background);
-        for (var y = height - 5; y < height; y++)
-        for (var x = 24; x < width; x++)
-            Require(Clear(x, y), "text overflows the bottom edge: " + label);
-        for (var y = 2; y < height; y++)
-        for (var x = width - 6; x < width; x++)
-            Require(Clear(x, y), "text overflows the right edge: " + label);
-        for (var y = 2; y < 6; y++)
-        for (var x = 30; x < width; x++)
-            Require(Clear(x, y), "text overflows the top edge: " + label);
+        var layout = card.MeasureText(1.25);
+        Require(layout.Top >= 5 && layout.Bottom <= AchievementCelebrationCard.CardHeight - 5,
+            "engraving fits between the glass edges: " + label);
     }
     private static void Require(bool value, string reason) { if (!value) throw new Exception(reason); }
 }

@@ -44,8 +44,9 @@ internal static class OverlaySettingsTests
                 MemberScopeMode = OverlayMemberScopeMode.AllFleet,
                 ChatDisplayMode = OverlayChatDisplayMode.FullScreenBarrage
             };
-            var activeLayout = InformationOverlayDefaults.CreateLayout(
-                InformationOverlayPresetCodec.CommandPresetId);
+            // the earlier command layout, written out (the built-in layouts are retired in 0.7.3)
+            var activeLayout = InformationOverlayLayoutItem.ParseMany(
+                "Notice,0.285,0,0.43,0.075;Squads,0.01,0.30,0.18,0.42;Members,0.78,0.54,0.21,0.26;Chat,0.35,0.75,0.30,0.21").ToArray();
             Write(root, "overlay.presets",
                 "{\"Presets\":[{\"Id\":\"preset1\",\"Name\":\"舰桥标准\"}," +
                 "{\"Id\":\"ops\",\"Name\":\"作战值班\"}]}");
@@ -182,8 +183,11 @@ internal static class OverlaySettingsTests
                 "workspace loaded from the legacy experimental render mode can be saved");
             Require(saved.Response.Payload.GetProperty("renderMode").GetString() == "DirectComposition",
                 "legacy render mode is projected as the supported runtime");
-            Require(File.ReadAllText(Path.Combine(root, "overlay.render-mode")).Trim() == "DirectComposition",
-                "first user save upgrades the legacy render mode");
+            // 0.7.3 overlay v2: the production store writes its own folder; the earlier file stays as it was
+            Require(File.ReadAllText(Path.Combine(root, OverlayWorkspaceStore.V2Folder, "overlay.render-mode")).Trim() == "DirectComposition",
+                "first user save writes the supported render mode");
+            Require(File.ReadAllText(Path.Combine(root, "overlay.render-mode")).Trim() == "experimental",
+                "the earlier render-mode file is not rewritten");
         }
         finally
         {
@@ -236,7 +240,8 @@ internal static class OverlaySettingsTests
             Require(!saved.Response.Payload.GetRawText().Contains("protected-", StringComparison.Ordinal),
                 "desktop secrets remain outside the wire response");
 
-            var backupRoot = Path.Combine(root, "overlay.workspace-backup-v1");
+            // 0.7.3 overlay v2: the production store keeps its files and its first-write backup in its own folder
+            var backupRoot = Path.Combine(root, OverlayWorkspaceStore.V2Folder, "overlay.workspace-backup-v1");
             Require(Directory.Exists(backupRoot), "first write creates recovery backup");
             Require(File.ReadAllBytes(Path.Combine(backupRoot, "desktop.config")).SequenceEqual(originalDesktop),
                 "recovery backup preserves desktop config exactly");
@@ -246,8 +251,10 @@ internal static class OverlaySettingsTests
             Require(savedDesktop[10] == "protected-server-secret" && savedDesktop[12] == "protected-auth-secret",
                 "unrelated protected desktop values are preserved");
 
+            // the earlier files and the v2 folder's own files must all stay as they were
             var beforeStale = Directory.GetFiles(root, "overlay.*", SearchOption.TopDirectoryOnly)
-                .ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes, StringComparer.OrdinalIgnoreCase);
+                .Concat(Directory.GetFiles(Path.Combine(root, OverlayWorkspaceStore.V2Folder), "overlay.*", SearchOption.TopDirectoryOnly))
+                .ToDictionary(path => Path.GetRelativePath(root, path), File.ReadAllBytes, StringComparer.OrdinalIgnoreCase);
             var stale = await dispatcher.DispatchAsync(Request("overlay.updateWorkspace", 9, new
             {
                 schemaVersion = 1,

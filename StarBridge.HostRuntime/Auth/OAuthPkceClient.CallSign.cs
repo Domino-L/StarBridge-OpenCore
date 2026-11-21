@@ -13,7 +13,9 @@ public sealed partial class OAuthPkceClient
     {
         if (!writeSession.Capabilities.Contains("profile.write", StringComparer.Ordinal))
             throw new ScmApiForbiddenException("Call sign update requires profile.write.");
-        if (expectedRevision < 0 || expectedRevision == long.MaxValue || string.IsNullOrWhiteSpace(callSign) ||
+        // An empty name asks Hong Kong (swap 7) to restore the SCM default name.
+        if (expectedRevision < 0 || expectedRevision == long.MaxValue || callSign is null ||
+            callSign.Length > 0 && string.IsNullOrWhiteSpace(callSign) ||
             callSign != callSign.Trim() || callSign.Length > 32 || callSign.Any(char.IsControl))
             throw new ArgumentException("Invalid call sign update.");
         using var request = new HttpRequestMessage(HttpMethod.Patch,
@@ -24,7 +26,8 @@ public sealed partial class OAuthPkceClient
         await ScmHttpClient.EnsureSuccessAsync(response, "Call sign update", token);
         using var document = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 8 * 1024);
         var result = document.RootElement.Deserialize<PersonalProfileCallSignResult>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (result is null || result.SchemaVersion != 1 || result.Revision != expectedRevision + 1 || result.CallSign != callSign)
+        if (result is null || result.SchemaVersion != 1 || result.Revision != expectedRevision + 1 ||
+            (callSign.Length == 0 ? string.IsNullOrWhiteSpace(result.CallSign) : result.CallSign != callSign))
             throw new ScmApiProtocolException("Call sign write acknowledgement is invalid.");
         return result; // A write grant must never replace the normal read session.
     }

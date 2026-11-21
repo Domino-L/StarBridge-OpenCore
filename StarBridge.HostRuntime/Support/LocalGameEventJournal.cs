@@ -12,6 +12,7 @@ public static class LocalGameEventCategories
     public const string Ship = "ship";
     public const string Location = "location";
     public const string Life = "life";
+    public const string Contract = "contract";
     public const string Other = "other";
 }
 
@@ -36,6 +37,8 @@ public sealed class LocalGameEventJournal : IDisposable
     private long _clearRevision;
     public long ClearRevision { get { lock (_stateLock) return _clearRevision; } }
     private LocalEventJournalReader Reader => new(System.IO.Path.GetDirectoryName(Path)!, _nowProvider);
+    private LocalEventJournalSnapshot ReadSnapshot() => System.IO.Path.GetFileName(Path) == LocalEventJournalReader.ContractFileName
+        ? Reader.ReadContract(System.IO.Path.GetDirectoryName(Path)!) : Reader.Read();
     public bool IsWritable { get { lock (_stateLock) return _loaded && !_disposed && _writeLease is not null; } }
 
     public LocalGameEventJournal(
@@ -45,7 +48,7 @@ public sealed class LocalGameEventJournal : IDisposable
         TimeSpan? retention = null)
     {
         if (!System.IO.Path.IsPathFullyQualified(path) ||
-            System.IO.Path.GetFileName(path) != "local-event-log.json")
+            System.IO.Path.GetFileName(path) is not ("local-event-log.json" or LocalEventJournalReader.ContractFileName))
             throw new ArgumentException("The configured local event journal path is required.");
         Path = System.IO.Path.GetFullPath(path);
         _nowProvider = nowProvider ?? (() => DateTimeOffset.Now);
@@ -103,7 +106,7 @@ public sealed class LocalGameEventJournal : IDisposable
                 Directory.CreateDirectory(directory);
                 _writeLease ??= new FileStream(Path + ".lock", FileMode.OpenOrCreate,
                     FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
-                var snapshot = Reader.Read();
+                var snapshot = ReadSnapshot();
                 if (!snapshot.Available) throw new IOException();
                 _entries = Normalize(snapshot.Entries, _nowProvider());
                 _loaded = true;
@@ -129,11 +132,12 @@ public sealed class LocalGameEventJournal : IDisposable
         Func<bool>? canAppend = null,
         LifeEventContext lifeContext = LifeEventContext.Unknown,
         string? displayValue = null,
-        string? displayPlayer = null)
+        string? displayPlayer = null,
+        string? stableId = null)
     {
         var timestamp = occurredAt ?? _nowProvider();
         var entry = new LocalEventEntry(
-            Guid.NewGuid().ToString("N"),
+            stableId ?? Guid.NewGuid().ToString("N"),
             timestamp,
             NormalizeCategory(category),
             NormalizeText(eventType, 80, "Unknown"),
@@ -154,8 +158,9 @@ public sealed class LocalGameEventJournal : IDisposable
                 return entry;
             }
             _entries = Normalize(_entries, _nowProvider());
+            if (stableId is not null && _entries.FirstOrDefault(e => e.Id == stableId) is { } duplicate) return duplicate;
             var latest = _entries.OrderByDescending(candidate => candidate.OccurredAt).FirstOrDefault();
-            if (latest is not null &&
+            if (stableId is null && latest is not null &&
                 timestamp - latest.OccurredAt >= TimeSpan.Zero &&
                 timestamp - latest.OccurredAt <= DuplicateWindow &&
                 latest.Category.Equals(entry.Category, StringComparison.Ordinal) &&
@@ -211,7 +216,7 @@ public sealed class LocalGameEventJournal : IDisposable
                         throw new InvalidOperationException();
                 }
                 Guard();
-                var disk = Reader.Read();
+                var disk = ReadSnapshot();
                 if (!disk.Available) throw new IOException();
                 CheckDirectory(System.IO.Path.GetDirectoryName(Path)!);
                 // For a backup-only source, retain a readable primary before
@@ -268,7 +273,7 @@ public sealed class LocalGameEventJournal : IDisposable
             {
                 if (!_loaded || _disposed || _writeLease is null) return;
                 CheckDirectory(System.IO.Path.GetDirectoryName(Path)!);
-                var disk = Reader.Read();
+                var disk = ReadSnapshot();
                 if (!disk.Available) throw new IOException();
                 // Never rotate a corrupt primary over the only valid backup.
                 if (disk.State == "ready") WriteAtomic(Path + ".bak", disk.Entries.ToArray());
@@ -289,6 +294,8 @@ public sealed class LocalGameEventJournal : IDisposable
                 FileShare.None, 4096, FileOptions.WriteThrough))
             {
                 JsonSerializer.Serialize(stream, entries, JsonOptions);
+                if (System.IO.Path.GetFileName(path).StartsWith(LocalEventJournalReader.ContractFileName, StringComparison.Ordinal) &&
+                    stream.Length > LocalEventJournalReader.MaximumFileBytes) throw new IOException("Contract history size limit.");
                 stream.Flush(true);
             }
             File.Move(temporary, path, overwrite: true);
@@ -388,6 +395,7 @@ public sealed class LocalGameEventJournal : IDisposable
         LocalGameEventCategories.Ship => LocalGameEventCategories.Ship,
         LocalGameEventCategories.Location => LocalGameEventCategories.Location,
         LocalGameEventCategories.Life => LocalGameEventCategories.Life,
+        LocalGameEventCategories.Contract => LocalGameEventCategories.Contract,
         _ => LocalGameEventCategories.Other
     };
 

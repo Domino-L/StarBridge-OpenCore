@@ -317,12 +317,14 @@ internal static class OverlaySyncLatencyTests
         var reader = new CommunityReader();
         using var source = new OverlayCommunitySource(() => (Owner, 1), reader);
         source.ReadForDisplay();
-        using (var initial = new CancellationTokenSource(TimeSpan.FromSeconds(1)))
+        // Bounds stay below the 15-second poll, so passing still proves the push path, but a busy
+        // machine cannot fail it the way the former 1-second bounds did.
+        using (var initial = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
             while (source.Read()?.Members.Single().Presence != "AppOnline") await Task.Delay(5, initial.Token);
         reader.Presence = "InGame";
         var timing = Stopwatch.StartNew();
         reader.Changes.Writer.TryWrite(new(Guid.NewGuid().ToString("N"), 1, true));
-        await reader.Updated.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await reader.Updated.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Console.WriteLine($"MEASURE fake organization invalidation -> authenticated snapshot callback: {timing.Elapsed.TotalMilliseconds:F1}ms");
         Check(source.Read()?.Members.Single().Presence == "InGame", "a live authorized change is reflected without the 15-second polling delay");
     }

@@ -5,6 +5,7 @@
     "city": "new-babbage",
     "evidence": "inventory"
   },
-  "cities": ["lorville", "area18", "orison", "new-babbage"],
+  "cities": ["lorville", "area18", "orison", "new-babbage", "levski",
+    "station-rr-p1-l2", "station-rr-p1-l3", "station-rr-p1-l4", "station-rr-p1-l5", "station-rr-p2-l3", "station-rr-p2-l4", "station-rr-p2-leo", "station-rr-p3-l1", "station-rr-p3-l2", "station-rr-p3-l3", "station-rr-p3-l5", "station-rr-p3-leo", "station-rr-p5-l1", "station-rr-p5-l2", "station-rr-p5-l3", "station-rr-p5-l4", "station-rr-p5-l5", "station-rr-p6-l1", "station-rr-p6-l2", "station-rr-p6-l3", "station-rr-p6-l4", "station-rr-p6-l5", "station-rr-p6-leo", "grimhex"],
   "evidence": ["inventory", "explicit"]
 }

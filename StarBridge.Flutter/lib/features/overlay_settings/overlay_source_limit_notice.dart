@@ -39,67 +39,73 @@ class OverlaySourceLimitNotice extends StatelessWidget {
             onActivate: (source) => showStarBridgeDialog<void>(
               context,
               source: source,
-              builder: (_) => ValueListenableBuilder<OverlayWorkspaceProjection>(
-                valueListenable: module.projection,
-                builder: (context, value, _) => AlertDialog(
-                  title: Text(copy('overlay.source.adjust')),
-                  scrollable: true,
-                  content: SizedBox(
-                    width: 460,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(copy('overlay.source.limitHelp')),
-                        for (final source in OverlaySourceModule.values) ...[
-                          const SizedBox(height: 16),
-                          Text(
-                            copy(
-                              'overlay.workspace.group.${source == OverlaySourceModule.overview ? 'fleetOverview' : source.name}',
-                            ),
+              builder: (_) =>
+                  ValueListenableBuilder<OverlayWorkspaceProjection>(
+                    valueListenable: module.projection,
+                    builder: (context, value, _) => AlertDialog(
+                      title: Text(copy('overlay.source.adjust')),
+                      scrollable: true,
+                      content: SizedBox(
+                        width: 460,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(copy('overlay.source.limitHelp')),
+                            // the overview follows the members and is not
+                            // listed (D6; 11-13 请你定 7)
+                            for (final source in OverlaySourceModule.values)
+                              if (source != OverlaySourceModule.overview) ...[
+                                const SizedBox(height: 16),
+                                Text(
+                                  copy(
+                                    'overlay.workspace.group.${source.name}',
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                if (value.sources != null &&
+                                    source == OverlaySourceModule.chat)
+                                  OverlayChatSourcesField(
+                                    value: value.sources!,
+                                    scenes: scenes,
+                                    onChanged: value.busy
+                                        ? null
+                                        : module.updateChatSources,
+                                    onSingleChanged: value.busy
+                                        ? null
+                                        : (binding) =>
+                                              module.updateModuleSource(
+                                                source,
+                                                binding,
+                                              ),
+                                  )
+                                else if (value.sources != null)
+                                  OverlaySourceBindingField(
+                                    value: value.sources!.forModule(source),
+                                    scenes: scenes,
+                                    onChanged: value.busy
+                                        ? null
+                                        : (binding) =>
+                                              module.updateModuleSource(
+                                                source,
+                                                binding,
+                                              ),
+                                  ),
+                              ],
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        StarBridgeActionButton(
+                          kind: StarBridgeActionKind.quiet,
+                          onActivate: (source) => dismissStarBridgeDialog<void>(
+                            context,
+                            source: source,
                           ),
-                          const SizedBox(height: 6),
-                          if (value.sources != null &&
-                              source == OverlaySourceModule.chat)
-                            OverlayChatSourcesField(
-                              value: value.sources!,
-                              scenes: scenes,
-                              onChanged: value.busy
-                                  ? null
-                                  : module.updateChatSources,
-                              onSingleChanged: value.busy
-                                  ? null
-                                  : (binding) => module.updateModuleSource(
-                                      source,
-                                      binding,
-                                    ),
-                            )
-                          else if (value.sources != null)
-                            OverlaySourceBindingField(
-                              value: value.sources!.forModule(source),
-                              scenes: scenes,
-                              onChanged: value.busy
-                                  ? null
-                                  : (binding) => module.updateModuleSource(
-                                      source,
-                                      binding,
-                                    ),
-                            ),
-                        ],
+                          child: Text(copy('overlay.source.done')),
+                        ),
                       ],
                     ),
                   ),
-                  actions: [
-                    StarBridgeActionButton(
-                      kind: StarBridgeActionKind.quiet,
-                      onActivate: (source) => dismissStarBridgeDialog<void>(
-                        context,
-                        source: source,
-                      ),
-                      child: Text(copy('overlay.source.done')),
-                    ),
-                  ],
-                ),
-              ),
             ),
             child: Text(copy('overlay.source.adjust')),
           ),

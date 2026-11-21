@@ -6,6 +6,7 @@ import '../account/account_models.dart';
 import '../onboarding/connection_mode_port.dart';
 import '../communities/community_logo_port.dart';
 import 'local_hangar_images.dart';
+import 'local_hangar_cloud.dart';
 import 'local_hangar_port.dart';
 import 'local_hangar_reconciliation.dart';
 import 'local_hangar_read_scope.dart';
@@ -23,7 +24,8 @@ final class HangarDisplaySession extends ChangeNotifier
         LocalHangarPersonalDataPort,
         LocalHangarReconciliationPort,
         ShipSpecificationsProvider,
-        LocalHangarViewSource {
+        LocalHangarViewSource,
+        LocalHangarCloudPort {
   HangarDisplaySession({
     required this.account,
     required this.retainedFactory,
@@ -342,6 +344,35 @@ final class HangarDisplaySession extends ChangeNotifier
       confirmed &&
       _source is LocalHangarFavoritesPort &&
       (_source as LocalHangarFavoritesPort).favoritesAvailable;
+
+  // Account copy follows the current business source only (never the
+  // retained read-only selection), and drops results across a source change.
+  static const _noCloud = LocalHangarCloudState(available: false);
+
+  Future<LocalHangarCloudState> _cloud(
+    Future<LocalHangarCloudState> Function(LocalHangarCloudPort port) call,
+  ) async {
+    final source = _source, epoch = _epoch;
+    if (_disposed ||
+        _retained ||
+        !confirmed ||
+        source is! LocalHangarCloudPort) {
+      return _noCloud;
+    }
+    final result = await call(source as LocalHangarCloudPort);
+    if (_disposed || epoch != _epoch || !identical(source, _source)) {
+      throw const LocalHangarFailure('hangar.account_changed');
+    }
+    return result;
+  }
+
+  @override
+  Future<LocalHangarCloudState> readCloud() => _cloud((p) => p.readCloud());
+
+  @override
+  Future<LocalHangarCloudState> acknowledgeCloud(String notice) =>
+      _cloud((p) => p.acknowledgeCloud(notice));
+
   @override
   Future<LocalHangarSnapshot> setFavorite(
     String shipId,

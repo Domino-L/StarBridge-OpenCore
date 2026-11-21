@@ -67,9 +67,11 @@ final class BridgePartyRoomsAdapter
         payload: const {'schemaVersion': 1},
       );
       if (!hasRelayAccount(account) || account.accountContext == null) {
-        return const RoomCommandResult(
+        return RoomCommandResult(
           'rejected',
-          error: 'identityUnavailable',
+          error: accountTemporarilyUnavailable(account)
+              ? 'unavailable'
+              : 'identityUnavailable',
         );
       }
       dispatched = true;
@@ -147,7 +149,8 @@ final class BridgePartyRoomsAdapter
         'account.reauthorization_required' => 'identityUnavailable',
         'party_rooms.forbidden' => 'forbidden',
         'party_rooms.data_invalid' => 'invalidInput',
-        'party_rooms.command_unavailable' => 'unavailable',
+        'party_rooms.command_unavailable' ||
+        credentialTemporarilyUnavailableCode => 'unavailable',
         'host.capability_missing' => 'hostUnavailable',
         _ => null,
       };

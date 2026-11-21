@@ -17,6 +17,8 @@ String? sharingStatusIssue(PrivacyPublicationView view, int savedRevision) {
     'privacy_publication.consent_required' => 'consent',
     'privacy_publication.identity_pending' => 'identityPending',
     'privacy_publication.identity_required' => 'identity',
+    // The official fleet choice on this computer must be confirmed again; never an identity issue.
+    'official_fleet.choice_changed' => 'officialChoiceChanged',
     'privacy_publication.identity_unavailable' ||
     'account.reauthorization_required' => 'signIn',
     'privacy_publication.forbidden' => 'permission',

@@ -10,6 +10,7 @@ import 'marketplace_diagonal.dart';
 import 'marketplace_port.dart';
 import 'marketplace_records_controller.dart';
 import 'marketplace_records_copy.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_surfaces.dart';
 import 'marketplace_trade_feedback.dart';
 import 'marketplace_trade_style.dart';
@@ -20,7 +21,8 @@ import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 /// 我的交易 · 评价 (0.7.2 G5, approved preview `trade-records-preview`):
 /// reviews other members gave me, with the average and star spread on top.
 class MarketplaceReviewsView extends StatefulWidget {
-  const MarketplaceReviewsView(this.c, {super.key});
+  const MarketplaceReviewsView(this.c, {this.login, super.key});
+  final Future<void> Function(BuildContext)? login;
   final MarketplaceRecordsController c;
   @override
   State<MarketplaceReviewsView> createState() => _ReviewsState();
@@ -48,12 +50,7 @@ class _ReviewsState extends State<MarketplaceReviewsView> {
     listenable: widget.c,
     builder: (context, _) {
       final list = widget.c.reviews;
-      final public = list.rows
-          .where((r) => _audit(r) == _Audit.public)
-          .toList();
-      final pending = list.rows
-          .where((r) => _audit(r) == _Audit.pending)
-          .length;
+      final public = list.rows;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -64,13 +61,17 @@ class _ReviewsState extends State<MarketplaceReviewsView> {
             ),
           ),
           const SizedBox(height: 12),
-          if (public.isNotEmpty || pending > 0) ...[
-            _ReviewSummary(public, pending),
+          if (public.isNotEmpty) ...[
+            if (list.reviewsComplete)
+              _ReviewSummary(public)
+            else
+              _Muted(recordsText(context, '按已加载的 {n} 条', {'n': '${public.length}'})),
             const SizedBox(height: 12),
           ],
           Expanded(
             child: _RecordList(
               list,
+              login: widget.login,
               retry: _loadAll,
               empty: recordsText(context, '还没有收到评价。'),
               row: (r, last) => _ReviewRow(r, last: last),
@@ -82,20 +83,13 @@ class _ReviewsState extends State<MarketplaceReviewsView> {
   );
 }
 
-enum _Audit { public, pending, rejected }
-
-_Audit _audit(MarketRow r) => switch ((r['auditStatus'] as num?)?.toInt()) {
-  0 => _Audit.pending,
-  2 => _Audit.rejected,
-  _ => _Audit.public,
-};
 
 int _rating(MarketRow r) => ((r['rating'] as num?)?.toInt() ?? 0).clamp(0, 5);
 
 class _ReviewSummary extends StatelessWidget {
-  const _ReviewSummary(this.public, this.pending);
+  const _ReviewSummary(this.public);
   final List<MarketRow> public;
-  final int pending;
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -132,10 +126,7 @@ class _ReviewSummary extends StatelessWidget {
               _Stars(average.round()),
               const SizedBox(height: 4),
               _Muted(
-                recordsText(context, '{n} 条已公开 · {p} 条审核中', {
-                  'n': '${public.length}',
-                  'p': '$pending',
-                }),
+                recordsText(context, '共 {n} 条评价', {'n': '${public.length}'}),
               ),
             ],
           ),
@@ -217,11 +208,9 @@ class _ReviewRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final contract =
-        '${r['source'] ?? ''}'.contains('合约') ||
-        '${r['source'] ?? ''}'.toLowerCase().contains('contract');
+    final contract = r['sourceType'] == 'contract';
     final content = '${r['content'] ?? ''}'.trim();
-    final audit = _audit(r);
+
     return _RowShell(
       last: last,
       child: Row(
@@ -254,6 +243,8 @@ class _ReviewRow extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 5),
+                if (contract && r['contractTitle'] is String)
+                  Text(r['contractTitle'] as String),
                 Text(
                   content.isEmpty
                       ? recordsText(context, '（只打了分，没有写评价）')
@@ -272,17 +263,9 @@ class _ReviewRow extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (r['transactionId'] != null) _Mono('#${r['transactionId']}'),
+
               MarketPublished(r['createTime']),
-              if (audit != _Audit.public) ...[
-                const SizedBox(height: 4),
-                MarketSlantTag(
-                  recordsText(context, audit == _Audit.pending ? '审核中' : '未通过'),
-                  color: audit == _Audit.pending
-                      ? MarketplacePalette.attention
-                      : t.colors.textSecondary,
-                ),
-              ],
+
             ],
           ),
         ],
@@ -294,7 +277,8 @@ class _ReviewRow extends StatelessWidget {
 /// 我的交易 · 举报与拉黑 (0.7.2 G6/G7): my reports with SCM's outcome, and
 /// my blocklist with a confirmed unblock.
 class MarketplaceReportsBlocksView extends StatefulWidget {
-  const MarketplaceReportsBlocksView(this.c, {super.key});
+  const MarketplaceReportsBlocksView(this.c, {this.login, super.key});
+  final Future<void> Function(BuildContext)? login;
   final MarketplaceRecordsController c;
   @override
   State<MarketplaceReportsBlocksView> createState() => _ReportsBlocksState();
@@ -305,12 +289,14 @@ class _ReportsBlocksState extends State<MarketplaceReportsBlocksView> {
   @override
   void initState() {
     super.initState();
+    widget.c.reportKind = 'reports';
     widget.c.load('reports');
   }
 
   void _show(bool value) {
     setState(() => blocks = value);
-    widget.c.load(value ? 'blocklist' : 'reports');
+    widget.c.reportKind = value ? 'blocklist' : 'reports';
+    widget.c.load(widget.c.reportKind);
   }
 
   @override
@@ -353,12 +339,13 @@ class _ReportsBlocksState extends State<MarketplaceReportsBlocksView> {
           Expanded(
             child: _RecordList(
               list,
+              login: widget.login,
               retry: () => widget.c.load(blocks ? 'blocklist' : 'reports'),
               more: () =>
                   widget.c.load(blocks ? 'blocklist' : 'reports', more: true),
               empty: recordsText(
                 context,
-                blocks ? '黑名单是空的。拉黑从交易单或订单面板发起。' : '还没有举报记录。新建举报从交易单里发起。',
+                blocks ? '黑名单是空的。拉黑从交易单发起。' : '还没有举报记录。新建举报从交易单里发起。',
               ),
               row: (r, last) => blocks
                   ? _BlockRow(r, widget.c, last: last)
@@ -591,11 +578,13 @@ class _RecordList extends StatelessWidget {
   const _RecordList(
     this.list, {
     required this.retry,
+    this.login,
     required this.empty,
     required this.row,
     this.more,
   });
   final MarketRecordList list;
+  final Future<void> Function(BuildContext)? login;
   final VoidCallback retry;
   final VoidCallback? more;
   final String empty;
@@ -603,6 +592,9 @@ class _RecordList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    if (list.failed && marketplaceNeedsLogin(list.error)) {
+      return MarketplaceAuthNotice(list.error, login: login);
+    }
     if (list.rows.isEmpty) {
       if (list.loading) {
         return const Align(
@@ -718,20 +710,6 @@ class _Muted extends StatelessWidget {
     overflow: TextOverflow.ellipsis,
     style: TextStyle(
       fontSize: 11.5,
-      color: context.tokens.colors.textSecondary,
-    ),
-  );
-}
-
-class _Mono extends StatelessWidget {
-  const _Mono(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: TextStyle(
-      fontSize: 11,
-      fontFamily: context.tokens.typography.monoFamily,
       color: context.tokens.colors.textSecondary,
     ),
   );

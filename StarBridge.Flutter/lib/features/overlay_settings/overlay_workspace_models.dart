@@ -6,6 +6,7 @@ import 'overlay_settings_models.dart';
 import 'overlay_preset_sources.dart';
 import 'overlay_workspace_layout_item.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_workspace_visor_specs.dart';
 import 'overlay_workspace_appearance.dart';
 import 'overlay_appearance_options.dart';
 import 'overlay_appearance_configuration.dart';
@@ -276,6 +277,8 @@ final class OverlayWorkspaceSettings {
     'calmLitOpacity',
     'calmLightWhen',
     'calmPeekHotkey',
+    // 0.7.3 visor projection (overlay_workspace_visor_specs.dart)
+    ...overlayWorkspaceVisorFields,
   };
 
   /// A peek key as the native HUD parses it; empty means unbound.
@@ -294,6 +297,7 @@ final class OverlayWorkspaceSettings {
     'onlineSummary',
     'primaryServer',
     'deathAndRespawn',
+    // Retired UI field: keep the stored duration for 0.7.2.1 rollback.
     'localPlayReminder',
   };
 
@@ -323,6 +327,10 @@ final class OverlayWorkspaceSettings {
       ..putIfAbsent('calmLitOpacity', () => 0.0)
       ..putIfAbsent('calmLightWhen', () => 'Relevant')
       ..putIfAbsent('calmPeekHotkey', () => '');
+    // A Host from before a visor setting (0.7.3) reads its default.
+    overlayWorkspaceVisorDefaults.forEach(
+      (key, value) => source.putIfAbsent(key, () => value),
+    );
     // An archived skin takes its locked theme and transition with it; an archived
     // theme or transition on another, valid appearance is replaced alone.
     final archived = {
@@ -406,6 +414,14 @@ final class OverlayWorkspaceSettings {
   OverlayWorkspaceSettings withValue(String field, Object? value) {
     if (!requiredFields.contains(field)) {
       throw ArgumentError.value(field, 'field', 'Unknown overlay setting.');
+    }
+    // Hidden compatibility values must survive every edit/save, including presets.
+    if (field == 'eventNotificationTypes' && value is int) {
+      value = (value & ~1024) | ((values[field] as int) & 1024);
+    }
+    if (field == 'eventNotificationDurations' && value is Map) {
+      value = Map<String, Object?>.from(value)
+        ..['localPlayReminder'] = (values[field] as Map)['localPlayReminder'];
     }
     return OverlayWorkspaceSettings.fromMap(
       Map<String, Object?>.from(values)..[field] = value,
@@ -682,6 +698,7 @@ final class OverlayWorkspaceSnapshot {
     this.appearanceConfigurations = const [],
     this.livePreviewAppearanceIds = const {},
     this.appearanceProgressIds = const {},
+    this.visorSwitchNotice = false,
   });
 
   const OverlayWorkspaceSnapshot.unavailable({
@@ -709,6 +726,7 @@ final class OverlayWorkspaceSnapshot {
     Set<String> appearanceProgressIds = const {},
     OverlayAppearanceOptions appearanceOptions =
         const OverlayAppearanceOptions.empty(),
+    bool visorSwitchNotice = false,
   }) : this._(
          availability: OverlayWorkspaceAvailability.available,
          revision: revision,
@@ -727,6 +745,7 @@ final class OverlayWorkspaceSnapshot {
          livePreviewAppearanceIds: livePreviewAppearanceIds,
          appearanceProgressIds: appearanceProgressIds,
          appearanceOptions: appearanceOptions,
+         visorSwitchNotice: visorSwitchNotice,
        );
 
   final OverlayWorkspaceAvailability availability;
@@ -747,6 +766,10 @@ final class OverlayWorkspaceSnapshot {
   final Set<String> livePreviewAppearanceIds;
   final Set<String> appearanceProgressIds;
   final OverlayAppearanceOptions appearanceOptions;
+
+  /// 0.7.3 switched this standard overlay to the visor once and the line
+  /// saying so has not been shown yet. False on an older Host.
+  final bool visorSwitchNotice;
 }
 
 Map<String, Object?> stringMap(Object? value) {

@@ -217,7 +217,7 @@ void main() {
   test('a proof past its deadline shows no name', () async {
     authors.setActive(true);
     await settle();
-    elapsed += const Duration(seconds: 5, milliseconds: 1);
+    elapsed += const Duration(seconds: 15, milliseconds: 1);
     expect(authors.present(_message(1)).callsign, '');
   });
 
@@ -226,7 +226,7 @@ void main() {
     await settle();
     now = now.add(const Duration(seconds: 30));
     expect(authors.present(_message(1)).callsign, 'Pilot');
-    elapsed += const Duration(seconds: 5);
+    elapsed += const Duration(seconds: 15, milliseconds: 1);
     expect(authors.present(_message(1)).callsign, '');
   });
 
@@ -346,9 +346,9 @@ void main() {
     var notified = 0;
     live.addListener(() => notified++);
     now = now.subtract(const Duration(seconds: 3));
-    elapsed += const Duration(seconds: 5, milliseconds: 1);
+    elapsed += const Duration(seconds: 15, milliseconds: 1);
     expect(live.present(_message(1)).callsign, '');
-    await tester.pump(const Duration(seconds: 5, milliseconds: 1));
+    await tester.pump(const Duration(seconds: 15, milliseconds: 1));
     expect(notified, 1);
     live.setActive(false);
   });
@@ -368,9 +368,9 @@ void main() {
     expect(live.present(_message(1)).callsign, 'Pilot');
     var notified = 0;
     live.addListener(() => notified++);
-    // Four real seconds on, the clock reads one second: the proof the relay
+    // A new proof is eleven seconds ahead of the local clock: the proof the relay
     // observed at the real time is from the local future and shows no name.
-    final real = now.add(const Duration(seconds: 4));
+    final real = now.add(const Duration(seconds: 12));
     port.answer = (_) => _page(updates: [
       {
         'messageRef': _ref(1),
@@ -389,6 +389,36 @@ void main() {
     live.setActive(false);
   });
 
+  testWidgets('preview retires at the exact original display deadline', (
+    tester,
+  ) async {
+    final live = OrganizationChatPreviewAuthors(
+      port,
+      now: () => now,
+      elapsed: () => elapsed,
+      interval: const Duration(hours: 1),
+    )..target = _target;
+    addTearDown(live.dispose);
+    live.setActive(true);
+    await tester.pump();
+    expect(live.present(_message(1)).callsign, 'Pilot');
+    var notified = 0;
+    live.addListener(() => notified++);
+    const before = Duration(seconds: 14, milliseconds: 999, microseconds: 999);
+    now = now.add(before);
+    elapsed += before;
+    await tester.pump(before);
+    expect(live.present(_message(1)).callsign, 'Pilot');
+    expect(notified, 0);
+    now = now.add(const Duration(microseconds: 1));
+    elapsed += const Duration(microseconds: 1);
+    await tester.pump(const Duration(microseconds: 1));
+    expect(live.present(_message(1)).callsign, '');
+    expect(notified, 1);
+    expect(port.reads, hasLength(1));
+    live.setActive(false);
+  });
+
   testWidgets('a renewed proof brings the name back after one expired', (
     tester,
   ) async {
@@ -396,16 +426,16 @@ void main() {
       port,
       now: () => now,
       elapsed: () => elapsed,
-      interval: const Duration(seconds: 6),
+      interval: const Duration(seconds: 16),
     )..target = _target;
     addTearDown(live.dispose);
     live.setActive(true);
     await tester.pump();
     var notified = 0;
     live.addListener(() => notified++);
-    now = now.add(const Duration(seconds: 5, milliseconds: 1));
-    elapsed += const Duration(seconds: 5, milliseconds: 1);
-    await tester.pump(const Duration(seconds: 5, milliseconds: 1));
+    now = now.add(const Duration(seconds: 15, milliseconds: 1));
+    elapsed += const Duration(seconds: 15, milliseconds: 1);
+    await tester.pump(const Duration(seconds: 15, milliseconds: 1));
     expect(live.present(_message(1)).callsign, '');
     expect(notified, 1);
     now = now.add(const Duration(seconds: 1));

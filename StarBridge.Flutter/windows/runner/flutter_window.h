@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 
+#include "frame_pressure_channel.h"
 #include "small_application_icon.h"
 #include "win32_window.h"
 
@@ -18,6 +19,7 @@ class HangarBrowserBridge;
 class OverlayEditorWindow;
 class MenuOverlayBridge;
 class FriendsWindowBridge;
+class RsiToolNoticeReceipt;
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -55,7 +57,9 @@ class FlutterWindow : public Win32Window {
       window_chrome_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       gameplay_files_channel_;
+  std::unique_ptr<frame_pressure::Channel> frame_pressure_channel_;
   std::unique_ptr<NativeHostBridge> native_host_bridge_;
+  std::unique_ptr<RsiToolNoticeReceipt> rsi_tool_notice_receipt_;
   std::unique_ptr<HangarBrowserBridge> hangar_browser_bridge_;
   std::unique_ptr<OverlayEditorWindow> overlay_editor_window_;
   std::unique_ptr<FriendsWindowBridge> friends_window_bridge_;

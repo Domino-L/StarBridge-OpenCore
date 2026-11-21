@@ -3,6 +3,7 @@ import '../../design_system/icons/icon_semantic.dart';
 const visibleSettingsSections = <SettingsSection>[
   SettingsSection.accountIdentity,
   SettingsSection.generalData,
+  SettingsSection.screenReading,
   SettingsSection.syncPrivacy,
   SettingsSection.notifications,
   SettingsSection.diagnostics,
@@ -19,6 +20,12 @@ enum SettingsSection {
     labelKey: 'settings.generalData',
     descriptionKey: 'settings.generalData.description',
     icon: StarBridgeIconSemantic.generalData,
+  ),
+  // 屏幕读取（本机设置）：读取游戏画面的功能，每项单独开关，默认关。
+  screenReading(
+    labelKey: 'settings.screenReading',
+    descriptionKey: 'settings.screenReading.description',
+    icon: StarBridgeIconSemantic.statusGame,
   ),
   syncPrivacy(
     labelKey: 'settings.syncPrivacy',

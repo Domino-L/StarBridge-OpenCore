@@ -52,6 +52,10 @@ final class EventSharingChoice {
   }
 }
 
+typedef EventSharingChoiceEdit = EventSharingChoice Function(
+  EventSharingChoice current,
+);
+
 /// Draft-only editor. The caller owns revisioned saving and publication status.
 /// Not mounted in the product until the event publication capability is present.
 class EventScopeEditor extends StatelessWidget {
@@ -62,6 +66,7 @@ class EventScopeEditor extends StatelessWidget {
     required this.choice,
     required this.canEdit,
     required this.onChanged,
+    this.canEditInactiveTypes = false,
     this.leading,
     super.key,
   });
@@ -70,7 +75,8 @@ class EventScopeEditor extends StatelessWidget {
   final Widget? leading;
   final EventSharingChoice choice;
   final bool canEdit;
-  final ValueChanged<EventSharingChoice> onChanged;
+  final bool canEditInactiveTypes;
+  final ValueChanged<EventSharingChoiceEdit> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +100,8 @@ class EventScopeEditor extends StatelessWidget {
             ),
             selected: choice.enabled,
             enabled: canEdit,
-            onChanged: (value) => onChanged(choice.copyWith(enabled: value)),
+            onChanged: (value) =>
+                onChanged((current) => current.copyWith(enabled: value)),
           ),
         ],
       ),
@@ -115,12 +122,12 @@ class EventScopeEditor extends StatelessWidget {
               'settings.privacy.events.${entry.key}Description',
             ),
             selected: choice.selectedTypes & entry.value != 0,
-            enabled: canEdit && choice.enabled,
+            enabled: canEdit && (choice.enabled || canEditInactiveTypes),
             onChanged: (value) => onChanged(
-              choice.copyWith(
+              (current) => current.copyWith(
                 selectedTypes: value
-                    ? choice.selectedTypes | entry.value
-                    : choice.selectedTypes & ~entry.value,
+                    ? current.selectedTypes | entry.value
+                    : current.selectedTypes & ~entry.value,
               ),
             ),
           ),

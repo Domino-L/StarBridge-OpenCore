@@ -1,10 +1,8 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-using StarBridge.Core.Identity;
 using StarBridge.Core.Parsing;
 
 namespace StarBridge.HostRuntime.Presence;
@@ -14,7 +12,7 @@ public sealed record GameProcessSession(string State, string? LogPath = null,
 public sealed record GameLogIdentityObservation(string State, string? Handle = null);
 
 /// <summary>Bounded, read-only identity snapshot. Never treats a display name or old session as current identity.</summary>
-public sealed class GameLogIdentityReader
+public sealed partial class GameLogIdentityReader
 {
     private const int WindowBytes = 16 * 1024 * 1024;
     private string? _source;
@@ -23,6 +21,16 @@ public sealed class GameLogIdentityReader
     private bool _following;
     private long _lineStart;
     private readonly Dictionary<(string Handle, string Id), string> _identities = [];
+    // Separate rejection evidence from the bounded two-identity snapshot.
+    private string? _firstObservedHandle;
+    private bool _observedDifferentHandles;
+    internal bool HasObservedOtherHandle(string expected) => _observedDifferentHandles ||
+        _firstObservedHandle is { } handle && !handle.Equals(expected, StringComparison.OrdinalIgnoreCase);
+    private void ObserveHandle(string handle)
+    {
+        _firstObservedHandle ??= handle;
+        _observedDifferentHandles |= !handle.Equals(_firstObservedHandle, StringComparison.OrdinalIgnoreCase);
+    }
     private bool _quit;
     private bool _invalidIdentityEvidence;
     private byte[] _anchor = [];
@@ -51,16 +59,23 @@ public sealed class GameLogIdentityReader
 
     // Runtime candidates belong to this reader source and must not survive its reset.
     internal event Action? SourceReset;
+    internal event Action? ContractReadInterrupted;
+    private string? _contractNotification;
+    private bool _contractNotificationLive;
     internal bool IdentityInvalidated => _quit || _invalidIdentityEvidence || _identities.Count > 1;
 
     public void Reset()
     {
+        _contractPath = null; _contractFileIdentity = null;
+        _contractFirstTimestamp = null; _contractCoverageFromStart = false;
         _source = null; _position = 0; _identities.Clear(); _quit = false;
         _liveFrom = null; _lineStart = 0; _following = false;
         _invalidIdentityEvidence = false;
+        _firstObservedHandle = null; _observedDifferentHandles = false;
         _anchor = []; _line.Clear(); _longLine = false;
         _recentIdentityAt = null;
         _recentWriteStamp = null;
+        _contractNotification = null;
         _session?.Reset();
         _journal?.Reset();
         SourceReset?.Invoke();
@@ -69,9 +84,7 @@ public sealed class GameLogIdentityReader
         "nickname=\"(?<handle>[^\"]{2,64})\"\\s+playerGEID\\s*=?\\s*\"?(?<id>[0-9]{1,24})(?:\"|\\s|,|$)",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
-    private static readonly GameProcessSnapshotCache Processes = new(new WindowsGameProcessSource());
-
-    public static GameProcessSession Probe() => GameProcessSnapshotCache.Resolve(Processes.Observe());
+    public static GameProcessSession Probe() => SharedGameProcesses.Session();
 
     public static string ValidatePath(string path)
     {
@@ -95,9 +108,9 @@ public sealed class GameLogIdentityReader
     public GameLogIdentityObservation ReadCurrent(string path, GameProcessSession process, DateTimeOffset now)
     {
         _journal?.BeginRead();
-        if (process.State != "running") { Reset(); return new(process.State == "notRunning" ? "notRunning" : "unknown"); }
+        if (process.State != "running") { EndContractSource(process.State == "notRunning"); Reset(); return new(process.State == "notRunning" ? "notRunning" : "unknown"); }
         if (process.StartedAt is null || process.LogPath is null || process.SessionId is null)
-        { Reset(); return new("unknown"); }
+        { EndContractSource(false); InterruptContracts(); Reset(); return new("unknown"); }
         if (_strictLocalEvidence && (process.StartedAt.Value.Offset != TimeSpan.Zero ||
             process.StartedAt < DateTimeOffset.UnixEpoch || process.StartedAt > now ||
             process.SessionId.Length is 0 or > 256 || process.SessionId.Any(char.IsControl)))
@@ -125,6 +138,8 @@ public sealed class GameLogIdentityReader
                 ? CheckedGameLogAccess.PinnedDirectories.Open(Path.GetDirectoryName(path)!, () => { }) : null;
             if (!recent && !path.Equals(Path.GetFullPath(process!.LogPath!), StringComparison.OrdinalIgnoreCase))
             {
+                EndContractSource(false);
+                InterruptContracts();
                 Reset();
                 return new("differentInstallation");
             }
@@ -146,7 +161,18 @@ public sealed class GameLogIdentityReader
             var source = path + "|" + (process?.SessionId ?? "recent-identity-only") + "|" + fileIdentity;
             if (_source != source || length < _position || !AnchorMatches() ||
                 ((recent || _strictLocalEvidence) && length == _position && _recentWriteStamp is { } lastWrite && lastWrite != writeStamp))
-            { Reset(); _source = source; }
+            {
+                var samePath = string.Equals(_contractPath, path, StringComparison.OrdinalIgnoreCase);
+                var sameFile = samePath && _contractFileIdentity == fileIdentity;
+                // Reuse paired metadata only for the same physical file. A distinct
+                // old path must still prove its old identity as well as its length.
+                EndContractSource(_source != source && (sameFile || !samePath),
+                    sameFile ? (fileIdentity, length) : null);
+                if (_source == source) InterruptContracts(); // Truncation/changed consumed bytes, not normal rotation.
+                Reset(); _source = source;
+                if (!recent && _session?.TracksContracts == true)
+                { _contractPath = path; _contractFileIdentity = fileIdentity; }
+            }
             // Stay historical until catch-up reaches EOF; an old partial line remains historical.
             if (!_following) _liveFrom = length;
             stream.Position = _position;
@@ -165,10 +191,11 @@ public sealed class GameLogIdentityReader
                             var lineBytes = _line.ToArray();
                             try
                             {
-                                Observe(new UTF8Encoding(false, true).GetString(lineBytes).TrimEnd('\r').TrimStart('\uFEFF'));
+                                Observe(new UTF8Encoding(false, true).GetString(lineBytes).TrimEnd('\r').TrimStart('\uFEFF'), process, now);
                             }
                             catch (DecoderFallbackException)
                             {
+                                if (_session?.TracksContracts == true) { _contractNotification = null; InterruptContracts(); }
                                 // One damaged diagnostic line must not restart the whole file on
                                 // every sample. Do not replace bytes and fabricate trusted evidence.
                                 // A possible identity/quit in a damaged line invalidates this session
@@ -185,6 +212,7 @@ public sealed class GameLogIdentityReader
                     else if (!_longLine)
                     {
                         if (_line.Count >= 65536) {
+                            if (_session?.TracksContracts == true) { _contractNotification = null; InterruptContracts(); }
                             _longLine = true; _line.Clear();
                             if (recent || _strictLocalEvidence) _invalidIdentityEvidence = true;
                         }
@@ -225,73 +253,13 @@ public sealed class GameLogIdentityReader
                 stream.Position = _position - bytes.Length; stream.ReadExactly(bytes);
                 return bytes.AsSpan().SequenceEqual(_anchor);
             }
-            void Observe(string line)
-            {
-                if (_strictLocalEvidence) { ObserveStrict(line); return; }
-                var containsIdentity = line.Contains("nickname=", StringComparison.Ordinal);
-                var containsQuit = line.Contains("SystemQuit", StringComparison.Ordinal);
-                if (_journal is null && !containsIdentity && !containsQuit &&
-                    (_session is null || !GameLogSessionTracker.MightContainEvidence(line))) return;
-                if (line.Length < 22 || line[0] != '<') {
-                    if (recent && containsIdentity) _invalidIdentityEvidence = true;
-                    return;
-                }
-                var end = line.IndexOf('>');
-                if (end is < 20 or > 40 ||
-                    !DateTimeOffset.TryParse(line.AsSpan(1, end - 1), CultureInfo.InvariantCulture,
-                        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var timestamp) ||
-                    (!recent && timestamp < process!.StartedAt!.Value.AddSeconds(-2)) || timestamp > now.AddSeconds(5)) {
-                    if (recent && containsIdentity) _invalidIdentityEvidence = true;
-                    return;
-                }
-                _session?.Observe(line, live: !recent && _following && _lineStart >= _liveFrom);
-                if (line.Contains("SystemQuit", StringComparison.Ordinal) && line.Contains("CSystem::Quit", StringComparison.Ordinal))
-                {
-                    _quit = true;
-                    _session?.Reset();
-                }
-                if (!containsIdentity)
-                {
-                    return;
-                }
-                var match = Identity.Match(line);
-                if (!match.Success || !IdentityBindingPolicy.IsValidGameName(match.Groups["handle"].Value) ||
-                    match.Groups["id"].Value.All(c => c == '0')) {
-                    if (recent) _invalidIdentityEvidence = true;
-                    return;
-                }
-                if (recent) {
-                    if (_recentIdentityAt is { } previous && timestamp < previous) return;
-                    if (_recentIdentityAt != timestamp) _identities.Clear();
-                    _recentIdentityAt = timestamp;
-                }
-                if (_identities.Count < 2)
-                    _identities.TryAdd((match.Groups["handle"].Value.ToLowerInvariant(), match.Groups["id"].Value),
-                        match.Groups["handle"].Value);
-            }
-            void ObserveStrict(string line)
-            {
-                var state = LocalGameIdentityLine.Parse(line, now, out var identity);
-                var quit = line.Contains("<SystemQuit>", StringComparison.OrdinalIgnoreCase) &&
-                    line.Contains("CSystem::Quit", StringComparison.OrdinalIgnoreCase);
-                if (!LocalGameIdentityLine.TryTimestamp(line, now, out var at, out var resolution))
-                { if (state == LocalGameIdentityLineState.Invalid || quit) _invalidIdentityEvidence = true; return; }
-                if (!LocalGameIdentityLine.MeetsSessionTime(new("", "", at) { ResolutionTicks = resolution },
-                    process!.StartedAt!.Value, process.StartedAt.Value, now)) return;
-                if (state == LocalGameIdentityLineState.Invalid) { _invalidIdentityEvidence = true; return; }
-                if (quit) { _quit = true; _session?.Reset(); return; }
-                // A remote/unrelated nickname must not change the session tracker's
-                // local identity while the strict identity observer ignores it.
-                if (state == LocalGameIdentityLineState.Unrelated &&
-                    line.Contains("nickname", StringComparison.OrdinalIgnoreCase)) return;
-                _session?.Observe(line, live: !recent && _following && _lineStart >= _liveFrom);
-                if (identity is not null && _identities.Count < 2)
-                    _identities.TryAdd((identity.Handle.ToLowerInvariant(), identity.PlayerId), identity.Handle);
-            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or
             NotSupportedException or DecoderFallbackException or RegexMatchTimeoutException or GameplayTimeException)
-        { Reset(); return new("unreadable"); }
+        {
+            Support.IdentityGateJournal.Changed("gamelog-observe", $"code=observe exception={Support.IdentityGateJournal.Type(e)}");
+            EndContractSource(false); InterruptContracts(); Reset(); return new("unreadable");
+        }
     }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint size, uint flags);

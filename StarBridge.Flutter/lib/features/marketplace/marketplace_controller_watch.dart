@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'marketplace_port.dart';
-import 'marketplace_widgets.dart' show marketItemId;
+import 'marketplace_widgets.dart' show marketItemId, marketIsChecklist;
 
 /// One followed item on the 关注 tab (G3, 0.7.2): what it costs now against
 /// what it cost when followed. Everything here is local; "changed" is only
@@ -53,6 +53,7 @@ mixin MarketplaceWatch on ChangeNotifier {
   List<int> get favorites;
   int? get itemId;
   num? bestPrice(int itemId, int side);
+  Future<void> ensureBestPrices(Iterable<(int, int)> wanted);
   List<MarketRow> get watchedSnapshots;
   Future<void> load(
     String key,
@@ -81,10 +82,8 @@ mixin MarketplaceWatch on ChangeNotifier {
   /// What the item looks like right now, for a snapshot taken on follow.
   MarketRow currentWatchSnapshot(int id) {
     final watch = blocks['watch-price:$id'];
-    final sell = itemId == id ? blocks['sell'] ?? watch : watch;
-    final price = sell == null
-        ? bestPrice(id, 1)
-        : marketNumber(sell.rows.firstOrNull?['unitPrice']);
+    final sell = watch;
+    final price = bestPrice(id, 1);
     return {
       'id': id,
       'price': price?.toString(),
@@ -124,6 +123,8 @@ mixin MarketplaceWatch on ChangeNotifier {
     if (more) watchLimit += 24;
     final ids = favorites.take(watchLimit).toList();
     await Future.wait([
+      for (var i = 0; i < ids.length; i += 10)
+        ensureBestPrices(ids.skip(i).take(10).map((id) => (id, 1))),
       for (final id in ids) ...[
         if (blocks['watch:$id'] == null) load('watch:$id', 'item', id: id),
         load('watch-price:$id', 'offers', id: id),
@@ -149,6 +150,7 @@ mixin MarketplaceWatch on ChangeNotifier {
 
   /// Ids the hall and cards mark with a red heart.
   bool isWatched(MarketRow row) {
+    if (marketIsChecklist(row) || row['displayType'] == 3 || row['side'] == 'barter') return false;
     final id = marketItemId(row) ?? marketNumber(row['id'])?.toInt();
     return id != null && favorites.contains(id);
   }

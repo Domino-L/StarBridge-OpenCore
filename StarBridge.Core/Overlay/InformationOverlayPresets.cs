@@ -8,10 +8,14 @@ public sealed record InformationOverlayPresetEntry(string Id, string Name);
 public static class InformationOverlayPresetCodec
 {
     public const string DefaultPresetId = "preset1";
-    public const string CompactPresetId = "compact";
-    public const string CommandPresetId = "command";
-    public const string CombatPresetId = "combat";
-    public const string CustomPresetId = "custom";
+
+    /// <summary>
+    /// The earlier client's built-in layouts (combat, compact, command and the custom slot), retired in 0.7.3 (user,
+    /// 11-10: "3套预设布局只是之前遗留下来的废弃代码"): there is one default layout. A preset under one of these names
+    /// that the user saved stays as their own preset; one never saved is dropped (OverlayWorkspaceStore).
+    /// </summary>
+    public static readonly IReadOnlySet<string> RetiredBuiltInIds =
+        new HashSet<string>(["combat", "compact", "command", "custom"], StringComparer.OrdinalIgnoreCase);
 
     private sealed record Manifest(List<InformationOverlayPresetEntry> Presets);
 
@@ -137,79 +141,63 @@ public static class InformationOverlayDefaults
 {
     // Fields 74–79 turn calm display on for new installs; older files parse as Unset.
     private const string DefaultSettingsPayload =
-        "0,CallsignAndGameName,1,1,1,1.00,1,1,0,1,Default,0,0,Simple,0,#FFFFFF,52.48,1.57,1,1,BridgeTerminal,1,1,120,1,Right,5.03,0.291,1,Auto,0,Default,AllFleet,0.456,2047,3,0,Slow,0;0;0;0;0;0;0;0;0;0;0,1,3.1,12.12,0,Default,Strong,0,0,0,60,3,Auto,1,FullScreenBarrage,Right,4,12,1,1,1,0,16,UpperMiddle,Standard,1,Strong,1,0,5,All,1,1,0,Default,1,On,10,0,0,Relevant,";
+        "0,CallsignAndGameName,1,1,1,1.00,1,1,0,1,Default,0,0,Simple,0,#FFFFFF,52.48,1.57,1,1,BridgeTerminal,1,1,120,1,Right,5.03,0.254,1,Auto,0,Default,AllFleet,0.456,2047,3,0,Slow,0;0;0;0;0;0;0;0;0;0;0,1,3.1,12.12,0,Default,Strong,0,0,0,60,3,Auto,1,FullScreenBarrage,Right,4,12,1,1,1,0,16,UpperMiddle,Standard,1,Strong,1,0,5,All,1,0.15,0,Default,1,On,10,0,0,Relevant,," +
+        // 0.7.3 m102 (11-18 user): the visor fields, with the members 12 rows high ("12 人"); the rest as before
+        "Visor,Medium,0,-1,-1,15,1,1,1,364,554";
 
     public const string DefaultLayoutPayload =
-        "Notice,0.34,0,0.32,0.055,Center,Top,0,1,0.5;" +
-        "Squads,0,0.4211,0.1327,0.1042,Left,Middle,0,1,0.5;" +
-        "Members,0,0.5253,0.1327,0.1557,Right,Middle,0,1,0.5;" +
-        "Chat,0,0.681,0.1327,0.1069,Center,Bottom,0,1,1";
+        "Notice,0.34,0,0.32,0.055,Center,Top,0,1,0.08;" +
+        "Squads,0,0.4211,0.1327,0.1042,Left,Middle,0,1,0.08;" +
+        "Members,0,0.5253,0.1327,0.1557,Right,Middle,0,1,0.08;" +
+        "Chat,0,0.681,0.1327,0.1069,Center,Bottom,0,1,0.15";
 
     public static OverlayDisplaySettings DefaultSettings { get; } =
         OverlayDisplaySettings.Parse(DefaultSettingsPayload);
 
-    public static OverlayDisplaySettings CreateSettings(string? presetId)
+    /// <summary>
+    /// The overall opacity each preset shipped with before 0.7.3, when the setting never took effect (the overlay was
+    /// always drawn full): the retired compact layout 0.78, the retired command layout 0.9, every other preset 0.85.
+    /// </summary>
+    public static double LegacyDefaultOpacity(string? presetId) => InformationOverlayPresetCodec.SanitizeId(presetId) switch
     {
-        return NormalizeBuiltInId(presetId) switch
-        {
-            InformationOverlayPresetCodec.DefaultPresetId => DefaultSettings,
-            InformationOverlayPresetCodec.CompactPresetId => OverlayDisplaySettings.Default with
-            {
-                HideMissionWhenIdle = false,
-                HideOfflineMembers = true,
-                HideSquadIcons = true,
-                Opacity = 0.78,
-                ShowNotice = true,
-                ShowSquads = true,
-                ShowMission = false,
-                ShowMembers = true
-            },
-            InformationOverlayPresetCodec.CommandPresetId => OverlayDisplaySettings.Default with
-            {
-                HideMissionWhenIdle = false,
-                HideOfflineMembers = false,
-                HideSquadIcons = false,
-                Opacity = 0.9,
-                ShowNotice = true,
-                ShowSquads = true,
-                ShowMission = false,
-                ShowMembers = true
-            },
-            _ => OverlayDisplaySettings.Default
-        };
-    }
+        "compact" => 0.78,
+        "command" => 0.9,
+        _ => 0.85,
+    };
 
-    public static IReadOnlyList<InformationOverlayLayoutItem> CreateLayout(string? presetId)
-    {
-        var payload = NormalizeBuiltInId(presetId) switch
-        {
-            InformationOverlayPresetCodec.CompactPresetId =>
-                "Notice,0.34,0,0.32,0.055;" +
-                "Squads,0.01,0.36,0.13,0.24;" +
-                "Members,0.84,0.58,0.15,0.18;" +
-                "Chat,0.35,0.78,0.30,0.18",
-            InformationOverlayPresetCodec.CommandPresetId =>
-                "Notice,0.285,0,0.43,0.075;" +
-                "Squads,0.01,0.30,0.18,0.42;" +
-                "Members,0.78,0.54,0.21,0.26;" +
-                "Chat,0.35,0.75,0.30,0.21",
-            _ => DefaultLayoutPayload
-        };
+    /// <summary>
+    /// The one-time move when the overall opacity starts to take effect (user, 11-10: "默认改成 100%", nobody's overlay may
+    /// turn fainter): a preset still at its old default moves to full; any other saved value was chosen and is kept.
+    /// The store runs this once per data root and then keeps what is saved, so a value chosen later stays.
+    /// </summary>
+    public static OverlayDisplaySettings MigrateLegacyOpacity(string? presetId, OverlayDisplaySettings settings) =>
+        Math.Abs(settings.Opacity - LegacyDefaultOpacity(presetId)) < 0.005 ? settings with { Opacity = 1.0 } : settings;
 
-        return InformationOverlayLayoutItem.ParseMany(payload).ToArray();
-    }
+    /// <summary>The default preset's settings; any other preset with nothing saved starts from the plain defaults.</summary>
+    public static OverlayDisplaySettings CreateSettings(string? presetId) =>
+        InformationOverlayPresetCodec.SanitizeId(presetId) == InformationOverlayPresetCodec.DefaultPresetId
+            ? DefaultSettings
+            : OverlayDisplaySettings.Default;
 
-    private static string NormalizeBuiltInId(string? presetId)
-    {
-        var id = InformationOverlayPresetCodec.SanitizeId(presetId);
-        return id switch
-        {
-            InformationOverlayPresetCodec.DefaultPresetId => id,
-            InformationOverlayPresetCodec.CompactPresetId => id,
-            InformationOverlayPresetCodec.CommandPresetId => id,
-            InformationOverlayPresetCodec.CombatPresetId => id,
-            InformationOverlayPresetCodec.CustomPresetId => id,
-            _ => InformationOverlayPresetCodec.DefaultPresetId
-        };
-    }
+    /// <summary>One default layout for every preset (the earlier built-in layouts are retired, 0.7.3).</summary>
+    /// <summary>
+    /// 0.7.3 (11-13 user, "背景可以"): a block's background opacity is the plate's real opacity (100% = solid). Before, 100%
+    /// drew only a faint plate (the decoration colour at 13%), so a value saved before is read once at 15% of itself and
+    /// looks as it did.
+    /// </summary>
+    public const double LegacyBackgroundScale = 0.15;
+
+    public static double ScaleLegacyBackground(double value) =>
+        Math.Round(InformationOverlayLayoutItem.NormalizeBackgroundOpacity(value) * LegacyBackgroundScale, 2);
+
+    public static OverlayDisplaySettings ScaleLegacyBackground(OverlayDisplaySettings settings) =>
+        settings with { EventNotificationBackgroundOpacity = ScaleLegacyBackground(settings.EventNotificationBackgroundOpacity) };
+
+    public static IReadOnlyList<InformationOverlayLayoutItem> ScaleLegacyBackground(IEnumerable<InformationOverlayLayoutItem> layout) =>
+        layout.Select(item => new InformationOverlayLayoutItem(item.Key, item.X, item.Y, item.Width, item.Height,
+            item.HorizontalAnchor, item.VerticalAnchor, item.IsLocked, item.TextOpacity,
+            ScaleLegacyBackground(item.BackgroundOpacity), item.DecorationOpacity)).ToArray();
+
+    public static IReadOnlyList<InformationOverlayLayoutItem> CreateLayout(string? presetId) =>
+        InformationOverlayLayoutItem.ParseMany(DefaultLayoutPayload).ToArray();
 }

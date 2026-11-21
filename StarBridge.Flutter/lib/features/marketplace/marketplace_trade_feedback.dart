@@ -8,7 +8,9 @@ import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 
 import 'marketplace_controller.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_states.dart' show marketTextAction;
+import 'marketplace_dialog_scope.dart';
 import 'marketplace_trade_copy.dart';
 import 'marketplace_trade_style.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
@@ -26,14 +28,17 @@ class TradeFailure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = c.trades;
-    final code = writing ? t.writeErrorCode : t.errorCode;
-    final message = writing ? t.writeError : t.error;
-    final login = code == 'marketplace.sign_in_required';
+    final code = writing || t.writeUncertain ? t.writeErrorCode : t.errorCode;
+    final message = writing || t.writeUncertain ? t.writeError : t.error;
+    final login = marketplaceNeedsLogin(code);
+    final reauthorize = code == 'marketplace.reauthorize_required';
     final forbidden = code == 'marketplace.forbidden';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TradeNoticeBox(tradeText(context, message ?? '暂时读不到交易'), danger: true),
+        TradeNoticeBox(marketplaceRecoveryCopy.containsKey(message)
+            ? recoveryText(context, message!)
+            : tradeText(context, message ?? '暂时读不到交易'), danger: true),
         if (!writing || login || forbidden || t.writeUncertain)
           Align(
             alignment: Alignment.centerLeft,
@@ -57,7 +62,7 @@ class TradeFailure extends StatelessWidget {
                     }
                   : retry,
               child: Text(
-                tradeText(
+                reauthorize ? recoveryText(context, '重新授权') : tradeText(
                   context,
                   login
                       ? '登录 SCM'
@@ -81,12 +86,14 @@ Future<T?> tradeMotionDialog<T>(BuildContext context, WidgetBuilder builder, {
   bool barrierDismissible = false,
 }) =>
     _restoreTradeFocus<T>(() {
+      final root = MarketplaceDialogScope.useRootNavigator(context);
       var themes = InheritedTheme.capture(
         from: context,
-        to: Navigator.of(context, rootNavigator: true).context,
+        to: Navigator.of(context, rootNavigator: root).context,
       );
       return showStarBridgeDialog<T>(
         context,
+        useRootNavigator: root,
         barrierDismissible: barrierDismissible,
         builder: (routeContext) {
           // Reuse the route's live relay, not a second settings listener.
@@ -99,7 +106,7 @@ Future<T?> tradeMotionDialog<T>(BuildContext context, WidgetBuilder builder, {
               ((context as Element).renderObject?.attached ?? false)) {
             themes = InheritedTheme.capture(
               from: context,
-              to: Navigator.of(context, rootNavigator: true).context,
+              to: Navigator.of(context, rootNavigator: root).context,
             );
           }
           return Semantics(

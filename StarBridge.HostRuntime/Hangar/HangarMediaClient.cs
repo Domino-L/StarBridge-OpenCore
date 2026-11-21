@@ -19,6 +19,7 @@ internal sealed class HangarMediaClient : IDisposable
             origin.Scheme != "https" && !(origin.Scheme == "http" && origin.IsLoopback))
             throw new ArgumentException("Trusted origin required.");
         _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = origin, Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal async Task<ShipMediaSummaryContract[]> ReadAsync(string bearer, string owner, Action current, CancellationToken token)

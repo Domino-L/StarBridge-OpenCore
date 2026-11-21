@@ -2,7 +2,7 @@ using StarBridge.HostRuntime.Settings;
 using StarBridge.NativeBridge;
 using System.Text.Json;
 
-internal static class ApplicationPreferencesTests
+internal static partial class ApplicationPreferencesTests
 {
     internal static async Task PreviewGuidePersistsIndependently()
     {
@@ -120,6 +120,59 @@ internal static class ApplicationPreferencesTests
                 AssertEqual(true, current.Response.Payload.GetProperty("preferences").GetProperty("holidayAppearance").GetBoolean(),
                     "invalid patch leaves cached holiday preference unchanged");
             }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    internal static async Task PerformanceModeDefaultsOffAndPersists()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var path = Path.Combine(root, "application-preferences.v1.json");
+            var expected = ApplicationPreferencesSnapshot.Default with
+            {
+                Revision = 3, LocaleOverride = "zh-TW", MotionPreference = "reduce", HolidayAppearance = false
+            };
+            var store = new ApplicationPreferencesStore(root);
+            store.Save(expected);
+            // A file written before the setting existed has no performanceMode: it reads as off (user 11-10).
+            var older = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(path))!;
+            older.Remove("performanceMode");
+            File.WriteAllText(path, JsonSerializer.Serialize(older));
+            AssertEqual(false, store.Load().Snapshot.PerformanceMode, "older file reads performance mode off");
+            foreach (var enabled in new[] { true, false })
+            {
+                using (var dispatcher = new ApplicationPreferencesBridgeDispatcher(root, () => 3))
+                {
+                    var read = await dispatcher.DispatchAsync(Request("performance-read", 3));
+                    AssertEqual(!enabled, read.Response.Payload.GetProperty("preferences").GetProperty("performanceMode").GetBoolean(),
+                        "performance mode read before the patch");
+                    var saved = await dispatcher.DispatchAsync(Request("performance-save", 3,
+                        ApplicationPreferencesRequestNames.Update,
+                        new { schemaVersion = 1, expectedRevision = expected.Revision,
+                            patch = new { performanceMode = enabled } }));
+                    AssertEqual(BridgeResponseStatuses.Ok, saved.Response.Status, "performance mode patch saved");
+                    AssertEqual(enabled, saved.Response.Payload.GetProperty("preferences").GetProperty("performanceMode").GetBoolean(),
+                        "performance mode patch response");
+                }
+                expected = expected with { Revision = expected.Revision + 1, PerformanceMode = enabled };
+                AssertEqual(expected, store.Load().Snapshot, "performance-only patch preserves every other preference");
+                using var stored = JsonDocument.Parse(File.ReadAllText(path));
+                AssertEqual(enabled, stored.RootElement.GetProperty("performanceMode").GetBoolean(), "performance mode persisted in JSON");
+            }
+            var before = File.ReadAllText(path);
+            using var check = new ApplicationPreferencesBridgeDispatcher(root, () => 3);
+            foreach (var patchJson in new[] { """{"performanceMode":"true"}""", """{"performanceMode":null}""", """{"performanceMode":1}""" })
+            {
+                using var patch = JsonDocument.Parse(patchJson);
+                var rejected = await check.DispatchAsync(Request("performance-invalid", 3,
+                    ApplicationPreferencesRequestNames.Update,
+                    new { schemaVersion = 1, expectedRevision = expected.Revision, patch = patch.RootElement }));
+                AssertEqual(BridgeResponseStatuses.Error, rejected.Response.Status, "invalid performance mode rejected");
+                AssertEqual(before, File.ReadAllText(path), "invalid performance mode leaves file unchanged");
+            }
+            Console.WriteLine("PASS performance mode defaults off, persists and rejects invalid values");
         }
         finally { Directory.Delete(root, true); }
     }

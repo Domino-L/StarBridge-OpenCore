@@ -16,20 +16,28 @@ import 'package:starbridge_flutter/features/hangar/hangar_reader_port.dart';
 import 'package:starbridge_flutter/platform/window/native_viewport_visibility.dart';
 
 void main() {
-  test('saveable scan stays available until the user leaves or cancels', () async {
-    final preview = PreviewFake()
-      ..results = [{...result('complete'), 'canSave': true}];
-    final reader = HangarReaderController(BrowserFake(), preview);
-    await reader.open();
-    final before = preview.cancels;
-    await reader.read();
-    expect(reader.phase, 'complete');
-    expect(preview.cancels, before,
-        reason: 'Finishing a scan must not discard the pending local save');
-    await reader.cancel();
-    expect(preview.cancels, before + 1);
-    reader.dispose();
-  });
+  test(
+    'saveable scan stays available until the user leaves or cancels',
+    () async {
+      final preview = PreviewFake()
+        ..results = [
+          {...result('complete'), 'canSave': true},
+        ];
+      final reader = HangarReaderController(BrowserFake(), preview);
+      await reader.open();
+      final before = preview.cancels;
+      await reader.read();
+      expect(reader.phase, 'complete');
+      expect(
+        preview.cancels,
+        before,
+        reason: 'Finishing a scan must not discard the pending local save',
+      );
+      await reader.cancel();
+      expect(preview.cancels, before + 1);
+      reader.dispose();
+    },
+  );
   if (const bool.fromEnvironment('HANGAR_READER_GOLDENS')) {
     TestWidgetsFlutterBinding.ensureInitialized();
     setUpAll(() async {
@@ -172,22 +180,25 @@ void main() {
     expect(browser.locked, false);
     reader.dispose();
   });
-  test('perpetual loading has finite timeout and unlocks the browser', () async {
-    final browser = BrowserFake()..loadingCount = 10000;
-    final preview = PreviewFake();
-    final reader = HangarReaderController(
-      browser,
-      preview,
-      pollInterval: const Duration(milliseconds: 1),
-      pageTimeout: const Duration(milliseconds: 30),
-    );
-    await reader.open();
-    await reader.read();
-    expect(reader.phase, 'timedOut');
-    expect(preview.observations, 0);
-    expect(browser.locked, false);
-    reader.dispose();
-  });
+  test(
+    'perpetual loading has finite timeout and unlocks the browser',
+    () async {
+      final browser = BrowserFake()..loadingCount = 10000;
+      final preview = PreviewFake();
+      final reader = HangarReaderController(
+        browser,
+        preview,
+        pollInterval: const Duration(milliseconds: 1),
+        pageTimeout: const Duration(milliseconds: 30),
+      );
+      await reader.open();
+      await reader.read();
+      expect(reader.phase, 'timedOut');
+      expect(preview.observations, 0);
+      expect(browser.locked, false);
+      reader.dispose();
+    },
+  );
   test('account switch drops visible results and closes browser', () async {
     final browser = BrowserFake();
     final reader = HangarReaderController(browser, PreviewFake());
@@ -606,11 +617,50 @@ class PreviewFake implements HangarPreviewPort {
 }
 
 class BrowserFake implements HangarBrowserPort {
+  int clears = 0;
+  String? clearFailure;
+
+  /// Most flows here predate the choice and keep the remembered sign-in;
+  /// the not-remembering flows set this to false.
+  bool remembered = true;
+  bool uncleared = false;
+  bool unknown = false;
+
+  /// Native noted that the clear on close did not finish.
+  bool closeLeavesUncleared = false;
+  List<bool> choices = [];
+  String? choiceFailure;
+  @override
+  Future<HangarSignIn> readSignIn() async =>
+      (remember: remembered, uncleared: uncleared, unknown: unknown);
+
+  @override
+  Future<void> setRemember(bool remember) async {
+    choices.add(remember);
+    if (choiceFailure != null) throw HangarReaderFailure(choiceFailure!);
+    remembered = remember;
+    locked = false;
+    shown = false;
+    if (!remember) clears++;
+  }
+
+  @override
+  Future<void> clearData() async {
+    clears++;
+    shown = false;
+    locked = false;
+    if (clearFailure != null) throw HangarReaderFailure(clearFailure!);
+  }
+
   @override
   void setFocusExitHandler(void Function(bool previous)? handler) {}
   int opens = 0, closes = 0, loadingCount = 0;
   Duration captureDelay = Duration.zero;
   bool failOpen = false, shown = false;
+  int busyOpens = 0;
+
+  /// The start-up clear finished while opening waited, with this outcome.
+  bool? unclearedOnOpen;
   bool locked = false;
   List<String> events = [];
   List<String> profileKeys = [];
@@ -623,6 +673,8 @@ class BrowserFake implements HangarBrowserPort {
     opens++;
     profileKeys.add(profileKey);
     if (failOpen) throw const HangarReaderFailure('runtime');
+    if (busyOpens-- > 0) throw const HangarReaderFailure('clear_busy');
+    if (unclearedOnOpen case final value?) uncleared = value;
   }
 
   @override
@@ -668,6 +720,7 @@ class BrowserFake implements HangarBrowserPort {
   @override
   Future<void> close() async {
     closes++;
+    if (closeLeavesUncleared) uncleared = true;
     locked = false;
     shown = false;
   }

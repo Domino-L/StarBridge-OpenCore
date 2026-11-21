@@ -1,4 +1,10 @@
+import 'marketplace_order_full.dart';
+import 'marketplace_order_full_copy.dart';
+import 'marketplace_display_copy.dart';
+import 'marketplace_display_rules.dart';
+import 'marketplace_quality.dart';
 import 'marketplace_trade_chat_entry.dart';
+import 'marketplace_bundle_copy.dart';
 
 import 'dart:async';
 
@@ -25,7 +31,6 @@ const _copy = <String, List<String>>{
   'ongoing': ['有进行中的交易', '有進行中的交易', 'Trade in progress'],
   'unitPrice': ['单价', '單價', 'Unit price'],
   'left': ['剩余', '剩餘', 'Left'],
-  'total': ['全部总价', '全部總價', 'All of it'],
   'market': ['行情对比', '行情對比', 'Against the market'],
   'bestSell': ['当前最低卖价', '目前最低賣價', 'Lowest ask now'],
   'bestBuy': ['当前最高收购', '目前最高收購', 'Highest bid now'],
@@ -51,6 +56,7 @@ const _copy = <String, List<String>>{
 };
 
 String _t(BuildContext context, String key) {
+  if (key == 'tierOthers') return marketDisplayText(context, key);
   final values = _copy[key]!;
   final locale = marketLocale(context);
   return values[locale == 'en'
@@ -64,7 +70,9 @@ String _t(BuildContext context, String key) {
 /// market, who trades and when, what is inside, and the item's other offers.
 /// Reads are public and lazy; a failed read only hides its own figure.
 class MarketOrderDetail extends StatefulWidget {
-  const MarketOrderDetail(this.c, this.row, {super.key});
+  const MarketOrderDetail(this.c, this.row, {this.openItem, this.onFullOrder, super.key});
+  final ValueChanged<int>? openItem;
+  final ValueChanged<MarketRow>? onFullOrder;
   final MarketplaceController c;
   final MarketRow row;
   @override
@@ -72,9 +80,38 @@ class MarketOrderDetail extends StatefulWidget {
 }
 
 class _OrderDetailState extends State<MarketOrderDetail> {
-  MarketRow get row => widget.row;
+  MarketRow? _fullRow;
+  MarketRow get row {
+    final cached = widget.c.fullOrders.cachedOrder('${widget.row['orderNumber']}');
+    return cached == null ? _fullRow ?? widget.row : {...widget.row, ...cached};
+  }
+  bool _fullLoading = false;
+  bool get _incomplete => MarketOrderFull.needs(row);
+
+  Future<void> _readFull({bool retry = false}) async {
+    if (!_incomplete) return;
+    setState(() => _fullLoading = true);
+    final result = await widget.c.fullOrders.fullOrder(widget.row, retry: retry);
+    if (!mounted) return;
+    setState(() {
+      _fullRow = result;
+      _fullLoading = false;
+    });
+    if (result != null) widget.onFullOrder?.call(result);
+  }
+
+  Widget _fullStatus(BuildContext context) => Column(children: [
+    Text(orderFullText(context, 'incomplete')),
+    if (_fullLoading) Text(orderFullText(context, 'loading'))
+    else TextButton(
+      key: const Key('market-order-full-retry'),
+      onPressed: () => _readFull(retry: true),
+      child: Text(orderFullText(context, 'retry')),
+    ),
+  ]);
   MarketRead? _trend, _offers;
   bool _offersFailed = false;
+  bool _trendLoading = true;
 
   int? get _id => marketItemId(row);
   bool get _single => row['displayType'] != 2 && row['displayType'] != 3;
@@ -83,9 +120,15 @@ class _OrderDetailState extends State<MarketOrderDetail> {
   @override
   void initState() {
     super.initState();
+    final cached = widget.c.fullOrders.cachedOrder('${widget.row['orderNumber']}');
+    if (cached != null) _fullRow = {...widget.row, ...cached};
+    if (_incomplete) unawaited(_readFull());
     final id = _id;
     if (id == null || !_single) return;
-    unawaited(widget.c.ensureBestPrices([(id, _side)]));
+    // Redraw once the price settles, read fine or failed.
+    unawaited(widget.c.ensureBestPrices([(id, _side)]).then((_) {
+      if (mounted) setState(() {});
+    }));
     unawaited(_read());
   }
 
@@ -101,12 +144,19 @@ class _OrderDetailState extends State<MarketOrderDetail> {
     }
 
     final results = await Future.wait([
-      quiet(port.read('trend', id: id)),
+      quiet(port.read('trend', id: id)).then((result) {
+        if (mounted) {
+          setState(() {
+            _trend = result;
+            _trendLoading = false;
+          });
+        }
+        return result;
+      }),
       quiet(port.read('offers', id: id, side: _side)),
     ]);
     if (!mounted) return;
     setState(() {
-      _trend = results[0];
       _offers = results[1];
       _offersFailed = results[1] == null;
     });
@@ -114,7 +164,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.c,
+    listenable: Listenable.merge([widget.c, widget.c.fullOrders]),
     builder: (context, _) => ListView(
       padding: EdgeInsets.zero,
       children: [
@@ -176,8 +226,8 @@ class _OrderDetailState extends State<MarketOrderDetail> {
         : row['creatorType'] == 0
         ? 'buy'
         : 'sell';
-    final quality = marketQuality(row);
-    final best = _id == null || !_single
+    final quality = marketShowsItemVisual(row) ? marketQuality(row) : null;
+    final best = _id == null || !_single || quality != null
         ? null
         : widget.c.bestPrice(_id!, _side);
     final price = marketNumber(row['unitPrice']);
@@ -219,7 +269,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
               Wrap(spacing: 4, runSpacing: 4, children: tags),
               const SizedBox(height: 8),
               Text(
-                marketName(row, marketLocale(context)),
+                marketOrderTitle(context, row),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -228,7 +278,11 @@ class _OrderDetailState extends State<MarketOrderDetail> {
                   fontWeight: t.typography.emphasisWeight,
                 ),
               ),
-              if (row['hasOngoingTransactions'] == true) ...[
+              if (row['hasOngoingTransactions'] == true ||
+                  marketNumber(row['availableQuantity']) != null &&
+                  marketNumber(row['remainingQuantity']) != null &&
+                  marketNumber(row['availableQuantity'])! <
+                      marketNumber(row['remainingQuantity'])!) ...[
                 const SizedBox(height: 6),
                 MarketSlantTag(_t(context, 'ongoing'), color: t.colors.warning),
               ],
@@ -240,7 +294,6 @@ class _OrderDetailState extends State<MarketOrderDetail> {
   }
 
   Widget _price(BuildContext context) {
-    final t = context.tokens;
     final quantity = marketNumber(
       row['remainingQuantity'] ?? row['availableQuantity'],
     );
@@ -250,7 +303,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
         padding: EdgeInsets.zero,
         child: MarketStatStrip([
           MarketStat(
-            _t(context, 'unitPrice'),
+            bundleText(context, '交易方式'),
             _t(context, 'barter'),
             mono: false,
           ),
@@ -258,35 +311,57 @@ class _OrderDetailState extends State<MarketOrderDetail> {
             _t(context, 'left'),
             quantity == null ? '—' : '×${quantity.toInt()}',
           ),
+          if (marketNumber(row['availableQuantity']) case final available?)
+            MarketStat(marketDisplayText(context, 'available'), '${available.toInt()}'),
         ]),
       );
     }
-    return MarketSurface(
+    final strip = MarketSurface(
       padding: EdgeInsets.zero,
       child: MarketStatStrip([
         MarketStat(
-          _t(context, 'unitPrice'),
+          marketIsChecklist(row) ? bundleText(context, '每套价格') : _t(context, 'unitPrice'),
           price == null ? '—' : '¤ ${marketMoney(price)}',
           color: MarketplacePalette.gold,
         ),
+        // User 11-14 "a": no "全部总价" cell. SCM's "总价" is one set's price,
+        // so price × remaining read as if one set cost that much.
         MarketStat(
           _t(context, 'left'),
-          quantity == null ? '—' : '×${quantity.toInt()}',
+          quantity == null
+              ? '—'
+              : '${quantity.toInt()} ${bundleText(context, marketIsChecklist(row) ? '套' : '件')}',
         ),
-        if (price != null && quantity != null && quantity > 1)
-          MarketStat(
-            _t(context, 'total'),
-            '¤ ${marketPrice(context, price * quantity)}',
-            color: t.colors.textPrimary,
-          ),
+        if (marketNumber(row['availableQuantity']) case final available?)
+          MarketStat(marketDisplayText(context, 'available'), '${available.toInt()}'),
       ]),
+    );
+    if (!marketIsChecklist(row) || !marketChecklistHasMultiples(row['items'])) {
+      return strip;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        strip,
+        Padding(
+          key: const Key('market-order-bundle-sum-hint'),
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            marketDisplayText(context, 'bundleSumHint'),
+            style: TextStyle(fontSize: 12, color: context.tokens.colors.textSecondary),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _market(BuildContext context) {
     final t = context.tokens;
     final price = marketNumber(row['unitPrice']);
-    final best = widget.c.bestPrice(_id!, _side);
+    final quality = marketQualityValue(row);
+    final best = quality == null ? widget.c.bestPrice(_id!, _side)
+        : marketTierLowest(row, widget.c.qualityTiers.of(_id!));
+    if (quality != null && best == null) return const SizedBox.shrink();
     final trend = _trend?.data;
     final reference = marketNumber(
       trend?[_side == 0 ? 'buyVWAP' : 'sellVWAP'] ?? trend?['overallPrice'],
@@ -297,7 +372,8 @@ class _OrderDetailState extends State<MarketOrderDetail> {
       if (value != null && price != null && value > 0) {
         final diff = (price - value) / value * 100;
         if (best && diff.abs() < .05) {
-          note = _t(context, 'isBest');
+          note = quality == null ? _t(context, 'isBest')
+              : marketDisplayText(context, 'sameTierPrice');
           tone = t.colors.success;
         } else if (diff.abs() >= .05) {
           final higher = diff > 0;
@@ -321,7 +397,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
             ),
             Text(
               value == null
-                  ? _t(context, 'loading')
+                  ? _t(context, (best ? !widget.c.hasBestPrice(_id!, _side) : _trendLoading) ? 'loading' : 'unavailable')
                   : '¤ ${marketMoney(value)}',
               style: TextStyle(
                 fontFamily: value == null ? null : t.typography.monoFamily,
@@ -346,11 +422,12 @@ class _OrderDetailState extends State<MarketOrderDetail> {
       Column(
         children: [
           line(
-            _t(context, _side == 0 ? 'bestBuy' : 'bestSell'),
+            quality == null ? _t(context, _side == 0 ? 'bestBuy' : 'bestSell')
+                : marketDisplayText(context, 'tierLowest'),
             best,
             best: true,
           ),
-          if (_trend != null) line(_t(context, 'reference'), reference),
+          if (quality == null && _trend != null) line(_t(context, 'reference'), reference),
         ],
       ),
     );
@@ -385,7 +462,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
         children: [
           MarketTrader(row),
           // 0.7.2 G9: SCM trade chat with the order's owner, order attached.
-          if (widget.c.tradeChat != null &&
+          if (row['displayType'] != 3 && widget.c.tradeChat != null &&
               !marketIsMine(row) &&
               row['orderNumber'] is String)
             Align(
@@ -432,7 +509,10 @@ class _OrderDetailState extends State<MarketOrderDetail> {
     );
   }
 
-  Widget _itemLine(BuildContext context, MarketRow item) {
+  /// [wanted]: a barter's wanted goods, a requirement like a buy order's.
+  /// Other lines take the order's own side: SCM's item rows carry none, and
+  /// a sell checklist's qualityMin must not read as 需要 (CX-BUYTAG-REVIEW-R2).
+  Widget _itemLine(BuildContext context, MarketRow item, {bool wanted = false}) {
     final t = context.tokens;
     final price = marketNumber(item['unitPrice']);
     return Container(
@@ -463,7 +543,12 @@ class _OrderDetailState extends State<MarketOrderDetail> {
                 ),
                 if (marketQuality(item) != null) ...[
                   const SizedBox(height: 3),
-                  MarketQualityBadge(item),
+                  MarketQualityBadge({
+                    ...item,
+                    // Only a known side is handed down; an unknown one keeps
+                    // the line's own fallback (qualityMin means a minimum).
+                    'side': ?(wanted ? 'buy' : marketOrderSide(row)),
+                  }),
                 ],
               ],
             ),
@@ -502,12 +587,19 @@ class _OrderDetailState extends State<MarketOrderDetail> {
           _section(
             context,
             'offered',
-            Column(children: [for (final i in offered) _itemLine(context, i)]),
+            Column(children: [if (_incomplete) _fullStatus(context), for (final i in offered) _contentLink(context, i)]),
           ),
           _section(
             context,
             'wanted',
-            Column(children: [for (final i in wanted) _itemLine(context, i)]),
+            Column(
+              children: [
+                if (_incomplete)
+                  Text(orderFullText(context, _fullLoading ? 'loading' : 'missing'))
+                else if (wanted.isEmpty) Text(bundleText(context, '未填写')),
+                for (final i in wanted) _contentLink(context, i, wanted: true),
+              ],
+            ),
           ),
         ],
       );
@@ -515,14 +607,23 @@ class _OrderDetailState extends State<MarketOrderDetail> {
     return _section(
       context,
       'contents',
-      Column(children: [for (final i in offered) _itemLine(context, i)]),
+      Column(children: [if (_incomplete) _fullStatus(context), for (final i in offered) _contentLink(context, i)]),
     );
+  }
+
+  Widget _contentLink(BuildContext context, MarketRow item, {bool wanted = false}) {
+    final id = marketNumber(item['itemId'])?.toInt() ?? marketItemId(item);
+    return marketButtonAction(TextButton(
+      onPressed: id == null || widget.openItem == null ? null : () => widget.openItem!(id),
+      child: _itemLine(context, item, wanted: wanted),
+    ), key: ValueKey(('market-order-content', wanted, id)));
   }
 
   Widget _others(BuildContext context) {
     final t = context.tokens;
     final rows = (_offers?.rows ?? const <MarketRow>[])
         .where((r) => r['orderNumber'] != row['orderNumber'])
+        .where((r) => marketSameQualityTier(row, r))
         .take(5)
         .toList();
     final Widget body;
@@ -576,7 +677,7 @@ class _OrderDetailState extends State<MarketOrderDetail> {
         ],
       );
     }
-    return _section(context, 'others', body);
+    return _section(context, marketQualityValue(row) == null ? 'others' : 'tierOthers', body);
   }
 
   Widget _meta(BuildContext context) {

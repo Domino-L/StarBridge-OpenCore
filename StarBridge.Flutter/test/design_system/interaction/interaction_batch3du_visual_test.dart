@@ -30,7 +30,6 @@ const _friendFields = [
   'serverDetails',
   'ship',
   'location',
-  'lastOnline',
 ];
 const _gameFields = ['organization', 'room', 'friends', 'profile'];
 
@@ -391,7 +390,9 @@ void main() {
                 ),
               );
               await _ready(t, bridge);
-              final measurements = <(String, Size, Rect)>[];
+              // The friend presence row carries its description (0.7.3 last
+              // online merge), so its native reference carries it too.
+              final measurements = <(String, String?, Size, Rect)>[];
               for (final field in bridge.fields) {
                 final target = find.byKey(bridge.control(field));
                 expect(t.widget(target), isA<SwitchListTile>());
@@ -402,8 +403,18 @@ void main() {
                   of: target,
                   matching: find.text(text),
                 );
+                final subtitle = kind == 'friend' && field == 'presence'
+                    ? strings.text('settings.privacy.field.presenceDescription')
+                    : null;
+                if (subtitle != null) {
+                  expect(
+                    find.descendant(of: target, matching: find.text(subtitle)),
+                    findsOneWidget,
+                  );
+                }
                 measurements.add((
                   text,
+                  subtitle,
                   row.size,
                   _relative(t.getRect(title), row),
                 ));
@@ -415,11 +426,14 @@ void main() {
                 final reference = Align(
                   alignment: Alignment.topLeft,
                   child: SizedBox(
-                    width: measurement.$2.width,
+                    width: measurement.$3.width,
                     child: SwitchListTile.adaptive(
                       key: const Key('3du-native-reference'),
                       contentPadding: EdgeInsets.zero,
                       title: Text(measurement.$1),
+                      subtitle: measurement.$2 == null
+                          ? null
+                          : Text(measurement.$2!),
                       value: false,
                       onChanged: (_) {},
                     ),
@@ -438,13 +452,13 @@ void main() {
                 await _frames(t, count: 2);
                 final target = find.byKey(const Key('3du-native-reference'));
                 final row = t.getRect(target);
-                expect(row.width, closeTo(measurement.$2.width, .01));
-                expect(row.height, closeTo(measurement.$2.height, .01));
+                expect(row.width, closeTo(measurement.$3.width, .01));
+                expect(row.height, closeTo(measurement.$3.height, .01));
                 final title = find.descendant(
                   of: target,
                   matching: find.text(measurement.$1),
                 );
-                _sameRect(_relative(t.getRect(title), row), measurement.$3);
+                _sameRect(_relative(t.getRect(title), row), measurement.$4);
               }
               expect(t.takeException(), isNull);
             } finally {

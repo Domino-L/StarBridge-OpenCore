@@ -12,40 +12,41 @@ Future<void> identity(
 }) async {
   await c.initialize();
   await c.next();
-  c.chooseMode(mode);
-  await c.next();
   await c.next();
   expect(c.value.step, OnboardingStep.identity);
 }
 
 void main() {
   test('product skips obsolete welcome only, without choosing mode or writing consent', () async {
-    final port = FakeOnboardingPort(facts());
+    final port = FakeOnboardingPort(
+      facts(logReady: false, evidence: OnboardingEvidence.unavailable),
+    );
     final c = OnboardingController(port, skipWelcomeIntro: true);
     addTearDown(c.dispose);
     await c.initialize();
-    expect(c.value.step, OnboardingStep.mode);
-    expect(c.value.mode, isNull);
+    expect(c.value.step, OnboardingStep.log);
+    expect(c.value.mode, OnboardingMode.local);
     expect(c.canGoBack, false);
     c.back();
-    expect(c.value.step, OnboardingStep.mode);
+    expect(c.value.step, OnboardingStep.log);
     expect(port.actions, isEmpty);
     expect(c.value.completed, false);
   });
   test(
     'local mode requires real publication suspension acknowledgement',
     () async {
+      // A plain local session is paused on the log step; Host acknowledging
+      // without suspending publication is an error. (An online account is
+      // never switched here: see onboarding_order_test.)
       final port = FakeOnboardingPort(
-        facts(activeMode: OnboardingMode.online, publicationSuspended: false),
+        facts(activeMode: OnboardingMode.local, publicationSuspended: false),
       );
       port.onAction = (_, _) async => OnboardingReply(facts: port.facts);
       final c = OnboardingController(port);
       addTearDown(c.dispose);
       await c.initialize();
       await c.next();
-      c.chooseMode(OnboardingMode.local);
-      await c.next();
-      expect(c.value.step, OnboardingStep.mode);
+      expect(c.value.step, OnboardingStep.log);
       expect(c.value.error, true);
       expect(c.value.completed, false);
       expect(port.actions, [OnboardingAction.applyMode]);
@@ -63,24 +64,27 @@ void main() {
       await c.next();
       c.chooseMode(OnboardingMode.local);
       await c.next();
-      expect(c.value.step, OnboardingStep.mode);
+      expect(c.value.step, OnboardingStep.log);
       expect(c.value.modeApplied, false);
     },
   );
 
-  test('starts in welcome without automatically selecting a mode', () async {
-    final port = FakeOnboardingPort(facts());
-    final c = OnboardingController(port);
-    addTearDown(c.dispose);
-    await c.initialize();
-    await c.initialize();
-    expect(port.reads, 1);
-    expect(c.value.step, OnboardingStep.welcome);
-    expect(c.value.mode, isNull);
-    await c.next();
-    expect(c.canContinue, false);
-    expect(port.actions, isEmpty);
-  });
+  test(
+    'starts in welcome and reserves local bootstrap for the log step',
+    () async {
+      final port = FakeOnboardingPort(facts());
+      final c = OnboardingController(port);
+      addTearDown(c.dispose);
+      await c.initialize();
+      await c.initialize();
+      expect(port.reads, 1);
+      expect(c.value.step, OnboardingStep.welcome);
+      expect(c.value.mode, OnboardingMode.local);
+      await c.next();
+      expect(c.canContinue, true);
+      expect(port.actions, isEmpty);
+    },
+  );
 
   for (final mode in OnboardingMode.values) {
     for (final evidence in [
@@ -121,18 +125,23 @@ void main() {
   });
 
   test('online choice alone cannot advance past sign-in', () async {
-    final port = FakeOnboardingPort(facts(signedIn: false));
+    final port = FakeOnboardingPort(facts(signedIn: false, confirmed: true));
+    port.restored = OnboardingCheckpoint(
+      step: OnboardingStep.mode,
+      mode: OnboardingMode.local,
+      sourceKey: port.facts.sourceKey,
+      evidenceKey: port.facts.evidenceKey,
+    );
     final c = OnboardingController(port);
     addTearDown(c.dispose);
     await c.initialize();
-    await c.next();
     c.chooseMode(OnboardingMode.online);
     await c.next();
     expect(c.value.step, OnboardingStep.mode);
     expect(port.actions, isEmpty);
     c.chooseMode(OnboardingMode.local);
     await c.next();
-    expect(c.value.step, OnboardingStep.log);
+    expect(c.value.step, OnboardingStep.local);
   });
 
   test('sign-in cannot replace local log evidence', () async {
@@ -195,7 +204,7 @@ void main() {
       expect(c.value.onlineIdentityReady, false);
       expect(c.canContinue, true);
       await c.next();
-      expect(c.value.step, OnboardingStep.local);
+      expect(c.value.step, OnboardingStep.mode);
     },
   );
 
@@ -215,20 +224,20 @@ void main() {
     port.facts = facts(
       source: 'fixture-ptu-1',
       origin: OnboardingEvidenceOrigin.freshSession,
-      activeMode: OnboardingMode.online,
+      activeMode: OnboardingMode.local,
     );
     await c.refresh();
     expect(c.value.needsFreshEvidence, false);
     port.facts = facts(
       origin: OnboardingEvidenceOrigin.history,
-      activeMode: OnboardingMode.online,
+      activeMode: OnboardingMode.local,
     );
     await c.refresh();
     expect(c.value.needsFreshEvidence, true);
     expect(c.canContinue, false);
     port.facts = facts(
       origin: OnboardingEvidenceOrigin.freshSession,
-      activeMode: OnboardingMode.online,
+      activeMode: OnboardingMode.local,
     );
     await c.refresh();
     expect(c.value.needsFreshEvidence, false);
@@ -272,22 +281,27 @@ void main() {
     expect(port.actions, [OnboardingAction.confirmHandle]);
     port.facts = facts(confirmed: true);
     await c.next();
-    expect(c.value.step, OnboardingStep.local);
+    expect(c.value.step, OnboardingStep.mode);
   });
 
-  test('SCM mismatch blocks online identity only', () async {
-    final port = FakeOnboardingPort(facts(matched: false));
-    final c = OnboardingController(port);
-    addTearDown(c.dispose);
-    await identity(c, mode: OnboardingMode.online);
-    expect(c.canContinue, false);
-    c.back();
-    c.back();
-    c.chooseMode(OnboardingMode.local);
-    await c.next();
-    await c.next();
-    expect(c.canContinue, true);
-  });
+  test(
+    'SCM mismatch blocks online setup after local identity and settings',
+    () async {
+      final port = FakeOnboardingPort(facts(confirmed: true, matched: false));
+      final c = OnboardingController(port);
+      addTearDown(c.dispose);
+      await identity(c);
+      await c.next();
+      c.chooseMode(OnboardingMode.online);
+      expect(c.value.step, OnboardingStep.mode);
+      expect(c.canContinue, false);
+      c.returnToMode();
+      c.chooseMode(OnboardingMode.local);
+      await c.next();
+      await c.next();
+      expect(c.canContinue, true);
+    },
+  );
 
   test(
     'online completion requires explicit online choices, not login',
@@ -297,7 +311,9 @@ void main() {
       );
       final c = OnboardingController(port);
       addTearDown(c.dispose);
-      await identity(c, mode: OnboardingMode.online);
+      await identity(c);
+      await c.next();
+      c.chooseMode(OnboardingMode.online);
       await c.next();
       await c.next();
       expect(c.value.step, OnboardingStep.online);
@@ -313,6 +329,7 @@ void main() {
       final c = OnboardingController(port);
       addTearDown(c.dispose);
       await identity(c);
+      await c.next();
       await c.next();
       await c.next();
       // The optional recognition check sits before the summary.
@@ -412,14 +429,19 @@ void main() {
 
   test('cancel login ignores the late login result', () async {
     final held = Completer<OnboardingReply>();
-    final port = FakeOnboardingPort(facts(signedIn: false));
+    final port = FakeOnboardingPort(facts(signedIn: false, confirmed: true));
     port.onAction = (action, _) async => action == OnboardingAction.login
         ? held.future
-        : OnboardingReply(facts: facts(signedIn: false));
+        : OnboardingReply(facts: facts(signedIn: false, confirmed: true));
+    port.restored = OnboardingCheckpoint(
+      step: OnboardingStep.mode,
+      mode: OnboardingMode.local,
+      sourceKey: port.facts.sourceKey,
+      evidenceKey: port.facts.evidenceKey,
+    );
     final c = OnboardingController(port);
     addTearDown(c.dispose);
     await c.initialize();
-    await c.next();
     c.chooseMode(OnboardingMode.online);
     final login = c.run(OnboardingAction.login);
     expect(c.canCancelLogin, true);

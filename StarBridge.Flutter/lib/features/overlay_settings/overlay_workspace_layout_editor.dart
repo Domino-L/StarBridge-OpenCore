@@ -1,11 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 
 import 'overlay_preview_identity.dart';
 import 'overlay_preview_sources.dart';
 import 'overlay_scene_controller.dart';
-import 'overlay_workspace_preview_content.dart';
+import 'overlay_visor_editor_overlay.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -17,11 +16,16 @@ import 'overlay_workspace_editor_state.dart';
 import 'overlay_workspace_inspector.dart';
 import 'overlay_workspace_editor_tools.dart';
 import 'overlay_workspace_controls.dart';
-import 'overlay_workspace_module_style_controls.dart';
 import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_runtime_projection.dart';
 import 'overlay_workspace_fixed_previews.dart';
 import 'overlay_workspace_module.dart';
+import 'overlay_workspace_canvas_module.dart';
+import 'overlay_visor_projection.dart';
+import 'overlay_visor_editor_content.dart';
+import 'overlay_visor_rally_sample.dart';
+import 'overlay_visor_sim_scope.dart';
+import 'overlay_workspace_editor_group_panel.dart';
 
 class OverlayWorkspaceInteractivePreview extends StatelessWidget {
   const OverlayWorkspaceInteractivePreview({
@@ -56,7 +60,10 @@ class OverlayWorkspaceInteractivePreview extends StatelessWidget {
         background: background,
         showGrid: showGrid,
         showHiddenModules: false,
+        editorContent: module.createVisorEditorContent,
         onSettingChanged: module.updateSetting,
+        onMembersResized: module.updateMembersSize,
+        onSizeStep: module.stepMembersSize,
         onEventNotificationPlacement: module.updateEventNotificationPlacement,
         onEventNotificationGestureStart: module.beginEventNotificationGesture,
         onEventNotificationGestureEnd: module.endEventNotificationGesture,
@@ -73,6 +80,8 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
     required this.settings,
     required this.onChanged,
     this.onSettingChanged,
+    this.onMembersResized,
+    this.onSizeStep,
     this.appearances = const [],
     this.onExperiencePreset,
     this.onEventNotificationPlacement,
@@ -94,17 +103,31 @@ class OverlayWorkspaceLayoutWorkbench extends StatefulWidget {
     this.selectionOnly = false,
     this.background,
     this.showGrid,
+    this.editorContent,
+    this.groupFooterExtra,
     super.key,
   });
 
+  /// What the settings page shows below a block's group, shown the same way
+  /// in the full-screen tools (11-13, 请你定 3): the member picker.
+  final Widget? Function(String group)? groupFooterExtra;
+
   final List<OverlayWorkspaceLayoutItem> layout;
+
+  /// Makes the source of what the visor would show (the Host's members,
+  /// events and chat) for this editor's simplified panels; null, or a null
+  /// result, shows samples.
+  final OverlayVisorEditorContentSource? Function()? editorContent;
   final OverlayWorkspaceSettings settings;
   final Object? editOwner;
   final Object? Function()? currentEditOwner;
   final List<OverlayWorkspaceAppearance> appearances;
   final void Function(String field, Object? value)? onSettingChanged;
+  final void Function(int width, int height, OverlayWorkspaceLayoutItem item)?
+  onMembersResized;
+  final void Function(String field, Object? value)? onSizeStep;
   final ValueChanged<String>? onExperiencePreset;
-  final void Function(String side, double normalizedY)?
+  final void Function(String side, double normalizedY, {double? x})?
   onEventNotificationPlacement;
   final VoidCallback? onEventNotificationGestureStart;
   final VoidCallback? onEventNotificationGestureEnd;
@@ -152,6 +175,8 @@ class _OverlayWorkspaceLayoutWorkbenchState
   late String _panelGroup;
   OverlayWorkspaceLayoutItem? _gestureStart;
   Offset _gestureDelta = Offset.zero;
+  final _visor = OverlayVisorEditing();
+  Rect? _membersResizePreview;
   Size get _surfaceSize => widget.fullScreen
       ? MediaQuery.sizeOf(context)
       : OverlayWorkspaceLayoutGeometry.referenceSize;
@@ -168,7 +193,10 @@ class _OverlayWorkspaceLayoutWorkbenchState
         overlayWorkspaceGroupOrder.first;
     _editor.addListener(_changed);
     widget.previewIdentity?.addListener(_changed);
+    _content = widget.editorContent?.call()?..addListener(_changed);
   }
+
+  OverlayVisorEditorContentSource? _content;
 
   @override
   void didUpdateWidget(covariant OverlayWorkspaceLayoutWorkbench oldWidget) {
@@ -187,6 +215,7 @@ class _OverlayWorkspaceLayoutWorkbenchState
   void dispose() {
     _editor.removeListener(_changed);
     widget.previewIdentity?.removeListener(_changed);
+    _content?.dispose();
     if (widget.controller == null) _editor.dispose();
     super.dispose();
   }
@@ -222,27 +251,30 @@ class _OverlayWorkspaceLayoutWorkbenchState
     final tokens = context.tokens;
     if (widget.fullScreen) _editor.fullscreenSurfaceSize = _surfaceSize;
     if (widget.canvasOnly) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: LayoutBuilder(
-          builder: (context, constraints) =>
-              _canvas(context, constraints.biggest),
-        ),
+      // the settings page's preview: never wider than the surface it shows
+      // (11-12 "显示区不够大也不要增加文字大小"), centred when there is room
+      return LayoutBuilder(
+        builder: (context, outer) {
+          final preview = AspectRatio(
+            aspectRatio: 16 / 9,
+            child: LayoutBuilder(
+              builder: (context, constraints) =>
+                  _canvas(context, constraints.biggest),
+            ),
+          );
+          return outer.maxWidth > _surfaceSize.width
+              ? Center(
+                  child: SizedBox(width: _surfaceSize.width, child: preview),
+                )
+              : preview;
+        },
       );
     }
     final selected = _selected;
     _editor.selectedKey ??= selected?.key;
     final inspector = selected == null
         ? const SizedBox.shrink()
-        : OverlayWorkspaceLayoutInspector(
-            key: ValueKey('overlay-layout-inspector-${selected.key}'),
-            item: selected,
-            presetId: widget.presetId,
-            layoutLocked: _editor.layoutLocked,
-            nudgePixels: _editor.nudgePixels,
-            surfaceSize: _surfaceSize,
-            onChanged: widget.onChanged,
-          );
+        : _inspector(selected);
     final toolbar = OverlayWorkspaceEditorTools(
       editor: _editor,
       fullscreenButton: widget.fullscreenButton,
@@ -271,7 +303,9 @@ class _OverlayWorkspaceLayoutWorkbenchState
                         ),
                         initialValue: _panelGroup,
                         isExpanded: true,
-                        items: overlayWorkspaceGroupOrder
+                        // the appearance itself is the appearance centre's;
+                        // its settings moved to Global and the blocks (11-11)
+                        items: overlayWorkspaceNavigationGroupOrder
                             .map(
                               (group) => DropdownMenuItem(
                                 value: group,
@@ -287,45 +321,26 @@ class _OverlayWorkspaceLayoutWorkbenchState
                       ),
                     ),
                     SizedBox(height: tokens.space.sm),
-                    OverlayWorkspaceSettingsGroup(
+                    OverlayWorkspaceEditorGroupPanel(
                       group: _panelGroup,
+                      settings: widget.settings,
+                      layout: widget.layout,
+                      selected: selected,
                       editOwner:
                           widget.editOwner ??
                           (widget.presetId, widget.settings),
                       currentEditOwner: widget.currentEditOwner,
-                      fields: overlayWorkspaceFieldSpecs
-                          .where((field) => field.group == _panelGroup)
-                          .toList(),
-                      settings: widget.settings,
                       appearances: widget.appearances,
-                      onChanged: widget.onSettingChanged ?? (_, _) {},
+                      onSettingChanged: widget.onSettingChanged ?? (_, _) {},
+                      onSizeStep: widget.onSizeStep,
+                      layoutLocked: _editor.layoutLocked,
+                      onLayoutChanged: widget.onChanged,
                       onExperiencePreset: widget.onExperiencePreset,
-                      footer: switch (_panelGroup) {
-                        'notice' || 'fleetOverview' || 'members' || 'chat'
-                            when selected != null =>
-                          OverlayWorkspaceLayoutInspector(
-                            key: ValueKey(
-                              'overlay-layout-inspector-${selected.key}',
-                            ),
-                            item: selected,
-                            presetId: widget.presetId,
-                            layoutLocked: _editor.layoutLocked,
-                            nudgePixels: _editor.nudgePixels,
-                            surfaceSize: _surfaceSize,
-                            embedded: true,
-                            onChanged: widget.onChanged,
-                          ),
-                        'events' => OverlayWorkspaceModuleStyleControls(
-                          group: _panelGroup,
-                          layout: widget.layout,
-                          settings: widget.settings,
-                          onLayoutChanged: widget.onChanged,
-                          onSettingChanged:
-                              widget.onSettingChanged ?? (_, _) {},
-                        ),
-                        'startup' => widget.startupExtra,
-                        _ => null,
-                      },
+                      position: (item) =>
+                          _inspector(item, embedded: true, positionOnly: true),
+                      onOpenGlobal: () => _selectPanelGroup('global'),
+                      startupExtra: widget.startupExtra,
+                      footerExtra: widget.groupFooterExtra?.call(_panelGroup),
                     ),
                   ],
                 ),
@@ -350,12 +365,14 @@ class _OverlayWorkspaceLayoutWorkbenchState
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               SizedBox(height: tokens.space.sm),
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: LayoutBuilder(
-                  builder: (context, constraints) => _canvas(
-                    context,
-                    Size(constraints.maxWidth, constraints.maxHeight),
+              _atMostActualSize(
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => _canvas(
+                      context,
+                      Size(constraints.maxWidth, constraints.maxHeight),
+                    ),
                   ),
                 ),
               ),
@@ -368,8 +385,42 @@ class _OverlayWorkspaceLayoutWorkbenchState
     );
   }
 
+  Widget _inspector(
+    OverlayWorkspaceLayoutItem item, {
+    bool embedded = false,
+    bool positionOnly = false,
+  }) => OverlayWorkspaceLayoutInspector(
+    key: ValueKey('overlay-layout-inspector-${item.key}'),
+    item: item,
+    presetId: widget.presetId,
+    layoutLocked: _editor.layoutLocked,
+    nudgePixels: _editor.nudgePixels,
+    surfaceSize: _surfaceSize,
+    embedded: embedded,
+    positionOnly: positionOnly,
+    settings: widget.settings,
+    onChanged: widget.onChanged,
+  );
+
+  /// The canvas is never drawn larger than the surface it stands for, so the
+  /// visor's text never grows past its real size however wide the page is
+  /// (11-12 user: "显示区不够大也不要增加文字大小"); smaller, everything shrinks
+  /// together.
+  Widget _atMostActualSize(Widget canvas) => Center(
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: _surfaceSize.width),
+      child: canvas,
+    ),
+  );
+
   Widget _canvas(BuildContext context, Size viewportSize) {
     final tokens = context.tokens;
+    // the visor's side blocks lean as the visor draws them (11-11 "同样的3d效果")
+    final tilts = OverlayVisorProjection.tilts(
+      widget.layout,
+      widget.settings,
+      _surfaceSize,
+    );
     final resolvedItems = OverlayWorkspaceLayoutGeometry.resolveItems(
       widget.layout,
       surfaceSize: _surfaceSize,
@@ -382,7 +433,14 @@ class _OverlayWorkspaceLayoutWorkbenchState
     );
     final scaleX = viewportSize.width / _surfaceSize.width;
     final scaleY = viewportSize.height / _surfaceSize.height;
-    return Container(
+    // what the visor would show, for the simplified panels (11-12): asked
+    // again when the draft or its sources change; the panels keep what they
+    // show until the answer comes
+    if (_projectsSampleInformation &&
+        OverlayVisorLayout.active(widget.settings)) {
+      _content?.sync((widget.sources, widget.settings));
+    }
+    final canvas = Container(
       key: Key(
         widget.canvasOnly ? 'overlay-runtime-preview' : 'overlay-layout-canvas',
       ),
@@ -406,11 +464,30 @@ class _OverlayWorkspaceLayoutWorkbenchState
                 ),
               ),
             ),
+          // the rally's other dock while it is selected or dragged (11-18)
+          if (visibility.isLayoutModuleVisible('Notice'))
+            ?OverlayVisorRallySlots.forLayout(
+              layout: widget.layout,
+              settings: widget.settings,
+              surface: _surfaceSize,
+              scale: Offset(scaleX, scaleY),
+              // previews (import, shared, runtime cards) show it only held
+              selected:
+                  _editor.selectedKey == 'Notice' &&
+                  !widget.canvasOnly &&
+                  !widget.selectionOnly,
+              dragDy: _visor.rallyDy,
+            ),
           ...widget.layout
               .where(
                 (item) =>
-                    widget.showHiddenModules ||
-                    visibility.isLayoutModuleVisible(item.key),
+                    // the visor shows the overview inside the members block
+                    !OverlayVisorLayout.mergedIntoMembers(
+                      widget.settings,
+                      item.key,
+                    ) &&
+                    (widget.showHiddenModules ||
+                        visibility.isLayoutModuleVisible(item.key)),
               )
               .where(
                 (item) =>
@@ -425,63 +502,113 @@ class _OverlayWorkspaceLayoutWorkbenchState
                             'FullScreenBarrage'),
               )
               .map((item) {
-                final rect = resolvedItems[item.key]!;
+                // Defer collision arrangement of the grabbed box until release.
+                final rect =
+                    (item.key == 'Members' && !_editor.layoutLocked
+                        ? _membersResizePreview
+                        : null) ??
+                    _visor.shown(
+                      item,
+                      widget.settings,
+                      _surfaceSize,
+                      widget.layout,
+                    ) ??
+                    resolvedItems[item.key]!;
                 final selected = item.key == _editor.selectedKey;
                 return Positioned(
                   left: rect.left * scaleX,
                   top: rect.top * scaleY,
                   width: rect.width * scaleX,
                   height: rect.height * scaleY,
-                  child: _CanvasModule(
-                    selectionOnly: widget.selectionOnly,
-                    key: Key(
-                      widget.canvasOnly
-                          ? 'overlay-runtime-preview-${item.key}'
-                          : 'overlay-layout-module-${item.key}',
+                  child: _tilted(
+                    item.key,
+                    rect,
+                    scaleX,
+                    scaleY,
+                    tilts,
+                    OverlayWorkspaceCanvasModule(
+                      // the settings page's small preview moves and resizes
+                      // like the full-screen editor (11-13 user)
+                      // a visor block reads from its screen edge (the side it
+                      // leans to; one placed up top, the half it is in)
+                      visorRight:
+                          OverlayVisorEditing.boxOrNull(
+                                item,
+                                widget.settings,
+                                _surfaceSize,
+                                widget.layout,
+                              ) ==
+                              null
+                          ? null
+                          : tilts[item.key] ??
+                                rect.center.dx > _surfaceSize.width / 2,
+                      key: Key(
+                        widget.canvasOnly
+                            ? 'overlay-runtime-preview-${item.key}'
+                            : 'overlay-layout-module-${item.key}',
+                      ),
+                      item: _editor.layoutLocked
+                          ? item.copyWith(isLocked: true)
+                          : item,
+                      selected: selected,
+                      settings: widget.settings,
+                      referenceSize: rect.size,
+                      previewIdentity: widget.previewIdentity?.value,
+                      simulate: _projectsSampleInformation,
+                      isVisible: visibility.isLayoutModuleVisible(item.key),
+                      onSelected: () => _selectLayoutModule(item.key),
+                      onMoveStart: (grab) => _beginGesture(
+                        item,
+                        grab:
+                            rect.topLeft +
+                            Offset(grab.dx / scaleX, grab.dy / scaleY),
+                      ),
+                      onMove: (delta) => _move(item, delta, viewportSize),
+                      onMoveEnd: _endGesture,
+                      onResizeStart: () => _beginGesture(item),
+                      onResize: (delta) => _resize(item, delta, viewportSize),
+                      onResizeEnd: _endGesture,
                     ),
-                    item: _editor.layoutLocked
-                        ? item.copyWith(isLocked: true)
-                        : item,
-                    selected: selected,
-                    settings: widget.settings,
-                    referenceSize: rect.size,
-                    previewIdentity: widget.previewIdentity?.value,
-                    simulate: _projectsSampleInformation,
-                    isVisible: visibility.isLayoutModuleVisible(item.key),
-                    onSelected: () => _selectLayoutModule(item.key),
-                    onMoveStart: () => _beginGesture(item),
-                    onMove: (delta) => _move(item, delta, viewportSize),
-                    onMoveEnd: _endGesture,
-                    onResizeStart: () => _beginGesture(item),
-                    onResize: (delta) => _resize(item, delta, viewportSize),
-                    onResizeEnd: _endGesture,
                   ),
                 );
               }),
+          if (OverlayVisorLayout.active(widget.settings))
+            Positioned.fill(
+              child: OverlayVisorEditorOverlay(
+                layout: widget.layout,
+                settings: widget.settings,
+                surface: _surfaceSize,
+                guides: _visor.guides,
+                guideColor: tokens.colors.accent,
+                warningColor: tokens.colors.danger,
+                onSettingChanged: _editor.layoutLocked
+                    ? null
+                    : widget.onSettingChanged,
+                onGestureStart: widget.onEventNotificationGestureStart,
+                onGestureEnd: widget.onEventNotificationGestureEnd,
+                onMembersResized: _editor.layoutLocked
+                    ? null
+                    : widget.onMembersResized,
+                onResizePreview: (box) =>
+                    setState(() => _membersResizePreview = box),
+              ),
+            ),
           Positioned.fill(
             child: OverlayWorkspaceFixedPreviews(
               selectionOnly: widget.selectionOnly,
               settings: widget.settings,
-              chatTextOpacity:
-                  widget.layout
-                      .where((item) => item.key == 'Chat')
-                      .map((item) => item.textOpacity)
-                      .firstOrNull ??
-                  1,
+              layout: widget.layout,
               surfaceSize: _surfaceSize,
               simulate: _projectsSampleInformation,
               eventNotificationSnapPixels: _editor.snapPixels,
               eventNotificationSmartSnap: _editor.smartSnap,
-              onEventNotificationPlacement:
-                  _editor.layoutLocked || widget.selectionOnly
+              onEventNotificationPlacement: _editor.layoutLocked
                   ? null
                   : widget.onEventNotificationPlacement,
-              onEventNotificationGestureStart:
-                  _editor.layoutLocked || widget.selectionOnly
+              onEventNotificationGestureStart: _editor.layoutLocked
                   ? null
                   : widget.onEventNotificationGestureStart,
-              onEventNotificationGestureEnd:
-                  _editor.layoutLocked || widget.selectionOnly
+              onEventNotificationGestureEnd: _editor.layoutLocked
                   ? null
                   : widget.onEventNotificationGestureEnd,
               onSelected: widget.fullScreen || widget.selectionOnly
@@ -498,12 +625,90 @@ class _OverlayWorkspaceLayoutWorkbenchState
         ],
       ),
     );
+    final strings = AppStrings.of(context);
+    return OverlayVisorSimScope(
+      content: _content?.content ?? overlayVisorSampleContent(strings.text),
+      sampleLabel: strings.text('overlay.sample.visorSampleData'),
+      simulate: _projectsSampleInformation,
+      child: canvas,
+    );
   }
 
-  void _beginGesture(OverlayWorkspaceLayoutItem item) {
+  /// A visor side block shown through the visor's camera: drawn and hit where
+  /// the visor shows it; placing stays on the flat box.
+  Widget _tilted(
+    String key,
+    Rect rect,
+    double scaleX,
+    double scaleY,
+    Map<String, bool> tilts,
+    Widget child,
+  ) {
+    final right = tilts[key];
+    final degrees = OverlayVisorProjection.degrees(widget.settings);
+    if (right == null || degrees == 0) return child;
+    return Transform(
+      transform: OverlayVisorProjection.forWidget(
+        rect,
+        right: right,
+        degrees: degrees,
+        surface: _surfaceSize,
+        distance: OverlayVisorProjection.distance(widget.settings),
+        scaleX: scaleX,
+        scaleY: scaleY,
+      ),
+      child: child,
+    );
+  }
+
+  /// [grab]: the flat point grabbed (surface pixels), for a leaning block.
+  void _beginGesture(OverlayWorkspaceLayoutItem item, {Offset? grab}) {
     _selectLayoutModule(item.key);
     _gestureStart = item;
     _gestureDelta = Offset.zero;
+    _grab = _grabShown = null;
+    final degrees = OverlayVisorProjection.degrees(widget.settings);
+    final leans = OverlayVisorProjection.tilts(
+      widget.layout,
+      widget.settings,
+      _surfaceSize,
+    ).containsKey(item.key);
+    if (grab == null || !leans || degrees == 0) return;
+    final box = OverlayVisorLayout.boxOf(
+      item,
+      widget.settings,
+      _surfaceSize,
+      widget.layout,
+    );
+    _grab = grab;
+    _grabBox = box;
+    _grabShown = OverlayVisorProjection.point(
+      grab,
+      right: box.center.dx > _surfaceSize.width / 2,
+      degrees: degrees,
+      surface: _surfaceSize,
+      distance: OverlayVisorProjection.distance(widget.settings),
+    );
+  }
+
+  Offset? _grab, _grabShown;
+  Rect _grabBox = Rect.zero;
+
+  /// The flat move for the pointer's move on screen ([_gestureDelta]): a
+  /// leaning block moves so the point grabbed stays under the pointer, worked
+  /// out from where the pointer is each time (reviews CX-VISOR-EVENTS3D-R1,
+  /// R2); a flat one by the pointer's move.
+  Offset _flatDelta(String key) {
+    final grab = _grab, shown = _grabShown;
+    if (grab == null || shown == null) return _gestureDelta;
+    return OverlayVisorProjection.follow(
+      grab,
+      _grabBox,
+      shown + _gestureDelta,
+      degrees: OverlayVisorProjection.degrees(widget.settings),
+      surface: _surfaceSize,
+      distance: OverlayVisorProjection.distance(widget.settings),
+    );
   }
 
   void _move(
@@ -517,6 +722,20 @@ class _OverlayWorkspaceLayoutWorkbenchState
       viewportSize,
       surfaceSize: _surfaceSize,
     );
+    final s = widget.settings, l = widget.layout;
+    final v = _visor.move(
+      _gestureStart!,
+      _flatDelta(item.key),
+      l,
+      s,
+      _surfaceSize,
+    );
+    // the rally only follows the pointer until release (v is its start)
+    if (v != null) {
+      return setState(
+        () => v == _gestureStart ? null : widget.onChanged(v, true),
+      );
+    }
     widget.onChanged(
       OverlayWorkspaceLayoutGeometry.move(
         item: _gestureStart!,
@@ -535,7 +754,9 @@ class _OverlayWorkspaceLayoutWorkbenchState
     Offset viewportDelta,
     Size viewportSize,
   ) {
+    final visor = OverlayVisorEditing.handles(widget.settings, item.key);
     if (_editor.layoutLocked || item.isLocked || _gestureStart == null) return;
+    if (visor) return; // visor blocks keep the S/M/L size setting
     _gestureDelta += OverlayWorkspaceLayoutGeometry.scaleDelta(
       viewportDelta,
       viewportSize,
@@ -555,215 +776,18 @@ class _OverlayWorkspaceLayoutWorkbenchState
   }
 
   void _endGesture() {
+    final start = _gestureStart;
     _gestureStart = null;
     _gestureDelta = Offset.zero;
-  }
-}
-
-class _CanvasModule extends StatefulWidget {
-  const _CanvasModule({
-    required this.item,
-    required this.selected,
-    required this.isVisible,
-    required this.settings,
-    required this.referenceSize,
-    required this.previewIdentity,
-    required this.simulate,
-    required this.onSelected,
-    required this.onMoveStart,
-    required this.onMove,
-    required this.onMoveEnd,
-    required this.onResizeStart,
-    required this.onResize,
-    required this.onResizeEnd,
-    this.selectionOnly = false,
-    super.key,
-  });
-  final OverlayWorkspaceLayoutItem item;
-  final bool selected, isVisible, simulate;
-  final bool selectionOnly;
-  final OverlayWorkspaceSettings settings;
-  final Size referenceSize;
-  final OverlayPreviewIdentity? previewIdentity;
-  final VoidCallback onSelected,
-      onMoveStart,
-      onMoveEnd,
-      onResizeStart,
-      onResizeEnd;
-  final ValueChanged<Offset> onMove, onResize;
-  @override
-  State<_CanvasModule> createState() => _CanvasModuleState();
-}
-
-class _CanvasModuleState extends State<_CanvasModule> {
-  int? _pointer;
-  Offset? _previous;
-  bool _resizing = false;
-
-  void _end() {
-    if (_pointer != null) {
-      if (_resizing) {
-        widget.onResizeEnd();
-      } else {
-        widget.onMoveEnd();
-      }
-    }
-    _pointer = null;
-    _previous = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final item = widget.item;
-    final tokens = context.tokens;
-    return Semantics(
-      label: _moduleName(context, item.key),
-      button: true,
-      child: LayoutBuilder(
-        builder: (context, constraints) => MouseRegion(
-          cursor: widget.selectionOnly
-              ? SystemMouseCursors.click
-              : item.isLocked
-              ? SystemMouseCursors.basic
-              : SystemMouseCursors.move,
-          child: Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (event) {
-              if ((event.buttons & kPrimaryMouseButton) == 0 ||
-                  _pointer != null) {
-                return;
-              }
-              widget.onSelected();
-              if (item.isLocked || widget.selectionOnly) return;
-              _pointer = event.pointer;
-              _previous = event.position;
-              _resizing =
-                  event.localPosition.dx >= constraints.maxWidth - 32 &&
-                  event.localPosition.dy >= constraints.maxHeight - 32;
-              if (_resizing) {
-                widget.onResizeStart();
-              } else {
-                widget.onMoveStart();
-              }
-            },
-            onPointerMove: (event) {
-              if (event.pointer != _pointer ||
-                  item.isLocked ||
-                  widget.selectionOnly) {
-                return;
-              }
-              final delta = event.position - _previous!;
-              _previous = event.position;
-              if (_resizing) {
-                widget.onResize(delta);
-              } else {
-                widget.onMove(delta);
-              }
-            },
-            onPointerUp: (event) {
-              if (event.pointer == _pointer) _end();
-            },
-            onPointerCancel: (event) {
-              if (event.pointer == _pointer) _end();
-            },
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                FittedBox(
-                  fit: BoxFit.fill,
-                  alignment: Alignment.topLeft,
-                  child: SizedBox(
-                    width: widget.referenceSize.width,
-                    height: widget.referenceSize.height,
-                    child: OverlayPreviewModuleSurface(
-                      settings: widget.settings,
-                      selected: widget.selected,
-                      visible: widget.isVisible,
-                      backgroundOpacity: item.backgroundOpacity,
-                      textOpacity: item.textOpacity,
-                      decorationOpacity: item.decorationOpacity,
-                      child: OverlayPreviewContent(
-                        moduleKey: item.key,
-                        settings: widget.settings,
-                        referenceSize: widget.referenceSize,
-                        previewIdentity: widget.previewIdentity,
-                        simulate: widget.simulate,
-                      ),
-                    ),
-                  ),
-                ),
-                if (item.isLocked)
-                  Positioned(
-                    top: 4,
-                    right: 6,
-                    child: Text(
-                      _copy(context, 'overlay.workspace.layout.lockedShort'),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ),
-                if (!widget.isVisible)
-                  Positioned(
-                    left: 6,
-                    bottom: 4,
-                    child: Text(
-                      _copy(context, 'overlay.workspace.layout.hiddenShort'),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ),
-                if (!item.isLocked && !widget.selectionOnly)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.resizeDownRight,
-                      child: SizedBox(
-                        key: Key('overlay-layout-resize-${item.key}'),
-                        width: 24,
-                        height: 24,
-                        child: CustomPaint(
-                          painter: _ResizeHandlePainter(
-                            color: tokens.colors.accent,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    final s = widget.settings, l = widget.layout;
+    final v = _visor.end(start?.key, l, s, _surfaceSize);
+    // a rally drop is its own undo step; a drop after a drag joins the drag
+    // (review CX-OVERLAY-M102-R1 P2-5)
+    setState(
+      () => v == null ? null : widget.onChanged(v, start?.key != 'Notice'),
     );
   }
 }
 
-class _ResizeHandlePainter extends CustomPainter {
-  const _ResizeHandlePainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    for (var inset = 5.0; inset <= 15; inset += 5) {
-      canvas.drawLine(
-        Offset(size.width - inset, size.height),
-        Offset(size.width, size.height - inset),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _ResizeHandlePainter oldDelegate) =>
-      color != oldDelegate.color;
-}
-
 String _copy(BuildContext context, String key) =>
     AppStrings.of(context).text(key);
-
-String _moduleName(BuildContext context, String key) =>
-    _copy(context, 'overlay.workspace.module.$key');

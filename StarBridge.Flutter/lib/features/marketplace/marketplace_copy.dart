@@ -26,6 +26,12 @@ String marketText(BuildContext context, String key) {
 }
 
 const _copy = <String, List<String>>{
+  'priceLoading': ['读取中…', '讀取中…', 'Loading…'],
+  'filteredEmpty': ['没有符合筛选条件的结果', '沒有符合篩選條件的結果', 'No results match your filters'],
+  'allTypes': ['看全部类型', '看全部類型', 'Show all types'],
+  'singleSell': ['单件出售', '單件出售', 'Single-item sell orders'],
+  'singleBuy': ['单件求购', '單件求購', 'Single-item buy orders'],
+  'tradingParty': ['交易方', '交易方', 'Trader'],
   'attachments': ['兼容配件', '相容配件', 'Compatible attachments'],
   'blueprints': ['用到它的蓝图', '用到它的藍圖', 'Blueprints using this item'],
   'materialIdentity': [
@@ -56,6 +62,8 @@ const _copy = <String, List<String>>{
   'cards': ['图片卡片', '圖片卡片', 'Cards'],
   'rows': ['密集行', '密集行', 'Rows'],
   'clearFilters': ['全部清除', '全部清除', 'Clear filters'],
+  // The empty result's own button, apart from the filter bar's 全部清除.
+  'clearFiltersEmpty': ['清除筛选', '清除篩選', 'Clear the filters'],
   'legendary': ['极品', '極品', 'Legendary'],
   'excellent': ['极佳', '極佳', 'Excellent'],
   'good': ['良好', '良好', 'Good'],
@@ -79,6 +87,13 @@ const _copy = <String, List<String>>{
   'noSell': ['暂无出售', '暫無出售', 'No sell offers'],
   'noBuy': ['暂无收购', '暫無收購', 'No buy offers'],
   'quality': ['品质', '品質', 'Quality'],
+  // A buy order's quality tag: what it needs, at least (user 2026-11-07).
+  'needs': ['需要', '需要', 'Needs'],
+  // Title of a checklist order that has no name: its first item, "and more".
+  'checklistMore': ['{n} 等', '{n} 等', '{n} and more'],
+  'checklist': ['清单', '清單', 'Checklist'],
+  'single': ['单件', '單件', 'Single'],
+  'emptyChecklist': ['没有包含这件物品的清单挂单', '沒有包含這件物品的清單掛單', 'No checklist listings include this item'],
   'published': ['发布于', '發佈於', 'Published'],
   'wanted': ['想换', '想換', 'Wanted'],
   'watchLimit': [
@@ -146,6 +161,9 @@ const _copy = <String, List<String>>{
   'time': ['交易时段', '交易時段', 'Trading hours'],
   'notSet': ['未设置', '未設定', 'Not set'],
   'notFilled': ['未填写', '未填寫', 'Not provided'],
+  'seeDetail': ['看详情', '看詳情', 'see details'],
+  'sellInclChecklist': ['出售（含清单）', '出售（含清單）', 'Sell offers (incl. checklists)'],
+  'buyInclChecklist': ['求购（含清单）', '求購（含清單）', 'Buy offers (incl. checklists)'],
   'offline': ['离线', '離線', 'Offline'],
   'online': ['在线', '上線', 'Online'],
   'me': ['我', '我', 'Me'],
@@ -166,7 +184,7 @@ const _copy = <String, List<String>>{
   'tradeClosedNow': ['不在交易时段', '不在交易時段', 'Closed now'],
   'tradeWindowUnset': ['未设置', '未設定', 'Not set'],
   'scmMarket': ['星际公民交易市场', '星際公民交易市場', 'Star Citizen trade market'],
-  'onSale': ['{n} 件在售', '{n} 件在售', '{n} on sale'],
+  'onSale': ['{n} 条挂单', '{n} 條掛單', '{n} orders'],
   // Hover drawers (方案 E).
   'drawerVsLowest': ['比最低价', '比最低價', 'vs lowest'],
   'drawerVsHighest': ['比最高收购', '比最高收購', 'vs top bid'],
@@ -181,7 +199,8 @@ const _copy = <String, List<String>>{
   'drawerQuotes': ['看报价', '看報價', 'Quotes'],
   'drawerOnSale': ['在售挂单', '在售掛單', 'Listings'],
   'drawerChecklist': ['清单挂单', '清單掛單', 'In checklists'],
-  'drawerChange': ['7 日', '7 日', '7 days'],
+  // SCM's changePercent: latest trading day vs the one before it (not 7 days).
+  'drawerChange': ['较上一交易日', '較上一交易日', 'vs previous trading day'],
   'drawerNone': ['暂无', '暫無', 'None'],
   'drawerExpiry': ['有效期至', '有效期至', 'Expires'],
   'drawerOngoing': ['进行中交易', '進行中交易', 'Active trades'],
@@ -206,7 +225,7 @@ const _copy = <String, List<String>>{
   'drawerNoSub': ['没有子分类', '沒有子分類', 'No subcategories'],
   'drawerDone': ['已完成', '已完成', 'Completed'],
   'drawerCancelled': ['已取消', '已取消', 'Cancelled'],
-  'onSaleTotal': ['共 {n} 件在售', '共 {n} 件在售', '{n} on sale'],
+  'onSaleTotal': ['共 {n} 条挂单', '共 {n} 條掛單', '{n} orders in total'],
   'verbSell': ['出售', '出售', 'Selling'],
   'verbBuy': ['求购', '求購', 'Buying'],
   'verbSwap': ['⇄ 换', '⇄ 換', '⇄ For'],

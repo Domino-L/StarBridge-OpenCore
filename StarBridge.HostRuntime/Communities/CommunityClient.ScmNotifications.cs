@@ -36,6 +36,14 @@ internal sealed partial class CommunityClient
                     tasks.Select(task => new CommunityNotificationTask(NotificationKey(scope, code.ToUpperInvariant(), joined, Text(task, "id", 128)),
                         DateTimeOffset.Parse(Timestamp(task, "createdAt") ?? throw Invalid()))).ToArray(), NotificationPolicyStore.Organization(code, joined));
             }).ToArray();
+            using var announcementBudget = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            for (var i = 0; i < sources.Length; i++) {
+                var code = Text(rows[i], "code", 256);
+                var announcements = await NotificationAnnouncements(bearer, code, false, false, current, token, announcementBudget.Token);
+                sources[i] = sources[i] with { Announcements = announcements,
+                    AnnouncementIdentity = "community:" + code.ToUpperInvariant(),
+                    AnnouncementSource = announcements == null ? null : NotificationAnnouncementTarget(code, scope, sources[i].Name) };
+            }
             current(); token.ThrowIfCancellationRequested();
             return new(_targetClock.GetUtcNow(), sources);
         }

@@ -18,11 +18,12 @@ import '../../features/onboarding/connection_mode_port.dart';
 import 'tray_quick_panel.dart';
 import 'tray_star_arrival.dart';
 import 'tray_surface_snapshot.dart';
+import '../runtime/frame_governor.dart';
 
 // Called only by trayMain. Deliberately does NOT call bootstrapStarBridge,
 // create an account, load preferences from disk or attach NativeHostBridge.
 void runTraySurface() {
-  WidgetsFlutterBinding.ensureInitialized();
+  StarBridgeBinding.ensureInitialized(FrameSurface.tray);
   runApp(const TraySurfaceApp());
 }
 
@@ -87,6 +88,8 @@ class _TraySurfaceAppState extends State<TraySurfaceApp> {
       _logo = GlobalKey();
     }
     setState(() => _snapshot = next);
+    // This engine has its own frame governor: follow the user's setting.
+    performanceModePreference.value = next.performanceMode;
     _source.value = ManualPresenceSnapshot(
       scope: next.scope,
       confirmedMode: next.presence,

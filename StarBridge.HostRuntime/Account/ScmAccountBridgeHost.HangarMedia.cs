@@ -27,7 +27,9 @@ internal sealed partial class ScmAccountBridgeHost
         Func<string, string, Action, CancellationToken, Task<T>> execute, CancellationToken token)
     {
         if (_hangarMedia is null) throw new AccountBridgeHostException("hangar.image_unavailable");
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         var generation = Generation;

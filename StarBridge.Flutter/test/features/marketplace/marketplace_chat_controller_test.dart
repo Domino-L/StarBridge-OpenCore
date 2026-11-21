@@ -67,6 +67,16 @@ int _count(_Port port, String operation) =>
     port.calls.where((x) => x.$1 == operation).length;
 
 void main() {
+  test('opening a trade counterparty clears a previous order attachment', () async {
+    final c = MarketplaceChatController(_Port());
+    addTearDown(c.dispose);
+    await c.loadConversations();
+    await c.open('p1');
+    c.attachment = const MarketChatAttachment('SO88', '#SO88');
+    expect(await c.openCounterparty('p1'), isTrue);
+    expect(c.attachment, isNull);
+  });
+
   test(
     'open reads newest, marks read, pages older; sends never repeat',
     () async {
@@ -92,14 +102,15 @@ void main() {
       expect(c.threadEnd, isTrue);
 
       final histories = _count(port, 'history');
-      await c.send('  成交  ', orderId: 88);
+      await c.send('  成交  ', orderNumber: 'SO88');
       expect(port.calls.where((x) => x.$1 == 'send').single.$2, {
         'ref': 'p1',
         'content': '成交',
-        'orderId': 88,
+        'orderNumber': 'SO88',
         'clientMessageId': matches(RegExp(r'^[0-9a-f]{32}$')),
       });
       expect(c.outgoing, isEmpty);
+      expect(c.thread.last['attachmentMissing'], isTrue);
       expect(c.thread.last['content'], '成交', reason: 'shown from the reply');
       expect(
         _count(port, 'history'),

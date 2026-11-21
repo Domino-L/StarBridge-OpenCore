@@ -9,7 +9,7 @@ public sealed record CityObservation(int SchemaVersion, string HandleHash, strin
     [JsonIgnore]
     public bool IsValid => SchemaVersion == 1 && HandleHash is { Length: 64 } &&
         HandleHash.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') &&
-        JourneyAchievementPolicy.IsCity(City) && Evidence is "RequestLocationInventory" or "PLAYER_LOCATION";
+        JourneyAchievementPolicy.IsToken(City) && Evidence is "RequestLocationInventory" or "PLAYER_LOCATION";
 }
 internal sealed record CityArrivalEvidence(BridgeAccountContext Owner, long Generation, CityObservation Observation);
 

@@ -7,12 +7,14 @@ namespace StarBridge.HostRuntime.Account;
 
 internal sealed partial class ScmAccountBridgeHost
 {
-    public async Task<StarBridge.Core.Profiles.PersonalProfileDocumentContract> ReadMemberPersonalProfileAsync(
+    public async Task<VisitorPersonalProfileResult> ReadMemberPersonalProfileAsync(
         BridgeAccountContext context, JsonElement payload, CancellationToken token)
     {
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         if (session.Scm is not null && _communities is not null)
         {
@@ -31,7 +33,7 @@ internal sealed partial class ScmAccountBridgeHost
             (active, ct) => _legacyPasswordLogin.ReadVisitorProfileAsync(active.Legacy!, target, ct), token);
         if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
         RequireSameRelaySession(session, RequireRelaySession(context));
-        return result.Result;
+        return new(result.Result);
     }
 
     public Task<object> PreviewCommunityInviteAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token) =>
@@ -43,7 +45,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (accept) CommunityClient.ParseInviteAcceptance(payload); else CommunityClient.ParseInvitePreview(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -81,7 +85,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (remove) CommunityClient.ValidateMemberRemoval(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -106,7 +112,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (save) CommunityClient.ValidateMemberRoleSave(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -131,7 +139,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (save) CommunityClient.ValidateRolesSave(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -158,7 +168,9 @@ internal sealed partial class ScmAccountBridgeHost
         if (manage) CommunityClient.ParseAdmissionIntent(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -188,7 +200,9 @@ internal sealed partial class ScmAccountBridgeHost
         Notifications.PlayerActivitySourceSnapshot? activity = null;
         Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value =>
         { if (backgroundActivity) PublishPlayerActivity(context, generation, sequence, value); else activity = value; } : null;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -248,7 +262,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         token.ThrowIfCancellationRequested();
         RequireRelaySession(context);
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         return Task.FromResult(CommunityClient.CreationOptions(payload));
     }
@@ -258,7 +274,9 @@ internal sealed partial class ScmAccountBridgeHost
         CommunityClient.ValidateProfileSave(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -285,7 +303,9 @@ internal sealed partial class ScmAccountBridgeHost
         CommunityClient.ParseCreation(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()
@@ -331,7 +351,9 @@ internal sealed partial class ScmAccountBridgeHost
         Notifications.PlayerActivitySourceSnapshot? activity = null;
         Action<Notifications.PlayerActivitySourceSnapshot>? observed = ObservePlayerActivity() ? value =>
         { if (backgroundActivity) PublishPlayerActivity(context, generation, sequence, value); else activity = value; } : null;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var displayRead = await BeginOrganizationDisplayRead(context, generation, query, token);
@@ -373,7 +395,9 @@ internal sealed partial class ScmAccountBridgeHost
         CommunityClient.ParseCommand(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()

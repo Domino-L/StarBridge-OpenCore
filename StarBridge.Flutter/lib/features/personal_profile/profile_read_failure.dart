@@ -37,6 +37,7 @@ String profileSaveFailureKey(Object error) {
       'personal_profile.write_forbidden' =>
         'profile.error.reauthorizationRequired',
       'personal_profile.write_conflict' => 'profile.error.writeConflict',
+      'personalProfile.write_invalid' => 'profile.collab.invalid',
       _ => profileReadFailureKey(error),
     };
   }
@@ -48,6 +49,7 @@ String profilePageSaveFailureKey(Object error) {
       const {
         'personal_profile.write_conflict',
         'personal_profile.write_forbidden',
+        'personalProfile.write_invalid',
         'account.reauthorization_required',
       }.contains(error.code)) {
     return profileSaveFailureKey(error);
@@ -55,3 +57,28 @@ String profilePageSaveFailureKey(Object error) {
   // After dispatch, a lost or invalid acknowledgement cannot prove no write.
   return 'profile.error.writeUnconfirmed';
 }
+
+String localProfileFailureKey(Object error) => switch (error) {
+  BridgeRemoteException(code: 'account.callsign_conflict') =>
+    'profile.error.refreshBeforeSave',
+  BridgeRemoteException(code: 'account.callsign_invalid') =>
+    'profile.collab.invalid',
+  BridgeRemoteException(code: 'account.callsign_unconfirmed') =>
+    'profile.callsign.unconfirmed',
+  BridgeRemoteException(code: 'account.callsign_unavailable') =>
+    'profile.callsign.unavailable',
+  BridgeRemoteException(code: 'personal_profile.write_forbidden') =>
+    'profile.callsign.forbidden',
+  BridgeCancelledException() => 'profile.callsign.cancelled',
+  BridgeRemoteException(code: 'profile_local.conflict') =>
+    'profile.error.refreshBeforeSave',
+  BridgeRemoteException(code: 'profile_local.account_changed') ||
+  BridgeStaleGenerationException() => 'profile.error.refreshBeforeSave',
+  BridgeRemoteException(code: 'profile_local.hangar_changed') =>
+    'profile.local.hangarChanged',
+  BridgeRemoteException(code: 'profile_local.read_failed') =>
+    'profile.local.readFailed',
+  BridgeRemoteException(code: 'profile_local.invalid_request') =>
+    'profile.collab.invalid',
+  _ => 'profile.local.failed',
+};

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using StarBridge.NativeBridge;
+using StarBridge.Core.Profiles;
 
 namespace StarBridge.HostRuntime.Profiles;
 
@@ -11,12 +12,19 @@ public sealed record LocalProfileContent(string CallSign, string Introduction, i
     string WallpaperId, IReadOnlyList<LocalProfileLayout> Modules, IReadOnlyList<string>? FavoriteShipIds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LocalProfilePlayStyle? PlayStyle = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LocalProfileSchedule? Schedule = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool PreserveEmptyFields = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool PreserveEmptyFields = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<PersonalProfileShowcaseContract>? Showcases = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? AchievementShowcase = null,
+    // 0.7.3 main role (user 11-05): one of PlayStyle.Roles. Kept only in the sidefile; on a save
+    // null keeps the saved one and "" clears it.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MainRole = null,
+    // Explicit defaults from the editor or the matching field state file.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, bool>? FieldStates = null);
 public sealed record LocalProfileSnapshot(long Revision, DateTimeOffset? SavedAt, string? OperationId, LocalProfileContent? Content);
 public sealed class LocalProfileException(string code) : Exception(code) { public string Code { get; } = code; }
 
 /// <summary>Explicit account-scoped presentation saves, with no legacy-file or remote writes.</summary>
-public sealed class LocalPersonalProfileStore(string root)
+public sealed partial class LocalPersonalProfileStore(string root)
 {
     internal Func<BridgeAccountContext, BridgeAccountContext>? ResolveOwner { get; set; }
     private string ResolvedHash(BridgeAccountContext owner)
@@ -34,7 +42,14 @@ public sealed class LocalPersonalProfileStore(string root)
     private sealed record SavedFile(int SchemaVersion, string OwnerHash, LocalProfileSnapshot Snapshot, string Integrity);
 
     public LocalProfileSnapshot Read(BridgeAccountContext owner)
+        => Read(owner, out _, out _, out _);
+
+    private LocalProfileSnapshot Read(BridgeAccountContext owner, out (bool Readable, string? OperationId) showcase,
+        out bool hasInlineShowcases, out string[]? explicitlyEmpty)
     {
+        showcase = default;
+        hasInlineShowcases = false;
+        explicitlyEmpty = null;
         var hash = ResolvedHash(owner);
         try
         {
@@ -56,8 +71,16 @@ public sealed class LocalPersonalProfileStore(string root)
                 file.Snapshot.SavedAt is null || file.Snapshot.SavedAt < DateTimeOffset.UnixEpoch ||
                 !Guid.TryParseExact(file.Snapshot.OperationId, "N", out _)) throw new IOException();
             Validate(file.Snapshot.Content);
+            // Build 61 stored the additive fields inline. Keep accepting its exact
+            // checksum; only a later explicit save converts it to the old disk shape.
+            hasInlineShowcases = file.Snapshot.Content is { Showcases: not null } or { AchievementShowcase: not null };
+            var snapshot = ReadShowcases(hash, file.Snapshot, out showcase);
+            explicitlyEmpty = ReadFieldStates(hash, snapshot);
             if (ResolvedHash(owner) != hash) throw new LocalProfileException("profile_local.account_changed");
-            return file.Snapshot;
+            return snapshot with { Content = snapshot.Content! with {
+                FieldStates = explicitlyEmpty is { Length: > 0 }
+                    ? explicitlyEmpty.ToDictionary(field => field, _ => true, StringComparer.Ordinal) : null
+            } };
         }
         catch (Exception e) when (StorageError(e) || e is LocalProfileException)
         { throw new LocalProfileException("profile_local.read_failed"); }
@@ -68,26 +91,32 @@ public sealed class LocalPersonalProfileStore(string root)
         => SaveCore(owner, expectedRevision, operationId, content, canCommit, false);
 
     internal LocalProfileSnapshot SaveImported(BridgeAccountContext owner, long expectedRevision, string operationId,
-        LocalProfileContent content, Func<bool> canCommit)
-        => SaveCore(owner, expectedRevision, operationId, content, canCommit, true);
+        LocalProfileContent content, Func<bool> canCommit, bool hasJournalShowcases = true)
+        => SaveCore(owner, expectedRevision, operationId, content, canCommit, true, hasJournalShowcases);
 
     private LocalProfileSnapshot SaveCore(BridgeAccountContext owner, long expectedRevision, string operationId,
-        LocalProfileContent content, Func<bool> canCommit, bool selectedImport)
+        LocalProfileContent content, Func<bool> canCommit, bool selectedImport, bool hasJournalShowcases = true)
     {
         var hash = ResolvedHash(owner);
         var originalCanCommit = canCommit;
         canCommit = () => originalCanCommit() && ResolvedHash(owner) == hash;
         Validate(content);
+        if (content.FieldStates?.Any(field => !field.Value || !IsExplicitDefault(content, field.Key)) == true)
+            throw new LocalProfileException("profile_local.invalid_request");
         if (expectedRevision < 0 || expectedRevision == long.MaxValue || !Guid.TryParseExact(operationId, "N", out _))
             throw new LocalProfileException("profile_local.invalid_request");
         content = content with {
             Modules = content.Modules.Select(m => m with { FavoriteShipIds = m.FavoriteShipIds?.ToArray() }).ToArray(),
             FavoriteShipIds = content.FavoriteShipIds?.ToArray(),
+            Showcases = content.Showcases?.ToArray(), AchievementShowcase = content.AchievementShowcase?.ToArray(),
+            FieldStates = content.FieldStates?.ToDictionary(field => field.Key, field => field.Value, StringComparer.Ordinal),
             PlayStyle = content.PlayStyle?.Copy(), Schedule = content.Schedule?.Copy()
         };
-        var current = Read(owner);
-        CheckRevision(current, expectedRevision, operationId, content);
-        string? temporary = null;
+        var requestedContent = content;
+        var fields = ExplicitlyEmpty(requestedContent);
+        var current = Read(owner, out var showcase, out var hasInlineShowcases, out _);
+        content = PreserveShowcases(requestedContent, current.Content);
+        CheckRevision(current, expectedRevision, operationId, content, showcase.OperationId, hasInlineShowcases);
         try
         {
             CheckPath(_directory, true);
@@ -95,31 +124,63 @@ public sealed class LocalPersonalProfileStore(string root)
             var path = PathFor(hash);
             CheckPath(path + ".lock", false);
             using var writeLock = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            current = Read(owner);
-            CheckRevision(current, expectedRevision, operationId, content);
+            current = Read(owner, out showcase, out hasInlineShowcases, out var savedFields);
+            content = PreserveShowcases(requestedContent, current.Content);
+            CheckRevision(current, expectedRevision, operationId, content, showcase.OperationId, hasInlineShowcases);
             if (!selectedImport) LocalProfileCollaborationPolicy.ValidateEdit(content.PlayStyle, current.Content?.PlayStyle);
             if (!canCommit()) throw new LocalProfileException("profile_local.account_changed");
-            if (current.OperationId == operationId) return current;
+            if (hasInlineShowcases)
+            {
+                // Preserve the already committed operation before starting this
+                // save. A failed split must never discard inline values or [].
+                MigrateInline(hash, current, canCommit);
+                current = Read(owner, out showcase, out hasInlineShowcases, out savedFields);
+                content = PreserveShowcases(requestedContent, current.Content);
+                CheckRevision(current, expectedRevision, operationId, content, showcase.OperationId, hasInlineShowcases);
+                if (!canCommit()) throw new LocalProfileException("profile_local.account_changed");
+            }
+            // An import can recover the main fields even when neither showcase copy is readable.
+            var writeShowcases = hasJournalShowcases || showcase.Readable;
+            if (current.OperationId == operationId)
+            {
+                if (!selectedImport && savedFields is not null && !savedFields.SequenceEqual(fields, StringComparer.Ordinal))
+                    throw new LocalProfileException("profile_local.conflict");
+                // Repair incomplete side writes under the same lock, keeping
+                // the revision, timestamp and main bytes already committed.
+                if (writeShowcases && showcase.OperationId != operationId)
+                    WriteAtomic(SidePath(hash), ShowcaseBytes(hash, operationId, content), canCommit);
+                if (savedFields is null)
+                    WriteAtomic(FieldStatePath(hash), FieldStateBytes(hash, operationId, fields), canCommit);
+                else
+                    content = content with { FieldStates = current.Content!.FieldStates };
+                return current with { Content = content };
+            }
             var next = new LocalProfileSnapshot(expectedRevision + 1, DateTimeOffset.UtcNow, operationId, content);
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(new SavedFile(1, hash, next, Integrity(hash, next)), Json);
+            var disk = MainSnapshot(next);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new MainFile(1, hash, disk, MainIntegrity(hash, disk)), Json);
             if (bytes.Length > MaximumBytes) throw new LocalProfileException("profile_local.invalid_request");
-            temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            { stream.Write(bytes); stream.Flush(true); }
-            CheckPath(_directory, true);
-            CheckPath(path, false);
-            if (!canCommit()) throw new LocalProfileException("profile_local.account_changed");
-            if (current.Revision > 0) File.Replace(temporary, path, null);
-            else File.Move(temporary, path);
+            var sideBytes = writeShowcases ? ShowcaseBytes(hash, operationId, content) : null;
+            WriteAtomic(path, bytes, canCommit);
+            if (sideBytes is not null) WriteAtomic(SidePath(hash), sideBytes, canCommit);
+            WriteAtomic(FieldStatePath(hash), FieldStateBytes(hash, operationId, fields), canCommit);
             return next;
         }
         catch (Exception e) when (StorageError(e)) { throw new LocalProfileException("profile_local.write_failed"); }
-        finally
-        {
-            if (temporary is not null)
-                try { File.Delete(temporary); } catch (Exception e) when (StorageError(e)) { }
-        }
     }
+
+    // Missing additive fields are an old-client edit, while [] explicitly clears.
+    // Merge again under the write lock, before revision/idempotency checks.
+    private static LocalProfileContent PreserveShowcases(LocalProfileContent requested, LocalProfileContent? current) =>
+        requested with {
+            Showcases = (requested.Showcases ?? current?.Showcases)?.ToArray(),
+            AchievementShowcase = (requested.AchievementShowcase ?? current?.AchievementShowcase)?.ToArray(),
+            MainRole = KeptMainRole(requested.MainRole switch { null => current?.MainRole, "" => null, var role => role },
+                requested.PlayStyle)
+        };
+
+    /// <summary>A main role survives only while it is still one of the roles.</summary>
+    internal static string? KeptMainRole(string? role, LocalProfilePlayStyle? style) =>
+        role is not null && style?.Roles?.Contains(role, StringComparer.Ordinal) == true ? role : null;
 
     internal static void Validate(LocalProfileContent? content)
     {
@@ -130,16 +191,37 @@ public sealed class LocalPersonalProfileStore(string root)
             content.Introduction.Any(c => char.IsControl(c) && c is not ('\r' or '\n' or '\t')) ||
             content.AvatarStyle is < 0 or > 3 || string.IsNullOrWhiteSpace(content.WallpaperId) ||
             content.WallpaperId.Length > 100 || content.WallpaperId.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-') ||
-            content.Modules is null)
+            content.Modules is null ||
+            content.MainRole is { } role && (role.Length > 80 || role.Any(char.IsControl) ||
+                role.Length > 0 && content.PlayStyle?.Roles?.Contains(role, StringComparer.Ordinal) != true))
             throw new LocalProfileException("profile_local.invalid_request");
     }
-    private static void CheckRevision(LocalProfileSnapshot current, long expected, string operation, LocalProfileContent content)
+
+    private static void CheckRevision(LocalProfileSnapshot current, long expected, string operation,
+        LocalProfileContent content, string? showcaseOperationId, bool hasInlineShowcases)
     {
-        if (current.OperationId == operation && current.Revision == expected + 1 &&
-            JsonSerializer.Serialize(current.Content, Json) == JsonSerializer.Serialize(content, Json)) return;
+        if (IsCommittedSave(current, expected, operation, content, showcaseOperationId, hasInlineShowcases)) return;
         if (current.OperationId == operation || current.Revision != expected)
             throw new LocalProfileException("profile_local.conflict");
     }
+    internal bool IsCommittedImport(BridgeAccountContext owner, long expected, string operation, LocalProfileContent? content)
+    {
+        var current = Read(owner, out var showcase, out var hasInlineShowcases, out _);
+        return content is not null &&
+            IsCommittedSave(current, expected, operation, PreserveShowcases(content, current.Content),
+                showcase.OperationId, hasInlineShowcases);
+    }
+
+    private static bool IsCommittedSave(LocalProfileSnapshot current, long expected, string operation,
+        LocalProfileContent content, string? showcaseOperationId, bool hasInlineShowcases) =>
+        current.OperationId == operation && current.Revision == expected + 1 &&
+        // Build 61 committed inline fields with main. Otherwise compare only
+        // the committed main until its corresponding showcase write finishes.
+        (hasInlineShowcases || showcaseOperationId == operation
+            ? JsonSerializer.Serialize(current.Content! with { FieldStates = null }, Json) ==
+                JsonSerializer.Serialize(content with { FieldStates = null }, Json)
+            : MainContentFor(current.Content) is { } main &&
+                JsonSerializer.Serialize(main, Json) == JsonSerializer.Serialize(MainContentFor(content), Json));
     internal static void RejectDuplicates(JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Object)
@@ -153,6 +235,13 @@ public sealed class LocalPersonalProfileStore(string root)
     }
     private static bool CheckPath(string path, bool directory)
     {
+        // Check ancestors too, including a missing destination below a linked root.
+        for (var parent = Path.GetDirectoryName(path); parent is not null; parent = Path.GetDirectoryName(parent))
+        {
+            try { if (File.GetAttributes(parent).HasFlag(FileAttributes.ReparsePoint)) throw new IOException(); }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
         FileAttributes attributes;
         try { attributes = File.GetAttributes(path); }
         catch (FileNotFoundException) { return false; }

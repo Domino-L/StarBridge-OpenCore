@@ -10,16 +10,10 @@ using StarBridge.HostRuntime.Presence;
 /// </summary>
 public static class WindowsInformationOverlayRuntimeFactory
 {
+    // Shares the host's one process observation instead of listing processes per name.
     public static StarBridge.HostRuntime.Overlay.GameStartupSession ReadGameStartupSession()
     {
-        try
-        {
-            var ids = new HashSet<int>();
-            foreach (var name in new[] { "StarCitizen", "StarCitizen_LIVE", "StarCitizen_PTUR", "StarCitizen_EPTU", "StarCitizen_HOTFIX", "StarCitizen_TECH-PREVIEW" })
-                foreach (var process in System.Diagnostics.Process.GetProcessesByName(name))
-                    using (process) ids.Add(process.Id);
-            return ids.Count == 0 ? new("notRunning") : ids.Count == 1 ? new("running", ids.Single()) : new("unknown");
-        }
+        try { return StarBridge.HostRuntime.Presence.SharedGameProcesses.Startup(); }
         catch { return new("unknown"); }
     }
     public static StarBridge.HostRuntime.Notifications.IDesktopNotificationSink CreateDesktopNotifications(int parentProcessId) =>

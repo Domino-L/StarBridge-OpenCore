@@ -197,6 +197,9 @@ public static class BridgeRequestPolicy
         "menuScreenshotDirectory.commitDraft",
         "notificationAudio.read",
         "playReminder.read",
+        // One local file, read when the page opens; no account owns it.
+        "keyBindings.read",
+        "keyBindings.saveView",
         "execHangar.read",
         "execHangar.refresh",
         "execHangar.save",
@@ -231,6 +234,10 @@ public static class BridgeRequestPolicy
         "overlay.runtime.open",
         "overlay.runtime.close",
         "overlay.runtime.retry",
+        // The visor drawn off screen for the layout editor from the draft; nothing is saved.
+        "overlay.editorPreview.content",
+        // Device-local one-time line after the 0.7.3 visor switch; no account owns it.
+        "overlay.visorNotice.dismiss",
         // Authenticated collection owner is derived inside Host, not supplied
         // by the renderer. This exact route cannot report usage or place items.
         "overlay.appearanceProgress.read",

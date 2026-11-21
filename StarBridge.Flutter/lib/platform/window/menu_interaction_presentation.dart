@@ -10,10 +10,11 @@ enum MenuInteractionStyle { standard, rail, scan, glow }
 @immutable
 final class MenuInteractionPresentation {
   const MenuInteractionPresentation({
-    this.style = MenuInteractionStyle.standard,
+    this.style = MenuInteractionStyle.scan,
     this.reduceMotion = false,
     this.language,
     this.holiday,
+    this.performanceMode = false,
   });
 
   final MenuInteractionStyle style;
@@ -22,8 +23,11 @@ final class MenuInteractionPresentation {
 
   /// 现在生效的节日，不在节日里或开关关了就没有。
   final String? holiday;
+
+  /// The user's performance mode; sent only when on.
+  final bool performanceMode;
   static const defaults = MenuInteractionPresentation();
-  static const maxPayloadLength = 128;
+  static const maxPayloadLength = 160;
 
   String encode() => jsonEncode({
     'schemaVersion': 1,
@@ -31,6 +35,7 @@ final class MenuInteractionPresentation {
     'reduceMotion': reduceMotion,
     if (language != null) 'language': language,
     if (holiday != null) 'holiday': holiday,
+    if (performanceMode) 'performanceMode': true,
   });
 
   static MenuInteractionPresentation? parse(Object? payload) {
@@ -39,7 +44,7 @@ final class MenuInteractionPresentation {
       final value = jsonDecode(payload);
       if (value is! Map ||
           value.length < 3 ||
-          value.length > 5 ||
+          value.length > 6 ||
           value.keys.any(
             (key) => !const {
               'schemaVersion',
@@ -47,6 +52,7 @@ final class MenuInteractionPresentation {
               'reduceMotion',
               'language',
               'holiday',
+              'performanceMode',
             }.contains(key),
           ) ||
           value.containsKey('language') &&
@@ -57,6 +63,8 @@ final class MenuInteractionPresentation {
                 'en',
               }.contains(value['language']) ||
           value.containsKey('holiday') && !_validHoliday(value['holiday']) ||
+          value.containsKey('performanceMode') &&
+              value['performanceMode'] != true ||
           value['schemaVersion'] is! int ||
           value['schemaVersion'] != 1 ||
           value['reduceMotion'] is! bool) {
@@ -71,6 +79,7 @@ final class MenuInteractionPresentation {
         language: value['language'] as String?,
         holiday: value['holiday'] as String?,
         reduceMotion: value['reduceMotion'] as bool,
+        performanceMode: value['performanceMode'] == true,
       );
     } on Object {
       return null;

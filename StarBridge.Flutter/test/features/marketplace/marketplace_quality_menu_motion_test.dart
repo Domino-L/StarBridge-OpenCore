@@ -52,7 +52,7 @@ void main() {
         tester.getRect(_chip),
         within(
           distance: .001,
-          from: const Rect.fromLTRB(481.75, 208, 572.75, 235),
+          from: const Rect.fromLTRB(608.75, 208, 699.75, 235),
         ),
       );
       await tester.tap(_chip);

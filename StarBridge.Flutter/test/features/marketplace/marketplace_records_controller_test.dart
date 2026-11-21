@@ -20,9 +20,11 @@ class _Port implements MarketplaceRecordsPort {
         final page = input['page'] as int;
         return {
           'rows': [
-            {'id': page * 10 + 1, 'reviewer': 'A*****y', 'rating': 5},
+            {'sourceType': 'trade', 'content': 'review-$page', 'createTime': page, 'reviewer': 'A*****y', 'rating': 5},
           ],
           'total': 2,
+          'tradeTotal': 2,
+          'contractTotal': 0,
         };
       case 'reports':
         if (failReports) {
@@ -56,7 +58,8 @@ void main() {
       expect(c.reviews.rows, hasLength(1));
       expect(c.reviews.more, isTrue);
       await c.load('reviews', more: true);
-      expect(c.reviews.rows.map((r) => r['id']), [11, 21]);
+      expect(c.reviews.rows.map((r) => r['content']), ['review-2', 'review-1']);
+      expect(c.reviews.reviewsComplete, isTrue);
       expect(c.reviews.more, isFalse);
       await c.load('reviews', more: true);
       expect(

@@ -115,7 +115,7 @@ public sealed partial class NativeInformationOverlayRuntime
             _moduleExpiryTimer = null;
             if (!_disposed && HasDisplayDemand)
             {
-                try { if (!ValidateMenuInformationLayer()) RefreshWindow(); }
+                try { if (!ValidateMenuInformationLayer()) { OverlayVisorRefreshCounts.Modules(); RefreshWindow(); } }
                 catch (Exception error)
                 {
                     TryCloseWindow();

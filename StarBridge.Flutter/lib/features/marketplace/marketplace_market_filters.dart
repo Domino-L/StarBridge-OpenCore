@@ -4,6 +4,8 @@ import '../../design_system/icons/marketplace_icon.dart';
 import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_browser.dart';
+import 'marketplace_display_copy.dart';
+import 'marketplace_display_rules.dart';
 import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_port.dart';
@@ -12,6 +14,7 @@ import 'marketplace_browser_copy.dart';
 import 'marketplace_surfaces.dart';
 import 'marketplace_prefetch.dart';
 import 'marketplace_category_tree.dart';
+import 'marketplace_dialog_scope.dart';
 import 'marketplace_diagonal.dart' show MarketHeadingMark;
 
 class MarketplaceMarketFilters extends StatefulWidget {
@@ -43,12 +46,17 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
           child: MarketHeadingMark(),
         ),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-            color: context.tokens.colors.textPrimary,
+        // Long English group titles must not overflow the panel.
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: context.tokens.colors.textPrimary,
+            ),
           ),
         ),
       ],
@@ -110,69 +118,58 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
   Widget build(BuildContext context) => ListView(
     padding: EdgeInsets.zero,
     children: [
-      if (b.kind == 'items')
-        _box(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              MarketCategoryTree(
-                categories: b.categories,
-                selected: b.category,
-                onSelect: (id) => _reset(b.choose(category: id)),
-                allLabel: marketBrowserText(context, '全部物品', 'All items'),
-                allCount: widget.controller.blocks['categories']?.total,
-                expandedRoots: {
-                  for (final r in b.path) (r['id'] as num).toInt(),
-                },
-                childCount: (id) =>
-                    b.category == id ? b.result?.data['allTotal'] : null,
-              ),
-            ],
-          ),
+      // Both tabs browse by category; orders count the current filter's
+      // orders (G3, user 2026-11-14).
+      _box(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            MarketCategoryTree(
+              categories: b.categories,
+              selected: b.category,
+              onSelect: (id) => _reset(b.choose(category: id, narrow: true)),
+              allLabel: b.kind == 'orders'
+                  ? marketBrowserText(context, '全部订单', 'All orders')
+                  : marketBrowserText(context, '全部物品', 'All items'),
+              allCount: b.kind == 'orders'
+                  ? (b.category == 0 ? b.result?.total : null)
+                  : widget.controller.blocks['categories']?.total,
+              expandedRoots: {
+                for (final r in b.path) (r['id'] as num).toInt(),
+              },
+              childCount: (id) =>
+                  b.category == id ? b.result?.data['allTotal'] : null,
+            ),
+          ],
         ),
-      if (b.kind == 'items') const SizedBox(height: 12),
+      ),
+      const SizedBox(height: 12),
       _box(
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: b.kind == 'orders'
               ? [
-                  _heading(
-                    marketBrowserText(context, '类型', 'Type'),
+                  // Side and order type are separate, as on SCM's order search:
+                  // a checklist or barter order can be a sell or a buy order.
+                  _choices(
+                    marketBrowserText(context, '方向', 'Side'),
+                    'creatorType',
+                    {
+                      '': marketBrowserText(context, '全部', 'All'),
+                      '1': marketBrowserText(context, '出售', 'Sell'),
+                      '0': marketBrowserText(context, '求购', 'Buy'),
+                    },
                     first: true,
                   ),
-                  MarketChoiceGrid(
-                    children: [
-                      for (final entry in [
-                        ('', '全部', 'All'),
-                        ('1', '出售', 'Sell'),
-                        ('0', '求购', 'Buy'),
-                        ('2', '以物易物', 'Barter'),
-                      ])
-                        MarketToggle(
-                          fill: true,
-                          label: Text(
-                            marketBrowserText(context, entry.$2, entry.$3),
-                            maxLines: 1,
-                            softWrap: false,
-                          ),
-                          selected:
-                              entry.$1 ==
-                              (b.options['displayType'] == '3'
-                                  ? '2'
-                                  : b.options['creatorType'] ?? ''),
-                          onSelected: (_) {
-                            b.options.remove('creatorType');
-                            b.options.remove('displayType');
-                            if (entry.$1 == '2') {
-                              b.options['displayType'] = '3';
-                            } else if (entry.$1.isNotEmpty) {
-                              b.options['creatorType'] = entry.$1;
-                              b.options['displayType'] = '1';
-                            }
-                            _reset(b.reload(reset: true));
-                          },
-                        ),
-                    ],
+                  _choices(
+                    marketBrowserText(context, '类型', 'Type'),
+                    'displayType',
+                    {
+                      '': marketBrowserText(context, '全部', 'All'),
+                      '1': marketBrowserText(context, '单件', 'Single'),
+                      '2': marketBrowserText(context, '清单', 'Checklist'),
+                      '3': marketBrowserText(context, '以物易物', 'Barter'),
+                    },
                   ),
                   _choices(
                     marketBrowserText(context, '卖家状态', 'Seller status'),
@@ -183,9 +180,14 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
                       '2': marketBrowserText(context, '游戏中', 'In game'),
                     },
                   ),
+                  if (marketBundleType(b.options))
+                    Text(marketDisplayText(context, 'noBundleSort')),
+                  if (!marketBundleType(b.options)) ...[
                   _heading(
                     marketBrowserText(context, '单价（UEC）', 'Unit price (UEC)'),
                   ),
+                  if (b.options['displayType'] == null)
+                    Text(marketDisplayText(context, 'singleOnly')),
                   Row(
                     children: [
                       Expanded(
@@ -206,6 +208,7 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
                       ),
                     ],
                   ),
+                  ],
                   _heading(marketBrowserText(context, '交易地点', 'Location')),
                   SizedBox(
                     height: 30,
@@ -256,12 +259,19 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
                     },
                   ),
                   _number(
-                    marketBrowserText(context, '最低品质', 'Minimum quality'),
+                    b.options['creatorType'] == '0'
+                        ? marketDisplayText(context, 'myQuality')
+                        : marketBrowserText(context, '最低品质', 'Minimum quality'),
                     'minQuality',
                   ),
+                  if (b.options['creatorType'] == '0') ...[
+                    if (b.options['minQuality'] case final quality?)
+                      Text(marketDisplayText(context, 'buyCeiling', n: quality)),
+                    Text(marketDisplayText(context, 'loadedOnly')),
+                  ],
                 ]
               : [
-                  if (marketRows(b.config['filters'])
+                  if (b.category != 0 && marketRows(b.config['filters'])
                       .where((f) => f['type'] != 'field')
                       .isEmpty)
                     Text(
@@ -295,7 +305,7 @@ class _FiltersState extends State<MarketplaceMarketFilters> {
                                   label: Text(
                                     marketBrowserLabel(context, option),
                                     maxLines: 1,
-                                    overflow: TextOverflow.fade,
+                                    overflow: fadeOverflow(context),
                                     softWrap: false,
                                   ),
                                   selected:
@@ -356,6 +366,7 @@ Future<MarketRow?> pickMarketLocation(
   MarketplacePort port,
 ) => showDialog<MarketRow>(
   context: context,
+  useRootNavigator: MarketplaceDialogScope.useRootNavigator(context),
   builder: (_) => _LocationPicker(port),
 );
 

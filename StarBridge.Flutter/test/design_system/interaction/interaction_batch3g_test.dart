@@ -535,7 +535,7 @@ void main() {
         await twoFrames(t);
         expect(
           effective().suite,
-          InteractionSuite.standard,
+          InteractionSuite.scan,
           reason: 'older sender has no retained previous opening style',
         );
         expect(effective().reduceMotion, false);

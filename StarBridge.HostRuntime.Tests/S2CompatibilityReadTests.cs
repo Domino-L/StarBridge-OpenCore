@@ -6,7 +6,7 @@ using StarBridge.Core.Profiles;
 using StarBridge.Core.Identity;
 using StarBridge.NativeBridge;
 
-internal static class S2CompatibilityReadTests
+internal static partial class S2CompatibilityReadTests
 {
     internal static async Task VerifyLocalPrivacyInheritance()
     {
@@ -144,15 +144,41 @@ internal static class S2CompatibilityReadTests
             coordinator.Pending = pendingProjection;
             var oldRead = host.GetCompatibilityStateAsync(host.CurrentContext!, default);
             coordinator.Pending = null;
+            // A mutation retires the old flight; ordinary overlapping reads now join it.
+            coordinator.AllowLink = true;
+            await host.LinkLegacyAccountAsync(host.CurrentContext!, new("synthetic-name", "synthetic-password"), default);
             coordinator.Linked = false;
             await host.GetCompatibilityStateAsync(host.CurrentContext!, default);
             pendingProjection.SetResult(Coordinator.LinkedProjection);
             try { await oldRead; } catch (AccountBridgeHostException) { }
             Check(host.ResolveLocalDataOwner(host.CurrentContext!) == host.CurrentContext,
                 "A late linked response must not restore old-account access after a newer unlink observation");
+            coordinator.Linked = true;
+            await host.GetCompatibilityStateAsync(host.CurrentContext!, default);
             coordinator.Failure = true;
-            try { await host.GetCompatibilityStateAsync(host.CurrentContext!, default); }
-            catch (AccountBridgeHostException) { }
+            await ReadUnavailable073(host);
+            Check(store.Read(host.CurrentContext!).Revision == updated.Revision,
+                "A transport failure must retain the confirmed privacy owner within its failure lifetime");
+            for (var minute = 1; minute < 30; minute++)
+            {
+                ownershipClock.Advance(TimeSpan.FromMinutes(1));
+                await ReadUnavailable073(host);
+            }
+            var retainedLog = logRuntime.Dispatch(BridgeEnvelope.Request("gameLog.read", "retained-log", host.Generation,
+                new { schemaVersion = 1 }, host.CurrentContext));
+            Check(retainedLog.Response.Error is null && !retainedLog.Response.Payload.GetProperty("enabled").GetBoolean() &&
+                retainedLog.Response.Payload.GetProperty("channel").GetString() == "PTU",
+                "A cached log lease must retain the original settings during the bounded transport outage");
+            var retainedProfile = await runtime.DispatchAsync(BridgeEnvelope.Request("personalProfile.localRead", "retained-profile", host.Generation,
+                new { schemaVersion = 1 }, host.CurrentContext));
+            Check(retainedProfile.Response.Error is null && retainedProfile.Response.Payload.GetProperty("revision").GetInt64() == oldProfile.Revision + 1,
+                "A confirmed profile remains available during the bounded transport outage");
+            var retainedHangar = await runtime.DispatchAsync(BridgeEnvelope.Request("hangarReader.inventory", "retained-hangar", host.Generation,
+                new { schemaVersion = 1 }, host.CurrentContext));
+            Check(retainedHangar.Response.Error is null && retainedHangar.Response.Payload.GetProperty("revision").GetInt64() == updatedHangar.Revision,
+                "A confirmed hangar remains available during the bounded transport outage");
+            ownershipClock.Advance(TimeSpan.FromMinutes(2));
+            await ReadUnavailable073(host);
             try { store.Read(host.CurrentContext!); throw new Exception("Unavailable ownership returned new-account defaults"); }
             catch (StarBridge.HostRuntime.Privacy.LocalPrivacyException) { }
             var unavailableLog = logRuntime.Dispatch(BridgeEnvelope.Request("gameLog.read", "unavailable-log", host.Generation,
@@ -310,6 +336,14 @@ internal static class S2CompatibilityReadTests
 
     internal static async Task Verify()
     {
+        await VerifyOwnerCancellationLifetimeR2();
+        await VerifyOwnerFailureLifetime073();
+        await VerifyOwnerSingleFlight073();
+        await VerifyOwnerJoinedCancellation073();
+        await VerifyOwnerWriteBarrier073();
+        await VerifyOwnerFailureKinds073();
+        await VerifyOwnerExplicitAnswers073();
+        await VerifyOwnerSessionFences073();
         var session = new ScmOAuthSession("scm-development", "synthetic", "Synthetic",
             "synthetic-bearer", DateTimeOffset.UtcNow.AddMinutes(5), []);
         foreach (var state in new[] { LegacyRelayAccessState.Ready, LegacyRelayAccessState.AccountMismatch,
@@ -376,28 +410,40 @@ internal static class S2CompatibilityReadTests
     {
         internal static AccountBridgeCompatibilityProjection LinkedProjection => new("linked", "notEstablished", false, false, [], "synthetic-legacy");
         internal bool Linked = true, Failure;
-        internal int Writes;
+        internal bool AllowLink;
+        internal Exception? ReadError;
+        internal AccountBridgeCompatibilityProjection? Projection;
+        internal Task<AccountBridgeCompatibilityProjection>? LinkWait;
+        internal int Writes, Reads;
         internal Action? OnRead;
+        internal CancellationToken LastReadToken;
+        internal bool HonorReadCancellation;
         internal TaskCompletionSource<AccountBridgeCompatibilityProjection>? Pending;
         public Task<AccountBridgeCompatibilityProjection> ReadAsync(ScmOAuthSession s, CancellationToken t)
         {
+            LastReadToken = t;
+            Interlocked.Increment(ref Reads);
             OnRead?.Invoke();
+            if (ReadError is { } error) return Task.FromException<AccountBridgeCompatibilityProjection>(error);
             return Failure ? Task.FromException<AccountBridgeCompatibilityProjection>(new HttpRequestException()) :
-            Pending?.Task ?? Task.FromResult(Linked ? LinkedProjection : new("unlinked", "notApplicable", false, false,
-                ["linkExistingAccount", "createCompatibilityIdentity"], null));
+            (HonorReadCancellation ? Pending?.Task.WaitAsync(t) : Pending?.Task) ?? Task.FromResult(Projection ?? (Linked ? LinkedProjection : new("unlinked", "notApplicable", false, false,
+                ["linkExistingAccount", "createCompatibilityIdentity"], null)));
         }
         public Task<AccountBridgeCompatibilityProjection> LinkExistingAsync(ScmOAuthSession s, LegacyIdentityLinkPasswordCredential? c, CancellationToken t)
-        { Writes++; throw new Exception("Unexpected link"); }
+        {
+            Writes++;
+            return AllowLink ? LinkWait ?? Task.FromResult(LinkedProjection) : throw new Exception("Unexpected link");
+        }
         public Task<AccountBridgeCompatibilityProjection> CreateCompatibilityIdentityAsync(ScmOAuthSession s, CancellationToken t)
         { Writes++; throw new Exception("Unexpected provision"); }
     }
     private sealed class Relay : ILegacyRelayAccountPort
     {
         internal LegacyRelayAccessState State = LegacyRelayAccessState.Ready;
-        internal int Calls; internal ScmOAuthSession? Session;
+        internal int Calls, Resets; internal ScmOAuthSession? Session;
         public Task<LegacyRelayAccessState> EstablishAsync(ScmOAuthSession s, string id, CancellationToken t)
         { t.ThrowIfCancellationRequested(); Calls++; Session = s; return Task.FromResult(State); }
         public Task<LegacyRelayProfileReadResult> ReadOwnProfileAsync(ScmOAuthSession s, string id, CancellationToken t) => throw new Exception("Unexpected profile read");
-        public void Reset() { }
+        public void Reset() { Resets++; }
     }
 }

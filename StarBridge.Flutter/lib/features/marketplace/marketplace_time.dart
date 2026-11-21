@@ -38,6 +38,10 @@ DateTime? scmInstant(Object? raw) {
       ?.toUtc();
 }
 
+/// SCM stores a permanent ("永不过期") listing as 9999-12-31 23:59:59; that
+/// value is a marker, not a real expiry date.
+bool scmPermanent(Object? raw) => (scmInstant(raw)?.year ?? 0) >= 9999;
+
 String? scmLocalTime(Object? raw, {DateTime Function(DateTime)? localize}) {
   final instant = scmInstant(raw);
   if (instant == null) return null;

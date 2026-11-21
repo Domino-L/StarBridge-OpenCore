@@ -28,7 +28,7 @@ internal static class OfficialFleetSharedShipsClientTests
                 query = new { text = "", filter = "concept", sort = "name", descending = false, culture = "en-US" },
                 revision = new string(mode == "changed" && offset > 0 ? 'b' : 'a', 64), offset,
                 totalCount = 45, matchedCount = 45, next = offset < 40 ? (int?)(offset + 20) : null,
-                identityValidUntilUtc = DateTimeOffset.UtcNow.AddSeconds(mode == "expired" ? -1 : 5),
+                identityValidUntilUtc = DateTimeOffset.UtcNow.AddSeconds(mode == "expired" ? -11 : 5),
                 ownerLookups = new[] { new { memberRef = new string('c',64), memberId = 43, state = "visible", callsign = "Bridge Pilot", identityBinding = new string('d',64) } },
                 ships = Enumerable.Range(offset, Math.Min(20,45-offset)).Select(i => new {
                     id = i.ToString("x64"), code = "source-"+i, displayName = "Source "+i,

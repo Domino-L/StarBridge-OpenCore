@@ -1,3 +1,5 @@
+import '../../features/common/last_online_days.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -204,6 +206,7 @@ final class MenuFriendsSession
       avatar: _avatar(row.avatar),
       stableKey: row.conversationKey,
       presence: friendSharedConversationPresence(row),
+      lastOnlineDays: resolveLastOnlineDays(row.shared),
       gameId: _text(row.gameId),
     );
   }

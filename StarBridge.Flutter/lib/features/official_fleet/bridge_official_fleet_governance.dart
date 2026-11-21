@@ -10,6 +10,7 @@ import 'official_fleet_governance_management.dart';
 final class BridgeOfficialFleetGovernance
     implements
         OrganizationGovernancePort,
+        OrganizationEvidenceRefreshPort,
         OfficialFleetGovernanceManagementProvider {
   BridgeOfficialFleetGovernance(this.transport) {
     _invalidations = transport.invalidations.listen((_) => _retire());
@@ -27,6 +28,48 @@ final class BridgeOfficialFleetGovernance
   static const command = 'officialFleet.readGovernanceContext';
   static const activate = 'officialFleet.governance.activate';
   static const revoke = 'officialFleet.governance.revokeActivation';
+  static const refresh = 'account.refreshRsiData';
+  @override
+  bool get canRefreshEvidence =>
+      available && transport.session.hostCapabilities.contains(refresh);
+
+  @override
+  Future<OrganizationEvidenceRefreshResult> refreshEvidence() async {
+    if (!canRefreshEvidence) throw const CommunityFailure('upgradeRequired');
+    final fence = (
+      _epoch,
+      transport.requestEpoch,
+      transport.session.activeGeneration,
+      transport.session.connectionModeRevision,
+    );
+    final row = await transport.sendRequest(refresh, {
+      'schemaVersion': 1,
+    }, timeout: const Duration(seconds: 55));
+    if (!canRefreshEvidence ||
+        fence !=
+            (
+              _epoch,
+              transport.requestEpoch,
+              transport.session.activeGeneration,
+              transport.session.connectionModeRevision,
+            )) {
+      throw const CommunityFailure('identityUnavailable');
+    }
+    final state = row['state'], minutes = row['remainingMinutes'];
+    if (row['schemaVersion'] != 1 ||
+        !const {
+          'schemaVersion',
+          'state',
+          'remainingMinutes',
+        }.containsAll(row.keys) ||
+        state is! String ||
+        !OrganizationEvidenceRefreshResult.states.contains(state) ||
+        (minutes != null && (minutes is! int || minutes < 0)) ||
+        (state == 'rateLimited' && minutes is! int)) {
+      throw const CommunityFailure('dataInvalid');
+    }
+    return OrganizationEvidenceRefreshResult(state, minutes as int?);
+  }
 
   /// Host can add the caller's role when asked (Flutter→Host negotiation).
   static const roleCapability = 'officialFleet.governanceRole';

@@ -62,6 +62,10 @@ public sealed partial class FirstUseOnlineReviewBridgeDispatcher : IBridgeReques
                     // Never stage an existing/unknown online owner by inference.
                     if (mode.State != "local" && !(v2 && mode.State == "offline") || !mode.PublicationSuspended)
                         return Error(request, "firstUse.context_changed");
+                    // Only a new online choice needs local identity; resuming the
+                    // installed account (offline) keeps its original route.
+                    if (mode.State == "local" && !_mode.AllowsOnlineSelection)
+                        return Error(request, "firstUse.evidence_required");
                     mode = mode.State == "offline" ? _mode.RequestResume(revision, Guid.NewGuid().ToString("N"))
                         : _mode.RequestOnline(revision, Guid.NewGuid().ToString("N"));
                     revision = mode.Revision;

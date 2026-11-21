@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
@@ -11,11 +12,17 @@ import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/interaction/starbridge_snack_bar.dart';
 import '../../platform/bridge/bridge_client_session.dart';
+import 'application_update_announcement.dart';
+import 'application_update_hero.dart';
 import 'application_update_panel.dart';
+import 'application_update_poster.dart';
 import 'application_update_status.dart';
+import 'application_update_strings.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 final _announcedVersions = Expando<Set<String>>();
+// Host: at most 3 origins x 8s; leave 11s for Bridge chunks and validation.
+const _heroReadTimeout = Duration(seconds: 35);
 Set<String> applicationUpdateShownVersions(BridgeClientSession session) =>
     _announcedVersions[session] ??= <String>{};
 
@@ -23,7 +30,6 @@ typedef ApplicationUpdateRead = Future<Map<String, dynamic>> Function();
 typedef ApplicationUpdatePrepare = Future<Map<String, dynamic>> Function(
   String version,
 );
-
 Future<void> showApplicationUpdateDialog(
   BuildContext context,
   BridgeClientSession? session, {
@@ -35,6 +41,9 @@ Future<void> showApplicationUpdateDialog(
 }) async {
   BridgeRequestOperation? checking;
   BridgeRequestOperation? preparing;
+  BridgeRequestOperation? readingHero;
+  // Explicit rechecks become manual; the initial startup offer remains automatic.
+  var automaticHero = startupAnnouncement;
   final progress = StreamController<Map<String, dynamic>>.broadcast();
   final generation = session?.activeGeneration;
   final events = session?.events.listen((event) {
@@ -88,8 +97,37 @@ Future<void> showApplicationUpdateDialog(
                     payload: const {'schemaVersion': 1},
                     timeout: const Duration(seconds: 35),
                   );
+                  automaticHero = false;
                   return (await checking!.future).payload;
                 },
+          readHero:
+              session == null ||
+                  !session.hostCapabilities.contains(
+                    'applicationUpdates.heroRead',
+                  )
+              ? null
+              : (version, offset) async {
+                  if (session.activeGeneration != generation ||
+                      isCurrent?.call() == false) {
+                    throw const FormatException('Update session changed');
+                  }
+                  readingHero = session.beginRequest(
+                    'applicationUpdates.heroRead',
+                    payload: {
+                      'schemaVersion': 1,
+                      'version': version,
+                      'offset': offset,
+                      'automatic': automaticHero,
+                    },
+                    timeout: _heroReadTimeout,
+                  );
+                  return (await readingHero!.future).payload;
+                },
+          cancelHero: () {
+            final operation = readingHero;
+            readingHero = null;
+            if (operation != null) unawaited(operation.cancel());
+          },
           cancelCheck: () {
             final operation = checking;
             if (operation != null) unawaited(operation.cancel());
@@ -186,6 +224,8 @@ class ApplicationUpdateDialog extends StatefulWidget {
     this.prepare,
     this.cancelPreparation,
     this.cancelCheck,
+    this.readHero,
+    this.cancelHero,
     this.progress,
     this.initialStatus,
     this.startupAnnouncement = false,
@@ -197,6 +237,8 @@ class ApplicationUpdateDialog extends StatefulWidget {
   final ApplicationUpdatePrepare? prepare;
   final VoidCallback? cancelPreparation;
   final VoidCallback? cancelCheck;
+  final ApplicationUpdateHeroRead? readHero;
+  final VoidCallback? cancelHero;
   final ApplicationUpdateStatus? initialStatus;
   final bool startupAnnouncement;
   final ValueChanged<String>? onAvailable;
@@ -215,6 +257,10 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
   String _state = 'checking';
   String? _current, _available, _notes;
   String? _ticket;
+  UpdateAnnouncement? _announcement;
+  bool _showFullNotes = false;
+  Uint8List? _hero;
+  String? _heroVersion;
   Timer? _retry;
   int _attempt = 0;
   StreamSubscription<Map<String, dynamic>>? _progressSubscription;
@@ -239,6 +285,7 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     _preparation++;
     unawaited(_progressSubscription?.cancel());
     widget.cancelCheck?.call();
+    widget.cancelHero?.call();
     widget.cancelPreparation?.call();
     super.dispose();
   }
@@ -369,7 +416,42 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     _current = status.payload['currentVersion'] as String?;
     _available = status.version;
     _notes = status.payload['notes'] as String?;
+    _announcement = switch (_available) {
+      final version? when isMajorUpdateVersion(version) =>
+        UpdateAnnouncement.parse(_notes),
+      _ => null,
+    };
     if (_available != null) widget.onAvailable?.call(_available!);
+    unawaited(_loadHero());
+  }
+
+  // 主图只是锦上添花：弹窗先用自带的图打开，读到了再换，读不到就不换，也不提示。
+  Future<void> _loadHero() async {
+    final version = _available, read = widget.readHero;
+    if (version == null ||
+        read == null ||
+        _announcement == null ||
+        _heroVersion == version ||
+        !updateNotesHaveHero(_notes!)) {
+      return;
+    }
+    _heroVersion = version;
+    var expired = false;
+    final bytes =
+        await readApplicationUpdateHero(
+          read,
+          version,
+          isCurrent: () => mounted && _available == version && !expired,
+        ).timeout(
+          _heroReadTimeout,
+          onTimeout: () {
+            expired = true;
+            widget.cancelHero?.call();
+            return null;
+          },
+        );
+    if (bytes == null || !mounted || _available != version) return;
+    setState(() => _hero = bytes);
   }
 
   void _scheduleRetry() {
@@ -390,6 +472,10 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
       _attempt = 0;
       _available = null;
       _notes = null;
+      _announcement = null;
+      _showFullNotes = false;
+      _hero = null;
+      _heroVersion = null;
       _ticket = null;
     });
     _load();
@@ -402,94 +488,100 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
         : locale.countryCode == 'TW' || locale.scriptCode == 'Hant'
         ? 1
         : 0;
-    return const <String, List<String>>{
-      'title': ['检查更新', '檢查更新', 'Check for updates'],
-      'announcement': ['发现新版本', '發現新版本', 'A new version is available'],
-      'later': ['稍后', '稍後', 'Later'],
-      'checking': ['正在检查更新…', '正在檢查更新…', 'Checking for updates…'],
-      'channel-unconfigured': [
-        '此版本尚未提供在线更新。你可以继续使用当前客户端。',
-        '此版本尚未提供線上更新。你可以繼續使用目前的用戶端。',
-        'Online updates are not available for this build. You can keep using the current client.',
+    return applicationUpdateStrings[key]![index];
+  }
+
+  /// 下载 › 校验 › 准备好 › 安装。只在有进度可看时显示。
+  Widget? _steps(BuildContext context) {
+    final current = _state == 'ready'
+        ? 2
+        : _state != 'downloading'
+        ? null
+        : _phase == 'downloading'
+        ? 0
+        : 1;
+    if (current == null) return null;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final names = [
+      t('step-download'),
+      t('step-verify'),
+      t('step-ready'),
+      t('step-install'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            for (var i = 0; i < names.length; i++) ...[
+              if (i > 0) const TextSpan(text: ' › '),
+              TextSpan(
+                text: names[i],
+                style: i == current
+                    ? TextStyle(
+                        color: colors.primary,
+                        fontWeight: FontWeight.w700,
+                      )
+                    : null,
+              ),
+            ],
+          ],
+        ),
+        key: const Key('update-steps'),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: colors.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  Widget _posterStatus(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final steps = _steps(context);
+    final linkStyle = theme.textTheme.bodySmall?.copyWith(
+      color: colors.primary,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ?steps,
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (_current != null)
+              Text(
+                '${t('current')} · $_current',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            if (_announcement?.fullNotes != null)
+              InkWell(
+                key: const Key('update-full-notes'),
+                onTap: () => setState(() => _showFullNotes = !_showFullNotes),
+                child: Text(
+                  t(_showFullNotes ? 'collapse-notes' : 'full-notes'),
+                  style: linkStyle,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        StarBridgeInteractionRegion(
+          child: Builder(
+            builder: (context) => SuiteContentSwitcher(
+              instant:
+                  resolveStarBridgeInitialReadSource(context, _source) ==
+                  InteractionSource.keyboard,
+              child: _statusContent(context),
+            ),
+          ),
+        ),
       ],
-      'up-to-date': ['当前已是最新版本。', '目前已是最新版本。', 'You are up to date.'],
-      'configuration-invalid': [
-        '此版本的更新服务暂不可用。你可以继续使用当前客户端。',
-        '此版本的更新服務暫不可用。你可以繼續使用目前的用戶端。',
-        'The update service is unavailable for this build. You can keep using the current client.',
-      ],
-      'channel-unavailable': [
-        '暂时无法获取更新信息，请稍后重试。',
-        '暫時無法取得更新資訊，請稍後重試。',
-        'Update information is unavailable. Try again later.',
-      ],
-      'verification-failed': [
-        '更新信息未通过安全验证，已停止更新。当前版本保持不变。',
-        '更新資訊未通過安全驗證，已停止更新。目前版本保持不變。',
-        'Update information failed security verification. The update was stopped; your current version is unchanged.',
-      ],
-      'check-failed': [
-        '暂时无法检查更新。请检查网络后重试，或继续使用当前客户端。',
-        '暫時無法檢查更新。請檢查網路後重試，或繼續使用目前的用戶端。',
-        'Unable to check for updates. Check your connection and try again, or keep using the current client.',
-      ],
-      'retry': ['重新检查', '重新檢查', 'Check again'],
-      'available': [
-        '此安装暂时无法在应用内更新。请从官网下载最新版安装器，保留现有资料完成升级。',
-        '此安裝暫時無法在應用程式內更新。請從官網下載最新版安裝程式，保留現有資料完成升級。',
-        'In-app installation is unavailable for this installation. Use the latest installer from the official website, keeping your existing data.',
-      ],
-      'available-installable': [
-        '发现新版本，可以下载更新。',
-        '發現新版本，可以下載更新。',
-        'An update is available to download.',
-      ],
-      'download': ['下载更新', '下載更新', 'Download update'],
-      'downloading': [
-        '正在下载更新。你可以随时取消，当前版本不会改变。',
-        '正在下載更新。你可以隨時取消，目前版本不會改變。',
-        'Downloading the update. You can cancel at any time; your current version will not change.',
-      ],
-      'verifying': [
-        '下载完成，正在验证更新…',
-        '下載完成，正在驗證更新…',
-        'Download complete. Verifying the update…',
-      ],
-      'cancel-download': ['取消下载', '取消下載', 'Cancel download'],
-      'cancelled': [
-        '下载已取消，当前版本保持不变。',
-        '下載已取消，目前版本保持不變。',
-        'Download cancelled. Your current version is unchanged.',
-      ],
-      'ready': [
-        '更新已准备好。安装将关闭并重新打开客户端，请先保存未完成的更改。',
-        '更新已準備好。安裝將關閉並重新開啟用戶端，請先儲存未完成的變更。',
-        'The update is ready. Installation will restart the client. Save your changes first.',
-      ],
-      'install': ['重启并安装', '重新啟動並安裝', 'Restart and install'],
-      'prepare-failed': [
-        '更新未准备完成，当前版本保持不变。请重试；若仍失败，请从官网下载正式安装包，关闭客户端后安装到原目录。无需先卸载或删除个人资料。',
-        '更新未準備完成，目前版本保持不變。請重試；若仍失敗，請從官網下載正式安裝程式，關閉用戶端後安裝至原目錄。無需先解除安裝或刪除個人資料。',
-        'The update could not be prepared. Your current version is unchanged. Try again. If it still fails, download the official installer, close the client, and install to the same location. Do not uninstall or delete personal data first.',
-      ],
-      'installation-version-mismatch': [
-        '安装登记与程序版本不一致，已停止更新。当前版本和个人资料未更改。请保存未完成的内容并关闭客户端，从官网下载正式安装包，安装到原目录。无需先卸载、删除个人资料或手动修改登记信息。',
-        '安裝登記與程式版本不一致，已停止更新。目前版本與個人資料未變更。請儲存未完成的內容並關閉用戶端，從官網下載正式安裝程式，安裝至原目錄。無需先解除安裝、刪除個人資料或手動修改登記資訊。',
-        'The installation registration does not match the program version. The update was stopped; your current version and personal data are unchanged. Save your work and close the client, then download the official installer and install to the same location. Do not uninstall, delete personal data, or manually edit the registration first.',
-      ],
-      'retrying': [
-        '暂时无法检查更新，正在自动重试。',
-        '暫時無法檢查更新，正在自動重試。',
-        'Unable to check for updates. Retrying automatically.',
-      ],
-      'unsupported': [
-        '当前客户端暂不支持检查更新。',
-        '目前的用戶端暫不支援檢查更新。',
-        'This client does not support update checks yet.',
-      ],
-      'current': ['当前版本', '目前版本', 'Current version'],
-      'close': ['关闭', '關閉', 'Close'],
-    }[key]![index];
+    );
   }
 
   Widget _statusContent(BuildContext context) => Column(
@@ -549,79 +641,110 @@ class _ApplicationUpdateDialogState extends State<ApplicationUpdateDialog> {
     ],
   );
 
-  @override
-  Widget build(BuildContext context) => ApplicationUpdatePanel(
-    key: const Key('application-update-dialog'),
-    title: t(_available == null ? 'title' : 'announcement'),
-    currentLabel: t('current'),
-    current: _current,
-    version: _available,
-    body: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        StarBridgeInteractionRegion(
-          child: Builder(
-            builder: (context) => SuiteContentSwitcher(
-              instant:
-                  resolveStarBridgeInitialReadSource(context, _source) ==
-                  InteractionSource.keyboard,
-              child: _statusContent(context),
-            ),
-          ),
-        ),
-        // Keep the notes mounted across state/progress changes, preserving selection.
-        if (_available != null && _notes?.isNotEmpty == true)
-          UpdateReleaseNotes(_notes!),
-      ],
+  List<Widget> _actions(BuildContext context) => [
+    StarBridgeActionButton(
+      kind: StarBridgeActionKind.quiet,
+      controlKey: const Key('update-close'),
+      onActivate: (source) =>
+          dismissStarBridgeDialog<String>(context, source: source),
+      child: Text(t(widget.startupAnnouncement ? 'later' : 'close')),
     ),
-    actions: [
+    if (_state == 'check-failed' ||
+        _state == 'channel-unavailable' ||
+        _state == 'verification-failed')
       StarBridgeActionButton(
         kind: StarBridgeActionKind.quiet,
-        controlKey: const Key('update-close'),
-        onActivate: (source) =>
-            dismissStarBridgeDialog<String>(context, source: source),
-        child: Text(t(widget.startupAnnouncement ? 'later' : 'close')),
+        controlKey: const Key('update-retry'),
+        onActivate: _checkAgain,
+        child: Text(t('retry')),
       ),
-      if (_state == 'check-failed' ||
-          _state == 'channel-unavailable' ||
-          _state == 'verification-failed')
-        StarBridgeActionButton(
-          kind: StarBridgeActionKind.quiet,
-          controlKey: const Key('update-retry'),
-          onActivate: _checkAgain,
-          child: Text(t('retry')),
+    if ((_state == 'available' ||
+            _state == 'prepare-failed' ||
+            _state == 'cancelled') &&
+        widget.prepare != null)
+      StarBridgeActionButton(
+        kind: StarBridgeActionKind.primary,
+        controlKey: const Key('update-download'),
+        onActivate: (source) => unawaited(_prepare(source)),
+        child: Text(
+          t(
+            _state == 'prepare-failed'
+                ? 'retry-download'
+                : _state == 'cancelled'
+                ? 'download-again'
+                : 'download',
+          ),
         ),
-      if ((_state == 'available' ||
-              _state == 'prepare-failed' ||
-              _state == 'cancelled') &&
-          widget.prepare != null)
-        StarBridgeActionButton(
-          kind: StarBridgeActionKind.primary,
-          controlKey: const Key('update-download'),
-          onActivate: (source) => unawaited(_prepare(source)),
-          child: Text(t('download')),
-        ),
-      if (_state == 'downloading')
-        StarBridgeActionButton(
-          kind: StarBridgeActionKind.quiet,
-          controlKey: const Key('update-cancel'),
-          onActivate: _cancelDownload,
-          child: Text(t('cancel-download')),
-        ),
-      if (_state == 'ready' && _ticket != null)
-        StarBridgeActionButton(
-          kind: StarBridgeActionKind.primary,
-          controlKey: const Key('update-install'),
-          onActivate: (source) {
-            widget.onInstallSource?.call(source);
-            dismissStarBridgeDialog<String>(
-              context,
-              source: source,
-              result: _ticket,
-            );
-          },
-          child: Text(t('install')),
-        ),
-    ],
-  );
+      ),
+    if (_state == 'downloading')
+      StarBridgeActionButton(
+        kind: StarBridgeActionKind.quiet,
+        controlKey: const Key('update-cancel'),
+        onActivate: _cancelDownload,
+        child: Text(t('cancel-download')),
+      ),
+    if (_state == 'ready' && _ticket != null)
+      StarBridgeActionButton(
+        kind: StarBridgeActionKind.primary,
+        controlKey: const Key('update-install'),
+        onActivate: (source) {
+          widget.onInstallSource?.call(source);
+          dismissStarBridgeDialog<String>(
+            context,
+            source: source,
+            result: _ticket,
+          );
+        },
+        child: Text(t('install')),
+      ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    if (_announcement case final announcement?) {
+      return ApplicationUpdatePoster(
+        key: const Key('application-update-dialog'),
+        announcement: announcement,
+        version: _available,
+        testVersionLabel: t('test-version'),
+        showFullNotes: _showFullNotes,
+        hero: _hero,
+        warning:
+            _state == 'prepare-failed' ||
+            _state == 'installation-version-mismatch',
+        status: _posterStatus(context),
+        actions: _actions(context),
+      );
+    }
+    final split = _available == null || _notes == null
+        ? null
+        : splitUpdateNotesTitle(stripUpdateHeroLine(_notes!));
+    return ApplicationUpdatePanel(
+      key: const Key('application-update-dialog'),
+      title: split?.title ?? t(_available == null ? 'title' : 'announcement'),
+      currentLabel: t('current'),
+      current: _current,
+      version: _available,
+      banner: _available != null,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          StarBridgeInteractionRegion(
+            child: Builder(
+              builder: (context) => SuiteContentSwitcher(
+                instant:
+                    resolveStarBridgeInitialReadSource(context, _source) ==
+                    InteractionSource.keyboard,
+                child: _statusContent(context),
+              ),
+            ),
+          ),
+          // Keep the notes mounted across state/progress changes, preserving selection.
+          if (_available != null && _notes?.isNotEmpty == true)
+            UpdateReleaseNotes(split?.notes ?? _notes!),
+        ],
+      ),
+      actions: _actions(context),
+    );
+  }
 }

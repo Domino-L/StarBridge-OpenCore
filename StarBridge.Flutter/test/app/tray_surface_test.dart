@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/app/runtime/frame_governor.dart';
 import 'package:starbridge_flutter/app/tray/tray_surface_snapshot.dart';
 import 'package:starbridge_flutter/app/tray/tray_surface_coordinator.dart';
 import 'package:starbridge_flutter/app/tray/tray_surface_app.dart';
@@ -84,11 +85,10 @@ void main() {
       'opening': 1,
     });
     await tester.pumpAndSettle();
-    expect(
-      calls.where((c) => c.method == 'painted').map((c) => c.arguments),
-      [0, 1],
-      reason: 'Hidden preparation must not consume the first visible frame',
-    );
+    expect(calls.where((c) => c.method == 'painted').map((c) => c.arguments), [
+      0,
+      1,
+    ], reason: 'Hidden preparation must not consume the first visible frame');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -160,6 +160,47 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(tester.binding.transientCallbackCount, 0);
   });
+  // Review CX-PERF-MODE-073-REVIEW P2: the tray engine has its own frame
+  // governor and follows the user's performance mode from each snapshot.
+  testWidgets(
+    'tray engine follows performance mode on first and later snapshots',
+    (tester) async {
+      const channel = MethodChannel('starbridge/tray-surface');
+      await tester.binding.setSurfaceSize(const Size(336, 552));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => null,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        );
+        performanceModePreference.value = false;
+      });
+      performanceModePreference.value = false;
+      await tester.pumpWidget(const TraySurfaceApp());
+      await tester.pumpAndSettle();
+      await native(tester.binding, channel.name, 'snapshot', {
+        ...sample.toMap(),
+        'performanceMode': true,
+      });
+      await tester.pumpAndSettle();
+      expect(performanceModePreference.value, isTrue);
+      await native(tester.binding, channel.name, 'snapshot', {
+        ...sample.toMap(),
+        'performanceMode': false,
+      });
+      await tester.pumpAndSettle();
+      expect(performanceModePreference.value, isFalse);
+      // A snapshot without the field keeps the full look.
+      final older = Map<String, Object?>.from(sample.toMap())
+        ..remove('performanceMode');
+      expect(TraySurfaceSnapshot.parse(older).performanceMode, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   test('display projection round trips and rejects invalid states', () {
     expect(
       TraySurfaceSnapshot.parse(sample.toMap()).presence,

@@ -5,11 +5,13 @@ namespace StarBridge.HostRuntime.Updates;
 
 /// <summary>Retains a non-writable, non-deletable file lease until the next owner
 /// acquires it. A verified download is not an installation/exit authorization.</summary>
-internal sealed class VerifiedInstallerDownload(string path, FlutterInstallerUpdateSource.Manifest manifest, FileStream lease) : IDisposable
+internal sealed class VerifiedInstallerDownload(string path, FlutterInstallerUpdateSource.Manifest manifest, FileStream lease,
+    FlutterInstallerManifestV2? manifestV2 = null) : IDisposable
 {
     internal string Path { get; } = path;
     internal string Version => Manifest.Version;
     internal FlutterInstallerUpdateSource.Manifest Manifest { get; } = manifest;
+    internal object SignedManifest => (object?)manifestV2 ?? Manifest;
     public void Dispose() => lease.Dispose();
 }
 
@@ -27,23 +29,59 @@ public sealed partial class FlutterInstallerUpdateSource
     {
         ArgumentNullException.ThrowIfNull(verifyPublisher);
         if (!await _operation.WaitAsync(0, cancellation)) throw new InvalidOperationException("Update operation is in progress.");
+        try
+        {
+            var manifest = _available ?? throw new InvalidOperationException("Check for updates first.");
+            var version = _availableV2?.Verify(_platform, _keys) ?? Verify(manifest);
+            if (manifest.Version != expectedVersion || version <= _current)
+                throw new InvalidOperationException("The confirmed update changed.");
+            var mirrors = _availableV2 is null ? new[] { new FlutterUpdateMirror("jp", manifest.DownloadUrl) } :
+                FlutterUpdateMirror.Order(_availableV2.DownloadUrls, _domestic);
+            for (var i = 0; i < mirrors.Length; i++)
+            {
+                try
+                {
+                    var result = await DownloadOneAsync(ownedRoot, manifest, mirrors[i].Url, verifyPublisher, progress, cancellation);
+                    if (_availableV2 is not null) Observe("download", i + 1, "verified");
+                    return result;
+                }
+                catch (InvalidOperationException error) when (error.Message == "download-cleanup-failed")
+                { Observe("download", i + 1, "download-cleanup-failed"); throw; }
+                catch (Exception error) when (_availableV2 is not null && !cancellation.IsCancellationRequested &&
+                    error is HttpRequestException or InvalidDataException or IOException or OperationCanceledException or CryptographicException)
+                {
+                    Observe("download", i + 1, error switch {
+                        OperationCanceledException => "download-timeout", HttpRequestException => "download-failed",
+                        InvalidDataException when error.Message is "download-size-mismatch" or "download-hash-mismatch" or "publisher-verification-failed" => error.Message,
+                        _ => "download-verification-failed" });
+                }
+            }
+            cancellation.ThrowIfCancellationRequested();
+            throw new InvalidDataException("download-mirrors-exhausted");
+        }
+        finally { _operation.Release(); }
+    }
+
+    private async Task<VerifiedInstallerDownload> DownloadOneAsync(string ownedRoot, Manifest manifest, string url,
+        Func<string, string, CancellationToken, Task> verifyPublisher, Action<FlutterUpdateProgress>? progress,
+        CancellationToken cancellation)
+    {
         string? file = null;
         var created = false;
         FileStream? lease = null;
         try
         {
-            var manifest = _available ?? throw new InvalidOperationException("Check for updates first.");
-            if (manifest.Version != expectedVersion || Verify(manifest) <= _current)
-                throw new InvalidOperationException("The confirmed update changed.");
             RequirePlainDirectory(ownedRoot);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromMinutes(10));
             var token = timeout.Token;
-            using var response = await _http.GetAsync(new Uri(manifest.DownloadUrl), HttpCompletionOption.ResponseHeadersRead, token);
+            using var response = await _http.GetAsync(new Uri(url), HttpCompletionOption.ResponseHeadersRead, token);
             if (response.StatusCode != HttpStatusCode.OK) throw new HttpRequestException("Installer download did not succeed directly.");
             var total = response.Content.Headers.ContentLength;
             const long maximumBytes = FlutterUpdateManifestVerifier.MaximumPackageBytes;
-            if (total is <= 0 or > maximumBytes) throw new InvalidDataException("Invalid installer size.");
+            if (total is <= 0 or > maximumBytes || _availableV2 is not null && total is not null && total != _availableV2.DownloadBytes)
+                throw new InvalidDataException("download-size-mismatch");
+            var expectedBytes = _availableV2?.DownloadBytes ?? total;
             RequirePlainDirectory(ownedRoot);
             file = System.IO.Path.Combine(ownedRoot, "installer-" + Guid.NewGuid().ToString("N") + ".exe");
             using var input = await response.Content.ReadAsStreamAsync(token);
@@ -59,14 +97,15 @@ public sealed partial class FlutterInstallerUpdateSource
                 while ((read = await input.ReadAsync(buffer, token)) > 0)
                 {
                     received += read;
-                    if (received > maximumBytes || (total is not null && received > total)) throw new InvalidDataException("Oversized installer.");
+                    if (received > maximumBytes || (expectedBytes is not null && received > expectedBytes)) throw new InvalidDataException("download-size-mismatch");
                     await output.WriteAsync(buffer.AsMemory(0, read), token);
                     hash.AppendData(buffer, 0, read);
                     progress?.Invoke(new("downloading", received, total));
                 }
-                if (received == 0 || (total is not null && received != total) ||
-                    !CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), Convert.FromHexString(manifest.DownloadSha256)))
-                    throw new InvalidDataException("Installer integrity verification failed.");
+                if (received == 0 || (expectedBytes is not null && received != expectedBytes))
+                    throw new InvalidDataException("download-size-mismatch");
+                if (!CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), Convert.FromHexString(manifest.DownloadSha256)))
+                    throw new InvalidDataException("download-hash-mismatch");
                 await output.FlushAsync(token);
                 output.Flush(flushToDisk: true);
                 // Reopen and independently rehash under a read-only lease below;
@@ -79,11 +118,13 @@ public sealed partial class FlutterInstallerUpdateSource
                 await SHA256.HashDataAsync(lease, token), Convert.FromHexString(manifest.DownloadSha256)))
                 throw new InvalidDataException("Installer changed after download.");
             progress?.Invoke(new("verifying", received, total));
-            await verifyPublisher(file, manifest.Version, token);
+            try { await verifyPublisher(file, manifest.Version, token); }
+            catch (Exception e) when (_availableV2 is not null && e is InvalidDataException or IOException or CryptographicException)
+            { throw new InvalidDataException("publisher-verification-failed", e); }
             token.ThrowIfCancellationRequested();
             progress?.Invoke(new("verified", received, total));
             token.ThrowIfCancellationRequested();
-            var verified = new VerifiedInstallerDownload(file, manifest, lease);
+            var verified = new VerifiedInstallerDownload(file, manifest, lease, _availableV2);
             lease = null;
             file = null; // Caller retains this one owned artifact, never a user-selected file.
             return verified;
@@ -95,10 +136,8 @@ public sealed partial class FlutterInstallerUpdateSource
             {
                 // Delete only the random file created by this attempt, never recurse.
                 try { RequirePlainDirectory(ownedRoot); File.Delete(file); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { if (_availableV2 is not null) throw new InvalidOperationException("download-cleanup-failed", e); }
             }
-            _operation.Release();
         }
     }
 

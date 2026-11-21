@@ -26,6 +26,7 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
         _scopedPlayers = new Uri(origin, "/api/players/realtime-scoped");
         _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) {
             Timeout = TimeSpan.FromSeconds(12), MaxResponseContentBufferSize = 2 * 1024 * 1024 };
+        Support.RelayClientVersion.Apply(_http);
     }
     internal static bool IsCompleteWithdrawal(JsonElement payload) =>
         !payload.GetProperty("online").GetBoolean() &&
@@ -51,6 +52,8 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
             // SCM official-fleet page. Never invent a fleet or write its directory.
             using var membershipRequest = Request(HttpMethod.Get, _membership, bearer);
             using var membershipResponse = await _http.SendAsync(membershipRequest, HttpCompletionOption.ResponseHeadersRead, token);
+            Support.IdentityGateJournal.Changed("publication-http-membership", $"code=http-status status={(int)membershipResponse.StatusCode}");
+            await RecordPublicationErrorAsync(membershipResponse, token);
             RequireSuccess(membershipResponse);
             var fleet = await ObservePublicationReceiptAsync(membershipResponse, async () =>
             {
@@ -73,6 +76,8 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
         using var request = Request(HttpMethod.Post, _players, bearer);
         request.Content = JsonContent.Create(payload);
         using var response = await SendAdmittedAsync(request, token, current, admission);
+        Support.IdentityGateJournal.Changed("publication-http-realtime", $"code=http-status status={(int)response.StatusCode}");
+        await RecordPublicationErrorAsync(response, token);
         RequireSuccess(response);
         await ObservePublicationReceiptAsync(response, async () =>
         {
@@ -143,6 +148,9 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
     }
     private static void RequireSuccess(HttpResponseMessage response)
     {
+        // Fixed operation token and status number only; never the URL, body or identity.
+        var operation = DiagnosticOperation(response.RequestMessage);
+        Support.IdentityGateJournal.Changed("publication-require-" + operation, $"status={(int)response.StatusCode}");
         if (response.IsSuccessStatusCode) return;
         throw new AccountBridgeHostException(response.StatusCode switch {
             HttpStatusCode.Unauthorized => "privacy_publication.identity_unavailable",
@@ -155,12 +163,30 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
             _ => "privacy_publication.unavailable"
         }, httpStatus: response.StatusCode);
     }
+    internal static string DiagnosticOperation(HttpRequestMessage? request)
+    {
+        var path = request?.RequestUri?.AbsolutePath ?? "";
+        var put = request?.Method == HttpMethod.Put;
+        return path switch {
+            "/api/players/realtime" => "realtime",
+            "/api/players/realtime-scoped" => "realtime-scoped",
+            "/api/fleets/membership" => "membership",
+            "/api/privacy/community-scopes" => "community-scopes",
+            "/api/privacy/community-members/read" => "community-members",
+            "/api/privacy/events" => "events",
+            "/api/official-fleets/realtime/context" => "official-context",
+            "/api/official-fleets/realtime/consent" => put ? "official-consent-save" : "official-consent-read",
+            "/api/official-fleets/realtime/publish" => "official-publish",
+            _ when path.StartsWith("/api/official-fleets/", StringComparison.Ordinal) => "official-other",
+            _ => "other"
+        };
+    }
     // Temporary loopback diagnostic [DEBUG-community-read]. Only a fixed code
     // whitelist can leave this method; response text and identifiers never do.
     internal async Task RecordPublicationErrorAsync(HttpResponseMessage response, CancellationToken token)
     {
         var diagnostic = PublicationDiagnostic ?? CommunityReadDiagnostic;
-        if (diagnostic is null || response.IsSuccessStatusCode) return;
+        if (response.IsSuccessStatusCode) return;
         var code = "unclassified";
         try
         {
@@ -191,7 +217,8 @@ internal sealed partial class PrivacyRelayWriter : IDisposable
             }
         }
         catch { /* Diagnostic failure cannot replace the original HTTP error. */ }
-        try { diagnostic("publication-http", code, (int)response.StatusCode, 0); }
+        Support.IdentityGateJournal.Event("publication-http", $"code={code} status={(int)response.StatusCode}");
+        try { diagnostic?.Invoke("publication-http", code, (int)response.StatusCode, 0); }
         catch { /* Diagnostic failure cannot affect publication. */ }
     }
     private static async Task<JsonDocument> ReadAsync(HttpResponseMessage response, CancellationToken token)

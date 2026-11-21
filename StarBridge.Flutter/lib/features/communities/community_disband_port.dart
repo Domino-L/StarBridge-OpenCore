@@ -17,16 +17,24 @@ final class CommunityDisbandPreview {
     this.memberCount,
     this.canDisband, {
     this.isExample = false,
+    this.scmRevalidation = false,
   });
   final String targetRef, confirmationRef, name;
   final int memberCount;
   final bool canDisband, isExample;
+
+  /// The owner's account was migrated into SCM: the relay re-confirms the SCM
+  /// sign-in itself, so no old account password is asked for.
+  final bool scmRevalidation;
   factory CommunityDisbandPreview.parse(Map<String, Object?> value) {
     bool reference(Object? v) =>
         v is String && RegExp(r'^[a-f0-9]{32}$').hasMatch(v);
     final name = value['name'], count = value['memberCount'];
     if (value['schemaVersion'] != 1 ||
-        value['credentialMode'] != 'legacyPassword' ||
+        !const {
+          'legacyPassword',
+          'scmRevalidation',
+        }.contains(value['credentialMode']) ||
         !reference(value['targetRef']) ||
         !reference(value['confirmationRef']) ||
         name is! String ||
@@ -45,6 +53,7 @@ final class CommunityDisbandPreview {
       name,
       count,
       value['canDisband'] as bool,
+      scmRevalidation: value['credentialMode'] == 'scmRevalidation',
     );
   }
 }

@@ -237,7 +237,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   (view.step != OnboardingStep.mode ||
                       widget.onlineReview?.value.snapshot.retainsSession !=
                           true) &&
-                  (view.step != OnboardingStep.identity ||
+                  (view.step != OnboardingStep.online ||
                       view.mode != OnboardingMode.online ||
                       widget.onlineReview == null ||
                       !widget.onlineReview!.value.error &&

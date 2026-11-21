@@ -12,6 +12,8 @@ import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/icons/marketplace_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_trade_copy.dart';
+import 'marketplace_trade_locations.dart';
+import 'marketplace_trade_details.dart';
 import 'marketplace_trade_feedback.dart';
 import 'marketplace_controller.dart';
 import 'marketplace_details.dart';
@@ -136,7 +138,7 @@ class TradeSheet extends StatelessWidget {
                     child: Text(
                       r['transactionNumber'] as String,
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(
                         fontFamily: context.tokens.typography.monoFamily,
@@ -203,6 +205,14 @@ class TradeSheet extends StatelessWidget {
                   ),
                   SizedBox(height: 18),
                   TradeDeadline(r),
+                  TradeContents(r),
+                  if (r['hasReported'] == true)
+                    Text(tradeReportStatus(r) == '已举报' ? tradeText(context, '已举报') :
+                      '${tradeText(context, '已举报')} · ${tradeText(context, tradeReportStatus(r))}')
+                  else if (tradeReportExpired(r))
+                    Text(tradeText(context, '已超过 7 天，不能举报')),
+                  if (r['deliveryStatus'] == 2 && tradeReceiptExpired(r))
+                    Text(tradeText(context, '已超过收货期限')),
                   SizedBox(height: 16),
                   MarketSurface(
                     padding: EdgeInsets.all(12),
@@ -231,7 +241,7 @@ class TradeSheet extends StatelessWidget {
                                 children: [
                                   TradeRole(r),
                                   Text(
-                                    '×${r['number'] ?? ''}',
+                                    tradeQuantity(context, r),
                                     style: TextStyle(
                                       fontFamily:
                                           context.tokens.typography.monoFamily,
@@ -253,7 +263,7 @@ class TradeSheet extends StatelessWidget {
                                 r['displayType'] != 3 &&
                                 r['orderType'] != 2)
                               Text(
-                                '${tradeText(context, '单价')} ${marketMoney(r['amount'])}',
+                                '${tradeText(context, r['displayType'] == 2 ? '每套价格' : '单价')} ${marketMoney(r['amount'])}',
                                 style: TextStyle(
                                   fontSize: 11.5,
                                   color: context.tokens.colors.textSecondary,
@@ -333,7 +343,7 @@ class TradeSheet extends StatelessWidget {
                               Text(
                                 '${r['counterpartyName'] ?? tradeText(context, '资料待更新')}',
                                 maxLines: 1,
-                                overflow: TextOverflow.fade,
+                                overflow: fadeOverflow(context),
                                 softWrap: false,
                                 style: TextStyle(fontWeight: FontWeight.w600),
                               ),
@@ -397,10 +407,8 @@ class TradeSheet extends StatelessWidget {
                     ),
                   ),
                   SizedBox(height: 14),
-                  info(
-                    tradeText(context, '交易地点'),
-                    r['transactionLocationName'] ?? r['locationName'],
-                  ),
+                  for (final (label, value) in tradeLocationRows(r))
+                    info(tradeText(context, label), value),
                   info(
                     tradeText(context, '交付方式'),
                     {
@@ -411,15 +419,15 @@ class TradeSheet extends StatelessWidget {
                     }[r['deliveryMethod']],
                   ),
                   if ((marketNumber(r['shippingFee']) ?? 0) > 0)
-                    info(tradeText(context, '运费'), r['shippingFee']),
+                    info(tradeText(context, '运费'), '${marketMoney(r['shippingFee'])} UEC'),
                   SizedBox(height: 12),
                   Text(
                     tradeText(context, '进度记录'),
                     style: TextStyle(fontSize: 12),
                   ),
                   info(tradeText(context, '发起'), r['createTime'], time: true),
-                  info(tradeText(context, '同意'), r['approvalTime'], time: true),
-                  info(tradeText(context, '发货'), r['shippedTime'], time: true),
+                  info(tradeText(context, '发货（约）'),
+                    tradeApproximateShipment(r)?.toIso8601String(), time: true),
                   info(
                     tradeText(context, '收货'),
                     r['completionTime'],
@@ -430,7 +438,6 @@ class TradeSheet extends StatelessWidget {
                     r['cancellationTime'],
                     time: true,
                   ),
-                  info(tradeText(context, '取消原因'), r['cancellationReason']),
                   if (r['deliveryProof'] is String &&
                       (r['deliveryProof'] as String).trim().isNotEmpty) ...[
                     Text(tradeText(context, '发货凭证')),
@@ -460,10 +467,16 @@ class TradeSheet extends StatelessWidget {
                           ),
                         ),
                       ),
-                  if (t.error != null)
+                  if (t.error != null || t.writeUncertain)
                     TradeFailure(
                       c,
-                      retry: () => t.open(r['transactionNumber'] as String),
+                      retry: () {
+                        if (t.writeUncertain) {
+                          t.inspectUncertainWrite(r['transactionNumber'] as String);
+                        } else {
+                          t.open(r['transactionNumber'] as String);
+                        }
+                      },
                     ),
                 ],
               ),
@@ -478,7 +491,7 @@ class TradeSheet extends StatelessWidget {
                         : () => tradeDialog(context, c, 'cancel', r),
                     child: Text(tradeText(context, '取消交易')),
                   ), key: const Key('market-trade-sheet-cancel')),
-                if (r['canReport'] == true)
+                if (tradeCanReport(r))
                   marketButtonAction(TextButton(
                     onPressed: t.pending
                         ? null

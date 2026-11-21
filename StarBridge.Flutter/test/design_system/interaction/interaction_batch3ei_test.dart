@@ -408,9 +408,9 @@ void main() {
                     description: 'Separate consent',
                     choice: choice,
                     canEdit: true,
-                    onChanged: (next) => setState(() {
-                      choice = next;
-                      changes.add(next);
+                    onChanged: (apply) => setState(() {
+                      choice = apply(choice);
+                      changes.add(choice);
                       sources.add(currentStarBridgeActivationSource);
                     }),
                   ),

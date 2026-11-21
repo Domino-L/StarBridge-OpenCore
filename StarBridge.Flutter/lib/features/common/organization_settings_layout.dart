@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/localization/app_strings.dart';
+
 import '../../design_system/icons/standard_icon.dart';
 import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/interaction/starbridge_compact_select.dart';
@@ -37,7 +39,23 @@ class OrganizationSettingsLayout extends StatelessWidget {
         final content = ClipRect(
           child: Material(
             color: context.tokens.surfaces.panel.fill,
-            child: this.content,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (sections.any(
+                  (s) => s.id == selected && s.group == 'mineGroup',
+                ))
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      AppStrings.of(context)
+                          .text('settings.notification.organization.summary'),
+                      key: const Key('organization-personal-result'),
+                    ),
+                  ),
+                Expanded(child: this.content),
+              ],
+            ),
           ),
         );
         if (compact) {

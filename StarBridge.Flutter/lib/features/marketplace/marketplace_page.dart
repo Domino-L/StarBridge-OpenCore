@@ -1,10 +1,12 @@
+import '../../design_system/surfaces/light_visual_shadow_scope.dart';
 import '../../shared/guide/guide_scope.dart';
 import '../../app/routing/open_destination_intent.dart';
 import 'marketplace_catalog_view.dart';
 import 'marketplace_search.dart';
 import 'marketplace_trades_page.dart';
 import 'marketplace_my_activity.dart';
-import 'marketplace_banner.dart';
+import 'marketplace_banner.dart' show MarketSectionHeading;
+import 'marketplace_refresh.dart';
 import 'marketplace_hall_drawers.dart';
 import 'marketplace_hall_reads.dart';
 import 'marketplace_hall_mine.dart';
@@ -15,6 +17,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'marketplace_filter_empty.dart';
 
 import '../../design_system/interaction/starbridge_action_row.dart';
 
@@ -25,6 +28,7 @@ import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_item_page.dart';
 import 'marketplace_market_page.dart';
+import 'marketplace_order_sheet.dart';
 import 'marketplace_port.dart';
 import 'marketplace_price_format.dart' show MarketPriceFormatScope;
 import '../../design_system/styles/marketplace_palette.dart';
@@ -57,6 +61,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
     }
     _location = location;
   }
+
   MarketplaceController get c => widget.controller;
   final _search = TextEditingController(), _focus = FocusNode();
   late final ScrollController _scroll = _HallScrollController(
@@ -140,10 +145,11 @@ class _MarketplacePageState extends State<MarketplacePage> {
     Widget? extra,
   }) {
     final categories = title == marketText(context, 'categories');
-    final onSale = categories
-        ? (c.blocks['categoryListings']?.rows ?? const <MarketRow>[])
-              .map((r) => marketNumber(r['count']) ?? 0)
-              .fold<num>(0, (a, b) => a + b)
+    // Summing the tiles counts a checklist spanning several categories once
+    // per category (MK9). Only SCM's own unfiltered total is used: the latest
+    // listings read with every type (side 3); otherwise no heading total.
+    final onSale = categories && c.side == 3
+        ? c.blocks['latest']?.total
         : null;
     return Padding(
       padding: const EdgeInsets.only(top: 22, bottom: 12),
@@ -187,7 +193,9 @@ class _MarketplacePageState extends State<MarketplacePage> {
     return Wrap(
       runSpacing: 4,
       children: [
-        for (final entry in [(1, 'sell'), (0, 'buy'), (2, 'barter')])
+        // Side 1/0 reads only single-item orders (Host adds displayType=1),
+        // so the chips say so (MK10).
+        for (final entry in [(1, 'singleSell'), (0, 'singleBuy'), (2, 'barter')])
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: Material(
@@ -233,10 +241,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
     );
   }
 
-  void _allOrders() {
-    c.tab(1);
-    unawaited(c.browser.choose(kind: 'orders'));
-  }
+  void _allOrders() => unawaited(c.allHallOrders());
 
   Widget _block(
     String key,
@@ -291,7 +296,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
           .toList();
       // Listing cards: the side whose best price decides 最低价 / 最高收购.
       int? sideOf(MarketRow r) =>
-          !r.containsKey('seller') || r['displayType'] == 3
+          !r.containsKey('seller') || marketIsChecklist(r) || r['displayType'] == 3
           ? null
           : r['creatorType'] == 0
           ? 0
@@ -330,7 +335,9 @@ class _MarketplacePageState extends State<MarketplacePage> {
             watched: c.isWatched(row),
             location: row.containsKey('seller') ? c.locationLabel(row) : null,
             best: id == null || side == null ? null : c.bestPrice(id, side),
-            open: id == null ? null : () => c.openItem(id),
+            open: marketIsChecklist(row) || row['displayType'] == 3
+                ? () => showMarketOrder(context, c, row)
+                : id == null ? null : () => c.openItem(id),
             drawer: (drawer) => trending
                 ? marketTrendingDrawer(drawer, context, c, row)
                 : marketListingDrawer(
@@ -411,7 +418,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
               readAt: c.blocks['categories']?.readAt,
               refresh: () => c.load('categories', 'categories'),
               action: 'enterMarket',
-              onAction: () => c.tab(1),
+              onAction: () => c.marketCategory(0),
             ),
             _block('categories', (read) {
               final roots =
@@ -591,7 +598,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
                 readAt: c.blocks['trending']?.readAt,
                 refresh: () => c.load('trending', 'trending'),
                 action: 'moreLink',
-                onAction: () => c.tab(1),
+                onAction: () => c.marketCategory(0),
               ),
               _block(
                 'trending',
@@ -610,7 +617,10 @@ class _MarketplacePageState extends State<MarketplacePage> {
             _block(
               'latest',
               (read) => read.rows.isEmpty
-                  ? MarketNotice(marketText(context, 'empty'))
+                  ? c.side != MarketplaceController.allSides
+                      ? MarketFilterEmpty(action: 'allTypes',
+                          clear: () => c.setSide(MarketplaceController.allSides))
+                      : MarketNotice(marketText(context, 'empty'))
                   : _grid(read.rows),
               c.loadLatest,
             ),
@@ -633,7 +643,10 @@ class _MarketplacePageState extends State<MarketplacePage> {
   );
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
+  Widget build(BuildContext context) =>
+      LightVisualShadowScope(child: Builder(builder: _buildPage));
+
+  Widget _buildPage(BuildContext context) => ListenableBuilder(
     listenable: c,
     builder: (context, _) {
       // 私信对方 / 联系卖家 leave the hall from dialogs above the shell; this
@@ -660,19 +673,7 @@ class _MarketplacePageState extends State<MarketplacePage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Full-bleed head: flush with the title bar and side navigation.
-                MarketHallHead(
-                  c,
-                  search: _searchBox(),
-                  onRefresh: c.loading.isNotEmpty
-                      ? null
-                      : c.hasItem
-                      ? c.refreshItem
-                      : c.mainTab == 1
-                      ? c.browser.reload
-                      : c.mainTab == 3
-                      ? c.trades.refresh
-                      : c.refreshHall,
-                ),
+                MarketCurrentPageHead(c, search: _searchBox()),
                 Expanded(
                   child: GuideSignal(
                     // Opening an item or submitting a search once completes

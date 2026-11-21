@@ -186,8 +186,12 @@ internal sealed partial class FriendsReader
             if (!before.SequenceEqual(after, StringComparer.Ordinal)) throw new Account.AccountBridgeHostException("friends.read_unavailable", true);
             FriendView[] Hidden(FriendView[] rows) => rows.Select(row => row with { GameId = "" }).ToArray();
             latest = latest with {
+                // When both sides hide this friend's game ID, keep the Relay's label ("成员"
+                // or an independent callsign): Hong Kong's name can be the hidden Handle.
                 Friends = latest.Friends.Select(row => projected.TryGetValue(row.AccountId, out var scmIdentity)
-                    ? row with { Callsign = scmIdentity.Callsign, GameId = scmIdentity.GameId }
+                    ? string.IsNullOrEmpty(row.GameId) && string.IsNullOrEmpty(scmIdentity.GameId)
+                        ? row with { GameId = "" }
+                        : row with { Callsign = scmIdentity.Callsign, GameId = scmIdentity.GameId }
                     : row).ToArray(),
                 Incoming = Hidden(latest.Incoming), Outgoing = Hidden(latest.Outgoing), Blocked = Hidden(latest.Blocked), Results = []
             };

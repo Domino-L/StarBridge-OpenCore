@@ -133,7 +133,7 @@ void main() {
               width: width,
               child: Column(
                 children: [
-                  for (final meta in ['刚刚更新', '共 36 件在售 · 刚刚更新'])
+                  for (final meta in ['刚刚更新', '共 36 条挂单 · 刚刚更新'])
                     MarketSectionHeading(
                       '按分类逛',
                       key: ValueKey('h-$meta'),
@@ -149,7 +149,7 @@ void main() {
       );
       await tester.pump();
       expect(tester.takeException(), isNull, reason: 'no overflow at $width');
-      for (final meta in ['刚刚更新', '共 36 件在售 · 刚刚更新']) {
+      for (final meta in ['刚刚更新', '共 36 条挂单 · 刚刚更新']) {
         final heading = tester.getRect(find.byKey(ValueKey('h-$meta')));
         final action = tester.getRect(
           find.descendant(

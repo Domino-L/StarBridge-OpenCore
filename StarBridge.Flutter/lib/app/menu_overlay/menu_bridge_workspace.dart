@@ -50,6 +50,7 @@ class MenuBridgeWorkspace extends StatelessWidget {
     this.hangarPinned = false,
     this.onHangarPinned,
     this.onHangarSettings,
+    this.relayPages = const {},
   });
   final MenuWorkspaceController controller;
   final MenuFriendsView? friends;
@@ -75,6 +76,13 @@ class MenuBridgeWorkspace extends StatelessWidget {
   final bool hangarPinned;
   final ValueChanged<bool>? onHangarPinned;
   final VoidCallback? onHangarSettings;
+
+  /// Client pages shown through the page relay, by panel id.
+  final Map<String, Widget Function()> relayPages;
+  static const _relayIcons = {
+    'marketplace': StarBridgeIconSemantic.marketplace,
+    'officialFleet': StarBridgeIconSemantic.officialFleet,
+  };
   @override
   Widget build(BuildContext context) => MenuOverlayWorkspace(
     controller: controller,
@@ -83,6 +91,14 @@ class MenuBridgeWorkspace extends StatelessWidget {
     moveLabel: menuText(context, 'menu.overlay.window.move'),
     resizeLabel: menuText(context, 'menu.overlay.window.resize'),
     panels: [
+      for (final MapEntry(key: id, value: page) in relayPages.entries)
+        if (id != 'organizations')
+        MenuPanelContent(
+          id: id,
+          title: menuText(context, 'menu.tools.$id'),
+          icon: _relayIcons[id]!,
+          builder: (_, _) => page(),
+        ),
       if (hangar != null)
         MenuPanelContent(
           id: 'execHangar',
@@ -109,7 +125,8 @@ class MenuBridgeWorkspace extends StatelessWidget {
             title: entry.value,
             icon: StarBridgeIconSemantic.friends,
             builder: (_, _) => entry.key == 'organizations'
-                ? MenuOrganizationsPanel(
+                ? relayPages['organizations']?.call() ??
+                      MenuOrganizationsPanel(
                     active:
                         controller.activeId == 'organizations' &&
                         controller.panelsVisible,

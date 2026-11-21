@@ -66,16 +66,16 @@ class OverlayAppearancePreviewPlaybackControls extends StatelessWidget {
             children: [
               action(
                 OverlayAppearancePreviewPlayback.noticeShow,
-                '公告展开',
-                '公告展開',
-                'Show notice',
+                '召集与提醒展开',
+                '召集與提醒展開',
+                'Show rally & reminder',
                 settings['showNotice'] == true,
               ),
               action(
                 OverlayAppearancePreviewPlayback.noticeHide,
-                '公告收起',
-                '公告收起',
-                'Hide notice',
+                '召集与提醒收起',
+                '召集與提醒收起',
+                'Hide rally & reminder',
                 true,
               ),
               action(
@@ -111,9 +111,9 @@ class OverlayAppearancePreviewPlaybackControls extends StatelessWidget {
               ),
               action(
                 OverlayAppearancePreviewPlayback.stop,
-                '收起公告、事件与转场',
-                '收起公告、事件與轉場',
-                'Clear notice, events and transition',
+                '收起召集与提醒、事件与转场',
+                '收起召集與提醒、事件與轉場',
+                'Clear rallies & reminders, events and transition',
                 true,
               ),
               action(

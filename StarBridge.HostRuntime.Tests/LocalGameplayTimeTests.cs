@@ -19,6 +19,8 @@ internal static class LocalGameplayTimeTests
         await GameplayTimeAccumulatorTests.Uncertainty();
         Console.WriteLine("PASS local statistics: shared interval arithmetic preserves three account accumulator groups");
         var tests = new (string Name, Action Test)[] {
+            ("deferred explicit choices transfer only after confirmed identity", DeferredChoices),
+            ("deferred consent retry after locked writer counts once", DeferredRetry),
             ("identity and listening do not grant statistics consent", UnknownChoice),
             ("one log timer, five-second cadence and explicit decline", ConsentAndCadence),
             ("uncertainty, stale observations, sleep and final exit", EvidenceGaps),
@@ -34,6 +36,87 @@ internal static class LocalGameplayTimeTests
         foreach (var test in tests) { test.Test(); Console.WriteLine("PASS local statistics: " + test.Name); }
         await Retirement();
         Console.WriteLine("PASS local statistics: retirement waits for admitted work and prevents late writes");
+    }
+
+    private static void DeferredChoices()
+    {
+        foreach (var choice in new bool?[] { true, false, null })
+        foreach (var rollback in new[] { false, true })
+        {
+            using var f = new Fixture();
+            var local = f.Identities.Read();
+            local = f.Identities.DeferLog(local.Revision, Id(), () => true);
+            if (choice is bool allowed) local = f.Identities.SetDeferredStatistics(local.Revision, Id(), allowed, () => true);
+            if (rollback)
+            {
+                var old = new StarBridge.HostRuntime.Onboarding.Rollback0721.LocalFirstUseStore(Path.Combine(f.Root, "device"), f.Clock);
+                var previous = old.Read();
+                old.SaveProgress(previous.Revision, Id(), new("log", "local", null, null, null), () => true);
+            }
+            f.Evidence.Select(f.Identities.Read().Revision, f.Log, "LIVE");
+            f.Tick(0); f.Tick(5);
+            Check(!f.Stats.Current.Recording && !Directory.Exists(f.StatisticsDirectory),
+                "Neither a device allow nor selected unconfirmed log starts recording");
+            if (choice is not null && !rollback)
+                Expect("firstUse.evidence_required", () => f.Stats.ApplyDeferredConsent(() => true));
+            f.ConfirmCurrent();
+            f.Stats.ApplyDeferredConsent(() => true);
+            f.EnableListening(); f.Tick(0); f.Tick(5);
+            var effective = rollback ? null : choice;
+            Check(f.Saved.Consent == (effective switch { true => GameplayRecordingConsent.Allowed,
+                false => GameplayRecordingConsent.Declined, _ => GameplayRecordingConsent.Unknown }),
+                "The existing per-profile writer preserves explicit allow/decline and Unknown after old rewrite");
+            Check(f.Stats.Current.Recording == (effective == true) && f.Saved.Seconds == (effective == true ? 5 : 0),
+                "Only confirmed identity with saved allow actually accumulates gameplay seconds");
+            Check(f.Identities.Read().DeferredStatisticsAllowed is null, "Transferred choice is consumed once");
+        }
+    }
+
+    private static void DeferredRetry()
+    {
+        using var f = new Fixture();
+        var state = f.Identities.Read();
+        state = f.Identities.DeferLog(state.Revision, Id(), () => true);
+        f.Identities.SetDeferredStatistics(state.Revision, Id(), true, () => true);
+        var candidate = f.Evidence.Select(f.Identities.Read().Revision, f.Log, "LIVE");
+        f.Evidence.Confirm(candidate.SourceKey!, candidate.EvidenceKey!);
+        Directory.CreateDirectory(f.StatisticsDirectory);
+        using (var blocked = new FileStream(f.PathFor(f.Profile) + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            Expect("firstUse.statistics_write_failed", () => f.Stats.ApplyDeferredConsent(() => true));
+            Check(f.Identities.Read().LogSetupPending && f.Identities.Read().DeferredStatisticsAllowed == true,
+                "Locked migration keeps a durable pending marker and the original explicit allow");
+            f.Tick(0); f.Tick(5);
+            Check(!f.Stats.Current.Recording && f.Saved.Seconds == 0, "Failure records no gameplay time");
+        }
+        f.Stats.ApplyDeferredConsent(() => true);
+        f.EnableListening(); f.Tick(0); f.Tick(5);
+        Check(!f.Identities.Read().LogSetupPending && f.Identities.Read().DeferredStatisticsAllowed is null &&
+            f.Stats.Current.Recording && f.Saved.Seconds == 5, "Explicit retry resumes the existing sampler and counts five seconds once");
+        var bytes = f.Bytes(f.Profile);
+        f.Stats.ApplyDeferredConsent(() => true);
+        Check(bytes.SequenceEqual(f.Bytes(f.Profile)), "Already consumed migration is read-only");
+        f.Tick(5);
+        Check(f.Saved.Seconds == 10, "Retry does not restart or duplicate the live interval");
+
+        // Model a committed profile choice followed by a locked extension
+        // consumption. The same original writer must not save consent twice.
+        state = f.Identities.Read();
+        state = f.Identities.DeferLog(state.Revision, Id(), () => true);
+        f.Identities.SetDeferredStatistics(state.Revision, Id(), true, () => true);
+        candidate = f.Evidence.Select(f.Identities.Read().Revision, f.Log, "LIVE");
+        f.Evidence.Confirm(candidate.SourceKey!, candidate.EvidenceKey!);
+        bytes = f.Bytes(f.Profile);
+        using (var blocked = new FileStream(Path.Combine(f.Root, "device", "local-first-use-v1", "state.bin.lock"),
+            FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Expect("firstUse.write_failed", () => f.Stats.ApplyDeferredConsent(() => true));
+            Check(f.Identities.Read().DeferredStatisticsAllowed == true && bytes.SequenceEqual(f.Bytes(f.Profile)),
+                "Failed consumption preserves the pending choice without repeating the completed statistics write");
+        }
+        f.Stats.ApplyDeferredConsent(() => true);
+        Check(f.Identities.Read().DeferredStatisticsAllowed is null && bytes.SequenceEqual(f.Bytes(f.Profile)),
+            "Retry consumes only the extension after an already committed profile choice");
     }
 
     private static void UnknownChoice()

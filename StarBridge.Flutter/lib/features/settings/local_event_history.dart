@@ -10,8 +10,19 @@ const localEventCategories = [
   'ship',
   'location',
   'life',
+  'contract',
   'other',
 ];
+
+List<String> parseUnavailableLocalEventSources(Object? value) {
+  if (value is! List ||
+      value.length > 2 ||
+      value.any((source) => source != 'events' && source != 'contract') ||
+      value.toSet().length != value.length) {
+    throw const FormatException('Invalid unavailable event sources.');
+  }
+  return List<String>.unmodifiable(value.cast<String>());
+}
 
 final class LocalHistoryEntry {
   const LocalHistoryEntry({
@@ -36,12 +47,14 @@ final class LocalHistoryPage {
     required this.hasMore,
     required this.entries,
     this.revision,
+    this.unavailableSources = const [],
   });
   final String state;
   final int totalCount, filteredCount, offset, pageSize;
   final bool hasMore;
   final String? revision;
   final List<LocalHistoryEntry> entries;
+  final List<String> unavailableSources;
 }
 
 abstract interface class LocalHistoryPort {

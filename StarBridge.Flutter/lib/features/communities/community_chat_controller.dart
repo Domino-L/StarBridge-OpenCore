@@ -13,6 +13,7 @@ import 'community_author_projection.dart';
 import 'community_chat_author_window.dart';
 import 'community_chat_local_models.dart';
 import 'community_chat_seen_authors.dart';
+import 'community_chat_author_lifecycle.dart';
 
 export 'community_chat_local_models.dart';
 
@@ -23,6 +24,7 @@ final class CommunityChatController extends ChangeNotifier {
     this.port,
     this._targetRef, {
     DateTime Function()? now,
+    this.elapsed,
     this.localEcho = false,
   }) : _now = now ?? DateTime.now {
     _subscription = port.invalidations.listen((_) => invalidate());
@@ -31,7 +33,9 @@ final class CommunityChatController extends ChangeNotifier {
           .authorIdentityChanges
           .listen((_) {
             if (!_active) return;
+            _authorIdentityEpoch++;
             _cancelAuthorExpiry();
+            seenAuthors.clear();
             _media?.retireAuthors(_messages);
             _authorWindow.suspend();
             notifyListeners();
@@ -50,6 +54,7 @@ final class CommunityChatController extends ChangeNotifier {
   void rememberViewport(CommunityChatViewport value) {
     if (_active) _viewport = value;
   }
+
   String _targetRef;
   bool _referenceRenewed = false;
   String get targetRef => _targetRef;
@@ -77,6 +82,7 @@ final class CommunityChatController extends ChangeNotifier {
   void renewVerifiedReference(String target) {
     if (!_active || !RegExp(r'^[a-f0-9]{32}$').hasMatch(target)) return;
     if (target == _targetRef) return;
+    _authorIdentityEpoch++;
     seenAuthors.clear();
     retireAuthors();
     _targetRef = target;
@@ -84,9 +90,13 @@ final class CommunityChatController extends ChangeNotifier {
     _media = null;
     _referenceRenewed = true;
   }
+
   final DateTime Function() _now;
+  final Duration Function()? elapsed;
   DateTime? _lastSuccessfulRead;
   Future<void> enter() async {
+    seenAuthors.sweep();
+    _scheduleAuthorExpiry();
     final age = _lastSuccessfulRead == null
         ? null
         : _now().difference(_lastSuccessfulRead!);
@@ -99,128 +109,43 @@ final class CommunityChatController extends ChangeNotifier {
     }
     await refresh(silent: _loaded);
   }
+
   late final StreamSubscription<void> _subscription;
   StreamSubscription<void>? _authorSubscription;
   List<CommunityChatMessage> _messages = [];
   List<CommunityChatMessage> get messages => List.unmodifiable(_messages);
 
-  CommunityChatMessage presentAuthor(CommunityChatMessage message) {
-    if (port is! CommunityAuthorProjectionPort) return message;
-    if (!(port as CommunityAuthorProjectionPort).authorIdentitiesAvailable) {
-      seenAuthors.clear();
-      return CommunityChatMessage.neutralAuthor(message);
-    }
-    return seenAuthors.present(
-      message,
-      verified: _authorWindow.canPresent(message.messageRef),
-      allowed: _active && _visible && _foreground && !_readOnly,
-      now: _authorNow(),
-    );
-  }
-
-  /// Recheck the owner after media IO; a newer observation renews no older one.
-  bool authorIsCurrent(CommunityChatMessage message) {
-    if (!_active ||
-        !_visible ||
-        !_foreground ||
-        _readOnly ||
-        port is! CommunityAuthorProjectionPort ||
-        !(port as CommunityAuthorProjectionPort).authorIdentitiesAvailable ||
-        !_authorWindow.canPresent(message.messageRef)) {
-      return false;
-    }
-    final current = _messages
-        .where((row) => row.messageRef == message.messageRef)
-        .firstOrNull;
-    final identity = current?.authorIdentity, expected = message.authorIdentity;
-    return current?.senderRef == message.senderRef &&
-        identity?.admit(_authorNow()).visible == true &&
-        expected?.visible == true &&
-        identity!.version == expected!.version &&
-        identity.avatarVersion == expected.avatarVersion &&
-        identity.observedAt == expected.observedAt &&
-        identity.validUntil == expected.validUntil;
-  }
-  final _authorWindow = CommunityChatAuthorWindow();
-  final seenAuthors = CommunityChatSeenAuthors();
-  DateTime _authorNow() => _authorWindow.identityTime(_now());
+  late final _authors = CommunityChatAuthorLifecycle(
+    port: port,
+    clock: _now,
+    elapsed: elapsed,
+    active: () => _active,
+    allowed: () => _visible && _foreground && !_readOnly,
+    messages: () => _messages,
+    replaceMessages: (value) => _messages = value,
+    media: () => _media,
+    onChanged: notifyListeners,
+  );
+  CommunityChatAuthorWindow get _authorWindow => _authors.window;
+  CommunityChatSeenAuthors get seenAuthors => _authors.seenAuthors;
+  DateTime _authorNow() => _authors.identityNow();
   bool _authorContinuation = false;
-  Timer? _authorExpiry;
-  int _authorExpiryEpoch = 0;
-  void _cancelAuthorExpiry() {
-    _authorExpiryEpoch++;
-    _authorExpiry?.cancel();
-    _authorExpiry = null;
-  }
-
-  bool _retireAuthorProofs(Iterable<CommunityChatMessage> expired) {
-    final result = _authorWindow.retireProofs(_messages, expired);
-    _messages = result.messages;
-    _media?.retireAuthors(result.retired);
-    return result.retired.isNotEmpty;
-  }
-
+  int _authorIdentityEpoch = 0;
+  CommunityChatMessage presentAuthor(CommunityChatMessage message) =>
+      _authors.presentAuthor(message);
+  bool authorIsCurrent(CommunityChatMessage message) =>
+      _authors.authorIsCurrent(message);
+  void _cancelAuthorExpiry() => _authors.cancelExpiry();
+  void _scheduleAuthorExpiry() => _authors.scheduleExpiry();
+  bool _retireAuthorProofs(Iterable<CommunityChatMessage> messages) =>
+      _authors.retireProofs(messages);
   void _narrowAuthor(
     CommunityChatMessage message,
     CommunityAuthorProjection observed,
-  ) {
-    if (!_active || observed.visible) return;
-    final hidden = observed.state == CommunityAuthorState.hidden;
-    if (hidden) seenAuthors.forget(message.senderRef, then: notifyListeners);
-    if (!hidden && !authorIsCurrent(message)) return;
-    // Hidden answers for the person, so every message of theirs goes with it.
-    if (_retireAuthorProofs(hidden ? _messages.where((m) => m.senderRef == message.senderRef) : [message])) {
-      _scheduleAuthorExpiry();
-      notifyListeners();
-    }
-  }
-
-  /// The original one-shot display deadline remains the only identity Timer.
-  void _scheduleAuthorExpiry() {
-    _cancelAuthorExpiry();
-    if (!_active ||
-        !_visible ||
-        !_foreground ||
-        _readOnly ||
-        port is! CommunityAuthorProjectionPort ||
-        !(port as CommunityAuthorProjectionPort).authorIdentitiesAvailable) {
-      return;
-    }
-    final now = _authorNow();
-    DateTime? earliest = _media?.nextAuthorDeadline;
-    for (final message in _messages) {
-      if (!_authorWindow.canPresent(message.messageRef)) continue;
-      final deadline = message.authorIdentity?.validUntil;
-      if (deadline != null &&
-          deadline.isAfter(now) &&
-          (earliest == null || deadline.isBefore(earliest))) {
-        earliest = deadline;
-      }
-    }
-    if (earliest == null) return;
-    final deadline = earliest, captured = _authorExpiryEpoch;
-    _authorExpiry = Timer(deadline.difference(now), () {
-      if (!_active || captured != _authorExpiryEpoch) return;
-      _authorExpiry = null;
-      final at = _authorWindow.identityTime(_now(), reachedDeadline: deadline);
-      _retireAuthorProofs([
-        ..._messages.where(
-          (message) => message.authorIdentity?.validUntil?.isAfter(at) == false,
-        ),
-        ...?_media?.retireExpiredAuthors(at),
-      ]);
-      notifyListeners();
-      _scheduleAuthorExpiry();
-    });
-  }
-
-  void retireAuthors({bool notify = false}) {
-    if (port is! CommunityAuthorProjectionPort) return;
-    _cancelAuthorExpiry();
-    _media?.retireAuthors(_messages);
-    _authorWindow.retire();
-    if (notify && _active) notifyListeners();
-  }
+  ) => _authors.narrowAuthor(message, observed);
+  void _withdrawAuthor(String sender) => _authors.withdrawAuthor(sender);
+  void retireAuthors({bool notify = false}) =>
+      _authors.retireAuthors(notify: notify);
 
   void observeAuthors(Iterable<CommunityChatMessage> visible) {
     if (!_active ||
@@ -234,6 +159,7 @@ final class CommunityChatController extends ChangeNotifier {
       unawaited(refresh(silent: true, renewal: authorRenewalAvailable));
     }
   }
+
   bool loading = false, markingRead = false, invalidated = false;
   bool hasOlder = false, canSend = false;
   bool localHistoryUnavailable = false;
@@ -452,6 +378,9 @@ final class CommunityChatController extends ChangeNotifier {
     if ((!visible || !foreground) && _visible && _foreground) retireAuthors();
     _visible = visible;
     _foreground = foreground;
+    // Lifecycle resume checks before the panel can build its first frame.
+    seenAuthors.sweep();
+    _scheduleAuthorExpiry();
     if (!canAcknowledge) _pendingVisibleRef = null;
     // Becoming foreground alone is not evidence that a message was seen.
   }
@@ -459,8 +388,10 @@ final class CommunityChatController extends ChangeNotifier {
   bool _loaded = false, _silentRead = false;
   bool _sendReadbackPending = false;
   bool get showProgress => loading && !_silentRead;
-  Future<ChatReadResult?> refresh({bool silent = false, bool renewal = false}) =>
-      _load(older: false, silent: silent, renewal: renewal);
+  Future<ChatReadResult?> refresh({
+    bool silent = false,
+    bool renewal = false,
+  }) => _load(older: false, silent: silent, renewal: renewal);
 
   bool get renewalSupported =>
       port is CommunityChatAuthorRenewalPort &&
@@ -491,6 +422,8 @@ final class CommunityChatController extends ChangeNotifier {
     final authorPort = port is CommunityAuthorProjectionPort
         ? port as CommunityAuthorProjectionPort
         : null;
+    final identityEpoch = _authorIdentityEpoch;
+    final authorGeneration = seenAuthors.readGeneration;
     if (!_authorContinuation) _authorWindow.refresh();
     _authorContinuation = false;
     final authorEpoch = _authorWindow.epoch;
@@ -554,8 +487,9 @@ final class CommunityChatController extends ChangeNotifier {
       );
       final trimmed = merged.length > 500; // The service retains 500 too.
       _messages = trimmed ? merged.sublist(merged.length - 500) : merged;
-      if (authorPort != null) {
-        if (page.authorRefreshRequired) seenAuthors.clear();
+      if (authorPort != null &&
+          identityEpoch == _authorIdentityEpoch &&
+          authorPort.authorIdentitiesAvailable) {
         final recovery =
             page.authorRefreshRequired &&
                 authorPort.authorIdentitiesAvailable &&
@@ -570,11 +504,32 @@ final class CommunityChatController extends ChangeNotifier {
           observed,
           _authorNow,
         );
+        _messages = seenAuthors.admitAnswers(_messages, authorGeneration);
         seenAuthors.answer(_messages, observed, page.authorUpdates);
+        final hidden = <String>{
+          for (final row in page.messages)
+            if (row.authorIdentity?.state == CommunityAuthorState.hidden)
+              row.senderRef,
+          for (final update in page.authorUpdates)
+            if (observed.contains(update.messageRef) &&
+                update.found &&
+                update.identity.state == CommunityAuthorState.hidden &&
+                !_messages.any(
+                  (row) =>
+                      row.messageRef == update.messageRef &&
+                      (row.senderRef != update.senderRef ||
+                          row.sequence != update.sequence),
+                ))
+              update.senderRef,
+        };
+        for (final sender in hidden) {
+          _withdrawAuthor(sender);
+        }
         _authorWindow.verified(authorEpoch, observed);
         if (recovery != null) {
           // Publish the primary page's independent retirement before extra IO.
           notifyListeners();
+          final recoveryGeneration = seenAuthors.readGeneration;
           final root = await authorPort.readChatAuthors(
             readTarget,
             before: recovery.before,
@@ -585,6 +540,7 @@ final class CommunityChatController extends ChangeNotifier {
             throw const CommunityFailure('dataInvalid');
           }
           if (targetRef == readTarget &&
+              identityEpoch == _authorIdentityEpoch &&
               authorPort.authorIdentitiesAvailable &&
               _visible &&
               _foreground &&
@@ -595,11 +551,32 @@ final class CommunityChatController extends ChangeNotifier {
               root,
               _authorNow,
             );
-            _messages = result.messages;
+            _messages = seenAuthors.admitAnswers(
+              result.messages,
+              recoveryGeneration,
+            );
             _media?.retireAuthors(result.retired);
+            final recoveredSequences = result.retired
+                .map((m) => m.sequence)
+                .toSet();
+            final recovered = _messages
+                .where((m) => recoveredSequences.contains(m.sequence))
+                .toList();
+            seenAuthors.answer(
+              recovered,
+              recovered.map((m) => m.messageRef).toList(),
+              const [],
+            );
+            for (final row in recovered) {
+              if (row.authorIdentity?.state == CommunityAuthorState.hidden) {
+                _withdrawAuthor(row.senderRef);
+              }
+            }
           }
         }
         _scheduleAuthorExpiry();
+      } else if (authorPort != null) {
+        _retireAuthorProofs(_messages);
       }
       if (renewed && targetRef == readTarget) _referenceRenewed = false;
       if (_pendingSend != null &&
@@ -644,7 +621,7 @@ final class CommunityChatController extends ChangeNotifier {
         final code = e is CommunityFailure ? e.code : 'unavailable';
         // A failed renewal only costs names; lost access still ends the chat.
         outcome = (renewal: renewalPort != null, ok: false);
-        if (code != 'unavailable') seenAuthors.clear();
+        // Failed reads never renew or erase the last valid display budget.
         if (renewalPort == null && !older) catchUp.due = true;
         if (renewalPort == null || code != 'unavailable') _failure(code);
       }

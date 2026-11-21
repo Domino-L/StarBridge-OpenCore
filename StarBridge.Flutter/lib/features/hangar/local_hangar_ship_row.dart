@@ -46,7 +46,10 @@ class LocalHangarShipRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = LocalHangarCopy(context), tokens = context.tokens;
     final ship = item.ship;
-    final title = LocalHangarNames.primary(Localizations.localeOf(context), ship);
+    final title = LocalHangarNames.primary(
+      Localizations.localeOf(context),
+      ship,
+    );
     final subtitle = [
       if (title != ship.title) ship.title,
       if (ship.liner?.trim().isNotEmpty == true) ship.liner!.trim(),
@@ -88,6 +91,7 @@ class LocalHangarShipRow extends StatelessWidget {
               display: ship.display,
               legacyCombatSize: combat,
               elapsed: elapsed,
+              names: [ship.catalogId, ship.title],
             ),
           ),
         ),

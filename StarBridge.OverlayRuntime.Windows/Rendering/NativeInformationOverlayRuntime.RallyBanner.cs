@@ -87,7 +87,7 @@ public sealed partial class NativeInformationOverlayRuntime : IRallyBannerSink
         if (_livePreviewSurface is not null || MenuActive || _workspace is not { } workspace) return null;
         var surface = ResolveTargetSurfaceBounds(out var dpi);
         // Only the notice slot: every other module, the crosshair and the startup transition stay off.
-        var settings = OverlaySkinCatalog.Resolve(workspace.Settings, SafeReadEntitlements()).Settings with
+        var settings = OverlaySkinCatalog.ResolveForDrawing(workspace.Settings, SafeReadEntitlements()).Settings with
         {
             ShowNotice = false, ShowSquads = false, ShowMission = false, ShowMembers = false, ShowChat = false,
             ShowEventNotifications = false, ShowCrosshair = false, EnableStartupTransition = false,

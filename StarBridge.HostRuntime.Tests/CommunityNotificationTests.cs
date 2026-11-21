@@ -54,6 +54,9 @@ internal static class CommunityNotificationTests
             Check(request.Method == HttpMethod.Get, "Notification feed performs no writes or receipts.");
             Check(request.Headers.Authorization?.Parameter == "fixture", "Authenticated source only.");
             var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/fleets/announcements") return Json(new { fleetCode = "A", revision = 1, refreshedAt = now,
+                current = new { id = "raw-announcement-id", fleetCode = "A", revision = 1, state = "Published", publishedAt = now, updatedAt = now },
+                history = Array.Empty<object>() });
             if (path == "/api/fleets/membership") return Json(new { fleetCode = member ? "A" : null, fleetCodes = member ? new[] { "A" } : [] });
             if (path == "/api/fleets") return Json(new[] { new {
                 code = "A", name = "Fixture", ownerAccount = owner ? "viewer" : "other",
@@ -79,6 +82,7 @@ internal static class CommunityNotificationTests
             await client.ReadWpfS2NotificationsAsync("fixture", scope, "viewer", () => { }, default);
         var first = (await Read()).Sources.Single();
         Check(first.Chat is { Sequence: 3, Incoming: true } && first.ManagementAvailable && first.Tasks.Length == 1, "Chat and authorized pending management read.");
+        Check(first.Announcements?.Entries.Single().Id == "raw-announcement-id", "Explicit WPF owner observes the same raw announcement ID without temporary Flutter references.");
         Check(!first.Tasks[0].Key.Contains("private-application") && first.SourceKey.Length == 64, "No raw identifiers in notification projection.");
         Check((await Read()).Sources.Single().SourceKey == first.SourceKey, "Stable within same owner and membership.");
         Check((await Read("other-scope")).Sources.Single().SourceKey != first.SourceKey, "Different owner cannot correlate sources.");

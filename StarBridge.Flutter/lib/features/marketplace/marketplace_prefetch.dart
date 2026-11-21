@@ -4,7 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'marketplace_copy.dart';
-import 'marketplace_states.dart' show marketRetryAction;
+import 'marketplace_display_copy.dart';
+import 'marketplace_states.dart' show marketRetryAction, marketButtonAction;
 import 'marketplace_port.dart';
 
 bool marketHasMore(MarketRead? read) =>
@@ -23,10 +24,12 @@ class MarketPrefetch extends StatefulWidget {
     required this.loading,
     required this.failed,
     required this.load,
+    this.enabled = true,
   });
   final Widget child;
   final MarketRead? read;
   final bool loading, failed;
+  final bool enabled;
   final Future<void> Function() load;
   @override
   State<MarketPrefetch> createState() => _MarketPrefetchState();
@@ -41,6 +44,7 @@ class _MarketPrefetchState extends State<MarketPrefetch> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduled = false;
       if (!mounted ||
+          !widget.enabled ||
           _request ||
           widget.loading ||
           widget.failed ||
@@ -98,9 +102,12 @@ class MarketPageStatus extends StatelessWidget {
     required this.loading,
     required this.failed,
     required this.load,
+    this.visibleCount,
   });
   final MarketRead read;
   final bool loading, failed;
+  /// Local filters keep raw page totals and allow only explicit further reads.
+  final int? visibleCount;
   final Future<void> Function() load;
   @override
   Widget build(BuildContext context) => Padding(
@@ -111,6 +118,16 @@ class MarketPageStatus extends StatelessWidget {
               loading ? null : load,
               key: const Key('market-page-status-retry'),
             )
+          : visibleCount != null
+          ? Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(marketDisplayText(context, 'loadedMatches',
+                  n: read.rows.length, matched: visibleCount)),
+              if (marketHasMore(read))
+                marketButtonAction(TextButton(
+                  onPressed: loading ? null : load,
+                  child: Text(marketText(context, loading ? 'loading' : 'more')),
+                ), key: const Key('market-filtered-load-more')),
+            ])
           : Text(
               loading
                   ? marketText(context, 'loading')

@@ -13,6 +13,7 @@ import 'community_ship_row_surface.dart';
 import 'community_ship_statistics.dart';
 import 'community_ships_copy.dart';
 import 'community_ships_port.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// 按持有人 (user decision 2026-10-29, option D): the whole shared
 /// inventory grouped by owner, owners online first. Ships follow their
@@ -140,7 +141,7 @@ class CommunityShipsOwnerGroups extends StatelessWidget {
                             child: Text(
                               '${name.isEmpty ? t('owner') : name}${first.ownerIsSelf ? ' · ${t('self')}' : ''}',
                               maxLines: 1,
-                              overflow: TextOverflow.fade,
+                              overflow: fadeOverflow(context),
                               softWrap: false,
                               style: text.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
@@ -251,6 +252,7 @@ class _OwnerShipTile extends StatelessWidget {
                         // Edge to edge with the name over the art, as the
                         // approved preview (2026-10-29).
                         CommunityCatalogShipImage(
+                          model: ship.code,
                           asset:
                               ship.catalogImageAsset ??
                               ship.catalogThumbnailAsset,
@@ -279,7 +281,7 @@ class _OwnerShipTile extends StatelessWidget {
                             child: Text(
                               name,
                               maxLines: 1,
-                              overflow: TextOverflow.fade,
+                              overflow: fadeOverflow(context),
                               softWrap: false,
                               style: text.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w700,
@@ -313,7 +315,7 @@ class _OwnerShipTile extends StatelessWidget {
                           ],
                         ),
                         maxLines: 1,
-                        overflow: TextOverflow.fade,
+                        overflow: fadeOverflow(context),
                         softWrap: false,
                         style: text.labelSmall?.copyWith(
                           color: tokens.colors.textSecondary,

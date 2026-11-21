@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../common/organization_member_copy.dart';
 import '../common/organization_member_row.dart';
 import 'official_fleet_chat_tile.dart';
 import 'official_fleet_command_row.dart';
@@ -57,10 +58,14 @@ abstract final class OfficialFleetRailPreviews {
         if (const {
           OfficialFleetMemberPresence.online,
           OfficialFleetMemberPresence.inGame,
+          OfficialFleetMemberPresence.away,
         }.contains(member.publicPresence))
           member,
     ];
     final inGame = members.visibleInGameCount;
+    final away = online
+        .where((m) => m.publicPresence == OfficialFleetMemberPresence.away)
+        .length;
     final strings = AppStrings.of(context);
     return Column(
       key: const Key('official-fleet-tile-members'),
@@ -88,7 +93,14 @@ abstract final class OfficialFleetRailPreviews {
                         allowProfile: false,
                       ).identity) {
                         final OrganizationMemberIdentity identity =>
-                          identity.avatar,
+                          member.publicPresence ==
+                                  OfficialFleetMemberPresence.away
+                              ? Tooltip(
+                                  message:
+                                      '${member.callsign} · ${memberBoardText(context, 'away')}',
+                                  child: identity.avatar,
+                                )
+                              : identity.avatar,
                         _ => const SizedBox.shrink(),
                       },
                     ),
@@ -114,8 +126,9 @@ abstract final class OfficialFleetRailPreviews {
                 .replaceAll('{inGame}', '$inGame')
                 .replaceAll(
                   '{online}',
-                  '${members.visibleOnlineCount! - inGame}',
-                ),
+                  '${members.visibleOnlineCount! - inGame - away}',
+                )
+                .replaceAll('{away}', '$away'),
             style: text.bodySmall?.copyWith(color: tokens.colors.textSecondary),
           ),
         ],

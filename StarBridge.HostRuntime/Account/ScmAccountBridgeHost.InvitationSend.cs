@@ -26,7 +26,9 @@ internal sealed partial class ScmAccountBridgeHost
         else send = InvitationBridgeRequests.Send(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         var accountKey = JsonSerializer.Serialize(context);

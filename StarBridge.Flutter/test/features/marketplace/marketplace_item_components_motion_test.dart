@@ -64,11 +64,14 @@ void main() {
     var c = await _page(tester, InteractionSuite.standard);
     try {
       for (final (label, rect) in [
-        ('全部', const Rect.fromLTRB(300, 214.5, 350.5, 241.5)),
-        ('在线', const Rect.fromLTRB(356.5, 214.5, 407, 241.5)),
-        ('游戏中', const Rect.fromLTRB(413, 214.5, 475.75, 241.5)),
-        ('品质 ≥', const Rect.fromLTRB(481.75, 214.5, 572.75, 241.5)),
-        ('全部地点', const Rect.fromLTRB(578.75, 214.5, 669.75, 241.5)),
+        // 单件 / 清单 lead the row (checklists, user 2026-11-11).
+        ('单件', const Rect.fromLTRB(300, 214.5, 350.5, 241.5)),
+        ('清单', const Rect.fromLTRB(356.5, 214.5, 407, 241.5)),
+        ('全部', const Rect.fromLTRB(427, 214.5, 477.5, 241.5)),
+        ('在线', const Rect.fromLTRB(483.5, 214.5, 534, 241.5)),
+        ('游戏中', const Rect.fromLTRB(540, 214.5, 602.75, 241.5)),
+        ('品质 ≥', const Rect.fromLTRB(608.75, 214.5, 699.75, 241.5)),
+        ('全部地点', const Rect.fromLTRB(705.75, 214.5, 796.75, 241.5)),
       ]) {
         expect(
           tester.getRect(_of(ItemFilterChip, label)),
@@ -102,7 +105,7 @@ void main() {
         tester.getRect(_clear),
         within(
           distance: .001,
-          from: const Rect.fromLTRB(675.75, 208, 744.15, 248),
+          from: const Rect.fromLTRB(802.75, 208, 871.15, 248),
         ),
       );
       await tester.pumpWidget(const SizedBox.shrink());

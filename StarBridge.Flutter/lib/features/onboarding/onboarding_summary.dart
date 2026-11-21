@@ -63,7 +63,9 @@ List<SummaryEntry> buildOnboardingSummary({
       : entry(SummaryItem.recording, SummaryStatus.incomplete, 'pending');
 
   final SummaryEntry historyEntry;
-  if (onlineMode) {
+  if (view.withoutLog) {
+    historyEntry = entry(SummaryItem.history, SummaryStatus.skipped, 'skipped');
+  } else if (onlineMode) {
     // The online account keeps its own statistics; import there after setup.
     historyEntry = entry(
       SummaryItem.history,
@@ -109,14 +111,17 @@ List<SummaryEntry> buildOnboardingSummary({
     view.modeApplied
         ? entry(SummaryItem.mode, SummaryStatus.saved, view.mode!.name)
         : entry(SummaryItem.mode, SummaryStatus.incomplete, 'pending'),
-    f.available && f.logReady
+    view.withoutLog
+        ? entry(SummaryItem.log, SummaryStatus.skipped, 'deferred')
+        : f.available && f.logReady
         ? entry(SummaryItem.log, SummaryStatus.saved, 'ready')
         : entry(SummaryItem.log, SummaryStatus.incomplete, 'pending'),
-    view.identityReady
-        ? entry(SummaryItem.identity, SummaryStatus.saved, 'confirmed')
-        : f.evidence == OnboardingEvidence.failed
-        ? entry(SummaryItem.identity, SummaryStatus.failed, 'failed')
-        : entry(SummaryItem.identity, SummaryStatus.incomplete, 'pending'),
+    if (!view.withoutLog)
+      view.identityReady
+          ? entry(SummaryItem.identity, SummaryStatus.saved, 'confirmed')
+          : f.evidence == OnboardingEvidence.failed
+          ? entry(SummaryItem.identity, SummaryStatus.failed, 'failed')
+          : entry(SummaryItem.identity, SummaryStatus.incomplete, 'pending'),
     if (onlineMode)
       view.onlineIdentityReady
           ? entry(SummaryItem.onlineIdentity, SummaryStatus.saved, 'matched')
@@ -158,22 +163,25 @@ List<SummaryEntry> buildOnboardingSummary({
               'pending',
             ),
     // Optional: only an observed ready read is a pass; otherwise an honest skip.
-    switch (recognition?.outcome) {
-      RecognitionCheckOutcome.passed => entry(
-        SummaryItem.recognition,
-        SummaryStatus.saved,
-        'passed',
-      ),
-      RecognitionCheckOutcome.unavailable || null => entry(
-        SummaryItem.recognition,
-        SummaryStatus.skipped,
-        'unavailable',
-      ),
-      RecognitionCheckOutcome.skipped => entry(
-        SummaryItem.recognition,
-        SummaryStatus.skipped,
-        'skipped',
-      ),
-    },
+    if (view.withoutLog)
+      entry(SummaryItem.recognition, SummaryStatus.skipped, 'skipped')
+    else
+      switch (recognition?.outcome) {
+        RecognitionCheckOutcome.passed => entry(
+          SummaryItem.recognition,
+          SummaryStatus.saved,
+          'passed',
+        ),
+        RecognitionCheckOutcome.unavailable || null => entry(
+          SummaryItem.recognition,
+          SummaryStatus.skipped,
+          'unavailable',
+        ),
+        RecognitionCheckOutcome.skipped => entry(
+          SummaryItem.recognition,
+          SummaryStatus.skipped,
+          'skipped',
+        ),
+      },
   ];
 }

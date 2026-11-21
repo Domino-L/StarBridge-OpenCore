@@ -95,31 +95,16 @@ class ShellTopBar extends StatelessWidget {
                                   instant:
                                       interaction ==
                                       NavigationInteraction.keyboard,
-                                  child: Column(
+                                  // 只显示页面名；说明小字按用户要求去掉（"去掉小字"）。
+                                  child: Text(
+                                    strings.text(selected.labelKey),
                                     key: ValueKey(selected.route),
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        strings.text(selected.labelKey),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.fade,
-                                        softWrap: false,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium,
-                                      ),
-                                      Text(
-                                        strings.text(selected.descriptionKey),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.fade,
-                                        softWrap: false,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                    ],
+                                    maxLines: 1,
+                                    overflow: TextOverflow.fade,
+                                    softWrap: false,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium,
                                   ),
                                 ),
                               ),

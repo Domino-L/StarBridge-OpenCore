@@ -143,6 +143,17 @@ final class MenuHudSession extends MenuFeatureSession {
         if (visible is bool) {
           unawaited(_quick(() => _setModule(value, !visible, undo: false)));
         }
+      // the global group's quick settings (11-11): saved like the toggles
+      case 'calm' when value.isEmpty:
+        final on = workspace.projection.value.settings?['calmDisplay'] == 'On';
+        unawaited(_quick(() => _setGlobal('calmDisplay', on ? 'Off' : 'On')));
+      case 'tilt':
+        final number = double.tryParse(value);
+        if (number != null && number.isFinite) {
+          unawaited(
+            _quick(() => _setGlobal('visorTilt', number.clamp(0.0, 60.0))),
+          );
+        }
       case 'undo' when value.isEmpty:
         final undo = _undo;
         final active = workspace.projection.value.snapshot?.activePresetId;
@@ -194,10 +205,31 @@ final class MenuHudSession extends MenuFeatureSession {
       case 'placeEvents':
         try {
           final wire = jsonDecode(value) as Map<String, Object?>;
-          final side = wire['side'], y = wire['y'];
+          final side = wire['side'], y = wire['y'], x = wire['x'];
           if (side is! String || y is! num || !y.isFinite) return;
+          // where across (11-12): a screen fraction, or -1 at the edge; an
+          // older menu engine sends none and keeps the saved one
+          if (x != null && (x is! num || !x.isFinite)) return;
           if (wire['first'] == true) workspace.beginEventNotificationGesture();
-          workspace.updateEventNotificationPlacement(side, y.toDouble());
+          workspace.updateEventNotificationPlacement(
+            side,
+            y.toDouble(),
+            x: (x as num?)?.toDouble(),
+          );
+        } on Object {
+          return;
+        }
+      case 'placeBadge':
+        // the visor's DM badge (11-11): screen fractions, or -1 for its default
+        try {
+          final wire = jsonDecode(value) as Map<String, Object?>;
+          final x = wire['x'], y = wire['y'];
+          if (x is! num || y is! num || !x.isFinite || !y.isFinite) return;
+          bool valid(num v) => v == -1 || (v >= 0 && v <= 1);
+          if (!valid(x) || !valid(y)) return;
+          if (wire['first'] == true) workspace.beginEventNotificationGesture();
+          workspace.updateSetting('visorBadgeX', x.toDouble());
+          workspace.updateSetting('visorBadgeY', y.toDouble());
         } on Object {
           return;
         }
@@ -341,6 +373,24 @@ final class MenuHudSession extends MenuFeatureSession {
         args: {'module': module, 'preset': preset.shownName(_strings)},
         undo: true,
       );
+    }
+  }
+
+  /// A whole-visor setting from the quick panel, saved straight to the active
+  /// preset like the module toggles (only on a clean workspace).
+  Future<void> _setGlobal(String field, Object value) async {
+    final before = workspace.projection.value;
+    if (!_editable || before.settings?[field] == value) return;
+    workspace.updateSetting(field, value);
+    final changed = workspace.projection.value;
+    if (identical(changed, before) || changed.settings?[field] != value) {
+      _setNote('failed', ok: false);
+      return;
+    }
+    if (!await workspace.save()) {
+      final after = workspace.projection.value;
+      if (after.dirty && !after.busy) workspace.discardChanges();
+      _setNote('failed', ok: false);
     }
   }
 

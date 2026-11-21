@@ -1,6 +1,10 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../../app/runtime/frame_governor.dart';
+
 import 'package:flutter/services.dart';
 
 import '../../app/shell/widgets/attention_badge.dart';
@@ -231,8 +235,18 @@ class _RailCellState extends State<_RailCell>
 
   bool get _active => widget.item.enabled && (_hovered || _focused);
 
+  // Light visuals finish the highlight at once, so turning them off again never
+  // returns to a half-way frame (review CX-C-FULL-073-REVIEW P2-1).
+  late final ValueListenable<bool> _light = lightVisuals()
+    ..addListener(_onLight);
+
+  void _onLight() {
+    if (_light.value) _lit.value = _active ? 1 : 0;
+  }
+
   void _sync() {
-    final reduce = resolveStarBridgeInteraction(context).reduceMotion;
+    final reduce =
+        resolveStarBridgeInteraction(context).reduceMotion || _light.value;
     if (reduce) {
       _lit.value = _active ? 1 : 0;
     } else if (_active) {
@@ -248,12 +262,18 @@ class _RailCellState extends State<_RailCell>
 
   @override
   void dispose() {
+    _light.removeListener(_onLight);
     _lit.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+
+  Widget _build(BuildContext context, bool lightOnly) {
     final tokens = context.tokens;
     final text = Theme.of(context).textTheme;
     final item = widget.item;
@@ -261,7 +281,9 @@ class _RailCellState extends State<_RailCell>
     final cell = AnimatedBuilder(
       animation: _lit,
       builder: (context, _) {
-        final t = Curves.easeOutCubic.transform(_lit.value);
+        final t = lightOnly
+            ? (_active ? 1.0 : 0.0)
+            : Curves.easeOutCubic.transform(_lit.value);
         return CustomPaint(
           painter: _RailCellPainter(
             t: t,

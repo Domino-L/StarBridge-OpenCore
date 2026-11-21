@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:starbridge_flutter/features/communities/community_author_projection.dart';
 import 'package:starbridge_flutter/features/communities/community_chat_port.dart';
 import 'package:starbridge_flutter/features/communities/community_author_projection_port.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +59,11 @@ void main() {
           expect(
             model.messages
                 .take(3)
-                .every((row) => model.presentAuthor(row).callsign.isEmpty),
+                .every(
+                  (row) =>
+                      model.presentAuthor(row).authorIdentity?.state ==
+                      CommunityAuthorState.lastSeen,
+                ),
             isTrue,
           );
           expect(
@@ -115,7 +120,11 @@ void main() {
         expect(
           model.messages
               .take(3)
-              .every((row) => model.presentAuthor(row).callsign.isEmpty),
+              .every(
+                (row) =>
+                    model.presentAuthor(row).authorIdentity?.state ==
+                    CommunityAuthorState.lastSeen,
+              ),
           isTrue,
         );
         expect(model.messages, hasLength(55));

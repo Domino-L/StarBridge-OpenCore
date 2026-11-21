@@ -7,6 +7,10 @@ import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/features/hangar/hangar_reader_results.dart';
 import 'package:starbridge_flutter/features/ships/ship_display_names.dart';
 import 'package:starbridge_flutter/shared/ships/catalog_vehicle_icon.dart';
+import 'package:starbridge_flutter/shared/ships/ship_silhouette_store.dart';
+import 'package:starbridge_flutter/shared/ships/ship_vehicle_icon.dart';
+
+import '../../shared/ships/ship_vehicle_icon_test.dart' show packBytes;
 
 void main() {
   test(
@@ -127,4 +131,42 @@ void main() {
       },
     );
   }
+  // User 11-14: "读取个人机库时，飞船小图标也要用真实俯视图标".
+  testWidgets(
+    'reader rows find the silhouette by catalog key, not only the RSI title',
+    (tester) async {
+      ShipSilhouetteStore.instance.debugUse(
+        ShipSilhouettePack.parse(packBytes()),
+      );
+      addTearDown(() => ShipSilhouetteStore.instance.debugUse(null));
+      const view = {
+        'shipCount': 2,
+        'ships': [
+          // An RSI title the silhouette keys do not carry; the Host resolved it.
+          {
+            'title': 'Aegis Gladius Pirate Edition Pledge',
+            'catalogId': 'catalog-gladius',
+          },
+          {'title': 'Unknown Variant', 'liner': 'Original Builder'},
+        ],
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildStarBridgeTheme(
+            FutureRestraintStyle.resolve(AppearanceMode.dark),
+            const Locale('en'),
+          ),
+          home: const Scaffold(
+            body: SizedBox(
+              width: 320,
+              child: HangarReaderResults(view: view, complete: true),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ShipSilhouetteIcon), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

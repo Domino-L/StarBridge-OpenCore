@@ -20,12 +20,21 @@ class RecoveringPort extends original.RecoveryPrivacy {
   bool readFails = false;
   final requests = <String>[];
   @override
-  Future<PrivacyPublicationView> publication(String action, {int? revision}) {
+  Future<PrivacyPublicationView> publication(
+    String action, {
+    int? revision,
+    bool firstOfficialDefault = false,
+  }) {
     requests.add(action);
     if (readFails && action == 'status') {
       return Future.error(StateError('synthetic status unavailable'));
     }
-    return pending?.future ?? super.publication(action, revision: revision);
+    return pending?.future ??
+        super.publication(
+          action,
+          revision: revision,
+          firstOfficialDefault: firstOfficialDefault,
+        );
   }
 }
 

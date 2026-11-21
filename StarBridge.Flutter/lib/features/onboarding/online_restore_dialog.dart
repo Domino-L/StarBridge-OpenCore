@@ -195,16 +195,7 @@ class _OnlineRestoreDialogState extends State<_OnlineRestoreDialog> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(copy.text('onlineRestore.$status')),
-                        if (!_error && _observed?.failure != null) ...[
-                          const SizedBox(height: 12),
-                          SelectableText(
-                            '${copy.text('onlineRestore.diagnostic')}: ${_observed!.failure!.code}',
-                            key: const Key('online-restore-diagnostic'),
-                          ),
-                        ],
-                      ],
+                      children: [Text(copy.text('onlineRestore.$status'))],
                     ),
                   )
                 : OnlineReviewPanel(

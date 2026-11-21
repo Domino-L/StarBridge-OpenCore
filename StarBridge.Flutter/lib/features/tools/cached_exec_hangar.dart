@@ -30,6 +30,7 @@ final class CachedExecHangar
   late final DateTime Function() _wallNow;
   ExecHangarSnapshot? _snapshot;
   Duration _acceptedElapsed = Duration.zero;
+  Duration _readElapsed = Duration.zero;
   DateTime? _acceptedWall;
   Future<ExecHangarSnapshot>? _pending;
   bool _pendingRefresh = false;
@@ -37,16 +38,28 @@ final class CachedExecHangar
 
   ExecHangarSnapshot? get snapshot => _snapshot;
   Duration get age => _elapsed() - _acceptedElapsed;
+
+  /// Time since the last successful read; polling cadence uses this, while
+  /// [age] keeps the countdown anchored to the snapshot's server time.
+  Duration get readAge => _elapsed() - _readElapsed;
   bool get fresh =>
       _snapshot != null &&
-      age < const Duration(minutes: 1) &&
-      (_wallNow().difference(_acceptedWall!).inSeconds - age.inSeconds).abs() <=
+      readAge < const Duration(minutes: 1) &&
+      (_wallNow().difference(_acceptedWall!).inSeconds - readAge.inSeconds)
+              .abs() <=
           2;
 
   void _accept(ExecHangarSnapshot value) {
-    _snapshot = value;
-    _acceptedElapsed = _elapsed();
+    // A repeated snapshot is still anchored to the same server time. Resetting
+    // its age would rewind the local countdown after every boundary read.
+    if (_snapshot?.now != value.now) {
+      _acceptedElapsed = _elapsed();
+    }
+    // Freshness describes the last successful read, independently of how far
+    // the snapshot's local clock has advanced.
+    _readElapsed = _elapsed();
     _acceptedWall = _wallNow();
+    _snapshot = value;
   }
 
   @override

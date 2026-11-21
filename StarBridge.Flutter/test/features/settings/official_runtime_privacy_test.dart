@@ -254,6 +254,11 @@ final class OfficialPrivacyFixture
       savedScope = 1,
       scopeVersion = 1,
       applies = 0;
+  String publicationState = 'inactive';
+  bool firstUseRequired = false;
+  String? publicationStatusError;
+  PrivacyPublicationView? applyReceipt;
+  bool lastFirstOfficialDefault = false;
   bool supported = true, lastCancelled = false, failReadAfterSave = false;
   bool choiceRequired = false;
   bool audienceSupported = false;
@@ -261,6 +266,8 @@ final class OfficialPrivacyFixture
   OfficialFleetAudience? lastAudience;
   String sourceRef = 'officialFleet:7';
   int failLocalReads = 0;
+  /// Reads that fail as if the Host has not settled this computer's account.
+  int accountNotReadyReads = 0;
   Object? officialError;
   Object? publicationError;
   Completer<void>? holdOfficialSave;
@@ -283,6 +290,10 @@ final class OfficialPrivacyFixture
   @override
   Future<LocalPrivacySnapshot> read() async {
     calls.add('localRead');
+    if (accountNotReadyReads > 0) {
+      accountNotReadyReads--;
+      throw const BridgeClientException('privacy_local.account_changed');
+    }
     if (failLocalReads > 0) {
       failLocalReads--;
       throw StateError('synthetic initial local read failure');
@@ -355,17 +366,24 @@ final class OfficialPrivacyFixture
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     calls.add('publication.$action');
     if (action == 'apply' || action == 'applyPreservingPause') {
       if (publicationError != null) throw publicationError!;
       expect(revision, this.revision);
+      lastFirstOfficialDefault = firstOfficialDefault;
       applies++;
       if (!applyStarted.isCompleted) applyStarted.complete();
       if (holdApply != null) await holdApply!.future;
-      return PrivacyPublicationView('applied', revision: revision);
+      return applyReceipt ??
+          PrivacyPublicationView('applied', revision: revision);
     }
-    return const PrivacyPublicationView('inactive');
+    return PrivacyPublicationView(
+      publicationState,
+      firstUseRequired: firstUseRequired,
+      errorCode: publicationStatusError,
+    );
   }
 
   @override

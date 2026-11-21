@@ -121,8 +121,8 @@ class _LocalHangarRemovalDialogState extends State<LocalHangarRemovalDialog> {
                           Localizations.localeOf(context),
                           ship,
                         ),
-                      if (ship.addedAt != null)
-                        '${local.addedAt} ${local.dateTime(context, ship.addedAt!)}',
+                      if (ship.acquiredOn != null)
+                        '${local.acquiredOn} ${MaterialLocalizations.of(context).formatCompactDate(ship.acquiredOn!)}',
                     ].join('\n');
                     return StarBridgeCheckboxTile(
                       controlKey: ValueKey('hangar-remove-${ship.id}'),

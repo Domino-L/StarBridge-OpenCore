@@ -22,7 +22,7 @@ internal static class ShipSpecificationTests
         Check(results[0].Groups!.SelectMany(g => g.Fields).All(f => f.Key != "crew"), "missing is not zero");
         Check(results[0].Components!.Any(c => c.Name == "Fixture cannon" && c.Group == "weapons"), "nested turret weapons preserved");
         var wire = BridgePayload.From(results[0]).GetRawText();
-        Check(!wire.Contains("thumbnail") && !wire.Contains("https://"), "no SCM media or account material in projection");
+        Check(results[0].ThumbnailUrl is null && !wire.Contains("https://"), "untrusted media stays outside projection");
         clock.Now += TimeSpan.FromHours(7);
         transport.Fail = true;
         var stale = await reader.ReadAsync("Carrack", false, default);

@@ -99,9 +99,9 @@ const _copy = <String, (String, String, String)>{
     'Choose players to follow, activity to report, and when to show reminders.',
   ),
   'description.continuous-play': (
-    '设置首次提醒与后续间隔，提醒自己休息和补水。',
-    '設定首次提醒與後續間隔，提醒自己休息與補水。',
-    'Set the first reminder and repeat interval for rest and hydration.',
+    '设置首次提醒与后续间隔，到点提醒你已经连续玩了多久。',
+    '設定首次提醒與後續間隔，到點提醒你已經連續玩了多久。',
+    "Set the first reminder and repeat interval; it tells you how long you've been playing.",
   ),
   'title': ('其他设置', '其他設定', 'Other settings'),
   'intro': (
@@ -167,9 +167,9 @@ const _copy = <String, (String, String, String)>{
     'Set reminder timing in background and in game',
   ),
   'playEnabled': (
-    '启用休息与补水提醒',
-    '啟用休息與補水提醒',
-    'Enable rest and hydration reminders',
+    '启用连续游玩提醒',
+    '啟用連續遊玩提醒',
+    'Enable continuous play reminders',
   ),
   'firstReminder': (
     '首次提醒：60 / 90 / 120 / 180 分钟',

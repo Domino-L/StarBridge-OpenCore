@@ -525,6 +525,9 @@ const communityShipsCopy = <String, (String, String, String)>{
   ),
 };
 String communityShipsText(BuildContext context, String key) {
+  if (key == 'readUnavailable') {
+    return AppStrings.of(context).text('officialFleet.ships.error.unavailable');
+  }
   final locale = AppStrings.of(context).locale;
   final value =
       shipCategoryLabels[key] ??

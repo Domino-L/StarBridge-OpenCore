@@ -15,6 +15,7 @@ class HelpSupportAction extends StatelessWidget {
     required this.child,
     this.kind = StarBridgeActionKind.quiet,
     this.icon,
+    this.customIcon,
     this.onActivate,
     super.key,
   }) : assert(
@@ -26,19 +27,25 @@ class HelpSupportAction extends StatelessWidget {
   final Widget child;
   final StarBridgeActionKind kind;
   final StarBridgeIconSemantic? icon;
+
+  /// A catalog icon outside [StarBridgeIconSemantic] (e.g. StandardIcon copy);
+  /// takes precedence over [icon].
+  final Widget? customIcon;
   final ValueChanged<InteractionSource>? onActivate;
 
   @override
   Widget build(BuildContext context) {
     final VoidCallback? enabled = onActivate == null ? null : () {};
-    final ButtonStyleButton native = switch ((kind, icon)) {
+    final Widget? leading =
+        customIcon ?? (icon == null ? null : StarBridgeIcon(icon!));
+    final ButtonStyleButton native = switch ((kind, leading)) {
       (StarBridgeActionKind.primary, null) => FilledButton(
         onPressed: enabled,
         child: child,
       ),
       (StarBridgeActionKind.primary, final glyph?) => FilledButton.icon(
         onPressed: enabled,
-        icon: StarBridgeIcon(glyph),
+        icon: glyph,
         label: child,
       ),
       (StarBridgeActionKind.secondary, null) => OutlinedButton(
@@ -47,13 +54,13 @@ class HelpSupportAction extends StatelessWidget {
       ),
       (StarBridgeActionKind.secondary, final glyph?) => OutlinedButton.icon(
         onPressed: enabled,
-        icon: StarBridgeIcon(glyph),
+        icon: glyph,
         label: child,
       ),
       (_, null) => TextButton(onPressed: enabled, child: child),
       (_, final glyph?) => TextButton.icon(
         onPressed: enabled,
-        icon: StarBridgeIcon(glyph),
+        icon: glyph,
         label: child,
       ),
     };
@@ -96,13 +103,13 @@ class HelpSupportAction extends StatelessWidget {
       2.0,
     );
     final children = <Widget>[
-      if (icon case final glyph?)
+      if (leading case final glyph?)
         IconTheme.merge(
           data: IconThemeData(
             size: style.iconSize?.resolve(states),
             color: style.iconColor?.resolve(states) ?? foreground,
           ),
-          child: StarBridgeIcon(glyph),
+          child: glyph,
         ),
       Flexible(child: label),
     ];
@@ -122,7 +129,7 @@ class HelpSupportAction extends StatelessWidget {
           target + adjustment.dy,
         ),
         onActivate: onActivate,
-        child: icon == null
+        child: leading == null
             ? label
             : Row(
                 mainAxisSize: MainAxisSize.min,

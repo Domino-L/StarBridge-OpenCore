@@ -6,10 +6,11 @@ import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/interaction/starbridge_choice_chip.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
-import '../../design_system/icons/icon_semantic.dart';
-import '../../design_system/icons/starbridge_icon.dart';
+import 'personal_profile_showcase_copy.dart';
+import 'personal_profile_edit_row.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_collaboration.dart';
+import 'personal_profile_main_role.dart';
 
 /// Owns selection drafts only; persistence stays at the profile port.
 class PersonalProfilePlayStyleEditor extends StatefulWidget {
@@ -69,6 +70,60 @@ class PersonalProfilePlayStyleEditorState
   };
   final _changed = <String>{};
   late final Map<String, List<String>> _retained;
+  // The main role (one of the ticked roles, or none) and whether it changed.
+  late String? _mainRole = switch (widget.initial?.mainRole) {
+    final String id when id.isNotEmpty => id,
+    '' => null,
+    _ => ProfileMainRole.idOf(widget.projection),
+  };
+  late bool _mainChanged = widget.initial?.mainRole != null;
+
+  void _emit() => widget.onChanged(
+    PersonalProfilePlayStyle(
+      // A main role always travels with the ticked roles it must be one of,
+      // as the same ids (a page that never saved roles, or HK spellings).
+      roles: _changed.contains('roles') || _mainChanged
+          ? List.of(_selections['roles']!)
+          : null,
+      interests: _changed.contains('interests')
+          ? List.of(_selections['interests']!)
+          : null,
+      support: _changed.contains('support')
+          ? List.of(_selections['support']!)
+          : null,
+      mainRole: _mainChanged ? _mainRole ?? '' : null,
+    ),
+  );
+
+  /// What is chosen, in words; the main role says so (plan A, 11-05).
+  InlineSpan _summary(BuildContext context, String group) {
+    final ids = _selections[group]!;
+    if (ids.isEmpty) {
+      return TextSpan(
+        text: profileShowcaseCopy(context, 'noneChosen'),
+        style: TextStyle(color: context.tokens.colors.textSecondary),
+      );
+    }
+    return TextSpan(
+      children: [
+        for (var i = 0; i < ids.length; i++) ...[
+          if (i > 0) const TextSpan(text: ' · '),
+          TextSpan(text: _label(context, group, ids[i])),
+          if (group == 'roles' && ids[i] == _mainRole)
+            TextSpan(
+              text: profileShowcaseCopy(context, 'mainRoleMark'),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+        ],
+      ],
+    );
+  }
+
+  String _label(BuildContext context, String group, String id) {
+    final option = ProfileCollaboration.options[group]![id];
+    return option == null ? id : AppStrings.of(context).text(option.labelKey);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -131,21 +186,13 @@ class PersonalProfilePlayStyleEditorState
                         '${_selections[group]!.length} / ${ProfileCollaboration.limit(group)}',
                     headerPadding: EdgeInsets.zero,
                     headerMinHeight: 0,
-                    headerBuilder: (context, visual, open) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        strings.text(_titles[group]!),
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      subtitle: Text(
-                        '${strings.text('profile.local.selected')} '
-                        '${_selections[group]!.length} / ${ProfileCollaboration.limit(group)}',
-                      ),
-                      trailing: StarBridgeIcon(
-                        _expanded.contains(group)
-                            ? StarBridgeIconSemantic.menuDown
-                            : StarBridgeIconSemantic.forward,
-                      ),
+                    headerBuilder: (context, visual, open) => ProfileEditGroupRow(
+                      title: strings.text(_titles[group]!),
+                      summary: _summary(context, group),
+                      count:
+                          '${strings.text('profile.local.selected')} '
+                          '${_selections[group]!.length} / ${ProfileCollaboration.limit(group)}',
+                      open: _expanded.contains(group),
                     ),
                     bodyPadding: EdgeInsets.only(
                       bottom: context.tokens.space.md,
@@ -172,16 +219,7 @@ class PersonalProfilePlayStyleEditorState
                               })
                                 StarBridgeChoiceChip.filter(
                                   controlKey: Key('profile-$group-$id'),
-                                  label:
-                                      ProfileCollaboration
-                                              .options[group]![id] ==
-                                          null
-                                      ? id
-                                      : strings.text(
-                                          ProfileCollaboration
-                                              .options[group]![id]!
-                                              .labelKey,
-                                        ),
+                                  label: _label(context, group, id),
                                   selected: _selections[group]!.contains(id),
                                   onSelected:
                                       !widget.enabled ||
@@ -199,36 +237,39 @@ class PersonalProfilePlayStyleEditorState
                                                 : _selections[group]!.remove(
                                                     id,
                                                   );
+                                            // Unticking the main role also
+                                            // removes it as the main role.
+                                            if (group == 'roles' &&
+                                                !selected &&
+                                                id == _mainRole) {
+                                              _mainRole = null;
+                                              _mainChanged = true;
+                                            }
                                           });
                                           field.didChange(
                                             List.of(_selections[group]!),
                                           );
-                                          widget.onChanged(
-                                            PersonalProfilePlayStyle(
-                                              roles: _changed.contains('roles')
-                                                  ? List.of(
-                                                      _selections['roles']!,
-                                                    )
-                                                  : null,
-                                              interests:
-                                                  _changed.contains('interests')
-                                                  ? List.of(
-                                                      _selections['interests']!,
-                                                    )
-                                                  : null,
-                                              support:
-                                                  _changed.contains('support')
-                                                  ? List.of(
-                                                      _selections['support']!,
-                                                    )
-                                                  : null,
-                                            ),
-                                          );
+                                          _emit();
                                         },
                                 ),
                             ],
                           ),
                         ),
+                        if (group == 'roles' &&
+                            ProfileMainRole.editable(widget.projection))
+                          ProfileMainRolePicker(
+                            selected: List.of(_selections['roles']!),
+                            mainRole: _mainRole,
+                            label: (id) => _label(context, 'roles', id),
+                            enabled: widget.enabled,
+                            onChanged: (id) {
+                              setState(() {
+                                _mainRole = id;
+                                _mainChanged = true;
+                              });
+                              _emit();
+                            },
+                          ),
                       ],
                     ),
                   ),

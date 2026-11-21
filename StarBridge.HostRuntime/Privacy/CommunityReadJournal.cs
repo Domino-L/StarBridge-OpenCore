@@ -40,7 +40,7 @@ internal sealed class CommunityReadJournal(string root)
             "upgrade-required" or "not-sent" or "duplicate" or "invalid" or "identityUnavailable" or
                 "notAllowed" or "conflict" or "storageLimitReached" or "operationOutcomeUnknown" or "outcomeUnknown" => code,
             "ok" or "cancelled" or "network" or "http-error" or "account.reauthorization_required" or "parse-failed" or "not-found" => code,
-            "communities.dataInvalid" or "communities.refreshRequired" or "communities.unavailable" or "communities.identityUnavailable" => code,
+            "communities.dataInvalid" or "communities.refreshRequired" or "communities.unavailable" or "communities.identityUnavailable" or "communities.readUnavailable" => code,
             "ships-descriptor" or "ships-page" or "ships-lookups" or "ships-identity-read" or "ships-identity-compare" or "ships-binding" or
             "ships-project" or "ships-timeout" or "communities.notAllowed" or "communities.mediaChanged" => code,
             "accepted" or "reference-expired" or "body-too-large" or "cursor-mismatch" or "invalid-response" or "account-changed" => code,

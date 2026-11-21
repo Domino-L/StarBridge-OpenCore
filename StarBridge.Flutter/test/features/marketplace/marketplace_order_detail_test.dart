@@ -178,10 +178,11 @@ void main() {
       await tester.tap(_card('O1'));
       await tester.pumpAndSettle();
       expect(find.text('订单详情'), findsOneWidget);
-      // Price, quantity and what all of it costs.
+      // Price and what is left; no "全部总价" cell (user 11-14 "a").
       expect(find.text('¤ 1,000,000'), findsOneWidget);
-      expect(find.text('×3'), findsWidgets);
-      expect(find.text('¤ 300万'), findsOneWidget);
+      expect(find.text('3 件'), findsOneWidget);
+      expect(find.text('全部总价'), findsNothing);
+      expect(find.text('¤ 300万'), findsNothing);
       // Against the market: the lowest ask and the recent average.
       expect(find.text('当前最低卖价'), findsOneWidget);
       expect(find.text('¤ 950,000'), findsOneWidget);
@@ -215,6 +216,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('清单内容'), findsOneWidget);
       expect(find.text('实准 枪口补偿器 3'), findsOneWidget);
+      // Per-set price and sets left; no "全部总价" (user 11-14 "a").
+      expect(find.text('每套价格'), findsOneWidget);
+      expect(find.text('3 套'), findsOneWidget);
+      expect(find.text('全部总价'), findsNothing);
       expect(find.text('行情对比'), findsNothing);
       expect(port.operations, isNot(contains('offers')));
       await tester.tap(find.byKey(const Key('market-order-close')));

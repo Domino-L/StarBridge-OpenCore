@@ -65,9 +65,9 @@ class _Fixture {
         layoutChanges++;
         module.updateLayoutItem(item, coalesce: coalesce);
       },
-      onEventNotificationPlacement: (side, y) {
+      onEventNotificationPlacement: (side, y, {x}) {
         placements.add((side, y));
-        module.updateEventNotificationPlacement(side, y);
+        module.updateEventNotificationPlacement(side, y, x: x);
       },
       onEventNotificationGestureStart: () {
         starts++;
@@ -183,7 +183,9 @@ void main() {
           final saved = f.module.projection.value.snapshot;
           final originalSettings = f.module.projection.value.settings;
           final commands = f.port.runtimeCalls.length;
-          final draggable = mode == 'draggable';
+          // the settings page's small preview (selectionOnly) drags like the
+          // full-screen editor (11-13 user); only a locked layout does not
+          final draggable = mode != 'locked';
           try {
             await _mount(t, f, suite);
             expect(_hint, findsOneWidget);

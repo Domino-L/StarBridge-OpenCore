@@ -10,6 +10,7 @@ import 'marketplace_port.dart';
 import 'marketplace_quality.dart';
 import 'marketplace_quality_copy.dart';
 import 'marketplace_widgets.dart' show MarketPrice, marketMoney;
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// The hall's tier colours: 极品 is foil (this colour only outlines it),
 /// 极佳 gold, 良好 cyan, the rest secondary text.
@@ -144,7 +145,7 @@ class MarketTierLadder extends StatelessWidget {
                               : marketMoney(quote.lowest),
                           style: quote.lowest == null ? small : mono,
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                         ),
                       ),
@@ -184,7 +185,7 @@ class MarketTierLadder extends StatelessWidget {
                       '${marketMoney(quote.bestPrice)} · ${quote.bestQuality?.round() ?? '—'}${quote.bestPerPoint == null ? '' : ' · ${_perPoint(context, quote.bestPerPoint!)}'}',
                       textAlign: TextAlign.right,
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(
                         fontFamily: t.typography.monoFamily,

@@ -61,7 +61,7 @@ internal static class AchievementReadContractTests
         var released = sample.RootElement.GetProperty("releasedClientProgress");
         var releasedKeys = released.GetProperty("keys").EnumerateArray().Select(key => key.GetString()!).ToHashSet();
         var maximum = released.GetProperty("maximumKeys").GetInt32();
-        foreach (var name in new[] { "empty", "withoutCities", "withCities" })
+        foreach (var name in new[] { "empty", "withoutCities", "withCities", "withStations", "withContracts" })
         {
             var expected = sample.RootElement.GetProperty(name);
             var snapshot = await Read(expected.GetRawText());
@@ -69,7 +69,12 @@ internal static class AchievementReadContractTests
             Require(snapshot.EarnedAt.Count == earned.Length && earned.All(p =>
                 snapshot.EarnedAt.TryGetValue(p.Name, out var at) && at == p.Value.GetDateTimeOffset()),
                 $"{name}: every sampled award and its time are decoded");
-            var progress = expected.GetProperty("progress").EnumerateObject().ToArray();
+            if (!expected.TryGetProperty("progress", out var progressValue))
+            {
+                Require(snapshot.Progress is null, "station markers require no new progress keys");
+                continue;
+            }
+            var progress = progressValue.EnumerateObject().ToArray();
             Require(snapshot.Progress is { } read && read.Count == progress.Length &&
                 progress.All(p => read.GetValueOrDefault(p.Name, -1) == p.Value.GetInt32()), $"{name}: progress is decoded");
             // A released client must read every account shape that has never reported a city.
@@ -77,5 +82,12 @@ internal static class AchievementReadContractTests
                 Require(progress.Length <= maximum && progress.All(p => releasedKeys.Contains(p.Name)),
                     $"{name}: the sample stays inside the released client's rule");
         }
+        foreach (var key in new[] { "journey-levski", "journey-pyro-majors", "journey-pyro-all", "journey-grimhex", "journey-station-rr-p2-l4", "contract-tsg-swift" })
+        {
+            var body = JsonSerializer.Serialize(new { schemaVersion = 1, earnedAt = new Dictionary<string, string>(), progress = new Dictionary<string, int> { [key] = 1 } });
+            try { await Read(body); throw new Exception("new progress key admitted: " + key); }
+            catch (InvalidDataException) { }
+        }
+        Console.WriteLine("PASS achievement read contract: 5 samples and 6 rejected progress keys");
     }
 }

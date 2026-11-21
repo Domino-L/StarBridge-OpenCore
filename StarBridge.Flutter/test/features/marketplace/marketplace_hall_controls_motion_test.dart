@@ -57,8 +57,9 @@ void main() {
         );
       }
       for (final (side, rect) in [
-        (1, const Rect.fromLTRB(990.4, 1018.5, 1034.9, 1043.5)),
-        (0, const Rect.fromLTRB(1038.9, 1018.5, 1083.4, 1043.5)),
+        // MK10 (m99): side chips say 单件出售 / 单件求购, so they are wider.
+        (1, const Rect.fromLTRB(941.4, 1018.5, 1010.4, 1043.5)),
+        (0, const Rect.fromLTRB(1014.4, 1018.5, 1083.4, 1043.5)),
         (2, const Rect.fromLTRB(1087.4, 1018.5, 1156.4, 1043.5)),
       ]) {
         expect(tester.getRect(_side(side)), within(distance: .001, from: rect));
@@ -91,7 +92,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       final c = await _hall(tester, suite);
       try {
-        activate(tester, namedButton(tester, '求购'));
+        activate(tester, namedButton(tester, '单件求购'));
         await tester.pumpAndSettle();
         expect(c.side, 0);
         await tester.tap(_side(2));
@@ -108,10 +109,10 @@ void main() {
             reason: 'no filter reads as selected once cleared',
           );
         }
-        activate(tester, namedButton(tester, '出售'));
+        activate(tester, namedButton(tester, '单件出售'));
         await tester.pumpAndSettle();
         expect(c.side, 1);
-        activate(tester, namedButton(tester, '出售'));
+        activate(tester, namedButton(tester, '单件出售'));
         await tester.pumpAndSettle();
         expect(
           c.side,

@@ -103,7 +103,9 @@ mixin CommunityBridgeCommunication on CommunityBridgeTransport
 
   @override
   bool get invitationSendingAvailable =>
-      !isClosed && session.hostCapabilities.contains('communities.sendInvite');
+      !isClosed &&
+      // Relay r49 serves invitation delivery to SCM accounts too.
+      session.hostCapabilities.contains('communities.sendInvite');
 
   @override
   Future<List<CommunityInvitationOperation>> readInvitationOutbox() =>

@@ -134,6 +134,8 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
                   const SizedBox(height: 16),
                   if (preview.isExample)
                     Text(t('example'))
+                  else if (preview.scmRevalidation)
+                    Text(t('scmRevalidation'))
                   else ...[
                     StarBridgeFieldFrame(
                       builder: (_, focus) => TextField(
@@ -211,7 +213,9 @@ class _CommunityDisbandDialogState extends State<CommunityDisbandDialog> {
               tone: ActionTone.danger,
               onActivate:
                   model.canConfirm &&
-                      (preview.isExample || password.text.trim().isNotEmpty)
+                      (preview.isExample ||
+                          preview.scmRevalidation ||
+                          password.text.trim().isNotEmpty)
                   ? (_) => _confirm()
                   : null,
               child: Text(t('action')),

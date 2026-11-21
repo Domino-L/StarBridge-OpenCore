@@ -61,7 +61,9 @@ class _LocalNotificationListenerState extends State<LocalNotificationListener>
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (!mounted ||
         event == null ||
-        event.overlayHandled ||
+        // 0.7.3: a room invite is a reminder card even when the overlay showed
+        // it in game; other kinds still stop at the overlay.
+        (event.overlayHandled && event.kind != 'room') ||
         ((event.kind == 'direct' || event.kind == 'friend') &&
             widget.menuOwnsNotices?.call() == true) ||
         !projection.canEdit ||

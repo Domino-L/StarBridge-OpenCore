@@ -498,6 +498,7 @@ class StaleReceiptFixture extends SharingFixture {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async => PrivacyPublicationView('applied', revision: (revision ?? 1) - 1);
 }
 
@@ -506,5 +507,6 @@ class CurrentReceiptFixture extends SharingFixture {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async => PrivacyPublicationView('applied', revision: this.revision);
 }

@@ -1,3 +1,4 @@
+import 'leaderboard_strings.dart';
 import 'menu_overlay_strings.dart';
 import 'room_tag_strings.dart';
 import 'community_tag_strings.dart';
@@ -17,6 +18,7 @@ import 'privacy_scope_settings_strings.dart';
 import 'legacy_migration_strings.dart';
 import 'local_profile_strings.dart';
 import 'startup_strings.dart';
+import 'account_migration_strings.dart';
 import 'gameplay_time_strings.dart';
 import 'game_log_strings.dart';
 import 'help_support_strings.dart';
@@ -26,16 +28,25 @@ import 'handle_mismatch_strings.dart';
 import 'game_identity_strings.dart';
 import 'achievements_strings.dart';
 import 'exec_hangar_strings.dart';
+import 'key_bindings_strings.dart';
+import 'catalog_strings.dart';
+import 'mission_records_strings.dart';
+import 'terminal_strings.dart';
 
 const traditionalAppStrings = <String, String>{
+  ...leaderboardZhTw,
   ...menuOverlayZhTw,
   'account.error.compatibilityProofRejected': '關聯證明無效或已過期，請重新發起帳號關聯。',
   'account.legacyLogin.retired': '此舊帳號已遷入 SCM，請使用 SCM 帳號登入。',
   ...execHangarZhTw,
+  ...keyBindingsZhTw,
+  ...catalogZhTw,
+  ...missionRecordsZhTw,
+  ...terminalZhTw,
   ...achievementsZhTw,
   ...handleMismatchZhTw,
   ...gameIdentityZhTw,
-  'app.name': '星海艦橋',
+  'app.name': 'SCM 星海艦橋',
   'navigation.home': '首頁',
   'navigation.home.description': '目前態勢與下一步',
   'navigation.rooms': '房間',
@@ -102,6 +113,7 @@ const traditionalAppStrings = <String, String>{
   ...traditionalLocalProfileStrings,
   ...traditionalStartupStrings,
   ...gameplayTimeZhTw,
+  ...accountMigrationZhTw,
   ...gameLogZhTw,
   ...helpSupportZhTw,
   ...overlaySettingsZhTw,
@@ -267,11 +279,14 @@ const traditionalAppStrings = <String, String>{
   'account.error.directoryUnavailable': '暫時無法讀取 SCM 時區目錄，資料沒有被修改。',
   'account.error.invalidResponse': '本機帳號服務傳回不相容的資料，已安全停止處理。',
   'account.error.writeRejected': '目前資料變更不合法，未傳送。',
+  'account.error.localMode': '現在是本機模式，無法登入。',
   'account.error.unavailable': '帳號資料暫時無法使用，請稍後重試。',
   'account.error.compatibilityUnavailable': '暫時無法讀取舊資料相容狀態。',
   'account.error.compatibilityWriteUnavailable': '暫時無法完成舊資料相容操作，未知結果沒有被當成成功。',
-  'account.error.legacyProofUnavailable': '舊帳號驗證服務暫時無法使用（503），本次未提交關聯。SCM 登入保持不變；請稍後重試，若持續出現請聯絡支援。',
-  'account.error.compatibilityConflict': '該 SCM 帳號或舊帳號已存在其他關聯，無法關聯。請使用原已關聯帳號登入。',
+  'account.error.legacyProofUnavailable':
+      '舊帳號驗證服務暫時無法使用（503），本次未提交關聯。SCM 登入保持不變；請稍後重試，若持續出現請聯絡支援。',
+  'account.error.compatibilityConflict':
+      '該 SCM 帳號或舊帳號已存在其他關聯，無法關聯。請使用原已關聯帳號登入。',
   'account.error.compatibilityExistingLinkMismatch':
       '目前 SCM 帳號已有不同的舊帳號關聯，請先核對帳號。',
   'account.error.legacyCredentialsRequired': '沒有可用的遷移憑證，請輸入舊帳號名稱或電子郵件和密碼。',

@@ -14,16 +14,19 @@ import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_listings_controller.dart';
 import 'marketplace_listing_errors.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_listing_copy.dart';
+import 'marketplace_listing_manifest.dart';
 import 'marketplace_details.dart';
 import 'marketplace_port.dart';
-import 'marketplace_surfaces.dart';
 import 'marketplace_widgets.dart';
 import 'marketplace_trade_style.dart';
 
 import 'marketplace_listing_publish_widgets.dart';
 import 'marketplace_listing_components.dart';
 import 'marketplace_listing_item_picker.dart';
+import 'marketplace_listing_quantity.dart';
+import 'marketplace_listing_barter.dart';
 import 'marketplace_quality_widgets.dart' show marketTierPriceDelta;
 
 class ListingPublishDialog extends StatefulWidget {
@@ -31,32 +34,26 @@ class ListingPublishDialog extends StatefulWidget {
     this.c,
     this.draft, {
     this.initialStep = 0,
+    this.initialError,
     this.editProfile,
+    this.manageListings,
     super.key,
   });
   final MarketplaceListingsController c;
   final ListingDraft draft;
   final int initialStep;
+  final String? initialError;
   final VoidCallback? editProfile;
+  final VoidCallback? manageListings;
   @override
   State<ListingPublishDialog> createState() => _PublishState();
 }
-
-/// Quantity − / + read as part of the field: no fill or outline of their own.
-const _stepperStyle = ButtonStyle(
-  backgroundColor: WidgetStatePropertyAll(Colors.transparent),
-  side: WidgetStatePropertyAll(BorderSide.none),
-  shape: WidgetStatePropertyAll(
-    RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(4))),
-  ),
-  visualDensity: VisualDensity.compact,
-);
 
 class _PublishState extends State<ListingPublishDialog> {
   late int step = widget.initialStep;
   late bool manifestForm = d.manifestId != null;
 
-  String? error;
+  late String? error = widget.initialError;
   late final quantityInput = TextEditingController(text: d.quantity);
   @override
   void initState() {
@@ -70,10 +67,6 @@ class _PublishState extends State<ListingPublishDialog> {
     super.dispose();
   }
 
-  void adjustQuantity(int value) => setState(() {
-    d.quantity = '$value';
-    quantityInput.text = d.quantity;
-  });
   // The wizard owns the draft it opened with. Dialog routes may rebuild their
   // builder (suite/theme relays), handing over a fresh draft object; adopting
   // it would silently drop the user's picks.
@@ -93,8 +86,9 @@ class _PublishState extends State<ListingPublishDialog> {
     listenable: widget.c,
     builder: (context, _) {
       final c = widget.c,
-          full =
-              widget.c.limit != null && widget.c.rows.length >= widget.c.limit!;
+          // SCM counts every undeleted order against the limit, whatever its
+          // type or visibility, so any new listing is refused once full.
+          full = c.capacityFull;
       final t = context.tokens;
       final sideColor = listingSideColor(context, d.side);
       return PopScope(
@@ -174,7 +168,8 @@ class _PublishState extends State<ListingPublishDialog> {
                         else if (step == 2)
                           ..._priceStep(c)
                         else
-                          ..._confirmStep(c),
+                          ...listingPublishReview(context, c, d, itemName),
+                        if (marketplaceNeedsLogin(c.errorCode)) MarketplaceAuthNotice(c.errorCode, login: c.login),
                         if (error != null || c.error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 12),
@@ -234,9 +229,9 @@ class _PublishState extends State<ListingPublishDialog> {
                                         ),
                                       )
                                     : tradePrimaryStyle(context),
-                                onPressed: c.pending
+                                onPressed: c.pending || c.loading
                                     ? null
-                                    : () => _next(c, full),
+                                    : c.writeUncertain ? () => _inspect(c) : () => _next(c, full),
                                 child: c.pending
                                     ? Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -252,7 +247,7 @@ class _PublishState extends State<ListingPublishDialog> {
                                         ],
                                       )
                                     : Text(
-                                        listingText(
+                                        c.writeUncertain ? recoveryText(context, '刷新核对') : listingText(
                                           context,
                                           full
                                             ? '管理挂单'
@@ -277,12 +272,21 @@ class _PublishState extends State<ListingPublishDialog> {
     },
   );
 
+  // A checked readback closes the wizard instead of re-arming 发布: the
+  // listing may already exist, and the hall's strip re-reads on close
+  // (CX-HALL-FIX2-REVIEW P1).
+  Future<void> _inspect(MarketplaceListingsController c) async {
+    await c.inspectUncertainWrite();
+    if (mounted && !c.writeUncertain) Navigator.pop(context);
+  }
+
   Future<void> _next(MarketplaceListingsController c, bool full) async {
     if (full) {
       dismissStarBridgeDialog<void>(
         context,
         source: StarBridgeActivationOrigin.sourceOf(context),
       );
+      widget.manageListings?.call();
       return;
     }
     if (step == 0 && manifestForm && d.manifestId == null) {
@@ -291,6 +295,10 @@ class _PublishState extends State<ListingPublishDialog> {
     }
     if (step == 1 && d.item['id'] == null && d.manifestId == null) {
       setState(() => error = '请选择物品');
+      return;
+    }
+    if (c.manifestPriceError(d) case final message?) {
+      setState(() => error = message);
       return;
     }
     if (step >= 2 && d.validation != null) {
@@ -353,15 +361,28 @@ class _PublishState extends State<ListingPublishDialog> {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: ListingOptionCard(
-            glyph: MarketplaceGlyph.checklist,
-            title: listingText(context, '清单'),
-            description: listingText(context, '从我的清单里一次发布多件'),
-            accent: listingSideColor(context, d.side),
-            selected: manifestForm,
-            onTap: c.manifests.isEmpty
-                ? null
-                : () => setState(() => manifestForm = true),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListingOptionCard(
+                glyph: MarketplaceGlyph.checklist,
+                title: listingText(context, '清单'),
+                description: listingText(context, '从我的清单里一次发布多件'),
+                accent: listingSideColor(context, d.side),
+                selected: manifestForm,
+                onTap: c.loading || c.manifests.isEmpty
+                    ? null
+                    : () => setState(() => manifestForm = true),
+              ),
+              if (c.loading || c.manifests.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    listingText(context, c.loading ? '正在读取清单…' : '还没有清单，请先在 SCM 创建'),
+                    style: TextStyle(fontSize: 12, color: context.tokens.colors.textSecondary),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
@@ -381,6 +402,7 @@ class _PublishState extends State<ListingPublishDialog> {
             onTap: () => setState(() {
               d.manifestId = r['id'];
               d.item = {'name': r['name']};
+              d.quality = '';
             }),
           ),
         ),
@@ -392,7 +414,8 @@ class _PublishState extends State<ListingPublishDialog> {
       ListingItemPicker(c, d, onPicked: () => setState(() {})),
       if (d.item['hasQuality'] == true) ...[
         const SizedBox(height: 6),
-        const ListingLabel('品质（这件物品有制造品质）'),
+        // A buy order names the least quality it accepts (user 2026-11-07).
+        ListingLabel(d.side == 'buy' ? '最低品质（低于这个品质的不要）' : '品质（这件物品有制造品质）'),
         Row(
           children: [
             SizedBox(
@@ -419,6 +442,7 @@ class _PublishState extends State<ListingPublishDialog> {
   }
 
   Widget? _priceDelta(MarketplaceListingsController c) {
+    if (d.manifestId != null) return null;
     final price = d.amount;
     if (price == null ||
         price < 0 ||
@@ -458,7 +482,7 @@ class _PublishState extends State<ListingPublishDialog> {
 
   List<Widget> _priceStep(MarketplaceListingsController c) {
     final t = context.tokens;
-    final price = d.amount;
+    final price = c.priceFor(d);
     final qty = int.tryParse(d.quantity);
     final delta = _priceDelta(c);
     return [
@@ -469,11 +493,12 @@ class _PublishState extends State<ListingPublishDialog> {
           context,
           {'sell': '出售', 'buy': '求购', 'barter': '以物易物'}[d.side]!,
         ),
-        quality: num.tryParse(d.quality),
+        quality: d.manifestId == null ? num.tryParse(d.quality) : null,
+        side: d.side,
         selected: true,
       ),
       const SizedBox(height: 10),
-      Container(
+      if (d.manifestId == null) Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
           color: t.surfaces.raised.fill,
@@ -501,29 +526,13 @@ class _PublishState extends State<ListingPublishDialog> {
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
+          if (d.manifestId == null || d.side == 'barter') Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ListingLabel(d.side == 'barter' ? '想要的物品' : '单价（UEC）'),
                 if (d.side == 'barter')
-                  StarBridgeSelectFormField<String>(
-                    identity: 'market-publish-wanted',
-                    controlKey: const Key('market-publish-wanted'),
-                    isDense: true,
-                    style: Theme.of(context).textTheme.bodyMedium
-                        ?.copyWith(color: context.tokens.colors.textPrimary),
-                    initialValue: d.wanted.isEmpty ? null : d.wanted,
-                    decoration: listingInputDecoration(context),
-                    items: [
-                      for (final r in c.items)
-                        DropdownMenuItem(
-                          value: '${r['id']}',
-                          child: Text('${r['name']}'),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => d.wanted = v!),
-                  )
+                  ListingBarterFields(c, d, onChanged: () => setState(() {}))
                 else
                   TextFormField(
                     initialValue: d.price,
@@ -546,60 +555,9 @@ class _PublishState extends State<ListingPublishDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const ListingLabel('数量'),
-                TextFormField(
-                  key: const ValueKey('publish-quantity'),
-                  controller: quantityInput,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(
-                    fontFamily: t.typography.monoFamily,
-                    fontSize: 15,
-                  ),
-                  textAlign: TextAlign.center,
-                  decoration: listingInputDecoration(context).copyWith(
-                    // − and + read as part of the field: no own fill, a
-                    // hairline between them and the number.
-                    prefixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        StarBridgeNativeIconAction(
-                          controlKey: const Key('market-publish-qty-dec'),
-                          label: listingText(context, '减少数量'),
-                          style: _stepperStyle,
-                          onActivate: qty == null || qty <= 1
-                              ? null
-                              : (_) => adjustQuantity(qty - 1),
-                          icon: const MarketplaceIcon(
-                            MarketplaceGlyph.remove,
-                            size: 16,
-                          ),
-                        ),
-                        Container(width: 1, height: 18, color: t.surfaces.panel.border),
-                      ],
-                    ),
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(width: 1, height: 18, color: t.surfaces.panel.border),
-                        StarBridgeNativeIconAction(
-                          controlKey: const Key('market-publish-qty-inc'),
-                          label: listingText(context, '增加数量'),
-                          style: _stepperStyle,
-                          onActivate: qty == null || qty >= 999999
-                              ? null
-                              : (_) => adjustQuantity(qty + 1),
-                          icon: const MarketplaceIcon(
-                            MarketplaceGlyph.add,
-                            size: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                    prefixIconConstraints: const BoxConstraints(minWidth: 32),
-                    suffixIconConstraints: const BoxConstraints(minWidth: 32),
-                  ),
-                  onChanged: (v) => setState(() => d.quantity = v),
-                ),
+                ListingLabel(d.side == 'barter' ? '可以交易几次' : d.manifestId == null ? '数量' : '份数'),
+                ListingQuantityField(input: quantityInput, identity: 'publish-quantity',
+                  onChanged: (v) => setState(() => d.quantity = v)),
               ],
             ),
           ),
@@ -712,7 +670,7 @@ class _PublishState extends State<ListingPublishDialog> {
               key: const Key('market-publish-profile'),
               onPressed: widget.editProfile,
               child: Text(
-                listingText(context, c.tradeProfile != null ? '修改' : '打开 SCM'),
+                listingText(context, '设置交易时段'),
               ),
             ),
           ],
@@ -728,55 +686,6 @@ class _PublishState extends State<ListingPublishDialog> {
         rowBuilder: (control) =>
             Row(children: [control, Text(listingText(context, '发布后立即上架'))]),
       ),
-    ];
-  }
-
-  List<Widget> _confirmStep(MarketplaceListingsController c) {
-    final rows = listingConfirmRows(context, c, d, itemName);
-    return [
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          border: Border.all(color: marketLine(context)),
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Column(
-          children: [
-            for (final (i, (label, value)) in rows.indexed)
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  border: i == 0
-                      ? null
-                      : Border(top: BorderSide(color: marketLine(context))),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: context.tokens.colors.textSecondary,
-                      ),
-                    ),
-                    const Spacer(),
-                    Flexible(
-                      child: Text(
-                        value,
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-      if (c.error == null) ...[
-        const SizedBox(height: 12),
-        TradeNoticeBox(listingPublishNotice(context, d)),
-      ],
     ];
   }
 }

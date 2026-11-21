@@ -27,6 +27,7 @@ class Fake implements NotificationSourcesPort {
   var value = BridgeNotificationSources.parse(data());
   int writes = 0, reads = 0;
   bool fail = false;
+  Object? saveFailure;
   @override
   Stream<void> get invalidations => changes.stream;
   @override
@@ -41,6 +42,7 @@ class Fake implements NotificationSourcesPort {
     Map<String, NotificationSourceMode> modes,
   ) async {
     writes++;
+    if (saveFailure != null) throw saveFailure!;
     if (fail) throw StateError('unconfirmed');
     return value = NotificationSourcesValue(original.revision + 1, [
       for (final source in original.sources)
@@ -434,5 +436,46 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     port.dispose();
+  });
+  testWidgets('save_failed retains editable source draft for another save', (
+    tester,
+  ) async {
+    viewport(tester, const Size(1280, 1000));
+    final port = Fake()
+      ..saveFailure = const BridgeRemoteException(
+        'notificationPolicies.save_failed',
+      );
+    addTearDown(port.dispose);
+    await tester.pumpWidget(
+      app(
+        NotificationEditorFrame(
+          owner: port,
+          child: SingleChildScrollView(
+            child: NotificationSourcesConnectedPanel(port: port),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    SegmentedButton<NotificationSourceMode> modes() =>
+        tester.widget(find.byKey(const Key('notification-source-mode-room')));
+    modes().onSelectionChanged!({NotificationSourceMode.doNotDisturb});
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('notification-save')));
+    await tester.pumpAndSettle();
+    expect(port.writes, 1);
+    expect(port.value.modes['room'], NotificationSourceMode.normal);
+    expect(modes().selected, {NotificationSourceMode.doNotDisturb});
+    expect(modes().onSelectionChanged, isNotNull);
+    modes().onSelectionChanged!({NotificationSourceMode.importantOnly});
+    await tester.pumpAndSettle();
+    expect(port.writes, 1);
+    port.saveFailure = null;
+    await tester.tap(find.byKey(const Key('notification-save')));
+    await tester.pumpAndSettle();
+    expect(port.writes, 2);
+    expect(port.value.modes['room'], NotificationSourceMode.importantOnly);
+    expect(port.reads, 1);
+    expect(tester.takeException(), isNull);
   });
 }

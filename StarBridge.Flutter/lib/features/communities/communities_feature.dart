@@ -1,4 +1,5 @@
 import '../../app/feature_registry.dart';
+import '../../design_system/surfaces/light_visual_shadow_scope.dart';
 import 'communities_module.dart';
 import 'communities_page.dart';
 import 'community_shortcuts.dart';
@@ -6,6 +7,7 @@ import '../settings/bridge_notification_sources.dart';
 import '../settings/local_privacy_controller.dart';
 import '../settings/local_privacy_port.dart';
 import '../settings/organization_personal_settings.dart';
+import '../settings/organization_notification_leave_guard.dart';
 
 final communitiesFeature = createCommunitiesFeature();
 FeatureDescriptor createCommunitiesFeature({
@@ -25,7 +27,10 @@ FeatureDescriptor createCommunitiesFeature({
   onPrimaryNavigation: module?.openDiscovery,
   prefetch: module?.prefetch,
   primaryNavigationSelected: module?.primaryNavigationSelected,
-  confirmLeave: module == null ? null : (_) => module.confirmLeave(),
+  confirmLeave: (_) async {
+    if (!await confirmOrganizationNotificationLeave()) return false;
+    return await module?.confirmLeave() ?? true;
+  },
   buildNavigationPanel: module == null
       ? null
       : (context, iconOnly, selected, activate) => CommunityShortcuts(
@@ -37,10 +42,14 @@ FeatureDescriptor createCommunitiesFeature({
   buildDestination: (_) => OrganizationPersonalSettings(
     privacy: privacy,
     notificationSources: notificationSources,
-    child: CommunitiesPage(
-      createPort: createPort ?? UnavailableCommunities.new,
-      module: module,
-      createAdmissionPrivacy: createAdmissionPrivacy,
+    // While a game runs (performance mode), fading names are cut with an
+    // ellipsis and tooltips drop their shadow, as on the fleet and trading hall.
+    child: LightVisualShadowScope(
+      child: CommunitiesPage(
+        createPort: createPort ?? UnavailableCommunities.new,
+        module: module,
+        createAdmissionPrivacy: createAdmissionPrivacy,
+      ),
     ),
   ),
 );

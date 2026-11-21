@@ -19,6 +19,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
     private readonly Lazy<string?> _initialLocale;
     private readonly Lazy<ApplicationPreferencesSnapshot> _initialPresentation;
     public string CurrentAppearanceMode => Volatile.Read(ref _current)?.Snapshot.AppearanceMode ?? _initialPresentation.Value.AppearanceMode;
+    // The health reader polls this; it only ever reads the committed snapshot.
+    public bool CurrentReadOwnHealth => Volatile.Read(ref _current)?.Snapshot.ReadOwnHealth ?? _initialPresentation.Value.ReadOwnHealth;
+    public bool CurrentReadOwnHealthInBackground => Volatile.Read(ref _current)?.Snapshot.ReadOwnHealthInBackground ?? _initialPresentation.Value.ReadOwnHealthInBackground;
     public bool CurrentReduceMotion => (Volatile.Read(ref _current)?.Snapshot.MotionPreference ?? _initialPresentation.Value.MotionPreference) == "reduce";
 
     // Native presentation reads the committed immutable snapshot, never a Flutter
@@ -229,6 +232,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
             "interactionStyle",
             "appearancePreviewGuideSeen",
             "holidayAppearance",
+            "performanceMode",
+            "readOwnHealth",
+            "readOwnHealthInBackground",
             "applicationBehavior");
         if (!patch.EnumerateObject().Any())
         {
@@ -293,6 +299,23 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
                 ApplicationPreferencesStableErrors.StartupRegistrationFailed,
                 "Windows startup registration could not be synchronized.",
                 retryable: true);
+        }
+
+        if (loaded.MigrationPending)
+        {
+            // One atomic write carries both the migrated style and the
+            // "migration done" flag. If it fails the file stays as it was, the
+            // migrated value is still used in memory, and the next save (or
+            // next start) writes it.
+            try
+            {
+                _store.Save(loaded.Snapshot);
+            }
+            catch (ApplicationPreferencesException)
+            {
+            }
+
+            loaded = loaded with { MigrationPending = false };
         }
 
         Volatile.Write(ref _current, loaded);
@@ -361,10 +384,20 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
             MotionPreference = motionPreference,
             InteractionStyle = patch.TryGetProperty("interactionStyle", out var interactionValue)
                 ? RequireNonEmptyString(interactionValue, "interactionStyle") : current.InteractionStyle,
+            // Only the settings choice sends interactionStyle; from then on the
+            // user's pick (including "standard") is never migrated.
+            InteractionStyleChoiceMade = current.InteractionStyleChoiceMade ||
+                                         patch.TryGetProperty("interactionStyle", out _),
             AppearancePreviewGuideSeen = patch.TryGetProperty("appearancePreviewGuideSeen", out _)
                 ? RequireBoolean(patch, "appearancePreviewGuideSeen") : current.AppearancePreviewGuideSeen,
             HolidayAppearance = patch.TryGetProperty("holidayAppearance", out _)
                 ? RequireBoolean(patch, "holidayAppearance") : current.HolidayAppearance,
+            PerformanceMode = patch.TryGetProperty("performanceMode", out _)
+                ? RequireBoolean(patch, "performanceMode") : current.PerformanceMode,
+            ReadOwnHealth = patch.TryGetProperty("readOwnHealth", out _)
+                ? RequireBoolean(patch, "readOwnHealth") : current.ReadOwnHealth,
+            ReadOwnHealthInBackground = patch.TryGetProperty("readOwnHealthInBackground", out _)
+                ? RequireBoolean(patch, "readOwnHealthInBackground") : current.ReadOwnHealthInBackground,
             LaunchAtStartup = launchAtStartup,
             KeepRunningInBackground = keepRunningInBackground,
             StartMinimized = startMinimized,
@@ -392,6 +425,9 @@ public sealed class ApplicationPreferencesBridgeDispatcher : IBridgeRequestDispa
                     ["interactionStyle"] = result.Snapshot.InteractionStyle,
                     ["appearancePreviewGuideSeen"] = result.Snapshot.AppearancePreviewGuideSeen,
                     ["holidayAppearance"] = result.Snapshot.HolidayAppearance,
+                    ["performanceMode"] = result.Snapshot.PerformanceMode,
+                    ["readOwnHealth"] = result.Snapshot.ReadOwnHealth,
+                    ["readOwnHealthInBackground"] = result.Snapshot.ReadOwnHealthInBackground,
                     ["applicationBehavior"] = new Dictionary<string, object?>
                     {
                         ["launchAtStartup"] = result.Snapshot.LaunchAtStartup,

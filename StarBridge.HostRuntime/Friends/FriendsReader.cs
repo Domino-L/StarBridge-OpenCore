@@ -6,7 +6,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.PartyRooms;
-using StarBridge.Core.Friends;
 
 // A scoped projection: internal account IDs, presence and raw URLs never cross the bridge.
 internal sealed record FriendView(string Callsign, string GameId, string Relationship,
@@ -23,13 +22,13 @@ internal sealed record FriendView(string Callsign, string GameId, string Relatio
     public string? ConversationKey { get; init; }
     public string? ChatTargetRef { get; init; }
     public string[] Actions { get; init; } = [];
-    public FriendSharedView? Shared { get; init; }
+    public FriendSharedWire? Shared { get; init; }
     public FriendSharedLabels? SharedLabels => FriendSharedLabels.From(Shared);
 }
 internal sealed record FriendDisplayNames(string En, string? ZhHans, string? ZhHant = null);
 internal sealed record FriendSharedLabels(FriendDisplayNames? Ship, FriendDisplayNames? Location)
 {
-    internal static FriendSharedLabels? From(FriendSharedView? shared)
+    internal static FriendSharedLabels? From(FriendSharedWire? shared)
     {
         if (shared is null) return null;
         var ship = string.IsNullOrWhiteSpace(shared.Ship) ? null : Presence.GameLogSessionTracker.FindSharedShipName(shared.Ship);
@@ -69,6 +68,7 @@ internal sealed partial class FriendsReader : IDisposable
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
         }) { Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
         if (realtime) RealtimeClient = new StarBridge.HostRuntime.Realtime.RelayRealtimeClient(origin, handler);
     }
 
@@ -106,6 +106,7 @@ internal sealed partial class FriendsReader : IDisposable
             "/api/friends/search?includePresence=false&q=" + Uri.EscapeDataString(query);
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        if (query is null) Support.LastOnlineDays.Apply(request);
         var probePhase = FriendsProbePhase.RelayHttp;
         var probeStatus = 0;
         try
@@ -206,14 +207,20 @@ internal sealed partial class FriendsReader : IDisposable
                 ? Text(user, "presence", 64) : null;
     }
 
-    private static FriendSharedView? ParseShared(JsonElement user)
+    private static FriendSharedWire? ParseShared(JsonElement user)
     {
         if (!user.TryGetProperty("shared", out var value) || value.ValueKind == JsonValueKind.Null) return null;
-        var shared = value.Deserialize<FriendSharedView>(Privacy.LocalPrivacyStore.Json) ?? throw Invalid();
-        if (shared.Presence is not (null or "AppOnline" or "InGame" or "Away" or "Offline") ||
+        var shared = value.Deserialize<FriendSharedWire>(Privacy.LocalPrivacyStore.Json) ?? throw Invalid();
+        var hour = Support.LastOnlineDays.ParseHour(shared.LastOnlineHour);
+        if (shared.LastOnlineDays is not null || shared.LastOnlineHour is not null && hour is null ||
+            shared.Presence is not (null or "AppOnline" or "InGame" or "Away" or "Offline") ||
             new[] { shared.ServerId, shared.ServerRegion, shared.Ship, shared.Location }.Any(v => v is not null && (v.Length > 512 || v.Any(char.IsControl))) ||
             shared.LastOnlineAt is { } seen && (seen <= DateTimeOffset.UnixEpoch || seen > DateTimeOffset.UtcNow.AddMinutes(1))) throw Invalid();
-        return shared;
+        // Only the local calendar day count crosses the bridge; neither the relay hour nor the precise time does.
+        // A relay that knows the hour contract (key present, even null) is authoritative: no legacy fallback.
+        var legacy = value.TryGetProperty(Support.LastOnlineDays.HourField, out _) ? null : shared.LastOnlineAt;
+        return shared with { LastOnlineHour = null, LastOnlineAt = null,
+            LastOnlineDays = Support.LastOnlineDays.Resolve(hour, legacy, DateTimeOffset.UtcNow) };
     }
     private static void RejectDuplicates(JsonElement value)
     {

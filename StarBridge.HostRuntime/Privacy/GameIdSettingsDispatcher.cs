@@ -17,7 +17,9 @@ internal sealed class GameIdSettingsDispatcher(IGameIdSettingsRemote remote, Fun
             var body = request.Payload;
             LocalPrivacyStore.RejectDuplicates(body);
             if (request.MessageType != BridgeMessageTypes.Request || body.GetRawText().Length > 1024 || body.GetProperty("schemaVersion").GetInt32() != 1) throw new JsonException();
-            GameIdSettingsSnapshot result;
+            object result;
+            bool Fields(params string[] names) => body.EnumerateObject().Count() == names.Length &&
+                body.EnumerateObject().All(p => names.Contains(p.Name));
             if (request.Name == "gameIdVisibility.read" && body.EnumerateObject().Count() == 1)
                 result = await remote.ReadGameIdAsync(owner.Context, owner.Generation, token);
             else if (request.Name == "gameIdVisibility.save" && body.EnumerateObject().Count() == 4 &&
@@ -28,6 +30,23 @@ internal sealed class GameIdSettingsDispatcher(IGameIdSettingsRemote remote, Fun
                 var locations = body.GetProperty("locations").GetInt32();
                 if (revision < 0 || revision == long.MaxValue || locations is < 0 or > 15 || stamp is not { Length: 64 } || stamp.Any(c => !char.IsAsciiHexDigit(c))) throw new JsonException();
                 result = await remote.SaveGameIdAsync(owner.Context, owner.Generation, revision, stamp, locations, token);
+            }
+            else if (request.Name == "gameIdVisibility.saveCallsign" && Fields("schemaVersion", "expectedRevision", "identityStamp", "callsign"))
+            {
+                var revision = body.GetProperty("expectedRevision").GetInt64();
+                var stamp = body.GetProperty("identityStamp").GetString();
+                var callsign = body.GetProperty("callsign");
+                if (revision < 0 || revision == long.MaxValue || stamp is not { Length: 64 } || stamp.Any(c => !char.IsAsciiHexDigit(c)) ||
+                    callsign.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) throw new JsonException();
+                result = await remote.SaveDisplayCallsignAsync(owner.Context, owner.Generation, revision, stamp,
+                    callsign.ValueKind == JsonValueKind.Null ? null : callsign.GetString(), token);
+            }
+            else if (request.Name == "gameIdVisibility.retrySync" && (Fields("schemaVersion") || Fields("schemaVersion", "automatic")))
+            {
+                // Automatic retries (the card's own timer) respect the restore cooldown.
+                var automatic = body.TryGetProperty("automatic", out var flag) &&
+                    (flag.ValueKind is JsonValueKind.True or JsonValueKind.False ? flag.GetBoolean() : throw new JsonException());
+                result = await remote.RetryDisplaySyncAsync(owner.Context, owner.Generation, automatic, token);
             }
             else throw new JsonException();
             if (owner != current()) throw new AccountBridgeHostException("gameId.account_changed");

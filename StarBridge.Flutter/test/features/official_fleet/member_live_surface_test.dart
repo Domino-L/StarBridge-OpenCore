@@ -99,33 +99,49 @@ void main() {
       await tester.pumpAndSettle();
       final otherRow = find.byKey(const ValueKey('member-row-other'));
       final original = tester.widget<OrganizationMemberRow>(otherRow);
-      expect(find.text('游戏中 0 · 在线 1'), findsOneWidget);
+      // The unchanged other pilot is away and remains part of the online total.
+      expect(find.text('游戏中 0 · 在线 1 · 暂离 1'), findsOneWidget);
+      expect(module.projection.value.visibleOnlineCount, 2);
       final cardAvatars = find.descendant(
         of: find.byKey(const Key('official-fleet-tile-members')),
         matching: find.byType(EmbeddedAvatar),
       );
-      expect(cardAvatars, findsOneWidget);
+      expect(cardAvatars, findsNWidgets(2));
+      final cardAwayLabels = find.descendant(
+        of: find.byKey(const Key('official-fleet-tile-members')),
+        matching: find.byTooltip('Pilot · 暂离'),
+      );
+      expect(cardAwayLabels, findsOneWidget);
       local.value = const OfficialFleetSelfPresence(
         key: 'presence.away',
         sharingAllowed: true,
       );
       await tester.pumpAndSettle();
-      expect(find.text('游戏中 0 · 在线 0'), findsOneWidget);
-      expect(cardAvatars, findsNothing);
+      expect(find.text('游戏中 0 · 在线 0 · 暂离 2'), findsOneWidget);
+      expect(module.projection.value.visibleOnlineCount, 2);
+      expect(cardAvatars, findsNWidgets(2));
+      expect(cardAwayLabels, findsNWidgets(2));
       expect(tester.widget(otherRow), same(original));
       local.value = const OfficialFleetSelfPresence(
         key: 'presence.online',
         sharingAllowed: true,
       );
       await tester.pumpAndSettle();
-      expect(find.text('游戏中 0 · 在线 1'), findsOneWidget);
-      expect(cardAvatars, findsOneWidget);
+      expect(find.text('游戏中 0 · 在线 1 · 暂离 1'), findsOneWidget);
+      expect(module.projection.value.visibleOnlineCount, 2);
+      expect(cardAvatars, findsNWidgets(2));
+      expect(cardAwayLabels, findsOneWidget);
+      expect(tester.widget(otherRow), same(original));
       local.value = const OfficialFleetSelfPresence(
         key: 'presence.invisible',
         sharingAllowed: true,
       );
       await tester.pumpAndSettle();
-      expect(find.text('游戏中 0 · 在线 0'), findsOneWidget);
+      expect(find.text('游戏中 0 · 在线 0 · 暂离 1'), findsOneWidget);
+      expect(module.projection.value.visibleOnlineCount, 1);
+      expect(cardAvatars, findsOneWidget);
+      expect(cardAwayLabels, findsOneWidget);
+      expect(tester.widget(otherRow), same(original));
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -150,7 +166,10 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.byType(EmbeddedAvatar), findsNWidgets(count));
-        expect(find.text('游戏中 1 · 在线 ${count - 1}'), findsOneWidget);
+        expect(
+          find.text('游戏中 1 · 在线 ${count - 1} · 暂离 0'),
+          findsOneWidget,
+        );
       },
     );
   }

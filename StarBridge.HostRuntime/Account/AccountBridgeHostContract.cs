@@ -15,6 +15,7 @@ internal static class AccountBridgeRequestNames
     internal const string UpdateAvatar = "account.updateAvatar";
     internal const string ReadAvatar = "account.readAvatar";
     internal const string UpdateCallSign = "account.updateCallSign";
+    internal const string RefreshRsiData = "account.refreshRsiData";
     internal const string Login = "account.login";
     internal const string CancelLogin = "account.cancelLogin";
     internal const string Logout = "account.logout";
@@ -128,6 +129,9 @@ internal static class AccountBridgeRequestNames
     internal const string ConfirmPasswordReset = "account.confirmPasswordReset";
     internal const string LinkLegacyAccount = "account.linkLegacyAccount";
     internal const string CreateCompatibilityIdentity = "account.createCompatibilityIdentity";
+    internal const string ReadLegacyMigration = "account.migration.status";
+    internal const string RetryLegacyMigration = "account.migration.retry";
+    internal const string AcknowledgeLegacyMigration = "account.migration.acknowledge";
     internal const string PatchPreferences = "profile.patchPreferences";
     internal const string ClearProfileCache = "profile.clearLocalCache";
     internal const string GetGameIdentityPolicy = "gameIdentity.getPolicy";
@@ -144,6 +148,7 @@ internal static class AccountBridgeStableErrors
     internal const string ReauthorizationRequired = "account.reauthorization_required";
     internal const string OperationInProgress = "account.operation_in_progress";
     internal const string ProfileReadUnavailable = "profile.read_unavailable";
+    internal const string CredentialTemporarilyUnavailable = "account.credential_temporarily_unavailable";
     internal const string ProfileReadTransient = "profile.read_transient";
     internal const string ProfileReadForbidden = "profile.read_forbidden";
     internal const string ProfileDataInvalid = "profile.data_invalid";
@@ -325,6 +330,8 @@ internal interface IAccountBridgeHost
         Task.FromException<object>(new AccountBridgeHostException("account.avatar_unavailable"));
     Task<object> ReadAvatarAsync(BridgeAccountContext context, CancellationToken token) =>
         Task.FromException<object>(new AccountBridgeHostException("account.avatar_unavailable"));
+    Task<object> RefreshRsiDataAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("communities.upgradeRequired"));
     Task<object> UpdateCallSignAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         Task.FromException<object>(new AccountBridgeHostException("account.callsign_unavailable"));
     bool PresenceRequiresSessionConfirmation => true;
@@ -385,14 +392,17 @@ internal interface IAccountBridgeHost
     Task<object> ProfileVisibilityAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
         bool save, CancellationToken token) => throw new AccountBridgeHostException("profile.visibility_unavailable");
 
+    Task<object> ReadAccountFactsAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
+        CancellationToken token) => Task.FromResult<object>(new Dictionary<string, object?> { ["schemaVersion"] = 1, ["facts"] = null });
+
     Task<object> ProfileBackgroundAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload,
         bool save, CancellationToken token) => throw new AccountBridgeHostException("profile.background_unavailable");
 
-    Task<PersonalProfileDocumentContract> ReadMemberPersonalProfileAsync(BridgeAccountContext context,
+    Task<VisitorPersonalProfileResult> ReadMemberPersonalProfileAsync(BridgeAccountContext context,
         System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new AccountBridgeHostException("profile.visitor_unavailable");
 
-    Task<PersonalProfileDocumentContract> ReadUserProfileAsync(BridgeAccountContext context,
+    Task<VisitorPersonalProfileResult> ReadUserProfileAsync(BridgeAccountContext context,
         System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new AccountBridgeHostException("profile.visitor_unavailable");
     Task<StarBridge.HostRuntime.Friends.FriendsView> ReadUserSocialAsync(BridgeAccountContext context,
@@ -599,6 +609,13 @@ internal interface IAccountBridgeHost
     Task<StarBridge.HostRuntime.Friends.FriendCommandView> ExecuteFriendAsync(
         BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
         throw new AccountBridgeHostException("friends.command_unavailable");
+
+    Task<object> ReadLegacyMigrationAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromResult<object>(LegacyMigrationView.Unavailable);
+    Task<object> RetryLegacyMigrationAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromResult<object>(LegacyMigrationView.Unavailable);
+    Task<object> AcknowledgeLegacyMigrationAsync(BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>
+        Task.FromException<object>(new AccountBridgeHostException("account.migration_unavailable"));
 
     Task<AccountSafetyView> ReadAccountSafetyAsync(
         BridgeAccountContext context, System.Text.Json.JsonElement payload, CancellationToken token) =>

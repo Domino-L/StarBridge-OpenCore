@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 
 import 'marketplace_port.dart';
+import 'marketplace_recovery.dart';
+import 'marketplace_trade_details.dart';
 
 String? tradeAction(MarketRow r) {
   final role = r['actorRole'], state = r['deliveryStatus'];
@@ -11,7 +13,7 @@ String? tradeAction(MarketRow r) {
   if (state != 3 && r['transactionStatus'] != 1) return null;
   if (state == 0 && role == 'buyer' && r['creatorType'] == 0) return 'approve';
   if (state == 1 && role == 'seller') return 'ship';
-  if (state == 2 && role == 'buyer') return 'receive';
+  if (state == 2 && role == 'buyer' && !tradeReceiptExpired(r)) return 'receive';
   if (state == 3 &&
       r['transactionStatus'] == 2 &&
       r['${role}CommentId'] == null) {
@@ -25,7 +27,20 @@ bool tradeCanCancel(MarketRow r) =>
     r['transactionStatus'] == 1 &&
     [0, 1].contains(r['deliveryStatus']);
 String tradeError(Object e, {bool writing = false}) =>
-    switch (e is MarketplaceTradeError ? e.code : '') {
+    switch (marketplaceFailureCode(e)) {
+      'marketplace.report_expired' => "已超过 7 天，不能举报",
+      'marketplace.report_exists' => "你已举报过此交易，请查看处理状态。",
+      'marketplace.trade_blocked_self' => "你已拉黑对方，不能发起交易。",
+      'marketplace.trade_blocked_other' => "对方已拉黑你，不能发起交易。",
+      'marketplace.trade_restricted' => "你的账号已被限制交易，请联系 SCM。",
+      'marketplace.trade_rate_limited' => "操作过于频繁，请稍后再试。",
+      'marketplace.trade_quantity_unavailable' => "数量超过当前可交易数量，请刷新后减少数量。",
+      'marketplace.trade_listing_unavailable' => "挂单已下架或不存在，请选择其他挂单。",
+      'marketplace.trade_expired' => "交易或挂单已过期，请刷新查看当前状态。",
+      'marketplace.reauthorize_required' => '需要重新授权 SCM 才能操作',
+      'marketplace.offline' => '当前无法连接 SCM（离线或功能不可用）',
+      'marketplace.invalid_request' => '请求未发出，请检查填写内容后重试',
+      'marketplace.context_changed' => '当前账号或连接已变化，请刷新后重试',
       'marketplace.sign_in_required' => '请先登录 SCM，再打开我的交易。',
       'marketplace.forbidden' => '交易功能暂时不可用，请稍后再试；一直这样请联系支持',
       'marketplace.state_changed' => '交易状态已变化，请查看更新后的交易单再操作。',
@@ -48,6 +63,15 @@ String tradeError(Object e, {bool writing = false}) =>
 /// SCM account checks that reject a trade before it is created. These are
 /// definite answers (nothing was written), so the draft stays and retry is safe.
 const tradeAccountPrechecks = {
+  'marketplace.report_expired',
+  'marketplace.report_exists',
+  'marketplace.trade_blocked_self',
+  'marketplace.trade_blocked_other',
+  'marketplace.trade_restricted',
+  'marketplace.trade_rate_limited',
+  'marketplace.trade_quantity_unavailable',
+  'marketplace.trade_listing_unavailable',
+  'marketplace.trade_expired',
   'marketplace.account_unbound',
   'marketplace.trade_time_required',
   'marketplace.contact_required',
@@ -68,7 +92,50 @@ WidgetsBinding? marketplaceAppBinding() {
 /// Only server-confirmed snapshots enter rows/detail. Requests from old accounts are discarded.
 class MarketplaceTradesController extends ChangeNotifier
     with WidgetsBindingObserver {
-  MarketplaceTradesController(this.port);
+  MarketplaceTradesController(this.port, {this.language});
+  final String Function()? language;
+  List<MarketRow> ongoing = [];
+  int? ongoingTotal;
+  bool ongoingComplete = false, ongoingLoaded = false;
+  int get activeCount => ongoingTotal ??
+      (ongoingLoaded ? ongoing.length : rows.where((r) => r['transactionStatus'] == 1).length);
+  // Nothing read yet (or the list read failed): '—', never "0+" (B1 review P2).
+  bool get _listUnknown => !listLoaded || listFailed;
+  String get activeCountLabel => !ongoingLoaded && _listUnknown
+      ? '—' : '$activeCount${ongoingComplete ? '' : '+'}';
+  List<MarketRow> get reviewsTodo =>
+      rows.where((r) => tradeAction(r) == 'review').toList();
+  String get reviewCountLabel => _listUnknown ? '—' : '${reviewsTodo.length}+';
+  String get todoCountLabel => _listUnknown
+      ? '—'
+      : '${todo.length}${ongoingComplete && ended && reviewsTodo.isEmpty ? '' : '+'}';
+
+  Future<void> _readOngoing(int epoch, int generation) async {
+    final found = <Object?, MarketRow>{};
+    int? count;
+    var complete = false;
+    try {
+      for (var page = 1; page <= 10; page++) {
+        final data = await request('list', {'page': page, 'status': 1});
+        if (_disposed || epoch != _epoch || generation != _pollGeneration) return;
+        count = marketNumber(data['total'])?.toInt();
+        final batch = marketRows(data['rows']);
+        for (final row in batch) {
+          if (row['transactionStatus'] == 1) found[row['transactionNumber']] = row;
+        }
+        complete = count != null && found.length >= count;
+        if (complete || batch.isEmpty) break;
+      }
+    } on Object catch (e) {
+      if (_disposed || epoch != _epoch || generation != _pollGeneration) return;
+      if (_isAuthorizationFailure(e)) rethrow;
+      // A failed later page keeps an explicitly partial snapshot, never a precise count.
+    }
+    ongoing = found.values.toList();
+    ongoingTotal = count;
+    ongoingComplete = complete;
+    ongoingLoaded = count != null;
+  }
   static const reconciliationInterval = Duration(seconds: 120);
   bool _visible = false, _foreground = true;
   String? _firstPage;
@@ -105,6 +172,7 @@ class MarketplaceTradesController extends ChangeNotifier
   MarketRow? detail;
   String? error, errorCode, writeError, writeErrorCode;
   bool writeUncertain = false;
+  bool listFailed = false, listLoaded = false;
   String get diagnostic =>
       'StarBridge marketplace; code=${errorCode == "marketplace.forbidden" || writeErrorCode == "marketplace.forbidden" ? "403" : "unavailable"}; utc=${DateTime.now().toUtc().toIso8601String()}';
   void readFailure(Object e) {
@@ -124,6 +192,7 @@ class MarketplaceTradesController extends ChangeNotifier
   int _pollGeneration = 0;
   void _blockAutomaticReads(String reason) {
     _pollBlock = reason;
+    ongoingComplete = false;
     _pollGeneration++;
     _timer?.cancel();
     _timer = null;
@@ -194,10 +263,17 @@ class MarketplaceTradesController extends ChangeNotifier
 
   int _detailRequest = 0;
   bool get supported => port is MarketplaceTradePort;
-  List<MarketRow> get todo =>
-      rows.where((r) => tradeAction(r) != null).toList();
+  List<MarketRow> get todo => [
+    ...(ongoingLoaded ? ongoing : rows.where((r) => r['transactionStatus'] == 1))
+        .where((r) => ['approve', 'ship', 'receive'].contains(tradeAction(r))),
+    ...reviewsTodo,
+  ];
   Future<MarketRow> request(String op, [MarketRow args = const {}]) => supported
-      ? (port as MarketplaceTradePort).trade(op, args)
+      // Only reads carry the UI language (TR10); writes keep their exact payload.
+      ? (port as MarketplaceTradePort).trade(op, {
+          ...args,
+          if (op == 'list' || op == 'detail') 'language': language?.call() ?? 'CN',
+        })
       : Future.error(const MarketplaceTradeError('marketplace.unavailable'));
   Future<void> start() async {
     if (_started || !supported || _disposed) return;
@@ -249,8 +325,12 @@ class MarketplaceTradesController extends ChangeNotifier
         if (number is String) await open(number);
         if (!_pollIsCurrent(epoch, generation)) return;
       }
+      // Unchanged list: no extra status=1 pages (B1 review P2); the ongoing
+      // read runs only with a real list refresh.
     } on Object catch (e) {
       if (_pollIsCurrent(epoch, generation) && _isAuthorizationFailure(e)) {
+        // The list can no longer be refreshed (CX-HALL-FIX2-REVIEW P2).
+        listFailed = true;
         readFailure(e);
         notifyListeners();
       }
@@ -312,12 +392,16 @@ class MarketplaceTradesController extends ChangeNotifier
                 (more ? rows.length : 0) + next.length >= nextTotal;
         if (exhausted) break;
       }
+      if (!more && !authorizationProbe) await _readOngoing(epoch, generation);
+      if (_disposed || epoch != _epoch || generation != _pollGeneration) return;
       final combined = more ? [...rows, ...next] : next;
       rows = {for (final row in combined) row['transactionNumber']: row}.values
           .toList();
       total = nextTotal;
       _page = loadedPage;
       ended = exhausted;
+      listFailed = false;
+      listLoaded = true;
       error = null;
       errorCode = null;
       if (authorizationProbe) {
@@ -329,6 +413,7 @@ class MarketplaceTradesController extends ChangeNotifier
       _ensureTimer();
     } on Object catch (e) {
       if (!_disposed && epoch == _epoch && generation == _pollGeneration) {
+        listFailed = true;
         readFailure(e);
       }
     } finally {
@@ -370,11 +455,11 @@ class MarketplaceTradesController extends ChangeNotifier
           next['transactionNumber'] is! String) {
         return null;
       }
-      detail = next;
+      detail = _mergeDetail(next);
       error = null;
       errorCode = null;
       notifyListeners();
-      return next;
+      return detail;
     } on Object catch (e) {
       if (!_disposed &&
           epoch == _epoch &&
@@ -387,6 +472,16 @@ class MarketplaceTradesController extends ChangeNotifier
     }
   }
 
+  MarketRow _mergeDetail(MarketRow next) {
+    final number = next['transactionNumber'];
+    final previous = ongoing.where((r) => r['transactionNumber'] == number).firstOrNull ??
+        rows.where((r) => r['transactionNumber'] == number).firstOrNull;
+    // A sheet opened from another entry can still carry a known list amount.
+    // Its report flags are deliberately not used as a substitute for a list row.
+    return mergeTradeDetail(next, previous ?? (detail?['transactionNumber'] == number
+        ? {'transactionNumber': number, 'amount': detail?['amount']} : null));
+  }
+
   Future<void> open(String number) async {
     final epoch = _epoch, generation = _pollGeneration;
     final requestId = ++_detailRequest;
@@ -396,7 +491,7 @@ class MarketplaceTradesController extends ChangeNotifier
           epoch == _epoch &&
           generation == _pollGeneration &&
           requestId == _detailRequest) {
-        detail = next;
+        detail = _mergeDetail(next);
         error = null;
         errorCode = null;
         notifyListeners();
@@ -426,6 +521,13 @@ class MarketplaceTradesController extends ChangeNotifier
       final number =
           result['transactionNumber'] as String? ??
           args['transactionNumber'] as String?;
+      if (op == 'report' && number != null) {
+        MarketRow reported(MarketRow row) => row['transactionNumber'] == number
+            ? {...row, 'hasReported': true, 'reportHandleStatus': 0} : row;
+        rows = rows.map(reported).toList();
+        ongoing = ongoing.map(reported).toList();
+        if (detail != null) detail = reported(detail!);
+      }
       // Deliver the confirmed write result, but never use its automatic
       // follow-up reads to recover an authorization-blocked generation.
       if (!_pollIsCurrent(epoch, generation)) return number;
@@ -437,10 +539,9 @@ class MarketplaceTradesController extends ChangeNotifier
       return number;
     } on Object catch (e) {
       if (!_disposed && epoch == _epoch) {
-        writeErrorCode = e is MarketplaceTradeError
-            ? e.code
-            : 'marketplace.unknown';
+        writeErrorCode = marketplaceFailureCode(e);
         writeUncertain = !const {
+          ...marketplacePreflightFailures,
           'marketplace.sign_in_required',
           'marketplace.forbidden',
           'marketplace.state_changed',
@@ -452,6 +553,17 @@ class MarketplaceTradesController extends ChangeNotifier
         writeError = tradeError(e, writing: true);
         errorCode = writeErrorCode;
         error = writeError;
+        // SCM says I already reported it (maybe from another client): hide the
+        // report action so it cannot be resubmitted; no handling status is
+        // invented (B1 review P2).
+        final number = args['transactionNumber'];
+        if (op == 'report' && writeErrorCode == 'marketplace.report_exists' && number is String) {
+          MarketRow mark(MarketRow row) => row['transactionNumber'] == number
+              ? {...row, 'hasReported': true, 'canReport': false} : row;
+          rows = rows.map(mark).toList();
+          ongoing = ongoing.map(mark).toList();
+          if (detail != null) detail = mark(detail!);
+        }
         notifyListeners();
       }
       return null;
@@ -478,6 +590,10 @@ class MarketplaceTradesController extends ChangeNotifier
 
     _detailRequest++;
     rows = [];
+    ongoing = [];
+    ongoingTotal = null;
+    ongoingComplete = ongoingLoaded = false;
+    listFailed = listLoaded = false;
     detail = null;
     errorCode = null;
     writeErrorCode = null;

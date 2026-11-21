@@ -62,12 +62,23 @@ internal static class CompatibilityPublicationIdentityTests
             throw new InvalidOperationException("Verified SCM log review must retain the current owner before local confirmation.");
         var recording = ((StarBridge.NativeBridge.BridgeAccountContext? Context, long Generation))typeof(AccountBridgeRuntime)
             .GetMethod("GameplayRecordingOwner", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(runtime, null)!;
-        if (recording.Context is not null)
-            throw new InvalidOperationException("Log review must not bypass independent game recording admission.");
+        // 11-08: an installed session keeps its playtime owner (saved settings stay
+        // readable); recording itself waits on the account identity, not the guide.
+        if (recording.Context != host.CurrentContext)
+            throw new InvalidOperationException("An installed session keeps its playtime owner whatever the guide's state.");
         var journalAllowed = (Func<bool>)log.GetType().GetField("_recordingAllowed",
             BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(log)!;
         if (journalAllowed())
             throw new InvalidOperationException("Log review must not bypass journal recording admission.");
+        var probe = typeof(AccountBridgeRuntime).GetProperty("GameLogIdentityCheckForTests",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        probe.SetValue(runtime, new Func<LocalIdentityCheckState?>(() => LocalIdentityCheckState.Match));
+        if (!journalAllowed())
+            throw new InvalidOperationException("Verified SCM Handle equal to the log's records without the guide receipt.");
+        probe.SetValue(runtime, new Func<LocalIdentityCheckState?>(() => LocalIdentityCheckState.Mismatch));
+        if (journalAllowed())
+            throw new InvalidOperationException("A log Handle that differs from the verified Handle never records.");
+        probe.SetValue(runtime, null);
     }
     private sealed class Vault : ITokenVault
     {

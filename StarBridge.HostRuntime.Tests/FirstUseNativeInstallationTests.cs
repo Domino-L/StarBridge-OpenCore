@@ -135,11 +135,11 @@ internal static partial class FirstUseBusinessOwnerTests
         var lifetime = (CancellationTokenSource)typeof(FirstUseModeRuntime).GetField("_candidateLifetime",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(f.Original.Mode)!;
         using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-        using var registration = lifetime.Token.Register(() => { entered.Set(); release.Wait(TimeSpan.FromSeconds(5)); });
+        using var registration = lifetime.Token.Register(() => { entered.Set(); release.Wait(FirstUseTestWait.Bound); });
         var cancel = Task.Run(() => f.Original.Cancel());
         try
         {
-            Check(entered.Wait(TimeSpan.FromSeconds(3)) && install.IsActive && !cancel.IsCompleted,
+            Check(entered.Wait(FirstUseTestWait.Bound) && install.IsActive && !cancel.IsCompleted,
                 "Lifetime callback holds the actual interval before physical graph retirement.");
             Check(!receipt.IsCurrent && native.Generation == -1 && !native.Read(_ => true, false) &&
                 native.InstallBusiness(install) is null && f.Original.Vault.LoadActiveAccountKey() is not null,

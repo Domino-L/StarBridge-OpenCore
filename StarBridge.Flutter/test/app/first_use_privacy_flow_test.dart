@@ -426,6 +426,7 @@ class PrivacyFixture implements LocalPrivacyPort, PrivacyPublicationPort {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     if (action == 'apply') {
       applies++;

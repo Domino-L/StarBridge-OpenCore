@@ -283,7 +283,9 @@ internal static class OverlayPresetMigrationTests
             foreach (var preset in legacy.Presets.Take(completed))
             {
                 var path = DocumentPath(candidate, preset.Id);
-                File.WriteAllText(path, new OverlayPresetDocument(preset.Settings, preset.Layout,
+                // committed by an earlier build: its backgrounds are on the old scale (100% = the faint plate)
+                File.WriteAllText(path, new OverlayPresetDocument(
+                    preset.Settings with { EventNotificationBackgroundOpacity = 1.0 }, WithBackground(preset.Layout, 1.0),
                     OverlayPresetSourcesCodec.FromLegacy(preset.Settings.ScenePreference)).Serialize());
                 committed.Add(path, File.ReadAllBytes(path));
             }
@@ -294,16 +296,46 @@ internal static class OverlayPresetMigrationTests
             Check(resumed.Presets.Single(p => p.Id == "preset1").Sources!.Binding.Mode == OverlaySourceMode.Room &&
                 resumed.Presets.Single(p => p.Id == "second").Sources!.Binding.Mode == OverlaySourceMode.None,
                 "Restart completes only missing documents with the original room/fleet migration mapping.");
+            // A restart that completes a missing document writes the committed ones once more, with only their backgrounds
+            // moved from the old scale (100% -> 15%) and the marker (11-13 "背景可以"); one with nothing to complete
+            // writes nothing (the scaling waits for the next save). Review CX-OVERLAY-M94-MIGRATION-R1.
+            var marker = Path.Combine(candidate, OverlayWorkspaceStore.BackgroundMarkerFile);
+            Check(File.Exists(marker) == (completed < 2), "the background marker goes only with a restart that writes");
             foreach (var (path, bytes) in committed)
-                Check(File.ReadAllBytes(path).SequenceEqual(bytes), "Restart never rewrites an already committed v2 document.");
+            {
+                var before = OverlayPresetDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+                var after = OverlayPresetDocument.Parse(File.ReadAllText(path));
+                Check(File.Exists(marker)
+                        ? after.Settings.Serialize() == (before.Settings with { EventNotificationBackgroundOpacity = 0.15 }).Serialize() &&
+                          InformationOverlayLayoutItem.SerializeMany(after.Layout) ==
+                          InformationOverlayLayoutItem.SerializeMany(WithBackground(before.Layout, 0.15)) &&
+                          OverlayPresetSourcesCodec.Serialize(after.Sources) == OverlayPresetSourcesCodec.Serialize(before.Sources)
+                        : File.ReadAllBytes(path).SequenceEqual(bytes),
+                    "Restart never rewrites an already committed v2 document beyond the one-time background scaling.");
+            }
+            foreach (var preset in resumed.Presets.Where(p => committed.ContainsKey(DocumentPath(candidate, p.Id))))
+                Check(preset.Settings.EventNotificationBackgroundOpacity == 0.15 && preset.Layout.All(item => item.BackgroundOpacity == 0.15),
+                    "a committed document reads at the old look (15%) whether or not the restart wrote");
             foreach (var (name, bytes) in originals)
             {
                 Check(File.ReadAllBytes(Path.Combine(candidate, name)).SequenceEqual(bytes), "Restart preserves legacy and account files.");
                 Check(File.ReadAllBytes(Path.Combine(backup, name)).SequenceEqual(bytes), "Restart preserves the original recovery backup.");
             }
             Check(Store(candidate).Load().Revision == resumed.Revision, "Completed migration is idempotent after restart.");
+            // the first save writes what is still pending with the marker; later reads never scale again
+            Save(Store(candidate), Store(candidate).Load());
+            var reread = Store(candidate).Load();
+            bool AtOldLook(OverlayWorkspacePresetSnapshot preset) => !committed.ContainsKey(DocumentPath(candidate, preset.Id)) ||
+                preset.Settings.EventNotificationBackgroundOpacity == 0.15 && preset.Layout.All(item => item.BackgroundOpacity == 0.15);
+            Check(File.Exists(marker) && reread.Presets.All(AtOldLook) && Store(candidate).Load().Presets.All(AtOldLook) &&
+                  committed.Keys.All(path => OverlayPresetDocument.Parse(File.ReadAllText(path)).Settings.EventNotificationBackgroundOpacity == 0.15),
+                "after the first save a committed preset stays at 15%, scaled exactly once");
         }
     }
+
+    private static IReadOnlyList<InformationOverlayLayoutItem> WithBackground(IEnumerable<InformationOverlayLayoutItem> layout, double value) =>
+        layout.Select(item => new InformationOverlayLayoutItem(item.Key, item.X, item.Y, item.Width, item.Height,
+            item.HorizontalAnchor, item.VerticalAnchor, item.IsLocked, item.TextOpacity, value, item.DecorationOpacity)).ToArray();
 
     private static void RecoveredAndConcurrent(string root)
     {

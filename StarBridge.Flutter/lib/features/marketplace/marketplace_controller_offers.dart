@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'marketplace_details.dart' show marketQuality;
 import 'marketplace_port.dart';
 import 'marketplace_quality.dart';
+import 'marketplace_display_rules.dart';
 
 /// The open item's sell/buy offer lists: filters, sort and paging.
 mixin MarketplaceOffers on ChangeNotifier {
@@ -28,6 +29,7 @@ mixin MarketplaceOffers on ChangeNotifier {
       offerSortDesc = desc;
     };
   }
+
   Future<void> load(
     String key,
     String operation, {
@@ -41,16 +43,31 @@ mixin MarketplaceOffers on ChangeNotifier {
   });
 
   /// Per-item offer filters: creatorStatus, locationId, minQuality,
-  /// maxQuality (a tier chosen on the tier strip), sortOrder.
-  /// Cleared when a different item opens; applied to both sell and buy pages.
+  /// maxQuality (a tier chosen on the tier strip), sortOrder, displayType.
+  /// Cleared when a different item opens. Buy quality is local, a ceiling on
+  /// requirements; the sell side sends the selected range to SCM.
   final offerFilters = <String, String>{};
   MarketRow? offerLocation;
 
+  /// Where a side's offers are kept. Checklist rows (bundle prices) live apart
+  /// from single-item rows, so the lowest price, follow snapshots and quality
+  /// maths only ever read single items, and 单件 comes back without a reload.
+  String offerKey(bool buy) =>
+      '${buy ? 'buy' : 'sell'}${offerChecklist ? '-checklist' : ''}';
+  List<String> get offerKeys => [offerKey(false), offerKey(true)];
+
   @protected
-  Future<void> loadOffers(int id) => Future.wait([
-    load('sell', 'offers', id: id, side: 1, options: {...offerFilters}),
-    load('buy', 'offers', id: id, side: 0, options: {...offerFilters}),
-  ]);
+  Future<void> loadOffers(int id) =>
+      Future.wait([reloadOffer(false, id: id), reloadOffer(true, id: id)]);
+
+  /// One side's first page with the current filters (also the retry).
+  Future<void> reloadOffer(bool buy, {int? id}) => load(
+    offerKey(buy),
+    'offers',
+    id: id ?? itemId!,
+    side: buy ? 0 : 1,
+    options: marketReadFilters(offerFilters, buy: buy),
+  );
 
   /// Effective price direction for a side: explicit choice, else SCM's default.
   String offerSortOrder(bool buy) =>
@@ -85,7 +102,7 @@ mixin MarketplaceOffers on ChangeNotifier {
     offerSortField = field;
     if (reload) {
       offerFilters.remove('sortOrder');
-      refilter(const ['sell', 'buy'], undo);
+      refilter(offerKeys, undo);
     }
     notifyListeners();
     if (reload) await loadOffers(id);
@@ -96,7 +113,7 @@ mixin MarketplaceOffers on ChangeNotifier {
   Future<void> _loadAllOffers() async {
     for (final buy in [false, true]) {
       for (var guard = 0; guard < 10; guard++) {
-        final read = blocks[buy ? 'buy' : 'sell'];
+        final read = blocks[offerKey(buy)];
         final total = read?.total;
         if (read == null ||
             total == null ||
@@ -106,7 +123,7 @@ mixin MarketplaceOffers on ChangeNotifier {
         }
         final before = read.rows.length;
         await moreOffers(buy);
-        if ((blocks[buy ? 'buy' : 'sell']?.rows.length ?? 0) <= before) break;
+        if ((blocks[offerKey(buy)]?.rows.length ?? 0) <= before) break;
       }
     }
   }
@@ -195,7 +212,7 @@ mixin MarketplaceOffers on ChangeNotifier {
       offerFilters['minQuality'] = '${tier.min}';
       offerFilters['maxQuality'] = '${tier.max}';
     }
-    refilter(const ['sell', 'buy'], undo);
+    refilter(offerKeys, undo);
     notifyListeners();
     await loadOffers(id);
   }
@@ -216,7 +233,31 @@ mixin MarketplaceOffers on ChangeNotifier {
     // The ≥ quality menu replaces a tier range rather than narrowing it.
     if (key == 'minQuality') offerFilters.remove('maxQuality');
     if (key == 'locationId') offerLocation = value == null ? null : location;
-    refilter(const ['sell', 'buy'], undo);
+    refilter(offerKeys, undo);
+    notifyListeners();
+    await loadOffers(id);
+  }
+
+  /// The item page's 单件 / 清单 switch: checklist orders containing this item
+  /// (SCM displayType 2, user 2026-11-11). A checklist's price is the whole
+  /// bundle's, so quality filters and the quality / per-point sorts are dropped.
+  bool get offerChecklist => offerFilters['displayType'] == '2';
+
+  Future<void> setOfferChecklist(bool on) async {
+    final id = itemId;
+    if (id == null || on == offerChecklist) return;
+    final undo = _offerUndo();
+    if (on) {
+      offerFilters
+        ..['displayType'] = '2'
+        ..remove('minQuality')
+        ..remove('maxQuality');
+      offerSortField = 'price';
+      offerSortDesc = true;
+    } else {
+      offerFilters.remove('displayType');
+    }
+    refilter(offerKeys, undo);
     notifyListeners();
     await loadOffers(id);
   }
@@ -229,16 +270,17 @@ mixin MarketplaceOffers on ChangeNotifier {
     final undo = _offerUndo();
     offerSortField = 'price';
     offerSortDesc = true;
+    final checklist = offerFilters['displayType'] == '2';
     offerFilters.clear();
+    if (checklist) offerFilters['displayType'] = '2';
     offerLocation = null;
-    refilter(const ['sell', 'buy'], undo);
+    refilter(offerKeys, undo);
     notifyListeners();
     await loadOffers(id);
   }
 
   Future<void> moreOffers(bool buy) {
-    final key = buy ? 'buy' : 'sell',
-        count = blocks[buy ? 'buy' : 'sell']?.rows.length ?? 0;
+    final key = offerKey(buy), count = blocks[key]?.rows.length ?? 0;
     return load(
       key,
       'offers',
@@ -246,7 +288,7 @@ mixin MarketplaceOffers on ChangeNotifier {
       side: buy ? 0 : 1,
       page: count ~/ 20 + 1,
       append: true,
-      options: {...offerFilters},
+      options: marketReadFilters(offerFilters, buy: buy),
     );
   }
 }

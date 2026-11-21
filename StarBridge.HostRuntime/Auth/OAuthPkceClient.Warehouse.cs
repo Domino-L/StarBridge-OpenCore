@@ -7,6 +7,14 @@ namespace StarBridge.HostRuntime.Auth;
 
 public sealed partial class OAuthPkceClient
 {
+    private static long? ReadWarehouseCursor(JsonElement value)
+    {
+        var parsed = value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number
+            : value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(),
+                System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var text) ? text : 0;
+        return parsed > 0 ? parsed : null;
+    }
+
     // 0.7.2 G2: the member's own SCM warehouse, read only (spaces, inventory, summary, ledger,
     // escrow). Fleet warehouses and every write stay on the SCM site for this version.
     internal async Task<(object Data, ScmOAuthSession ActiveSession)> MarketplaceWarehouseAsync(
@@ -68,8 +76,9 @@ public sealed partial class OAuthPkceClient
                 {
                     rows = data.ValueKind == JsonValueKind.Object && data.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array
                         ? list.EnumerateArray().Take(50).Select(MarketplaceWarehouse.Escrow).ToArray() : [],
-                    next = data.ValueKind == JsonValueKind.Object && data.TryGetProperty("nextCursor", out var next) && next.TryGetInt64(out var n) ? n : (long?)null,
-                    more = data.ValueKind == JsonValueKind.Object && data.TryGetProperty("hasMore", out var more) && more.ValueKind == JsonValueKind.True,
+                    next = data.ValueKind == JsonValueKind.Object && data.TryGetProperty("nextCursor", out var next) && ReadWarehouseCursor(next) is { } n ? n : (long?)null,
+                    more = data.ValueKind == JsonValueKind.Object && data.TryGetProperty("hasMore", out var more) && more.ValueKind == JsonValueKind.True &&
+                        data.TryGetProperty("nextCursor", out var cursorValue) && ReadWarehouseCursor(cursorValue) != null,
                 }, active);
             }
         }

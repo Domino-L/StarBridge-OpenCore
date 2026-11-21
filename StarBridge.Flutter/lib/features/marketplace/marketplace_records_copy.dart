@@ -24,6 +24,8 @@ String recordsText(
 }
 
 const recordsCopy = <String, List<String>>{
+  '按已加载的 {n} 条': ['按已加载的 {n} 条', '按已載入的 {n} 條', 'Based on {n} loaded reviews'],
+  '共 {n} 条评价': ['共 {n} 条评价', '共 {n} 條評價', '{n} reviews'],
   '评价': ['评价', '評價', 'Reviews'],
   '举报与拉黑': ['举报与拉黑', '檢舉與封鎖', 'Reports & blocks'],
   '收到的评价': ['收到的评价', '收到的評價', 'Reviews received'],
@@ -68,10 +70,10 @@ const recordsCopy = <String, List<String>>{
   '原因：': ['原因：', '原因：', 'Reason: '],
   '{time} 拉黑': ['{time} 拉黑', '{time} 封鎖', 'Blocked {time}'],
   '解除': ['解除', '解除', 'Unblock'],
-  '黑名单是空的。拉黑从交易单或订单面板发起。': [
-    '黑名单是空的。拉黑从交易单或订单面板发起。',
-    '黑名單是空的。封鎖請從交易單或訂單面板發起。',
-    'Nobody is blocked. Block from a trade or order panel.',
+  '黑名单是空的。拉黑从交易单发起。': [
+    '黑名单是空的。拉黑从交易单发起。',
+    '黑名單是空的。封鎖請從交易單發起。',
+    'Nobody is blocked. Block from a trade.',
   ],
   '解除拉黑 {name}？': ['解除拉黑 {name}？', '解除封鎖 {name}？', 'Unblock {name}?'],
   '解除后，对方可以再次向你发起交易，你也能看到对方的挂单。': [

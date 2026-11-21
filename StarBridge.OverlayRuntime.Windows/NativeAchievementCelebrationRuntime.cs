@@ -94,7 +94,8 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
         // desktop hides and pauses rather than silently dropping the grant.
         if (_desktopProbe == 0 || Stopwatch.GetElapsedTime(_desktopProbe, now).TotalMilliseconds >= 250)
         {
-            _desktopAllowed = StarBridge.Desktop.DesktopNotificationEnvironment.CanPresentAchievement();
+            _desktopAllowed = StarBridge.Desktop.DesktopNotificationEnvironment.CanPresentAchievement() &&
+                AchievementCelebrationAttention.Present(IdleMilliseconds());
             _desktopProbe = now;
         }
         _playback.Advance(delta);
@@ -104,11 +105,13 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
     {
         if (!notice.IsCurrent()) return null;
         var card = new AchievementCelebrationCard(_locale(), _light(), _reduce() || !SystemParameters.ClientAreaAnimation,
-            notice.AchievementId, notice.Rank, notice.DisplayName, notice.LocalImagePath);
+            notice.AchievementId, notice.Rank, notice.DisplayName, notice.LocalImagePath, notice.ContractRecord, notice.SummaryCount,
+            notice.RarityTier, notice.RarityBasisPoints);
         try
         {
             var surface = CreateHiddenSurface(card);
-            _desktopAllowed = StarBridge.Desktop.DesktopNotificationEnvironment.CanPresentAchievement();
+            _desktopAllowed = StarBridge.Desktop.DesktopNotificationEnvironment.CanPresentAchievement() &&
+                AchievementCelebrationAttention.Present(IdleMilliseconds());
             _lastTick = Stopwatch.GetTimestamp();
             return surface;
         }
@@ -117,7 +120,12 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
     internal static Surface CreateHiddenSurface(AchievementCelebrationCard card, string? targetScreen = null)
     {
         var window = new Window { Width = card.Width, Height = card.Height,
-            Content = new System.Windows.Controls.Viewbox { Child = card, Stretch = Stretch.Uniform }, WindowStyle = WindowStyle.None,
+            Content = new System.Windows.Controls.Viewbox
+            {
+                Child = card, Stretch = Stretch.Uniform, StretchDirection = System.Windows.Controls.StretchDirection.DownOnly,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Right, VerticalAlignment = System.Windows.VerticalAlignment.Bottom
+            },
+            WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, ShowActivated = false, Topmost = true,
             AllowsTransparency = true, Background = Brushes.Transparent, Left = -32000, Top = -32000,
             Title = "StarBridge achievement", IsHitTestVisible = false };
@@ -143,7 +151,7 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
         private System.Drawing.Rectangle _lastArea;
         private uint _lastDpi;
         private long _positionProbe;
-        private System.Drawing.Rectangle _bounds;
+        private AchievementCelebrationPlacement _placement;
         internal IntPtr Handle => _hwnd;
         internal double PointerOpacity => window.Opacity;
         internal Surface(Window window, AchievementCelebrationCard card, string? targetScreen)
@@ -159,6 +167,7 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         }
         public double LifetimeMilliseconds => card.LifetimeMilliseconds;
+        public double EntryMilliseconds => card.EntryMilliseconds;
         public bool IsVisible => window.IsVisible;
         public void Show()
         {
@@ -182,7 +191,7 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
         }
         internal void ApplyPointerPosition(System.Drawing.Point? point)
         {
-            var opacity = point.HasValue && _bounds.Contains(point.Value) ? .5 : 1;
+            var opacity = point.HasValue && _placement.ContainsCard(point.Value) ? .5 : 1;
             if (window.Opacity != opacity) window.Opacity = opacity;
         }
         public void UpdatePosition()
@@ -200,7 +209,8 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
             var bounds = placement.Bounds;
             if (!SetWindowPos(_hwnd, new IntPtr(-1), bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x10))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            _bounds = bounds; _lastArea = area; _lastDpi = dpi;
+            card.PrepareGlass(placement.Scale);
+            _placement = placement; _lastArea = area; _lastDpi = dpi;
         }
         public void Dispose() => window.Close();
     }
@@ -211,6 +221,15 @@ public sealed class NativeAchievementCelebrationRuntime : IAchievementCelebratio
         Post(() => { _playback.Dispose(); _dispatcher?.BeginInvokeShutdown(DispatcherPriority.Send); });
         if (Thread.CurrentThread != _thread) _thread.Join(TimeSpan.FromSeconds(2));
     }
+    // Milliseconds since the last keyboard or mouse input in this session;
+    // null when Windows cannot say (the card then waits).
+    private static uint? IdleMilliseconds()
+    {
+        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        return GetLastInputInfo(ref info) ? unchecked((uint)Environment.TickCount - info.Time) : null;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct LastInputInfo { internal uint Size; internal uint Time; }
+    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LastInputInfo info);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { internal int X, Y; }
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);

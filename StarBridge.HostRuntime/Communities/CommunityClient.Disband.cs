@@ -10,7 +10,10 @@ namespace StarBridge.HostRuntime.Communities;
 
 internal sealed partial class CommunityClient
 {
-    private sealed record DisbandConfirmation(string Code, string TargetRef, string Scope, string Version, DateTimeOffset Expires);
+    // CredentialMode: "legacyPassword" (old-account owner) or "scmRevalidation" (an owner the relay
+    // re-confirms through the SCM identity of this request, after migration; no password).
+    private sealed record DisbandConfirmation(string Code, string TargetRef, string Scope, string Version, DateTimeOffset Expires,
+        string CredentialMode = "legacyPassword");
     private readonly ConcurrentDictionary<string, DisbandConfirmation> _disbandConfirmations = new();
 
     internal Task<object> ReadDisbandAsync(string bearer, JsonElement body, string scope, Action current, CancellationToken token) =>
@@ -22,13 +25,15 @@ internal sealed partial class CommunityClient
             var target = Resolve(targetRef, scope);
             var root = await WorkspaceJson(bearer, "/api/fleets/disband-preview?code=" + Uri.EscapeDataString(target.Code), token);
             if (Encoding.UTF8.GetByteCount(root.GetRawText()) > 16 * 1024 || Number(root, "schemaVersion", 1, 1) != 1 ||
-                Text(root, "code", 256) != target.Code || Text(root, "credentialMode", 32) != "legacyPassword" ||
+                Text(root, "code", 256) != target.Code ||
+                Text(root, "credentialMode", 32) is not ("legacyPassword" or "scmRevalidation") ||
                 root.EnumerateObject().Select(p => p.Name).Distinct().Count() != root.EnumerateObject().Count()) throw Invalid();
             var name = Text(root, "name", 512);
             var version = Text(root, "version", 64);
             if (string.IsNullOrWhiteSpace(name) || !LowerHex(version, 64)) throw Invalid();
             var memberCount = Number(root, "memberCount", 0, 100000);
             var canDisband = root.GetProperty("canDisband").GetBoolean();
+            var credentialMode = Text(root, "credentialMode", 32);
             token.ThrowIfCancellationRequested();
             current();
             foreach (var old in _disbandConfirmations.Where(p => p.Value.Expires <= DateTimeOffset.UtcNow ||
@@ -36,13 +41,16 @@ internal sealed partial class CommunityClient
                 _disbandConfirmations.TryRemove(old.Key, out _);
             if (_disbandConfirmations.Count >= 128) throw new AccountBridgeHostException("communities.refreshRequired");
             var confirmationRef = Guid.NewGuid().ToString("N");
-            if (canDisband) _disbandConfirmations[confirmationRef] = new(target.Code, targetRef, scope, version, DateTimeOffset.UtcNow.AddMinutes(5));
-            return new { schemaVersion = 1, targetRef, confirmationRef, name, memberCount, canDisband, credentialMode = "legacyPassword" };
+            if (canDisband)
+                _disbandConfirmations[confirmationRef] = new(target.Code, targetRef, scope, version, DateTimeOffset.UtcNow.AddMinutes(5), credentialMode);
+            return new { schemaVersion = 1, targetRef, confirmationRef, name, memberCount, canDisband, credentialMode };
         });
 
     private static bool LowerHex(string value, int length) => value.Length == length && value.All(c => c is >= 'a' and <= 'f' or >= '0' and <= '9');
 
-    internal static void ValidateDisband(JsonElement body)
+    /// <param name="allowEmptyPassword">Only the SCM path: an "scmRevalidation" confirmation sends no
+    /// password. Which one a confirmation needs is checked against its own preview.</param>
+    internal static void ValidateDisband(JsonElement body, bool allowEmptyPassword = false)
     {
         Validate(body, "targetRef", "confirmationRef", "password");
         try
@@ -50,20 +58,28 @@ internal sealed partial class CommunityClient
             if (!LowerHex(Text(body, "targetRef", 32), 32) || !LowerHex(Text(body, "confirmationRef", 32), 32)) throw Invalid();
             var password = body.GetProperty("password").GetString();
             // Preserve the credential exactly. Never trim, cache or include it in an idempotency key.
-            if (string.IsNullOrWhiteSpace(password) || password.Length > 4096) throw Invalid();
+            if (password is null || password.Length > 4096 ||
+                (password.Length == 0 ? !allowEmptyPassword : string.IsNullOrWhiteSpace(password))) throw Invalid();
         }
         catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or JsonException) { throw Invalid(); }
     }
 
     internal async Task<object> DisbandAsync(string bearer, JsonElement body, string scope, Action current, CancellationToken token)
     {
-        ValidateDisband(body);
+        ValidateDisband(body, allowEmptyPassword: true);
         var targetRef = Text(body, "targetRef", 32);
         var confirmationRef = Text(body, "confirmationRef", 32);
         var target = Resolve(targetRef, scope);
-        if (!_disbandConfirmations.TryGetValue(confirmationRef, out var entry) || entry.Scope != scope ||
+        var found = _disbandConfirmations.TryGetValue(confirmationRef, out var entry);
+        // An empty password is only valid for a live SCM re-confirmation; anything else is malformed.
+        if (body.GetProperty("password").GetString()!.Length == 0 && (!found || entry!.CredentialMode != "scmRevalidation"))
+            throw Invalid();
+        if (!found || entry!.Scope != scope ||
             entry.TargetRef != targetRef || entry.Code != target.Code || entry.Expires <= DateTimeOffset.UtcNow)
             return new CommunityCommand("rejected", "refreshRequired");
+        // The preview decides: a password for an old-account owner, none for SCM re-confirmation.
+        if ((entry.CredentialMode == "scmRevalidation") != (body.GetProperty("password").GetString()!.Length == 0))
+            throw Invalid();
         if (!await _write.WaitAsync(0, token)) return new CommunityCommand("rejected", "busy");
         var sent = false;
         try

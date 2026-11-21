@@ -4,7 +4,7 @@ using StarBridge.Core.Ships;
 
 namespace StarBridge.HostRuntime.Ships;
 
-/// <summary>Anonymous SCM model lookup, bounded transport and model cache. No credentials or media.</summary>
+/// <summary>Anonymous SCM model lookup with bounded transport and model cache.</summary>
 internal sealed class ScmShipSpecificationReader : IDisposable
 {
     private readonly HttpClient _http;
@@ -136,7 +136,11 @@ internal sealed class ScmShipSpecificationReader : IDisposable
             throw new JsonException("Catalogue reproduction identity changed.");
         return ShipSpecificationProjection.Project(item, model.EnglishName, now) with {
             PaintBaseModel = model.Mapping?.PaintBaseModel,
-            BundleBaseModel = model.Mapping?.BundleBaseModel
+            BundleBaseModel = model.Mapping?.BundleBaseModel,
+            // Parameter aliases can deliberately read a base paint/bundle. Such
+            // facts do not establish that its artwork depicts the requested edition.
+            ThumbnailUrl = model.Mapping?.PaintBaseModel is null && model.Mapping?.BundleBaseModel is null
+                ? ScmShipThumbnail.From(item) : null
         };
     }
 

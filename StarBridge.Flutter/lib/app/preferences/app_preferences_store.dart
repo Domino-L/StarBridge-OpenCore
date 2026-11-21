@@ -23,9 +23,12 @@ final class StoredAppPreferences {
     required this.localeOverride,
     required this.appearanceMode,
     required this.motionPreference,
-    this.interactionStyle = InteractionStyle.standard,
+    this.interactionStyle = InteractionStyle.scan,
     this.applicationBehavior = ApplicationBehaviorPreferences.defaults,
     this.holidayAppearance = true,
+    this.performanceMode = false,
+    this.readOwnHealth = false,
+    this.readOwnHealthInBackground = false,
   });
 
   final Locale? localeOverride;
@@ -34,6 +37,9 @@ final class StoredAppPreferences {
   final InteractionStyle interactionStyle;
   final ApplicationBehaviorPreferences applicationBehavior;
   final bool holidayAppearance;
+  final bool performanceMode;
+  final bool readOwnHealth;
+  final bool readOwnHealthInBackground;
 
   StoredAppPreferences apply(AppPreferencesPatch patch) {
     return StoredAppPreferences(
@@ -45,6 +51,10 @@ final class StoredAppPreferences {
       interactionStyle: patch.interactionStyle ?? interactionStyle,
       applicationBehavior: patch.applicationBehavior ?? applicationBehavior,
       holidayAppearance: patch.holidayAppearance ?? holidayAppearance,
+      performanceMode: patch.performanceMode ?? performanceMode,
+      readOwnHealth: patch.readOwnHealth ?? readOwnHealth,
+      readOwnHealthInBackground:
+          patch.readOwnHealthInBackground ?? readOwnHealthInBackground,
     );
   }
 }
@@ -58,6 +68,9 @@ final class AppPreferencesPatch {
     this.interactionStyle,
     this.applicationBehavior,
     this.holidayAppearance,
+    this.performanceMode,
+    this.readOwnHealth,
+    this.readOwnHealthInBackground,
   });
 
   const AppPreferencesPatch.locale(Locale? locale)
@@ -67,7 +80,10 @@ final class AppPreferencesPatch {
       motionPreference = null,
       interactionStyle = null,
       applicationBehavior = null,
-      holidayAppearance = null;
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
 
   const AppPreferencesPatch.appearance(AppearanceMode mode)
     : includesLocaleOverride = false,
@@ -76,7 +92,10 @@ final class AppPreferencesPatch {
       motionPreference = null,
       interactionStyle = null,
       applicationBehavior = null,
-      holidayAppearance = null;
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
 
   const AppPreferencesPatch.motion(MotionPreference preference)
     : includesLocaleOverride = false,
@@ -85,7 +104,10 @@ final class AppPreferencesPatch {
       motionPreference = preference,
       interactionStyle = null,
       applicationBehavior = null,
-      holidayAppearance = null;
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
 
   const AppPreferencesPatch.applicationBehavior(
     ApplicationBehaviorPreferences behavior,
@@ -95,7 +117,10 @@ final class AppPreferencesPatch {
       motionPreference = null,
       interactionStyle = null,
       applicationBehavior = behavior,
-      holidayAppearance = null;
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
 
   const AppPreferencesPatch.interaction(InteractionStyle style)
     : includesLocaleOverride = false,
@@ -104,7 +129,10 @@ final class AppPreferencesPatch {
       motionPreference = null,
       interactionStyle = style,
       applicationBehavior = null,
-      holidayAppearance = null;
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
 
   const AppPreferencesPatch.holidayAppearance(bool enabled)
     : includesLocaleOverride = false,
@@ -113,7 +141,46 @@ final class AppPreferencesPatch {
       motionPreference = null,
       interactionStyle = null,
       applicationBehavior = null,
-      holidayAppearance = enabled;
+      holidayAppearance = enabled,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
+
+  const AppPreferencesPatch.performanceMode(bool enabled)
+    : includesLocaleOverride = false,
+      localeOverride = null,
+      appearanceMode = null,
+      motionPreference = null,
+      interactionStyle = null,
+      applicationBehavior = null,
+      holidayAppearance = null,
+      performanceMode = enabled,
+      readOwnHealth = null,
+      readOwnHealthInBackground = null;
+
+  const AppPreferencesPatch.readOwnHealth(bool enabled)
+    : includesLocaleOverride = false,
+      localeOverride = null,
+      appearanceMode = null,
+      motionPreference = null,
+      interactionStyle = null,
+      applicationBehavior = null,
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = enabled,
+      readOwnHealthInBackground = null;
+
+  const AppPreferencesPatch.readOwnHealthInBackground(bool enabled)
+    : includesLocaleOverride = false,
+      localeOverride = null,
+      appearanceMode = null,
+      motionPreference = null,
+      interactionStyle = null,
+      applicationBehavior = null,
+      holidayAppearance = null,
+      performanceMode = null,
+      readOwnHealth = null,
+      readOwnHealthInBackground = enabled;
 
   final bool includesLocaleOverride;
   final Locale? localeOverride;
@@ -122,6 +189,9 @@ final class AppPreferencesPatch {
   final InteractionStyle? interactionStyle;
   final ApplicationBehaviorPreferences? applicationBehavior;
   final bool? holidayAppearance;
+  final bool? performanceMode;
+  final bool? readOwnHealth;
+  final bool? readOwnHealthInBackground;
 
   bool get isEmpty =>
       !includesLocaleOverride &&
@@ -129,7 +199,10 @@ final class AppPreferencesPatch {
       motionPreference == null &&
       interactionStyle == null &&
       applicationBehavior == null &&
-      holidayAppearance == null;
+      holidayAppearance == null &&
+      performanceMode == null &&
+      readOwnHealth == null &&
+      readOwnHealthInBackground == null;
 }
 
 final class AppPreferencesReadResult {

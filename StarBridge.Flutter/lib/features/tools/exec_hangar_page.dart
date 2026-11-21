@@ -150,14 +150,18 @@ final class ExecHangarPageState extends State<ExecHangarPage> {
     final snapshot = _controller!.value.snapshot;
     if (!identical(snapshot, _snapshot) && snapshot != null) {
       _snapshot = snapshot;
-      _snapshotAge = widget.port is CachedExecHangar
-          ? (widget.port as CachedExecHangar).age
-          : Duration.zero;
+      final cached = widget.port is CachedExecHangar
+          ? widget.port as CachedExecHangar
+          : null;
+      _snapshotAge = cached?.age ?? Duration.zero;
+      // Poll from the last successful read, not from the snapshot's age: a
+      // repeated snapshot keeps its age, which would otherwise read every second.
+      final sinceRead = cached?.readAge ?? Duration.zero;
       _elapsed
         ..reset()
         ..start();
       _receivedWall = DateTime.now();
-      _lastReadSecond = -_snapshotAge.inSeconds;
+      _lastReadSecond = -sinceRead.inSeconds;
       if (!_dirty) _resetDraft();
     }
     setState(() {});

@@ -4,9 +4,9 @@ enum OnboardingMode { online, local }
 
 enum OnboardingStep {
   welcome,
-  mode,
   log,
   identity,
+  mode,
   local,
   online,
   verify,
@@ -28,17 +28,29 @@ enum OnboardingEvidenceOrigin { current, history, freshSession, confirmedLocal }
 
 enum OnboardingAction {
   applyMode,
+  prepareLog,
   login,
   cancelLogin,
   selectLog,
+  locateLogs,
+  skipLog,
   refresh,
   confirmHandle,
+  finishLogSetup,
   reviewLocalSettings,
   reviewOnlineChoices,
 }
 
+@immutable
+final class OnboardingLogCandidate {
+  const OnboardingLogCandidate(this.path, this.version);
+  final String path, version;
+}
+
 /// Host observations, not claims inferred from navigation or an SCM profile.
 /// Source/evidence keys are opaque revisions: never paths, GEIDs or account IDs.
+/// `logCandidates` is the one exception: Host shows the full local paths it
+/// found so the user can recognise them; choosing one sends only its index.
 @immutable
 final class OnboardingFacts {
   const OnboardingFacts({
@@ -49,6 +61,9 @@ final class OnboardingFacts {
     this.evidenceKey,
     this.version,
     this.logReady = false,
+    this.logCandidates,
+    this.logDeferred = false,
+    this.logSearchBlocked = false,
     this.evidence = OnboardingEvidence.unavailable,
     this.origin,
     this.handle,
@@ -56,6 +71,7 @@ final class OnboardingFacts {
     this.scopeChecked = false,
     this.requiresFreshEvidence = false,
     this.localIdentityConfirmed = false,
+    this.logSetupPending = false,
     this.localSettingsReady = false,
     this.signedIn = false,
     this.onlineIdentityMatched = false,
@@ -66,12 +82,20 @@ final class OnboardingFacts {
   });
 
   final OnboardingEligibility eligibility;
-  final bool available, canSave, logReady, scopeChecked;
+
+  /// Null before discovery; empty after a completed search with no safe result.
+  final List<OnboardingLogCandidate>? logCandidates;
+
+  /// The last search did not finish because a disk call was still blocked.
+  /// It is not "nothing found"; earlier candidates are kept.
+  final bool logSearchBlocked;
+  final bool available, canSave, logReady, scopeChecked, logDeferred;
   final String? sourceKey, evidenceKey, version, handle;
   final DateTime? observedAt;
   final OnboardingEvidence evidence;
   final OnboardingEvidenceOrigin? origin;
   final bool requiresFreshEvidence, localIdentityConfirmed, localSettingsReady;
+  final bool logSetupPending;
   final bool signedIn, onlineIdentityMatched, onlineChoicesReviewed;
   final OnboardingMode? activeMode;
   final bool publicationSuspended;
@@ -121,6 +145,11 @@ final class OnboardingReply {
     this.saved,
     this.completed,
   });
+
+  /// Presentation policy only; this does not grant online or completion authority.
+  bool get canUseUsageMode =>
+      completed != null || facts.eligibility == OnboardingEligibility.returning;
+
   final OnboardingFacts facts;
   final OnboardingCheckpoint? restored, saved, completed;
 }
@@ -136,14 +165,22 @@ final class OnboardingView {
     this.saved = false,
     this.completed = false,
     this.needsFreshEvidence = false,
+    this.errorCode,
   });
   final OnboardingStep step;
   final OnboardingMode? mode;
   final OnboardingFacts facts;
   final bool busy, error, saved, completed, needsFreshEvidence;
+  final String? errorCode;
+  bool get withoutLog =>
+      mode == OnboardingMode.local && facts.logDeferred && !facts.logReady;
+  bool get localSetupReady => identityReady || withoutLog;
 
   bool get identityReady =>
-      facts.hasCandidate && facts.localIdentityConfirmed && !needsFreshEvidence;
+      facts.hasCandidate &&
+      facts.localIdentityConfirmed &&
+      !needsFreshEvidence &&
+      !facts.logSetupPending;
 
   bool get onlineIdentityReady => facts.signedIn && facts.onlineIdentityMatched;
 
@@ -160,7 +197,7 @@ final class OnboardingView {
       facts.available &&
       facts.canSave &&
       modeApplied &&
-      identityReady &&
+      localSetupReady &&
       facts.localSettingsReady &&
       mode != null &&
       (mode == OnboardingMode.local ||
@@ -175,12 +212,12 @@ final class OnboardingView {
 
   List<OnboardingStep> get steps => [
     OnboardingStep.welcome,
-    OnboardingStep.mode,
     OnboardingStep.log,
-    OnboardingStep.identity,
+    if (!withoutLog) OnboardingStep.identity,
+    OnboardingStep.mode,
     OnboardingStep.local,
     if (mode == OnboardingMode.online) OnboardingStep.online,
-    OnboardingStep.verify,
+    if (!withoutLog) OnboardingStep.verify,
     OnboardingStep.summary,
   ];
 }

@@ -53,7 +53,8 @@ internal sealed class OverlayAppearancePreviewFrame
         Settings = settings with
         {
             Skin = skin, RequestedSkin = skin, AppearanceOptions = options,
-            Theme = profile.LocksTheme ? profile.DefaultTheme : settings.Theme,
+            // 0.7.3 overlay v2: a hidden appearance's locked palette is not carried into the preview
+            Theme = profile.LocksTheme ? profile.DefaultTheme : OverlaySkinCatalog.DrawnTheme(settings.Theme),
             AutoThemeByShip = profile.LocksTheme ? false : settings.AutoThemeByShip,
             StartupTransitionFollowOverlayTheme = true,
             StartupTransitionStyle = profile.StartupTransition,
@@ -144,8 +145,8 @@ internal sealed partial class OverlayAppearancePreviewSurface : IDisposable
         switch (example)
         {
             case OverlayAppearancePreviewExample.Notice:
-                _hud.QueueCommunicationEvent(zh ? "公告 · 预览示例" : "Notice · preview example",
-                    zh ? "这是一条示例公告，不是实际舰队消息。" : "Example announcement, not a real fleet message.");
+                _hud.QueueCommunicationEvent(zh ? "召集与提醒 · 预览示例" : "Rally & reminder · preview example",
+                    zh ? "这是一条示例提醒，不是实际舰队消息。" : "Example reminder, not a real fleet message.");
                 break;
             case OverlayAppearancePreviewExample.Event:
                 var sequence = ++_sequence;

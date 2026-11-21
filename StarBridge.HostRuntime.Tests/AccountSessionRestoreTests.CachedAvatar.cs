@@ -49,7 +49,9 @@ internal static partial class AccountSessionRestoreTests
                 AssertEqual(false, handler.Kinds.Any(name => name is not ("token" or "identity" or "bootstrap" or "businessIdentity")),
                     "cached avatar enrichment never performs an additional business request");
             }
-            finally { Directory.Delete(root, recursive: true); }
+            // The runtime is disposed above; a profile-cache write it already started, or a
+            // file scanner, may still hold a .tmp/.lock briefly. Retry instead of failing the test.
+            finally { await ScmRealtimeLifecycleTests.DeleteTemporaryRoot(root); }
         }
     }
 }

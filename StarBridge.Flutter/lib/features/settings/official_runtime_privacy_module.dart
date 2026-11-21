@@ -35,6 +35,26 @@ final class OfficialRuntimePrivacyModule {
   bool get canEdit => !reading && !failed && scope?.canSave == true;
   bool get canCancel => !reading && !failed && scope?.canCancel == true;
 
+  bool isFirstDefault(int fields, int? audience) =>
+      scope?.choiceRequired == true &&
+      !scope!.fleetChanged &&
+      !scope!.savedForCurrentSource &&
+      scope!.savedFields == 0 &&
+      fields == 15 &&
+      audience == null;
+
+  /// The scope changed under the editor for the same account. Only an explicit
+  /// save, including the publication it applies, leaves the main fleet outcome
+  /// unknown; a background publication apply/stop never submits a new choice.
+  /// An account change clears the stage instead (retire(saving: false)): one
+  /// account's unknown outcome never shows under another.
+  void retireUnder(bool saving, bool publicationBusy) =>
+      retire(
+        saving:
+            saving ||
+            publicationBusy && stage == OfficialPrivacySaveStage.applying,
+      );
+
   void retire({required bool saving}) {
     ++epoch;
     scope = null;

@@ -124,11 +124,21 @@ class _LocalEventExportActionState extends State<LocalEventExportAction> {
                       liveRegion: true,
                       child: Text(
                         _text(
-                          context,
-                          result.code == 'saved' && result.recovered
-                              ? 'savedBackup'
-                              : result.code,
-                        ).replaceAll('{count}', '${result.count}'),
+                              context,
+                              result.code == 'saved' && result.recovered
+                                  ? 'savedBackup'
+                                  : result.code,
+                            ).replaceAll('{count}', '${result.count}') +
+                            (result.code == 'saved' &&
+                                    result.unavailableSources.isNotEmpty
+                                ? _text(context, 'sentenceEnd') +
+                                      result.unavailableSources
+                                          .map(
+                                            (source) =>
+                                                ' ${_text(context, '${source}Omitted')}',
+                                          )
+                                          .join()
+                                : ''),
                         key: const Key('history-export-result'),
                       ),
                     ),
@@ -170,6 +180,17 @@ String _text(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
+  'sentenceEnd': ('。', '。', '.'),
+  'contractOmitted': (
+    '合约记录读不出来，这次没有导出。',
+    '合約記錄讀不出來，這次沒有匯出。',
+    "Contract records couldn't be read and weren't exported this time.",
+  ),
+  'eventsOmitted': (
+    '部分记录读不出来，这次没有导出。',
+    '部分記錄讀不出來，這次沒有匯出。',
+    "Some records couldn't be read and weren't exported this time.",
+  ),
   'export': ('导出全部记录', '匯出全部記錄', 'Export all records'),
   'working': ('正在导出…', '正在匯出…', 'Exporting…'),
   'saved': ('已导出 {count} 条记录', '已匯出 {count} 筆記錄', 'Exported {count} records'),

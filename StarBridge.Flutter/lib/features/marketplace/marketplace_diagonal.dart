@@ -1,10 +1,12 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../design_system/styles/marketplace_palette.dart';
 
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 
 /// The trading hall's one diagonal: every slanted edge, divider and stripe
@@ -51,10 +53,22 @@ class MarketParallelogramPainter extends CustomPainter {
 /// One slanted label segment. [solid] fills with [color]; otherwise a light
 /// tint with a coloured outline, which is the hall's default label style.
 class MarketSlantTag extends StatelessWidget {
-  const MarketSlantTag(this.label, {required this.color, this.solid = false, this.mono, this.foil = false, super.key});
+  const MarketSlantTag(
+    this.label, {
+    required this.color,
+    this.solid = false,
+    this.mono,
+    this.foil = false,
+    this.foreground,
+    super.key,
+  });
   final String label;
   final Color color;
   final bool solid;
+
+  /// Text colour of a [solid] tag; dark ink on the gold by default.
+  final Color? foreground;
+
   /// Optional numeric suffix set in the mono family (quality values).
   final String? mono;
 
@@ -65,8 +79,15 @@ class MarketSlantTag extends StatelessWidget {
   Widget build(BuildContext context) {
     if (foil) return MarketFoilTag(label, mono: mono);
     final t = context.tokens;
-    final foreground = solid ? MarketplacePalette.onGoldTag : color;
-    final style = TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: foreground, height: 1.2);
+    final foreground = solid
+        ? this.foreground ?? MarketplacePalette.onGoldTag
+        : color;
+    final style = TextStyle(
+      fontSize: 10.5,
+      fontWeight: FontWeight.w600,
+      color: foreground,
+      height: 1.2,
+    );
     return CustomPaint(
       painter: MarketParallelogramPainter(
         fill: solid ? color : color.withValues(alpha: .15),
@@ -94,8 +115,11 @@ class MarketSlantTag extends StatelessWidget {
   }
 }
 
-/// The 极品 label: foil fill, a soft warm glow, and a white sheen crossing
-/// every few seconds. One repaint boundary per tag keeps the frames local.
+/// The 极品 label: foil fill, a soft warm glow, and one white sheen pass.
+/// The foil is still; the sheen crosses once when the tag appears (including
+/// each return to its page) and when the pointer enters it (user 11-07,
+/// option A: a looping sheen redrew the whole window at the display rate).
+/// One repaint boundary per tag keeps the frames local.
 class MarketFoilTag extends StatefulWidget {
   const MarketFoilTag(this.label, {this.mono, super.key});
   final String label;
@@ -106,63 +130,120 @@ class MarketFoilTag extends StatefulWidget {
 
 class _MarketFoilTagState extends State<MarketFoilTag>
     with SingleTickerProviderStateMixin {
-  late final _phase = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 4500),
-  );
+  /// A screen of 极品 tags must not sweep together: at most two appearance
+  /// passes run at once in this engine; the rest stay still. Hover always
+  /// plays. Entries are removed when a pass ends or the tag goes away.
+  static const _maxAppearing = 2;
+  static final Set<_MarketFoilTagState> _appearing = {};
+
+  /// Sheen position: 0 enters at the left, 1 has left on the right (rest).
+  late final _sheen =
+      AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 2700),
+        value: _rest,
+      )..addStatusListener((status) {
+        if (status != AnimationStatus.forward) _appearing.remove(this);
+      });
+  static const _rest = 1.0;
+  // Reduced motion keeps the earlier still frame with the band mid-tag.
+  static const _stillSheen = .48;
+  late final ValueListenable<bool> _motion = decorativeMotion();
+  bool _still = false;
+  bool? _tickerOn;
+
+  @override
+  void initState() {
+    super.initState();
+    _motion.addListener(_motionChanged);
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final still =
+    _still =
         InteractionScope.maybeOf(context)?.reduceMotion ??
         MediaQuery.maybeDisableAnimationsOf(context) ??
         false;
-    if (still) {
-      _phase
-        ..stop()
-        ..value = .3;
-    } else if (!_phase.isAnimating) {
-      _phase.repeat();
+    final tickerOn = TickerMode.valuesOf(context).enabled;
+    final appeared = _tickerOn == null || (_tickerOn == false && tickerOn);
+    _tickerOn = tickerOn;
+    if (_still) {
+      _settle(_stillSheen);
+    } else {
+      if (_sheen.value == _stillSheen) _settle(_rest);
+      if (appeared && tickerOn) _pass(appearance: true);
     }
+  }
+
+  void _pass({required bool appearance}) {
+    if (_still || _sheen.isAnimating) return;
+    if (appearance) {
+      if (!_motion.value || _appearing.length >= _maxAppearing) return;
+      _appearing.add(this);
+    }
+    _sheen.forward(from: 0);
+  }
+
+  void _settle(double value) {
+    _appearing.remove(this);
+    _sheen
+      ..stop()
+      ..value = value;
+  }
+
+  // A game came to the front or the window lost focus: stop mid-pass.
+  void _motionChanged() {
+    if (!_motion.value && _sheen.isAnimating) _settle(_rest);
   }
 
   @override
   void dispose() {
-    _phase.dispose();
+    _appearing.remove(this);
+    _motion.removeListener(_motionChanged);
+    _sheen.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
     const ink = MarketplacePalette.foilInk;
-    return RepaintBoundary(
-      child: CustomPaint(
-        painter: _FoilPainter(_phase),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-          child: Text.rich(
-            TextSpan(
-              text: widget.label,
-              children: [
-                if (widget.mono != null)
-                  TextSpan(
-                    text: widget.label.isEmpty
-                        ? widget.mono
-                        : ' ${widget.mono}',
-                    style: TextStyle(fontFamily: t.typography.monoFamily),
-                  ),
-              ],
+    return MouseRegion(
+      // Cards behind keep their own hover.
+      opaque: false,
+      onEnter: (_) => _pass(appearance: false),
+      child: RepaintBoundary(
+        child: CustomPaint(
+          painter: _FoilPainter(_sheen, lightOnly),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            child: Text.rich(
+              TextSpan(
+                text: widget.label,
+                children: [
+                  if (widget.mono != null)
+                    TextSpan(
+                      text: widget.label.isEmpty
+                          ? widget.mono
+                          : ' ${widget.mono}',
+                      style: TextStyle(fontFamily: t.typography.monoFamily),
+                    ),
+                ],
+              ),
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: ink,
+                height: 1.2,
+              ),
+              maxLines: 1,
+              softWrap: false,
             ),
-            style: const TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: ink,
-              height: 1.2,
-            ),
-            maxLines: 1,
-            softWrap: false,
           ),
         ),
       ),
@@ -171,20 +252,27 @@ class _MarketFoilTagState extends State<MarketFoilTag>
 }
 
 class _FoilPainter extends CustomPainter {
-  _FoilPainter(this.phase) : super(repaint: phase);
-  final Animation<double> phase;
+  _FoilPainter(this.sheen, this.lightOnly) : super(repaint: sheen);
+  final bool lightOnly;
+  final Animation<double> sheen;
+
+  /// The foil gradient rests where the reduced-motion frame always showed it.
+  static const _foilPhase = .3;
+
   @override
   void paint(Canvas canvas, Size size) {
     final path = _parallelogram(size);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = MarketplacePalette.foilGlow
-        ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 5),
-    );
-    // The gradient is twice the tag's width and slides one width per cycle.
+    if (!lightOnly) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = MarketplacePalette.foilGlow
+          ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 5),
+      );
+    }
+    // The gradient is twice the tag's width; it no longer slides.
     final span = size.width * 2;
-    final shift = -span / 2 * phase.value;
+    final shift = -span / 2 * _foilPhase;
     canvas.drawPath(
       path,
       Paint()
@@ -193,29 +281,38 @@ class _FoilPainter extends CustomPainter {
           tileMode: TileMode.repeated,
         ).createShader(Rect.fromLTWH(shift, 0, span / 2, size.height)),
     );
-    // Sheen: a narrow white band crossing in the first 60% of each cycle.
-    final sweep = (phase.value * 1.6).clamp(0.0, 1.0);
-    final x = -size.width * .4 + sweep * size.width * 1.8;
+    // Sheen: a narrow white band crossing from left to right.
+    final x = -size.width * .4 + sheen.value * size.width * 1.8;
     canvas.save();
     canvas.clipPath(path);
     canvas.drawRect(
       Offset.zero & size,
       Paint()
-        ..shader = LinearGradient(
-          colors: MarketplacePalette.foilSheen,
-        ).createShader(Rect.fromLTWH(x, 0, size.width * .35, size.height)),
+        ..shader = LinearGradient(colors: MarketplacePalette.foilSheen)
+            .createShader(Rect.fromLTWH(x, 0, size.width * .35, size.height)),
     );
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_FoilPainter old) => old.phase != phase;
+  bool shouldRepaint(_FoilPainter old) =>
+      old.sheen != sheen || old.lightOnly != lightOnly;
 }
 
 /// Attribute tags joined along their shared slanted edge into one badge.
+/// The solid purple 需要 segment fused before a buy order's quality tag
+/// (user 2026-11-07, 方案 A): same colour as the buy side's edge.
+MarketSlantTag marketNeedsTag(String label) => MarketSlantTag(
+  label,
+  key: const Key('market-quality-needs'),
+  color: MarketplacePalette.buyer,
+  solid: true,
+  foreground: Colors.white,
+);
+
 class MarketFusedTags extends StatelessWidget {
   const MarketFusedTags(this.tags, {super.key});
-  final List<MarketSlantTag> tags;
+  final List<Widget> tags;
   @override
   Widget build(BuildContext context) {
     if (tags.isEmpty) return const SizedBox.shrink();
@@ -225,7 +322,10 @@ class MarketFusedTags extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < tags.length; i++)
-          Transform.translate(offset: Offset(-overlap * i + i * 1.0, 0), child: tags[i]),
+          Transform.translate(
+            offset: Offset(-overlap * i + i * 1.0, 0),
+            child: tags[i],
+          ),
       ],
     );
   }
@@ -241,7 +341,9 @@ class MarketSlantDivider extends StatelessWidget {
     width: marketSlantRun(height) + 2,
     height: height,
     child: CustomPaint(
-      painter: _SlashPainter(color ?? context.tokens.colors.textSecondary.withValues(alpha: .4)),
+      painter: _SlashPainter(
+        color ?? context.tokens.colors.textSecondary.withValues(alpha: .4),
+      ),
     ),
   );
 }

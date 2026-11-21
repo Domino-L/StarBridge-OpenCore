@@ -20,7 +20,8 @@ internal static class OverlayEntitlementRefreshTests
                 var options = new ScmOAuthOptions("synthetic-authority", endpoint, endpoint, endpoint,
                     "synthetic-client", "synthetic-resource", "openid profile.read", "/callback");
                 var vault = new Vault();
-                var oauth = new OAuthPkceClient(new ScmHttpClient(transport), vault, options);
+                var clock = new BackoffClock();
+                var oauth = new OAuthPkceClient(new ScmHttpClient(transport), vault, options) { SessionClock = clock, RestoreBackoffRandom = () => 0.5 };
                 var initial = await oauth.TryRestoreSessionAsync(default) ?? throw new Exception("Missing synthetic session");
                 Check(transport.BootstrapReads == 0, "Cold restoration must not duplicate the Host bootstrap");
                 var bootstrap = await oauth.LoadBootstrapAsync(initial, default);
@@ -48,8 +49,15 @@ internal static class OverlayEntitlementRefreshTests
                     "Resource qualification denial cannot delete the refresh credential");
                 if (mode == "unavailable")
                 {
+                    var rotations = transport.TokenRefreshes;
+                    var reads = transport.BootstrapReads;
+                    try { await oauth.RefreshIdentityAsync(bootstrap.ActiveSession, default); throw new Exception("Expected backoff"); }
+                    catch (ScmRefreshTemporarilyUnavailableException) { }
+                    Check(rotations == transport.TokenRefreshes && reads == transport.BootstrapReads, "Bootstrap failure suppresses all retry traffic");
+                    clock.Now = clock.Now.AddSeconds(5);
                     transport.Recovered = true;
                     var recovered = await oauth.RefreshIdentityAsync(bootstrap.ActiveSession, default);
+                    Check(rotations == transport.TokenRefreshes, "Bootstrap recovery reuses committed rotation");
                     Check(recovered.ActiveOverlayEntitlements.Contains("overlay.skin.night-shadow"),
                         "A transient qualification failure must be recoverable from the original account authority");
                 }
@@ -66,6 +74,12 @@ internal static class OverlayEntitlementRefreshTests
     private static void Check(bool value, string message)
     {
         if (!value) throw new Exception(message);
+    }
+
+    private sealed class BackoffClock : TimeProvider
+    {
+        internal DateTimeOffset Now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     private sealed class Vault : ITokenVault

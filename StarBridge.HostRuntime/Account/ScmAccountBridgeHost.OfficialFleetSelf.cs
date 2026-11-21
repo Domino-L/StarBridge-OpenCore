@@ -10,14 +10,16 @@ internal sealed partial class ScmAccountBridgeHost
 
     // Marks only the viewer's own Java-verified visible row, so the shared board opens
     // the viewer's own page instead of a visitor read. Names never prove self. Any
-    // identity-read failure leaves every row as an ordinary member.
+    // identity-read failure leaves every row as an ordinary member. Such a failure is
+    // not membership evidence, so it never revokes navigation or fails the page;
+    // a real departure is still caught by the navigation fences around this read.
     private async Task<long?> FindOfficialFleetSelfAsync(BridgeAccountContext owner, long generation,
-        IReadOnlyDictionary<long, OfficialFleetMemberIdentity> identities, CancellationToken token)
+        IReadOnlyDictionary<long, OfficialFleetMemberIdentity> identities, FleetNavigationRead use, CancellationToken token)
     {
         if (!identities.Values.Any(row => row.State == "visible")) return null;
         try
         {
-            RequireFleetReadOwner(owner, generation);
+            RequireFleetNavigationCurrent(owner, generation, use);
             var session = RequireSession(owner);
             string? viewer = null;
             lock (_fleetViewerGate)
@@ -27,8 +29,10 @@ internal sealed partial class ScmAccountBridgeHost
             {
                 using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
                 budget.CancelAfter(TimeSpan.FromSeconds(5));
-                var identity = await _oauth.LoadBusinessIdentityAsync(session, budget.Token);
-                RequireFleetReadOwner(owner, generation);
+                RequireFleetNavigationCurrent(owner, generation, use);
+                var identity = await _oauth.LoadBusinessIdentityAsync(session, budget.Token,
+                    () => RequireFleetNavigationCurrent(owner, generation, use));
+                RequireFleetNavigationCurrent(owner, generation, use);
                 RequireSameSession(session, identity.ActiveSession);
                 _session = identity.ActiveSession;
                 viewer = identity.BusinessSubjectId;

@@ -15,7 +15,9 @@ internal sealed partial class ScmAccountBridgeHost
         FriendsReader.ParsePrivacyRead(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("directMessages.privacy_unavailable");
         try
@@ -44,7 +46,9 @@ internal sealed partial class ScmAccountBridgeHost
         var allowStrangerDirectMessages = FriendsReader.ParsePrivacyWrite(payload);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _friends ?? throw new AccountBridgeHostException("directMessages.privacy_unavailable");
 

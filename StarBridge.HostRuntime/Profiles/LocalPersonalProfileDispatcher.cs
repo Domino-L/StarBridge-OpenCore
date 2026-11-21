@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using StarBridge.HostRuntime.Hangar;
 using StarBridge.NativeBridge;
 
@@ -30,8 +31,15 @@ public sealed class LocalPersonalProfileDispatcher(LocalPersonalProfileStore sto
                 {
                     if (body.EnumerateObject().Any(p => p.Name is not ("schemaVersion" or "expectedRevision" or "operationId" or "content")))
                         return Error(request, "profile_local.invalid_request");
-                    var content = body.GetProperty("content").Deserialize<LocalProfileContent>(LocalPersonalProfileStore.Json);
+                    var content = ReadSaveContent(body.GetProperty("content"));
                     LocalPersonalProfileStore.Validate(content);
+                    var expectedRevision = body.GetProperty("expectedRevision").GetInt64();
+                    var operationId = body.GetProperty("operationId").GetString();
+                    if (expectedRevision < 0 || expectedRevision == long.MaxValue ||
+                        !Guid.TryParseExact(operationId, "N", out _))
+                        return Error(request, "profile_local.invalid_request");
+                    if (snapshot.Revision != expectedRevision && snapshot.OperationId != operationId)
+                        return Error(request, "profile_local.conflict");
                     // Existing references survive removals/reordering. Only newly
                     // selected IDs require membership in this owner's current hangar.
                     if (content!.FavoriteShipIds is { } ids &&
@@ -46,8 +54,7 @@ public sealed class LocalPersonalProfileDispatcher(LocalPersonalProfileStore sto
                                 return Error(request, "profile_local.hangar_changed");
                         }
                     }
-                    snapshot = store.Save(owner.Context, body.GetProperty("expectedRevision").GetInt64(),
-                        body.GetProperty("operationId").GetString()!, content, CanCommit);
+                    snapshot = store.Save(owner.Context, expectedRevision, operationId!, content, CanCommit);
                 }
                 else if (request.Name != "personalProfile.localRead") return Error(request, BridgeErrorCodes.CapabilityUnavailable);
                 else if (body.EnumerateObject().Any(p => p.Name != "schemaVersion"))
@@ -65,6 +72,26 @@ public sealed class LocalPersonalProfileDispatcher(LocalPersonalProfileStore sto
             { return Error(request, "profile_local.invalid_request"); }
         }
     }
+
+    // Fill the required defaults for sparse saves. Only the editor can mark
+    // a value as an explicit clear.
+    private static LocalProfileContent? ReadSaveContent(JsonElement body)
+    {
+        var wire = JsonNode.Parse(body.GetRawText())!.AsObject();
+        void FillRequired(string field, JsonNode value)
+        {
+            if (wire.ContainsKey(field)) return;
+            if (wire["fieldStates"]?.AsObject().ContainsKey(field) == true)
+                throw new JsonException("Missing explicit profile field.");
+            wire[field] = value;
+        }
+        FillRequired("introduction", JsonValue.Create("")!);
+        FillRequired("avatarStyle", JsonValue.Create(0)!);
+        FillRequired("wallpaperId", JsonValue.Create("none")!);
+        FillRequired("modules", new JsonArray());
+        return wire.Deserialize<LocalProfileContent>(LocalPersonalProfileStore.Json);
+    }
+
     private static BridgeDispatchBatch Error(BridgeEnvelope request, string code) =>
         new(BridgeEnvelope.ErrorResponse(request, new(code, "Local personal profile operation failed.", true)), []);
 }

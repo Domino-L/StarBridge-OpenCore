@@ -5,7 +5,7 @@ namespace StarBridge.HostRuntime.Communities;
 // Internal notification input. No account ids, command references, attachments
 // or read-receipt handles leave the existing authenticated reader.
 internal sealed record CommunityNotificationFeed(DateTimeOffset ReceivedAt, CommunityNotificationSource[] Sources,
-    bool CommunitiesConfirmed = true)
+    bool CommunitiesConfirmed = true, bool OfficialMembershipConfirmed = false, string? OfficialMembershipSource = null)
 {
     internal bool IsBounded => Sources.Length <= 65 &&
         Sources.Count(row => row.SourceKind == OrganizationNotificationSourceKind.Community) <= 64 &&
@@ -19,7 +19,11 @@ internal sealed record CommunityNotificationSource(
     string SourceKey, string Name, DateTimeOffset? JoinedAt,
     bool ChatAvailable, CommunityNotificationChat? Chat,
     bool ManagementAvailable, CommunityNotificationTask[] Tasks, string PolicyKey = "", bool ManagementConfirmed = true,
-    OrganizationNotificationSourceKind SourceKind = OrganizationNotificationSourceKind.Community);
+    OrganizationNotificationSourceKind SourceKind = OrganizationNotificationSourceKind.Community,
+    CommunityNotificationAnnouncements? Announcements = null, string? AnnouncementSource = null,
+    string? AnnouncementIdentity = null);
+internal sealed record CommunityNotificationAnnouncements(DateTimeOffset ServerTime, CommunityNotificationAnnouncement[] Entries);
+internal sealed record CommunityNotificationAnnouncement(string Id, bool Published, DateTimeOffset PublishedAt);
 internal sealed record CommunityNotificationChat(
     long Sequence, int Unread, bool Incoming, DateTimeOffset ServerTime,
     DateTimeOffset? CreatedAt, string Callsign, string Text);

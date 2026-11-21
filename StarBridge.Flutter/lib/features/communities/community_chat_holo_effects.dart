@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../common/organization_holo.dart';
@@ -265,14 +267,19 @@ class _ArrivalPainter extends CustomPainter {
   }
 
   void _edge(Canvas canvas, Offset a, Offset b) {
-    canvas.drawLine(
-      a,
-      b,
-      Paint()
-        ..color = light.withValues(alpha: .6)
-        ..strokeWidth = 4
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-    );
+    // The glow is a blurred pass; while a game runs (performance mode) only
+    // the sharp line is drawn. Read at paint time: the arrival repaints every
+    // frame while it runs.
+    if (!lightVisuals().value) {
+      canvas.drawLine(
+        a,
+        b,
+        Paint()
+          ..color = light.withValues(alpha: .6)
+          ..strokeWidth = 4
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+    }
     canvas.drawLine(
       a,
       b,
@@ -469,11 +476,26 @@ class _SkeletonState extends State<CommunityChatHoloSkeleton>
     vsync: this,
     duration: const Duration(milliseconds: 1400),
   );
+  // A placeholder that never gets data (offline) would loop forever; it
+  // pauses while a game runs or the window is not in front.
+  late final ValueListenable<bool> _motion = decorativeMotion();
+  bool _reduced = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _motion.addListener(_update);
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (resolveStarBridgeInteraction(context).reduceMotion) {
+    _reduced = resolveStarBridgeInteraction(context).reduceMotion;
+    _update();
+  }
+
+  void _update() {
+    if (_reduced || !_motion.value) {
       _shine.stop();
     } else if (!_shine.isAnimating) {
       _shine.repeat();
@@ -482,6 +504,7 @@ class _SkeletonState extends State<CommunityChatHoloSkeleton>
 
   @override
   void dispose() {
+    _motion.removeListener(_update);
     _shine.dispose();
     super.dispose();
   }

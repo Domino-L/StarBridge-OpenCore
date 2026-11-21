@@ -108,7 +108,7 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
             var plan = new InstalledUpdatePlan(1, _registration.Directory, _registration.Version, _dataRoot,
                 _client.Id, _client.StartTime.ToUniversalTime().Ticks, host.Id, host.StartTime.ToUniversalTime().Ticks, Path.GetFileName(artifact));
             plan.Validate(_root);
-            InstalledUpdateFiles.Write(Path.Combine(_root, "installer-manifest.json"), _download.Manifest);
+            InstalledUpdateFiles.Write(Path.Combine(_root, "installer-manifest.json"), _download.SignedManifest);
             InstalledUpdateFiles.Write(Path.Combine(_root, InstalledUpdatePlan.FileName), plan);
             _helper = await FlutterUpdateHandoff.StartInstalledAsync(helper, Path.Combine(_root, InstalledUpdatePlan.FileName), token);
             _handedOff = true;
@@ -136,7 +136,9 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
 
     // At most one pending workspace per installed product. Completed upgrades,
     // completed rollbacks and untouched failed handoffs retire on the NEXT update.
-    internal static void PruneCompleted(string installation, Func<InstalledUpdateRegistration>? readRegistration = null)
+    // Transactions superseded by a manual installation are archived, never deleted.
+    internal static void PruneCompleted(string installation, Func<InstalledUpdateRegistration>? readRegistration = null,
+        Func<Guid>? createArchiveId = null)
     {
         foreach (var directory in Directory.EnumerateDirectories(Path.GetDirectoryName(installation)!, InstalledUpdateFiles.Prefix + "*")) {
             InstalledUpdateFiles.RequireSibling(installation, directory);
@@ -159,20 +161,24 @@ public sealed class FlutterInstalledUpdateInstallation : IDisposable
             if (!InstalledUpdateRegistration.Same(current.Directory, installation) ||
                 state.SchemaVersion != 1 || state.Installation != installation)
                 throw new IOException("Previous update requires recovery.");
-            // A later independently installed version can supersede a committed
-            // transaction. Preserve its entire recovery tree outside the active
-            // transaction namespace; never treat incomplete/rolled-back work as such.
-            if (state.Phase == "committed" &&
-                ApplicationUpdateVersion.Parse(state.Version) > ApplicationUpdateVersion.Parse(plan.CurrentVersion) &&
-                ApplicationUpdateVersion.Parse(current.Version) > ApplicationUpdateVersion.Parse(state.Version)) {
+            // A manual install of a third version supersedes this transaction,
+            // including interrupted work. Matching either endpoint still follows
+            // the normal recovery/completion rules below. No manifest is read here.
+            var currentVersion = ApplicationUpdateVersion.Parse(current.Version);
+            if (currentVersion != ApplicationUpdateVersion.Parse(plan.CurrentVersion) &&
+                currentVersion != ApplicationUpdateVersion.Parse(state.Version)) {
                 using var idleArchive = AcquireGate(installation, "");
                 if (current != (readRegistration ?? InstalledUpdateRegistration.Read)())
                     throw new IOException("Installation registration changed.");
+                if (plan != InstalledUpdateFiles.Read<InstalledUpdatePlan>(planPath, 16384) ||
+                    state != InstalledUpdateFiles.Read<InstalledUpdateTransaction.State>(statePath, 8192))
+                    throw new IOException("Update workspace changed.");
                 InstalledUpdateFiles.Tree(directory);
-                var archive = Path.Combine(Path.GetDirectoryName(installation)!, ".starbridge-retired-update-" + Guid.NewGuid().ToString("N"));
+                var archive = Path.Combine(Path.GetDirectoryName(installation)!, ".starbridge-retired-update-" + (createArchiveId ?? Guid.NewGuid)().ToString("N"));
                 InstalledUpdateFiles.Plain(archive);
                 if (Directory.Exists(archive) || File.Exists(archive)) throw new IOException("Recovery archive already exists.");
                 Directory.Move(directory, archive);
+                Auth.ScmAuthDiagnostics.Write("installed-update", "stale-transaction-retired", "completed");
                 continue;
             }
             var final = state.Phase == "committed" && ApplicationUpdateVersion.Parse(state.Version) == ApplicationUpdateVersion.Parse(current.Version) ||

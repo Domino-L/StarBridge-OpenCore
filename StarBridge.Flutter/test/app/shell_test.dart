@@ -10,6 +10,8 @@ import '../features/communities/community_visitor_profile_test.dart'
 import '../features/friends/social_layout_test.dart' show capture, loadFonts;
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show SuitePressable;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -346,7 +348,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('行动'), findsWidgets);
-    expect(find.text('组织与舰队的目标性协作（即将推出）'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('shell-title-switcher')),
+        matching: find.text('行动'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('组织与舰队的目标性协作（即将推出）'), findsNothing);
     final semantics = tester.getSemantics(
       find.byKey(const Key('operations-coming-soon-semantics')),
     );
@@ -453,11 +462,7 @@ void main() {
       );
       expect(find.text('正在重试…'), findsOneWidget);
       expect(
-        tester
-            .widget<TextButton>(
-              find.byKey(const Key('connection-status-retry')),
-            )
-            .onPressed,
+        _pressHandler(tester, find.byKey(const Key('connection-status-retry'))),
         isNull,
       );
 
@@ -562,10 +567,24 @@ void main() {
       expect(find.byKey(ValueKey('friends-nav-$section')), findsOneWidget);
     }
     expect(find.byType(TextField), findsOneWidget);
-    expect(find.text('好友状态与好友申请'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('shell-title-switcher')),
+        matching: find.text('好友'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('好友状态与好友申请'), findsNothing);
     await tester.tap(find.byKey(const Key('friends-recent')));
     await tester.pumpAndSettle();
-    expect(find.text('私信、消息请求与未读消息'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('shell-title-switcher')),
+        matching: find.text('消息'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('私信、消息请求与未读消息'), findsNothing);
     expect(find.byKey(const Key('friends-nav-friends')), findsNothing);
   });
 
@@ -688,3 +707,11 @@ final class _DelayedRetryAccountPort implements AccountPort {
   @override
   Future<void> close() async {}
 }
+
+// Button enabled state whatever the interaction suite (default is scan since 0.7.3).
+Object? _pressHandler(WidgetTester tester, Finder finder) =>
+    switch (tester.widget(finder)) {
+      final ButtonStyleButton button => button.onPressed,
+      final SuitePressable pressable => pressable.onActivate,
+      final other => throw StateError('Unexpected button ${other.runtimeType}'),
+    };

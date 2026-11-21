@@ -27,8 +27,7 @@ import 'overlay_preset_import_preview.dart';
 import 'overlay_preset_transfer.dart';
 import 'overlay_scene_controller.dart';
 import 'overlay_source_card.dart';
-import 'overlay_source_binding_field.dart';
-import 'overlay_chat_sources_field.dart';
+import 'overlay_workspace_editor_group_panel.dart';
 import 'overlay_source_limit_notice.dart';
 import 'overlay_roster_editor.dart';
 import 'overlay_workspace_appearance_center.dart';
@@ -48,6 +47,8 @@ import 'overlay_workspace_preset_bar.dart';
 import 'overlay_workspace_preview_stage.dart';
 import 'overlay_workspace_runtime_card.dart';
 import 'overlay_workspace_schema.dart';
+import 'overlay_workspace_global_group.dart';
+import 'overlay_visor_switch_notice.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 class OverlayWorkspacePage extends StatefulWidget {
@@ -157,8 +158,11 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     super.dispose();
   }
 
-  Widget get _fullscreenButton =>
-      OverlayWorkspaceFullscreenButton(module: widget.module, editor: _editor);
+  Widget get _fullscreenButton => OverlayWorkspaceFullscreenButton(
+    module: widget.module,
+    editor: _editor,
+    roster: widget.roster,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -219,6 +223,10 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
               projection: projection,
               module: widget.module,
               onBack: () => setState(() => _appearanceCenterOpen = false),
+              onOpenGlobal: () {
+                setState(() => _appearanceCenterOpen = false);
+                _selectGroup('global');
+              },
             )
           : _workspace(context, projection, active, fields),
     );
@@ -232,26 +240,51 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        OverlayWorkspaceSettingsGroup(
-          group: _group,
-          editOwner: (widget.module, projection.snapshot),
-          currentEditOwner: () =>
-              (widget.module, widget.module.projection.value.snapshot),
-          fields: fields,
-          settings: projection.settings!,
-          appearances: projection.snapshot!.appearances,
-          onChanged: widget.module.updateSetting,
-          onExperiencePreset: widget.module.applyExperiencePreset,
-          footer: _moduleStyleControls(projection),
-          // Appearance Center stays the full appearance page; this group keeps
-          // the quick fields and links to it.
-          header: _group == 'appearance'
-              ? OverlayWorkspaceAppearanceEntry(
-                  projection: projection,
-                  onPressed: () => setState(() => _appearanceCenterOpen = true),
+        ValueListenableBuilder<bool>(
+          valueListenable: widget.module.visorNotice.visible,
+          builder: (_, show, _) => show
+              ? OverlayVisorSwitchNotice(
+                  onClose: widget.module.visorNotice.close,
                 )
-              : _sourceField(projection),
+              : const SizedBox.shrink(),
         ),
+        if (_group == OverlayWorkspaceGlobalGroup.group)
+          OverlayWorkspaceGlobalGroup(
+            settings: projection.settings!,
+            onChanged: widget.module.updateSetting,
+            onExperiencePreset: widget.module.applyExperiencePreset,
+            appearances: projection.snapshot!.appearances,
+            editOwner: (widget.module, projection.snapshot),
+            currentEditOwner: () =>
+                (widget.module, widget.module.projection.value.snapshot),
+          )
+        else
+          OverlayWorkspaceSettingsGroup(
+            group: _group,
+            editOwner: (widget.module, projection.snapshot),
+            currentEditOwner: () =>
+                (widget.module, widget.module.projection.value.snapshot),
+            fields: fields,
+            settings: projection.settings!,
+            appearances: projection.snapshot!.appearances,
+            onChanged: widget.module.updateSetting,
+            onExperiencePreset: widget.module.applyExperiencePreset,
+            footer: _moduleStyleControls(projection),
+            // Appearance Center stays the full appearance page; this group keeps
+            // the quick fields and links to it.
+            header: _group == 'appearance'
+                ? OverlayWorkspaceAppearanceEntry(
+                    projection: projection,
+                    onPressed: () =>
+                        setState(() => _appearanceCenterOpen = true),
+                  )
+                : overlayWorkspaceModuleSourceField(
+                    _group,
+                    projection,
+                    widget.module,
+                    widget.scenes,
+                  ),
+          ),
         if (_group == 'startup')
           OverlayWorkspaceHotkeyCard(
             hotkey: projection.hotkey!,
@@ -259,44 +292,14 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
                 widget.module.updateHotkey(binding: value),
             onEnabledChanged: (value) =>
                 widget.module.updateHotkey(enabled: value),
+            // the same switch as the full-screen editor's (11-13 请你定 3)
+            onRegisterHotKeyChanged: (value) =>
+                widget.module.updateHotkey(registerHotKey: value),
+            registrationFailures: projection.runtime.hotkeyRegistrationFailures,
           ),
       ],
     ),
   );
-
-  Widget? _sourceField(OverlayWorkspaceProjection projection) {
-    final module = switch (_group) {
-      'notice' => OverlaySourceModule.notice,
-      'fleetOverview' => OverlaySourceModule.overview,
-      'members' => OverlaySourceModule.members,
-      'chat' => OverlaySourceModule.chat,
-      'events' => OverlaySourceModule.events,
-      _ => null,
-    };
-    if (module == null ||
-        projection.snapshot?.sourcePresetsEnabled != true ||
-        projection.sources == null) {
-      return null;
-    }
-    if (module == OverlaySourceModule.chat) {
-      return OverlayChatSourcesField(
-        value: projection.sources!,
-        scenes: widget.scenes,
-        onChanged: projection.busy ? null : widget.module.updateChatSources,
-        onSingleChanged: projection.busy
-            ? null
-            : (value) => widget.module.updateModuleSource(module, value),
-      );
-    }
-    return OverlaySourceBindingField(
-      key: Key('overlay-module-source-${module.name}'),
-      value: projection.sources!.forModule(module),
-      scenes: widget.scenes,
-      onChanged: projection.busy
-          ? null
-          : (value) => widget.module.updateModuleSource(module, value),
-    );
-  }
 
   Widget _workspace(
     BuildContext context,
@@ -497,13 +500,19 @@ class _OverlayWorkspacePageState extends State<OverlayWorkspacePage> {
     }.contains(_group)) {
       return null;
     }
-    final controls = OverlayWorkspaceModuleStyleControls(
-      group: _group,
-      layout: projection.layout,
-      settings: projection.settings!,
-      onLayoutChanged: (item, coalesce) =>
-          widget.module.updateLayoutItem(item, coalesce: coalesce),
-      onSettingChanged: widget.module.updateSetting,
+    final controls = ListenableBuilder(
+      listenable: _editor,
+      builder: (context, _) => OverlayWorkspaceModuleStyleControls(
+        group: _group,
+        layout: projection.layout,
+        settings: projection.settings!,
+        onLayoutChanged: (item, coalesce) =>
+            widget.module.updateLayoutItem(item, coalesce: coalesce),
+        onSettingChanged: widget.module.updateSetting,
+        onSizeStep: widget.module.stepMembersSize,
+        layoutLocked: _editor.layoutLocked,
+        onOpenGlobal: () => _selectGroup('global'),
+      ),
     );
     return _group == 'members' && widget.roster != null
         ? Column(

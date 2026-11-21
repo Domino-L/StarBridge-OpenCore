@@ -52,13 +52,13 @@
     },
     {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1280.png",
-      "sha256": "98d8197680f45d21f580e125ab3f62902a8a7a148a9cac0a4091a67960b5b64b",
+      "sha256": "243956439259bc9ee33ae7798ba2cee3139902aa8fe951ca3e0e792df37de483",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
     },
     {
       "path": "StarBridge.Flutter/test/features/overlay_settings/goldens/overlay-import-1440.png",
-      "sha256": "f5ee5f5067f10cc8a5619dd2704e04a91b25f7f4362bb2bcd43d8038bd1c2daf",
+      "sha256": "8d03540d2036b3e2c68f4843d41adbee05b405e39338e31b950bfcc1ce2baa7b",
       "license": "StarBridge-authored synthetic UI fixture; bundled fonts retain OFL",
       "licenseFile": "docs/UI_TEST_FIXTURES.md"
     },

@@ -7,8 +7,45 @@ import 'chat_message_bubble.dart';
 import 'direct_message_outgoing_bubble.dart';
 import 'direct_messages_module.dart';
 
-/// Newest first: the user's own messages not yet in history (A2), then the
-/// confirmed history, then the "older" control.
+/// Oldest first: confirmed history with the user's failed messages placed at
+/// the time they were written (2026-11-19: a failed bubble must not drop below
+/// later messages that did go out). Messages still sending, or confirmed but
+/// not yet in history, are returned separately and stay at the bottom.
+({List<Object> timeline, List<DirectOutgoing> pinned}) directMessageTimeline(
+  List<DirectMessage> history,
+  List<DirectOutgoing> outgoing,
+) {
+  final pinned = [
+    for (final entry in outgoing)
+      if (entry.state != DirectOutgoingState.failed) entry,
+  ];
+  final failed = [
+    for (final entry in outgoing)
+      if (entry.state == DirectOutgoingState.failed) entry,
+  ];
+  // Stable: equal times keep history first and failed entries in queue order.
+  final order = List<int>.generate(failed.length, (i) => i)
+    ..sort((a, b) {
+      final byTime = failed[a].time.compareTo(failed[b].time);
+      return byTime != 0 ? byTime : a.compareTo(b);
+    });
+  final timeline = <Object>[];
+  var next = 0;
+  for (final message in history) {
+    while (next < order.length &&
+        failed[order[next]].time.isBefore(message.time)) {
+      timeline.add(failed[order[next++]]);
+    }
+    timeline.add(message);
+  }
+  while (next < order.length) {
+    timeline.add(failed[order[next++]]);
+  }
+  return (timeline: timeline, pinned: pinned);
+}
+
+/// Newest first: the user's messages still sending (A2), then history with
+/// failed messages at their own time, then the "older" control.
 class DirectMessageHistoryList extends StatelessWidget {
   const DirectMessageHistoryList({
     required this.module,
@@ -32,6 +69,10 @@ class DirectMessageHistoryList extends StatelessWidget {
   Widget build(BuildContext context) {
     String t(String key) => AppStrings.of(context).text('direct.$key');
     final outgoing = module.outgoing;
+    final (:timeline, :pinned) = directMessageTimeline(
+      module.messages,
+      outgoing,
+    );
     if (module.messages.isEmpty && outgoing.isEmpty && !module.hasOlder) {
       return Center(
         child: Text(
@@ -54,21 +95,21 @@ class DirectMessageHistoryList extends StatelessWidget {
       key: ValueKey(target.ref),
       controller: scroll,
       reverse: true,
-      itemCount: outgoing.length + module.messages.length + 1,
+      itemCount: pinned.length + timeline.length + 1,
       itemBuilder: (context, index) {
-        if (index < outgoing.length) {
-          final message = outgoing[outgoing.length - 1 - index];
-          return DirectOutgoingBubble(
-            key: ValueKey('outgoing-${message.id}'),
-            message: message,
-            time: time(message.time),
-            avatar: module.viewerAvatar,
-            userTarget: userTarget,
-            onRetry: () => module.retrySend(message.id),
-          );
+        Widget outgoingBubble(DirectOutgoing message) => DirectOutgoingBubble(
+          key: ValueKey('outgoing-${message.id}'),
+          message: message,
+          time: time(message.time),
+          avatar: module.viewerAvatar,
+          userTarget: userTarget,
+          onRetry: () => module.retrySend(message.id),
+        );
+        if (index < pinned.length) {
+          return outgoingBubble(pinned[pinned.length - 1 - index]);
         }
-        final position = index - outgoing.length;
-        if (position == module.messages.length) {
+        final position = index - pinned.length;
+        if (position == timeline.length) {
           return Center(
             child: module.hasOlder
                 ? StarBridgeActionButton(
@@ -85,7 +126,9 @@ class DirectMessageHistoryList extends StatelessWidget {
                   ),
           );
         }
-        final message = module.messages[module.messages.length - 1 - position];
+        final item = timeline[timeline.length - 1 - position];
+        if (item is DirectOutgoing) return outgoingBubble(item);
+        final message = item as DirectMessage;
         return KeyedSubtree(
           key: messageKeys.putIfAbsent(message.id, GlobalKey.new),
           child: ChatMessageBubble(

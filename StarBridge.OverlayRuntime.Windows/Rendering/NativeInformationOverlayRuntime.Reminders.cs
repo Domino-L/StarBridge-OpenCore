@@ -27,7 +27,7 @@ public sealed partial class NativeInformationOverlayRuntime
             var traditional = language.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ||
                 language.Equals("zh-Hant", StringComparison.OrdinalIgnoreCase);
             var hidden = reminder.Preview == "hiddenDetails";
-            var title = hidden ? "StarBridge" : traditional ? "房間提醒" : zh ? "房间提醒" : "Room reminder";
+            var title = hidden ? traditional ? "SCM 星海艦橋" : zh ? "SCM 星海舰桥" : "SCM StarBridge" : traditional ? "房間提醒" : zh ? "房间提醒" : "Room reminder";
             var detail = hidden ? (traditional ? "你有新的提醒" : zh ? "你有新的提醒" : "You have a new notification")
                 : reminder.Preview != "fullContent" ? (traditional ? "有新的房間邀請或加入申請" : zh ? "有新的房间邀请或加入申请" : "New room invitations or join requests")
                 : traditional ? $"新邀請 {reminder.Invitations} · 新加入申請 {reminder.Applications}"

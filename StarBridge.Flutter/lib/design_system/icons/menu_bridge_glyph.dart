@@ -26,6 +26,8 @@ enum MenuGlyph {
   camera,
   image,
   browser,
+  market,
+  fleet,
 }
 
 class MenuGlyphView extends StatelessWidget {

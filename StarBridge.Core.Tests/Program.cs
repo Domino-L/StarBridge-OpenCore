@@ -6,6 +6,14 @@ using StarBridge.Core.Identity;
 using StarBridge.Core.Parsing;
 using StarBridge.Core.Presence;
 using StarBridge.Core.State;
+args = args.Where(a => a is not ("-nodeReuse:false" or "-p:UseSharedCompilation=false" or "--")).ToArray();
+if (args is ["--cx-polish-ships-only"]) { StarBridge.Core.Tests.PolishShipAliasTests.RunAll(); return; }
+if (args is ["--contract-host-only"]) {
+    try { StarBridge.Core.Tests.ContractLogParserTests.RunAll(); }
+    catch (Exception e) { Console.WriteLine("FAIL CONTRACT CORE " + e.Message); Environment.ExitCode = 1; }
+    return;
+}
+if (args.Length == 0) StarBridge.Core.Tests.ContractLogParserTests.RunAll();
 if (args is ["--overlay-fleet-only"])
 {
     StarBridge.Core.Tests.OverlayFleetSourceTests.RunAll();
@@ -14,6 +22,7 @@ if (args is ["--overlay-fleet-only"])
     Console.WriteLine("PASS overlay source existing regressions: 2 groups, 0 failed");
     return;
 }
+if (args is ["--visor-placement-only"]) { StarBridge.Core.Tests.OverlayVisorPlacementTests.RunAll(); StarBridge.Core.Tests.OverlayMemberChangeFloodTests.RunAll(); Console.WriteLine("PASS visor placement and flood control"); return; }
 if (args is ["--cityhost-only"]) { StarBridge.Core.Tests.JourneyAchievementPolicyTests.RunAll(); return; }
 if (args.Length == 0) StarBridge.Core.Tests.JourneyAchievementPolicyTests.RunAll();
 if (args is ["--affiliation-logo-only"]) { StarBridge.Core.Tests.PersonalProfileAffiliationContractTests.RunAll(); return; }
@@ -110,6 +119,8 @@ var tests = new (string Name, Action Test)[]
     ("Event stack animates new lower rows, old upper exits and survivor reflow", StarBridge.Core.Tests.OverlayEventStackLayoutTests.RunAll),
     ("Information overlay layout input excludes non-finite numbers and invalid anchors", StarBridge.Core.Tests.OverlayLayoutInputAuditTests.RunAll),
     ("Information overlay layout geometry matches the shared cross-client samples", StarBridge.Core.Tests.InformationOverlayLayoutGeometryTests.RunAll),
+    ("Visor appearance reads its slots from old overlay layouts without rewriting them", StarBridge.Core.Tests.OverlayVisorPlacementTests.RunAll),
+    ("Visor teammate changes merge per person and collapse when many people change", StarBridge.Core.Tests.OverlayMemberChangeFloodTests.RunAll),
     ("Gameplay history import eligibility preserves migrated and unknown evidence", StarBridge.Core.Tests.GameplayHistoryImportPolicyTests.RunAll),
     ("Ship presentation uses exact catalog names and explicit combat size only", StarBridge.Core.Tests.ShipPresentationCatalogTests.RunAll),
     ("Shared ship catalog facts recover missing fields without replacing known values", StarBridge.Core.Tests.ShipCatalogMetadataTests.RunAll),
@@ -117,6 +128,7 @@ var tests = new (string Name, Action Test)[]
     ("Ship channel names and runtime exits share catalog identity", StarBridge.Core.Tests.ShipNameIndexTests.CatalogIdentityRelease),
     ("All bundled ship names translate and release without variant guessing", StarBridge.Core.Tests.ShipCatalogCoverageTests.RunAll),
     ("SCM profile contracts separate public, private, patch, and offline cache fields", StarBridge.Core.Tests.ScmProfileContractTests.RunAll),
+    ("Profile showcase normalization, bounds and legacy compatibility", StarBridge.Core.Tests.PersonalProfileShowcaseTests.RunAll),
     ("Profile hangar contracts distinguish display placeholders without changing legacy inventory", StarBridge.Core.Tests.PersonalProfileHangarContractTests.RunAll),
     ("SCM profile time zones preserve IANA and map safely on Windows", StarBridge.Core.Tests.ProfileTimeZoneContractTests.RunAll),
     ("SCM RSI identity policy fails closed for identity-sensitive writes", StarBridge.Core.Tests.RsiIdentityPolicyTests.RunAll),

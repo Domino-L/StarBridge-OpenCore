@@ -161,6 +161,7 @@ class RecoveryPrivacy extends PublishingPrivacy {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     actions.add(action);
     if (action == 'apply') applied = true;

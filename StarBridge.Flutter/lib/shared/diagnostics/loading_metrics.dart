@@ -541,6 +541,7 @@ final class LoadingMetrics {
     '/overlay',
     '/tools',
     '/tools/exec-hangar',
+    '/tools/key-bindings',
     '/settings/privacy',
     '/settings',
     '/settings/account',
@@ -699,6 +700,8 @@ final class LoadingMetrics {
     'overlay.getWorkspace': 'overlay.workspace',
     'achievements.read': 'achievements.read',
     'execHangar.read': 'execHangar.read',
+    'keyBindings.read': 'keyBindings.read',
+    'keyBindings.saveView': 'keyBindings.saveView',
     'execHangar.refresh': 'execHangar.refresh',
     'notificationInbox.read': 'notifications.read',
     // Trading hall: one bridge name per request kind, plus a consumer span

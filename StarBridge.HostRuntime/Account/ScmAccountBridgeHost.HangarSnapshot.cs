@@ -41,7 +41,9 @@ internal sealed partial class ScmAccountBridgeHost
     internal async Task<Hangar.ServerHangarMigrationRead> ReadMigrationHangarSourceAsync(BridgeAccountContext context, CancellationToken token)
     {
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var session = RequireRelaySession(context);
         // This is an explicit old-account migration source, never a Java/SCM fallback.

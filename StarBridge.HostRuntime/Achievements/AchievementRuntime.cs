@@ -39,12 +39,14 @@ internal sealed partial class AchievementRuntime : IDisposable
         Func<HangarAchievementEvidence?>? hangarEvidence = null,
         Action<long, string, int, DateTimeOffset>? seriesEarned = null,
         Action<BridgeAccountContext, AchievementSnapshot, Func<bool>>? confirmed = null,
-        Func<BridgeAccountContext, Func<bool>, Account.OfflineAchievementDisplay?>? cached = null, CityAchievementOutbox? cityStore = null)
+        Func<BridgeAccountContext, Func<bool>, Account.OfflineAchievementDisplay?>? cached = null, CityAchievementOutbox? cityStore = null,
+        ContractAchievementStore? contractStore = null, ContractRecordStore? contractRecords = null)
     {
         _store = store; _remote = remote; _current = current; _evidence = evidence; _changed = changed;
         _earned = earned;
         _confirmed = confirmed;
-        _cached = cached; _cityStore = cityStore;
+        _cached = cached; _cityStore = cityStore; _contractStore = contractStore;
+        _contractRecords = contractRecords;
         _hangarStore = hangarStore; _hangarEvidence = hangarEvidence; _seriesEarned = seriesEarned;
         _time = time ?? TimeProvider.System;
         _timer = new(_time, () => TickAsync(), TimeSpan.Zero, TimeSpan.FromSeconds(2));
@@ -53,6 +55,7 @@ internal sealed partial class AchievementRuntime : IDisposable
     internal bool StartDeferredWork() => !_disposed && !_retirement.IsClosed && _timer.Start();
     internal void Invalidate(long _)
     {
+        Volatile.Write(ref _rarity, null);
         Volatile.Write(ref _published, null); Volatile.Write(ref _observedEvidence, null); Interlocked.Exchange(ref _nextAttempt, 0);
         try { Volatile.Read(ref _active)?.Cancel(); } catch (ObjectDisposedException) { }
     }
@@ -96,6 +99,8 @@ internal sealed partial class AchievementRuntime : IDisposable
             bool Current() => !_disposed && !token.IsCancellationRequested && _current() == owner;
             if (_owner != owner) { _lease?.Dispose(); _lease = null; _hangarLease?.Dispose(); _hangarLease = null; _owner = owner; _failures = 0;
                 _cityRetries.Clear();
+                _contractRetries.Clear();
+                _contractStoreRetryAt = 0;
                 var retained = Volatile.Read(ref _published);
                 if (retained is null || retained.Owner != owner.Context || retained.Generation != owner.Generation) Volatile.Write(ref _published, null);
                 Interlocked.Exchange(ref _nextAttempt, 0); }
@@ -110,7 +115,9 @@ internal sealed partial class AchievementRuntime : IDisposable
             if (!alreadyEarned && evidence is not null && evidence.Owner == owner.Context && evidence.Generation == owner.Generation &&
                 evidence.Observation.IsValid && pending != evidence.Observation)
             { _lease.Save(evidence.Observation, Current); pending = evidence.Observation; Interlocked.Exchange(ref _nextAttempt, 0); }
-            CaptureCityPending(owner.Context, owner.Generation, Current);
+            // An unreadable city outbox stops city uploads only; first entry, contracts and hangar continue.
+            try { CaptureCityPending(owner.Context, owner.Generation, Current); }
+            catch (Exception error) when (CityStorageError(error)) { }
             CaptureHangarPending(owner.Context, owner.Generation, Current);
             if (!force && _time.GetUtcNow().UtcTicks < Interlocked.Read(ref _nextAttempt)) return;
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -136,6 +143,7 @@ internal sealed partial class AchievementRuntime : IDisposable
                 if (pending is not null && snapshot.EarnedAt.ContainsKey(Core.Achievements.FirstEntryAchievementPolicy.Id))
                 { try { _lease.Save(null, Current); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { } }
                 snapshot = await UpdateCitiesAsync(owner.Context, owner.Generation, snapshot, Current, budget.Token).ConfigureAwait(false);
+                snapshot = await UpdateContractsAsync(owner.Context, owner.Generation, snapshot, Current, budget.Token).ConfigureAwait(false);
                 budget.Token.ThrowIfCancellationRequested(); if (!Current()) return;
                 snapshot = await UpdateHangarAsync(owner.Context, owner.Generation, snapshot, Current, budget.Token).ConfigureAwait(false);
                 if (!Current()) return;
@@ -146,6 +154,8 @@ internal sealed partial class AchievementRuntime : IDisposable
                 var next = new Published(owner.Context, owner.Generation, snapshot, _time.GetUtcNow());
                 Volatile.Write(ref _published, next);
                 _failures = 0; Interlocked.Exchange(ref _nextAttempt, _time.GetUtcNow().AddMinutes(5).UtcTicks);
+                if (NextContractAttempt(owner.Context) is { } contractAttempt)
+                    Interlocked.Exchange(ref _nextAttempt, Math.Min(Interlocked.Read(ref _nextAttempt), contractAttempt));
                 if (NextCityAttempt(owner.Context) is { } cityAttempt)
                     Interlocked.Exchange(ref _nextAttempt, Math.Min(Interlocked.Read(ref _nextAttempt), cityAttempt));
                 if (previous is null || previous.Owner != next.Owner || previous.Generation != next.Generation ||
@@ -179,6 +189,8 @@ internal sealed partial class AchievementRuntime : IDisposable
             if (_disposed || owner.Context is null || request.AccountContext != owner.Context || request.SessionGeneration != owner.Generation)
                 return Error(request, "achievements.account_changed");
             Profiles.LocalPersonalProfileStore.RejectDuplicates(request.Payload);
+            if (request.Name.StartsWith("achievements.leaderboard.", StringComparison.Ordinal))
+                return await DispatchLeaderboardAsync(request, owner, token).ConfigureAwait(false);
             if (request.MessageType != BridgeMessageTypes.Request || request.Name != "achievements.read" ||
                 request.Payload.GetRawText().Length > 128 || request.Payload.EnumerateObject().Count() != 1 ||
                 request.Payload.GetProperty("schemaVersion").GetInt32() != 1) return Error(request, "achievements.invalid_request");
@@ -188,9 +200,13 @@ internal sealed partial class AchievementRuntime : IDisposable
             token.ThrowIfCancellationRequested();
             value = ReadPublished(owner);
             if (_current() != owner) return Error(request, "achievements.account_changed");
+            var records = ReadContractRecords(owner.Context, value?.Snapshot);
+            _ = RefreshRarityAsync(owner);
+            if (_current() != owner) return Error(request, "achievements.account_changed");
             return value is not null && value.Owner == owner.Context && value.Generation == owner.Generation
                 ? new(BridgeEnvelope.Response(request, new { schemaVersion = value.Snapshot.SchemaVersion,
                     earnedAt = value.Snapshot.EarnedAt, progress = value.Snapshot.Progress,
+                    rarity = ReadRarity(owner), contractRecords = records,
                     synchronizedAtUtc = value.ConfirmedAt, refreshFailed = value.RefreshFailed }), []) : Error(request, "achievements.unavailable");
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or BridgeProtocolException or FormatException or OverflowException)

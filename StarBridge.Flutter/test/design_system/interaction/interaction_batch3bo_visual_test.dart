@@ -96,4 +96,4 @@ void main() {
   }
 }
 
-void ignore(EventSharingChoice _) {}
+void ignore(EventSharingChoiceEdit _) {}

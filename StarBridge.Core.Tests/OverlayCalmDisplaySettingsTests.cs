@@ -30,11 +30,11 @@ internal static class OverlayCalmDisplaySettingsTests
         Check(invalid.CalmWaitSeconds == 10 && invalid.CalmIdleOpacity == 0.15 && invalid.CalmLitOpacity == 1 && invalid.CalmPeekHotkey == "",
             "out-of-range values are normalized, never written raw");
 
-        // Levels follow the existing opacity until the user picks their own.
+        // Unset levels take the defaults; the retired overall opacity (user 11-12) no longer counts.
         var full = OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { Opacity = 1 });
-        Check(full.Enabled && full.Idle == 0.35 && full.Lit == 1 && full.Wait == TimeSpan.FromSeconds(10), "full opacity rests at 35% and lights to 100%");
+        Check(full.Enabled && full.Idle == 0.35 && full.Lit == 1 && full.Wait == TimeSpan.FromSeconds(10), "unset levels rest at 35% and light to 100%");
         var low = OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { Opacity = 0.25 });
-        Check(low.Idle == 0.25 && low.Lit == 0.85, "a low opacity never rests darker, and lights to a readable 85%");
+        Check(low.Idle == 0.35 && low.Lit == 1, "an old saved overall opacity never makes calm display fainter");
         var floor = OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { Opacity = 0.15, CalmIdleOpacity = 0.15 });
         Check(floor.Idle >= OverlayCalmDisplayLevels.MinimumOpacity, "nothing goes below the readable floor");
         var crossed = OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { CalmIdleOpacity = 0.9, CalmLitOpacity = 0.5 });

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_states.dart' show marketButtonAction;
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// One rail entry: its tab id, label and an optional count ("3 / 24").
 /// [hot] marks a count that waits on me.
@@ -104,7 +105,7 @@ class _RailEntry extends StatelessWidget {
                     child: Text(
                       item.label,
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(
                         fontSize: 13,

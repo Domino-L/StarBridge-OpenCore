@@ -10,13 +10,17 @@ public sealed class HelpSupportBridgeDispatcher : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> Capabilities { get; } =
         ["helpSupport.history", "helpSupport.stats", "helpSupport.feedback", "helpSupport.openScm", "helpSupport.openRsiOrganization",
-         "helpSupport.openRsiProfileSettings"];
-    internal static Uri ScmWebsiteRoot { get; } = new("https://scm.flowcld.com/");
+         "helpSupport.openRsiProfileSettings", "helpSupport.openGitHub", "helpSupport.openWebsite"];
+    // Our own public pages (user 11-16). Fixed addresses; nothing caller-supplied.
+    internal const string GitHubUrl = "https://github.com/Domino-L/StarBridge-OpenCore";
+    internal const string WebsiteUrl = "https://scstarbridge.com/";
+    internal static Uri ScmWebsiteRoot => Auth.ScmWebsiteRouting.CurrentRoot;
     internal static void OpenBrowser(Uri uri) =>
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         { FileName = uri.AbsoluteUri, UseShellExecute = true });
     private readonly Action _openScm;
     private readonly Action<Uri> _openRsiOrganization;
+    private readonly Action<Uri> _openPublicPage;
     private readonly Uri? _origin;
     private readonly Func<long> _generation;
     private readonly HttpClient _client;
@@ -27,7 +31,7 @@ public sealed class HelpSupportBridgeDispatcher : IBridgeRequestDispatcher
 
     public HelpSupportBridgeDispatcher(Uri? origin, Func<long> generation, HttpMessageHandler? handler = null,
         Action? openScm = null, Lifecycle.DeviceNetworkAdmission? network = null, Action<Uri>? openRsiOrganization = null,
-        AppStatsHeartbeatRuntime.RelayCapability? appStatsCapability = null)
+        AppStatsHeartbeatRuntime.RelayCapability? appStatsCapability = null, Action<Uri>? openPublicPage = null)
     {
         _origin = origin;
         _appStatsCapability = appStatsCapability;
@@ -36,8 +40,10 @@ public sealed class HelpSupportBridgeDispatcher : IBridgeRequestDispatcher
         _openScm = openScm ?? (() => OpenBrowser(ScmWebsiteRoot));
         _openRsiOrganization = openRsiOrganization ?? (uri => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         { FileName = uri.AbsoluteUri, UseShellExecute = true }));
+        _openPublicPage = openPublicPage ?? OpenBrowser;
         _client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
         _client.Timeout = TimeSpan.FromSeconds(15);
+        RelayClientVersion.Apply(_client);
     }
     public event Action<BridgeEnvelope>? EventReady { add { } remove { } }
 
@@ -86,6 +92,16 @@ public sealed class HelpSupportBridgeDispatcher : IBridgeRequestDispatcher
                 linkWork?.RequireCurrent();
                 if (_disposed || request.SessionGeneration != _generation()) return Error(request, "unavailable");
                 _openRsiOrganization(new Uri(Account.RsiAvatarImage.ProfileSettingsUrl));
+                return Reply(request, new { schemaVersion = 1, opened = true });
+            }
+            if (request.Name is "helpSupport.openGitHub" or "helpSupport.openWebsite")
+            {
+                using var linkWork = _network?.Enter(cancellationToken);
+                if (_network is not null && linkWork is null) return Error(request, "offline");
+                cancellationToken.ThrowIfCancellationRequested();
+                linkWork?.RequireCurrent();
+                if (_disposed || request.SessionGeneration != _generation()) return Error(request, "unavailable");
+                _openPublicPage(new Uri(request.Name == "helpSupport.openGitHub" ? GitHubUrl : WebsiteUrl));
                 return Reply(request, new { schemaVersion = 1, opened = true });
             }
             if (request.Name == "helpSupport.openScm")
@@ -146,15 +162,18 @@ public sealed class HelpSupportBridgeDispatcher : IBridgeRequestDispatcher
             long Count(string key) => data.GetProperty(key).GetInt64() is var n && n >= 0 ? n : throw new JsonException();
             var updatedAt = data.GetProperty("updatedAt").GetDateTimeOffset();
             // Optional during Relay rollout. Missing or invalid is unknown, never zero.
-            long? registeredAccountCount = data.TryGetProperty("registeredAccountCount", out var accounts)
-                && accounts.ValueKind == JsonValueKind.Number && accounts.TryGetInt64(out var count) && count >= 0
+            long? OptionalCount(string key) => data.TryGetProperty(key, out var value)
+                && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var count) && count >= 0
                 ? count : null;
+            long? registeredAccountCount = OptionalCount("registeredAccountCount");
+            // SCM sign-in users, once the Relay serves them (11-07 user: "用户数"). Same rule: unknown, never zero.
+            long? scmUserCount = OptionalCount("scmUserCount");
             if (_disposed || request.SessionGeneration != _generation()) return Error(request, "unavailable");
             networkWork?.RequireCurrent();
             _appStatsCapability?.Observe(data);
             return Reply(request, new { schemaVersion = 1, downloadCount = Count("downloadCount"),
                 onlineUserCount = Count("onlineUserCount"), fleetCount = Count("fleetCount"),
-                overlayUsageSeconds = Count("overlayUsageSeconds"), registeredAccountCount, updatedAt });
+                overlayUsageSeconds = Count("overlayUsageSeconds"), registeredAccountCount, scmUserCount, updatedAt });
         }
         catch { return Error(request, request.Name == "helpSupport.feedback" ? "unconfirmed" : "unavailable"); }
         finally { if (sending) _sending.Release(); }

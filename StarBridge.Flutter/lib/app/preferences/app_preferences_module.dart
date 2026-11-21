@@ -110,6 +110,18 @@ final class AppPreferencesModule implements AppPreferencesPort {
   Future<bool> setHolidayAppearance(bool enabled) =>
       _apply(AppPreferencesPatch.holidayAppearance(enabled));
 
+  @override
+  Future<bool> setPerformanceMode(bool enabled) =>
+      _apply(AppPreferencesPatch.performanceMode(enabled));
+
+  @override
+  Future<bool> setReadOwnHealth(bool enabled) =>
+      _apply(AppPreferencesPatch.readOwnHealth(enabled));
+
+  @override
+  Future<bool> setReadOwnHealthInBackground(bool enabled) =>
+      _apply(AppPreferencesPatch.readOwnHealthInBackground(enabled));
+
   void updateAccountLocale(Locale? locale) {
     if (_disposed) {
       return;
@@ -296,6 +308,9 @@ final class AppPreferencesModule implements AppPreferencesPort {
     interactionStyle: values.interactionStyle,
     applicationBehavior: values.applicationBehavior,
     holidayAppearance: values.holidayAppearance,
+    performanceMode: values.performanceMode,
+    readOwnHealth: values.readOwnHealth,
+    readOwnHealthInBackground: values.readOwnHealthInBackground,
   );
 
   static Locale resolveLocale({

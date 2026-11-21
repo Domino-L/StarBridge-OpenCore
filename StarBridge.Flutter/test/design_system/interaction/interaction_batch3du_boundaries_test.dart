@@ -284,6 +284,15 @@ Future<void> _tap(WidgetTester t, String key) async {
   await t.pump();
 }
 
+Future<void> _adoptFriendSuggestion(WidgetTester t) async {
+  final action = find.byKey(const Key('friend-sharing-adopt-suggestion'));
+  await t.ensureVisible(action);
+  await t.tap(action);
+  await _frames(t);
+  await t.tap(find.byKey(const Key('privacy-sharing-suggestion-confirm')));
+  await _frames(t);
+}
+
 void main() {
   setUpAll(fixture.loadFonts);
   for (final suite in InteractionSuite.values) {
@@ -298,20 +307,23 @@ void main() {
             await page.mount(t);
             expect(host.reads, hasLength(1));
             expect(host.writes, isEmpty);
-            expect(drafts.dirty, saved == null);
-            final expected = saved ?? 63;
+            expect(drafts.dirty, isFalse);
+            final expected = saved ?? 0;
             for (final entry in const {
               1: 'presence',
               2: 'serverRelation',
               4: 'serverDetails',
               8: 'ship',
               16: 'location',
-              32: 'lastOnline',
             }.entries) {
               expect(
                 _switch(t, 'friend-sharing-${entry.value}').value,
                 expected & entry.key != 0,
               );
+            }
+            if (saved == null) {
+              await _adoptFriendSuggestion(t);
+              expect(drafts.dirty, isTrue);
             }
             final save = drafts.save();
             await _frames(t);
@@ -332,13 +344,14 @@ void main() {
     }
 
     testWidgets(
-      '$suite friend discard never re-stages absent defaults after background notifications',
+      '$suite friend discard restores actual settings after background notifications',
       (t) async {
         final host = _Host(_Kind.friends)..snapshot = _friendSnapshot(null);
         final drafts = PrivacyPageDrafts();
         final page = _Mounted(host, suite, drafts);
         try {
           await page.mount(t);
+          await _adoptFriendSuggestion(t);
           expect(drafts.dirty, isTrue);
           drafts.discard();
           await _frames(t);
@@ -358,7 +371,7 @@ void main() {
     );
 
     testWidgets(
-      '$suite friend late initial post-frame draft respects editor epoch discard',
+      '$suite an initial friend read followed by discard leaves switches off',
       (t) async {
         final host = _Host(_Kind.friends)
           ..snapshot = _friendSnapshot(null)
@@ -399,6 +412,7 @@ void main() {
         final page = _Mounted(host, suite, drafts);
         try {
           await page.mount(t);
+          await _adoptFriendSuggestion(t);
           expect(drafts.dirty, isTrue);
           final first = drafts.save();
           await _frames(t);

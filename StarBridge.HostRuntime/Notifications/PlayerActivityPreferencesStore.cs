@@ -4,8 +4,10 @@ using System.Text.Json.Nodes;
 namespace StarBridge.HostRuntime.Notifications;
 
 // WPF scope bit 2 means community members, not RSI official-fleet membership.
-internal sealed record PlayerActivityPreferences(bool Enabled = false, int Scope = 2, int Position = 3,
-    bool Online = true, bool Offline = false, bool StartedGame = true, bool StoppedGame = false,
+// 0.7.3 (user: "windows提醒默认是需要都开的"; online/offline are reminder cards only): cards and
+// the offline card default on. A key the user saved keeps its value, so an explicit off stays off.
+internal sealed record PlayerActivityPreferences(bool Enabled = true, int Scope = 2, int Position = 3,
+    bool Online = true, bool Offline = true, bool StartedGame = true, bool StoppedGame = false,
     bool BackgroundOnly = true, bool ReduceInGame = true);
 internal sealed record PlayerActivityPreferencesSnapshot(string Revision, PlayerActivityPreferences Value,
     bool DoNotDisturb = false, int CooldownSeconds = 60);
@@ -89,9 +91,9 @@ internal sealed class PlayerActivityPreferencesStore
     }
     private static PlayerActivityPreferences Parse(JsonObject d)
     {
-        var v = new PlayerActivityPreferences(Bool(d,"EnablePlayerActivityNotifications",false),
+        var v = new PlayerActivityPreferences(Bool(d,"EnablePlayerActivityNotifications",true),
             Int(d,"PlayerActivityScope",2),Int(d,"PlayerActivityPosition",3),
-            Bool(d,"NotifyPlayerOnline",true),Bool(d,"NotifyPlayerOffline",false),
+            Bool(d,"NotifyPlayerOnline",true),Bool(d,"NotifyPlayerOffline",true),
             Bool(d,"NotifyPlayerStartedGame",true),Bool(d,"NotifyPlayerStoppedGame",false),
             Bool(d,"PlayerActivityBackgroundOnly",true),Bool(d,"ReducePlayerActivityNotificationsInGame",true));
         Validate(v); return v;

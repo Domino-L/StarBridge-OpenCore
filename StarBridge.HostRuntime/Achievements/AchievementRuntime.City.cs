@@ -27,9 +27,13 @@ internal sealed partial class AchievementRuntime
                 CaptureCityPending(evidence.Owner, evidence.Generation,
                     () => !_disposed && _current() == (evidence.Owner, evidence.Generation));
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or
                 System.Text.Json.JsonException or OperationCanceledException)
-            { /* Keep the candidate for the next tick; storage failure must not invalidate Game.log presence. */ }
+            {
+                // Keep the candidate for the next tick; storage failure must not invalidate Game.log presence.
+                // An unreadable outbox (integrity mismatch, or a token from a newer build after a rollback)
+                // stays untouched for the build that wrote it; this build only skips the write.
+            }
         }
     }
 
@@ -59,7 +63,8 @@ internal sealed partial class AchievementRuntime
     {
         if (_cityStore is null) return snapshot;
         CityObservation[] pending;
-        lock (_citySync) { using var lease = _cityStore.Open(owner); pending = lease.Read().Pending; }
+        try { lock (_citySync) { using var lease = _cityStore.Open(owner); pending = lease.Read().Pending; } }
+        catch (Exception error) when (CityStorageError(error)) { return snapshot; }
         foreach (var observation in pending)
         {
             token.ThrowIfCancellationRequested(); if (!current()) return snapshot;
@@ -78,7 +83,7 @@ internal sealed partial class AchievementRuntime
                     if (!receipt.EarnedAt.ContainsKey(id)) throw new InvalidDataException("City acknowledgement is missing.");
                     // Receipt admission precedes local cleanup, as in first-entry. Never infer stanton locally.
                     foreach (var earned in receipt.NewlyEarned)
-                        if (current()) _seriesEarned?.Invoke(generation, earned, 0, receipt.EarnedAt[earned]);
+                        if (JourneyAchievementPolicy.IsAward(earned) && current()) _seriesEarned?.Invoke(generation, earned, 0, receipt.EarnedAt[earned]);
                     snapshot = snapshot.MergeConfirmed(receipt.Snapshot);
                 }
                 cleaning = true;
@@ -100,10 +105,7 @@ internal sealed partial class AchievementRuntime
                 // A lasting answer waits a full normal read period: any 4xx but 401 (an unverified or
                 // mismatched identity is a 403), 429, or a receipt this client cannot accept.
                 // Never remove the original observation on rejection.
-                var rejected = error is Auth.ScmApiRateLimitException or Auth.ScmApiProtocolException or InvalidDataException ||
-                    error is HttpRequestException { StatusCode: >= System.Net.HttpStatusCode.BadRequest and < System.Net.HttpStatusCode.InternalServerError }
-                        and not HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized };
-                var delay = rejected ? 300 : Math.Min(30, 1 << Math.Min(failures + 1, 5));
+                var delay = AchievementObservationRetry.DelaySeconds(error, failures);
                 _cityRetries[observation.City] = new(failures, _time.GetUtcNow().AddSeconds(delay).UtcTicks, cleaning);
             }
         }
@@ -113,10 +115,16 @@ internal sealed partial class AchievementRuntime
     private long? NextCityAttempt(BridgeAccountContext owner)
     {
         if (_cityStore is null) return null;
-        lock (_citySync)
+        try
         {
-            using var lease = _cityStore.Open(owner);
-            return lease.Read().Pending.Select(p => (long?)(_cityRetries.GetValueOrDefault(p.City)?.NextAttempt ?? 0)).Min();
+            lock (_citySync)
+            {
+                using var lease = _cityStore.Open(owner);
+                return lease.Read().Pending.Select(p => (long?)(_cityRetries.GetValueOrDefault(p.City)?.NextAttempt ?? 0)).Min();
+            }
         }
+        catch (Exception error) when (CityStorageError(error)) { return null; }
     }
+    private static bool CityStorageError(Exception error) => error is IOException or UnauthorizedAccessException or
+        InvalidDataException or System.Text.Json.JsonException;
 }

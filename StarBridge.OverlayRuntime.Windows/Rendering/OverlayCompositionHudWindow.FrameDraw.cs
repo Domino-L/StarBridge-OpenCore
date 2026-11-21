@@ -134,6 +134,7 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private void DrawFrameWithDeviceContext(ID2D1DeviceContext target, IDXGISurface dxgiSurface)
     {
+        if (TryDrawVisorFrame(target, dxgiSurface)) return;
         var dpiX = (float)(96.0 * _renderDpiScaleX);
         var dpiY = (float)(96.0 * _renderDpiScaleY);
         target.SetDpi(dpiX, dpiY);
@@ -185,10 +186,12 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private static void DrawOverlayGlowLayer(ID2D1DeviceContext target, ID2D1Effect blur, int passes)
     {
+        // Output adds a COM reference on every read; an unreleased one keeps the D3D11 device alive after close.
+        using var output = blur.Output;
         for (var pass = 0; pass < passes; pass++)
         {
             target.DrawImage(
-                blur.Output,
+                output,
                 null,
                 null,
                 Vortice.Direct2D1.InterpolationMode.Linear,
@@ -221,6 +224,7 @@ internal sealed partial class OverlayCompositionHudWindow
         StopCalm();
 
         _renderThreadDisposed = true;
+        ForgetVisorEvents();
         _frameScheduler?.Stop();
         _frameScheduler?.Dispose();
         _hitTraceTimer?.Stop();
@@ -290,8 +294,11 @@ internal sealed partial class OverlayCompositionHudWindow
         _d3dDevice = null;
         _source = null;
 
-        var dispatcher = _renderDispatcher ?? Dispatcher.CurrentDispatcher;
-        if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+        // only the HUD's own render thread is shut down. Without one (never started) there is nothing to shut down: the
+        // calling thread's dispatcher is not ours (a test calling this on its main thread queued that thread's shutdown,
+        // which later stopped the visor's close timers, m86)
+        var dispatcher = _renderDispatcher;
+        if (dispatcher is not null && !dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
         {
             dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
         }

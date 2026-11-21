@@ -5,6 +5,8 @@ import '../../features/overlay_settings/overlay_preset_sources.dart';
 import '../../features/overlay_settings/overlay_scene_controller.dart';
 import '../../features/overlay_settings/overlay_scene_projection.dart';
 import '../../features/overlay_settings/overlay_workspace_module.dart';
+import '../../features/overlay_settings/overlay_visor_layout.dart';
+import '../../features/overlay_settings/overlay_workspace_rules.dart';
 import '../localization/app_strings.dart';
 import '../shell/chrome/overlay_source_labels.dart';
 
@@ -89,9 +91,20 @@ Map<String, Object?> menuHudQuickWire({
     'modules': {
       if (available)
         for (final entry in menuHudQuickFields.entries)
-          if (workspace.settings![entry.value] case final bool visible)
-            entry.key: visible,
+          // a switch the shown appearance has no use for is not offered
+          // (11-10: the visor shows the fleet overview on top of the members)
+          if (overlayWorkspaceFieldVisible(entry.value, workspace.settings!))
+            if (workspace.settings![entry.value] case final bool visible)
+              entry.key: visible,
     },
+    // the global group's in-game settings (11-11 user; the overall opacity
+    // retired 11-12); the depth only where the visor draws with it
+    if (available)
+      'global': {
+        'calm': workspace.settings!['calmDisplay'] == 'On',
+        if (OverlayVisorLayout.active(workspace.settings!))
+          'tilt': workspace.settings!['visorTilt'],
+      },
     if (scene != null) 'source': _source(scene, strings, working),
     'note': ?note,
     'placing': placing,
@@ -109,6 +122,8 @@ Map<String, Object?> menuHudQuickWire({
         'side': workspace.settings!['eventNotificationSide'],
         'y': workspace.settings!['eventNotificationY'],
       },
+    // placement on the visor places the blocks as the visor does (11-11)
+    if (available && placing) 'settings': workspace.settings!.toMap(),
   };
 }
 

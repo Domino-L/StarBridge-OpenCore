@@ -4,9 +4,11 @@ import '../../design_system/interaction/starbridge_select_field.dart';
 import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/interaction/starbridge_field_frame.dart';
 import '../../design_system/interaction/starbridge_choice_chip.dart';
-import '../../design_system/interaction/starbridge_slider.dart';
+import 'overlay_workspace_number_field.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/routing/open_destination_intent.dart';
+import '../../app/routing/screen_reading_route.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -74,13 +76,6 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                 key: const Key('overlay-appearance-fixed-palette'),
               ),
             ],
-            if (group == 'startup' && onExperiencePreset != null) ...[
-              SizedBox(height: tokens.space.sm),
-              _ExperiencePresetPicker(
-                settings: settings,
-                onSelected: onExperiencePreset!,
-              ),
-            ],
             SizedBox(height: tokens.space.sm),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -110,8 +105,12 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                                       OverlayWorkspaceFieldKind.eventTypes
                               ? constraints.maxWidth
                               : width,
-                          child: _Field(
+                          child: OverlayWorkspaceField(
                             spec: field,
+                            labelKey: overlayWorkspaceFieldLabelKey(
+                              field.field,
+                              settings,
+                            ),
                             editOwner: editOwner,
                             currentEditOwner: currentEditOwner,
                             value: field.field == 'startupTransitionStyle'
@@ -136,6 +135,7 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
                 );
               },
             ),
+            if (group == 'members') const _HealthRingNote(),
             if (footer != null) ...[
               SizedBox(height: tokens.space.md),
               Divider(color: tokens.surfaces.panel.border),
@@ -149,10 +149,13 @@ class OverlayWorkspaceSettingsGroup extends StatelessWidget {
   }
 }
 
-class _ExperiencePresetPicker extends StatelessWidget {
-  const _ExperiencePresetPicker({
+/// Smooth / balanced / reduced motion: sets the open and close animation and
+/// the overlay's frame rate together (in the global group since 11-11).
+class OverlayExperiencePresetPicker extends StatelessWidget {
+  const OverlayExperiencePresetPicker({
     required this.settings,
     required this.onSelected,
+    super.key,
   });
 
   final OverlayWorkspaceSettings settings;
@@ -204,8 +207,8 @@ class _ExperiencePresetPicker extends StatelessWidget {
   }
 }
 
-class _Field extends StatelessWidget {
-  const _Field({
+class OverlayWorkspaceField extends StatelessWidget {
+  const OverlayWorkspaceField({
     required this.spec,
     required this.value,
     required this.enabled,
@@ -214,12 +217,19 @@ class _Field extends StatelessWidget {
     this.disabledReason,
     this.editOwner,
     this.currentEditOwner,
+    this.labelKey,
+    this.onStep,
+    super.key,
   });
 
   final OverlayWorkspaceFieldSpec spec;
   final Object? value;
   final bool enabled;
   final ValueChanged<Object?> onChanged;
+
+  /// A label that depends on other settings (the members size: maximum or fixed).
+  final String? labelKey;
+  final ValueChanged<Object?>? onStep;
   final List<OverlayWorkspaceAppearance> appearances;
   final String? disabledReason;
   final Object? editOwner;
@@ -227,10 +237,45 @@ class _Field extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _fieldName(context, spec);
-    final helper = disabledReason == null
-        ? null
-        : _copy(context, disabledReason!);
+    final label = labelKey == null
+        ? _fieldName(context, spec)
+        : _copy(context, labelKey!);
+    final helper = disabledReason != null
+        ? _copy(context, disabledReason!)
+        // The visor, like every overlay, is covered by a game in exclusive
+        // fullscreen; borderless window mode keeps it visible.
+        : spec.field == 'visorSize'
+        ? _copy(context, 'overlay.workspace.hint.visorBorderless')
+        : spec.field == 'visorTilt'
+        ? _copy(context, 'overlay.workspace.hint.visorTilt')
+        : spec.field == 'visorViewingDistance'
+        ? _copy(context, 'overlay.workspace.hint.visorViewingDistance')
+        : spec.field == 'visorChatPlate'
+        ? _copy(context, 'overlay.workspace.hint.visorChatPlate')
+        // 11-10 user (settings comparison): say what these do on the visor
+        : const {
+            'eventNotificationSide',
+            'eventNotificationMaxVisibleCount',
+            'eventNotificationAnimationSpeed',
+            'enableStartupTransition',
+            'hideSelfMember',
+            'animationFrameRate',
+            // 11-12: the colour changes only the decoration
+            'theme',
+          }.contains(spec.field)
+        ? _copy(context, 'overlay.workspace.hint.${spec.field}')
+        : const {
+            'visorMembersAutoWidth',
+            'visorMembersAutoHeight',
+            'visorMembersWidth',
+            'visorMembersHeight',
+            'visorEventsAutoWidth',
+            'visorEventsWidth',
+            'visorChatAutoWidth',
+            'visorChatWidth',
+          }.contains(spec.field)
+        ? _copy(context, 'overlay.workspace.hint.${spec.field}')
+        : null;
     final numberValue = value is num ? (value! as num).toDouble() : null;
     return switch (spec.kind) {
       OverlayWorkspaceFieldKind.choice
@@ -292,8 +337,10 @@ class _Field extends StatelessWidget {
             .toList(growable: false),
         onSelected: enabled ? (next, _) => onChanged(next) : null,
       ),
-      OverlayWorkspaceFieldKind.number => _NumberField(
+      OverlayWorkspaceFieldKind.number => OverlayWorkspaceNumberField(
+        onStep: enabled ? onStep : null,
         spec: spec,
+        label: label,
         value: value,
         helperText: helper,
         onChanged: enabled ? onChanged : null,
@@ -432,70 +479,6 @@ class _AppearanceSelector extends StatelessWidget {
           )
           .toList(growable: false),
       onSelected: enabled ? (next, _) => onChanged(next) : null,
-    );
-  }
-}
-
-class _NumberField extends StatelessWidget {
-  const _NumberField({
-    required this.spec,
-    required this.value,
-    required this.onChanged,
-    this.helperText,
-  });
-
-  final OverlayWorkspaceFieldSpec spec;
-  final Object? value;
-  final ValueChanged<Object?>? onChanged;
-  final String? helperText;
-
-  @override
-  Widget build(BuildContext context) {
-    final number = value is num ? (value as num).toDouble() : spec.minimum;
-    final clamped = number.clamp(spec.minimum, spec.maximum).toDouble();
-    // JSON writes whole-valued doubles as 0/1, so runtime numeric type cannot
-    // determine whether a setting accepts fractions. Counts alone are integral.
-    final integral = spec.unit == OverlayWorkspaceUnit.count;
-    return InputDecorator(
-      decoration: InputDecoration(
-        helperText: helperText,
-        helperMaxLines: 3,
-        filled: false,
-        contentPadding: EdgeInsets.zero,
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${_fieldName(context, spec)}  ${overlayWorkspaceFormatValue(spec, clamped, AppStrings.of(context))}',
-          ),
-          // Flutter's Windows AX bridge cannot safely reuse the Slider's
-          // OverlayPortal children when enabling replaces their traversal
-          // parent. Recreate that local subtree only across enabled changes;
-          // keep the value in the draft and preserve normal drag state.
-          KeyedSubtree(
-            key: ValueKey('slider-${spec.field}-${onChanged != null}'),
-            child: StarBridgeSlider(
-              controlKey: Key('overlay-field-${spec.field}'),
-              semanticLabel: _fieldName(context, spec),
-              value: clamped,
-              min: spec.minimum,
-              max: spec.maximum,
-              divisions: spec.divisions,
-              valueLabel: (current) => overlayWorkspaceFormatValue(
-                spec,
-                current,
-                AppStrings.of(context),
-              ),
-              onChanged: onChanged == null
-                  ? null
-                  : (next) => onChanged!(integral ? next.round() : next),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -691,3 +674,39 @@ String _fieldName(BuildContext context, OverlayWorkspaceFieldSpec spec) {
 
 String _copy(BuildContext context, String key) =>
     AppStrings.of(context).text(key);
+
+/// The health ring (user, 11-10): only someone who reads their own health has
+/// one, and that switch is a local setting in the client's own settings
+/// ("读血不应该放在这里吧，这是一个本机设置"), in the screen reading section.
+/// The link shows only once that section exists, so it never leads nowhere.
+class _HealthRingNote extends StatelessWidget {
+  const _HealthRingNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      key: const Key('overlay-members-health-ring-note'),
+      padding: EdgeInsets.only(top: tokens.space.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: OverlaySettingsHelp(
+              _copy(context, 'overlay.workspace.hint.healthRing'),
+            ),
+          ),
+          if (screenReadingSettingsAvailable)
+            TextButton(
+              key: const Key('overlay-members-open-screen-reading'),
+              onPressed: () => Actions.maybeInvoke(
+                context,
+                const OpenDestinationIntent(screenReadingSettingsRoute),
+              ),
+              child: Text(_copy(context, 'overlay.workspace.healthRing.open')),
+            ),
+        ],
+      ),
+    );
+  }
+}

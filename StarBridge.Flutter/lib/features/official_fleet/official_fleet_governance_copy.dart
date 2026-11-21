@@ -50,6 +50,13 @@ const _copy = <String, (String, String, String)>{
   'load': ('加载更多', '載入更多', 'Load more'),
   'read': ('查看角色', '檢視角色', 'View roles'),
   'assign': ('设置角色', '設定角色', 'Set role'),
+  'deleteRole': ('删除角色', '刪除角色', 'Delete role'),
+  'keepRole': ('保留角色', '保留角色', 'Keep role'),
+  'deleteRoleConfirm': (
+    '删除后，拥有这个角色的成员立刻失去它带来的权限。星级自带的权限不受影响，操作记录会保留。删除后不能恢复。',
+    '刪除後，擁有這個角色的成員立刻失去它帶來的權限。星級自帶的權限不受影響，操作記錄會保留。刪除後無法復原。',
+    'Members with this role lose what it gave them right away. Star permissions stay, and the activity record is kept. This cannot be undone.',
+  ),
   'revoke': ('撤销', '撤銷', 'Revoke'),
   'create': ('新建角色', '新增角色', 'New role'),
   'edit': ('编辑', '編輯', 'Edit'),

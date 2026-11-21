@@ -54,13 +54,20 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
   @override
   Future<DirectMessagePrivacySnapshot> read() async {
     if (!_canRead) {
-      return const DirectMessagePrivacySnapshot.unavailable(
-        DirectMessagePrivacyFailure.hostUnavailable,
+      return DirectMessagePrivacySnapshot.unavailable(
+        _closed
+            ? DirectMessagePrivacyFailure.hostUnavailable
+            : DirectMessagePrivacyFailure.capabilityMissing,
       );
     }
     try {
       return _snapshot(await _request('directMessages.privacyRead'));
-    } on _SignedOut {
+    } on _AccountUnavailable catch (error) {
+      if (error.temporary) {
+        return const DirectMessagePrivacySnapshot.unavailable(
+          DirectMessagePrivacyFailure.hostUnavailable,
+        );
+      }
       return const DirectMessagePrivacySnapshot.signedOut();
     } on BridgeClientException catch (error) {
       return DirectMessagePrivacySnapshot.unavailable(_failure(error.code));
@@ -95,7 +102,7 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
         return await _confirmUncertainWrite(allowStrangerDirectMessages);
       }
       return DirectMessagePrivacyWriteResult.completed(snapshot);
-    } on _SignedOut {
+    } on _AccountUnavailable {
       return const DirectMessagePrivacyWriteResult.rejected(
         DirectMessagePrivacyFailure.identityUnavailable,
       );
@@ -132,7 +139,7 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
         if (snapshot.allowStrangerDirectMessages == expectedValue) {
           return DirectMessagePrivacyWriteResult.completed(snapshot);
         }
-      } on _SignedOut {
+      } on _AccountUnavailable {
         return const DirectMessagePrivacyWriteResult.rejected(
           DirectMessagePrivacyFailure.identityUnavailable,
         );
@@ -177,11 +184,13 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
       timeout: timeout,
     );
     final account = await _pending!.future;
-    if (_closed || epoch != _epoch) throw const _SignedOut();
+    if (_closed || epoch != _epoch) throw const _AccountUnavailable();
     if (account.payload['schemaVersion'] != 1 ||
         !hasRelayAccount(account) ||
         account.accountContext == null) {
-      throw const _SignedOut();
+      throw _AccountUnavailable(
+        temporary: accountTemporarilyUnavailable(account),
+      );
     }
     _pending = _session.beginRequest(
       name,
@@ -190,7 +199,7 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
       timeout: timeout,
     );
     final response = await _pending!.future;
-    if (_closed || epoch != _epoch) throw const _SignedOut();
+    if (_closed || epoch != _epoch) throw const _AccountUnavailable();
     return response.payload;
   }
 
@@ -246,8 +255,10 @@ final class BridgeDirectMessagePrivacy implements DirectMessagePrivacyPort {
   }
 }
 
-final class _SignedOut implements Exception {
-  const _SignedOut();
+final class _AccountUnavailable implements Exception {
+  const _AccountUnavailable({this.temporary = false});
+
+  final bool temporary;
 }
 
 final class _ConfirmationDelay {

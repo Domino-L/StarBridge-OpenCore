@@ -17,6 +17,7 @@ import 'community_visitor_profile_port.dart';
 import 'community_cached_presentation_port.dart';
 import 'offline_community_reader.dart';
 import '../personal_profile/bridge_personal_profile_adapter.dart';
+import '../personal_profile/bridge_personal_profile_account_facts.dart';
 import '../personal_profile/personal_profile_models.dart';
 
 import 'community_bridge_transport.dart';
@@ -43,6 +44,7 @@ final class BridgeCommunities extends CommunityBridgeTransport
     super.session, {
     super.ownAvatar,
     super.connectionMode,
+    super.scmOnly,
     this.retainedReadId,
     this.retainedPreviousReadId,
     this.retainedSelectionChanges,
@@ -130,7 +132,12 @@ final class BridgeCommunities extends CommunityBridgeTransport
         'memberRef': memberRef,
       });
       if (payload['editable'] != false) throw const FormatException();
-      return parsePersonalProfileSnapshot(payload);
+      return parsePersonalProfileSnapshot(
+        payload,
+        visitorAccountFactsSupported: session.hostCapabilities.contains(
+          visitorAccountFactsCapability,
+        ),
+      );
     } on BridgeClientException catch (error) {
       return PersonalProfileSnapshot.unavailable(
         failureKey: switch (error.code) {
@@ -353,6 +360,13 @@ final class BridgeCommunities extends CommunityBridgeTransport
         'targetRef': targetRef,
       });
       final status = value['status'];
+      if (status == 'rejected' &&
+          const {
+            'identityRequired',
+            'identityAmbiguous',
+          }.contains(value['error'])) {
+        return value['error'] as String;
+      }
       return const {'accepted', 'rejected', 'unknown'}.contains(status)
           ? status as String
           : 'unknown';

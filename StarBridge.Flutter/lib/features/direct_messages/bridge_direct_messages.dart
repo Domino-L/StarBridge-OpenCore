@@ -1,3 +1,5 @@
+import '../common/last_online_days.dart';
+
 import 'dart:async';
 
 import '../common/chat_room_invitation.dart';
@@ -68,11 +70,15 @@ final class BridgeDirectMessages
   }
 
   @override
-  Stream<void> get changes => directMessageActivityChanges(session)
-      .where((targets) => targets == null).map((_) {});
+  Stream<void> get changes =>
+      directMessageActivityChanges(session)
+          .where((targets) => targets == null)
+          .map((_) {});
   @override
-  Stream<List<String>> get hints => directMessageActivityChanges(session)
-      .where((targets) => targets != null).map((targets) => targets!);
+  Stream<List<String>> get hints =>
+      directMessageActivityChanges(session)
+          .where((targets) => targets != null)
+          .map((targets) => targets!);
   @override
   bool get activityHealthy => socialActivityHealthy(session);
   @override
@@ -331,6 +337,9 @@ List<Conversation> parseConversations(Map<String, Object?> data) {
       gameId: game,
       conversationKey: readConversationKey(row['conversationKey']),
       presence: conversationPresence(_state(row), row['presence']),
+      lastOnlineDays: _state(row) == 'friend'
+          ? readLastOnlineDays(row['lastOnlineDays'])
+          : null,
     );
   }).toList();
   if (_number(data, 'totalUnread') != result.fold(0, (n, r) => n + r.unread)) {

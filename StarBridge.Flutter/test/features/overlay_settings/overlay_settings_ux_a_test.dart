@@ -20,12 +20,18 @@ OverlayWorkspaceSettings settings([Map<String, Object?> changes = const {}]) =>
           OverlayWorkspaceFieldKind.readOnlyChoice => f.options.first,
           OverlayWorkspaceFieldKind.numberChoice => f.numberOptions.first,
           OverlayWorkspaceFieldKind.number =>
-            f.field == 'chatMaxVisibleCount' ? f.minimum.round() : f.minimum,
+            f.field == 'chatMaxVisibleCount'
+                ? f.minimum.round()
+                // the visor's camera as it always was (11-11 viewing distance)
+                : f.field == 'visorViewingDistance'
+                ? 1000.0
+                : f.minimum,
           OverlayWorkspaceFieldKind.color => '#FFFFFF',
           OverlayWorkspaceFieldKind.hotkey => '',
           OverlayWorkspaceFieldKind.eventTypes => 0,
           OverlayWorkspaceFieldKind.eventDurations => <String, Object?>{
             for (final entry in overlayDurationFields) entry.$1: 0,
+            'localPlayReminder': 0,
             'squadChange': 0,
             'commanderChange': 0,
           },
@@ -167,7 +173,6 @@ void main() {
     expect(
       seen,
       containsAll([
-        'fixedPalette',
         'crosshair',
         'themeColor',
         'crosshairStyle',
@@ -180,6 +185,17 @@ void main() {
         'startup',
       ]),
     );
+    // 0.7.3 overlay v2 shows every saved look as the visor, so a locked palette
+    // is reached only through an appearance's own rule until v2 brings it back.
+    final fixed = overlayWorkspaceFieldDisabledReason(
+      'theme',
+      settings({'skin': 'Verdict'}),
+      appearanceRule: overlayWorkspaceAppearanceRules['Verdict'],
+    )!;
+    expect(fixed, endsWith('.fixedPalette'));
+    for (final locale in AppStrings.supportedLocales) {
+      expect(AppStrings.resolve(locale).text(fixed), isNot(fixed));
+    }
     expect(
       overlayWorkspaceFieldDisabledReason('crosshairColor', settings()),
       endsWith('.crosshair'),

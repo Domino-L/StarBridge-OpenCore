@@ -60,9 +60,19 @@ internal sealed class DesktopNotificationCard : Border
         }
         if (notice.Community is {} community && !hidden) {
             title = community.Name;
-            body = community.Management ? Local("有新的加入申请待处理。", "有新的加入申請待處理。", "New join requests need your review.")
+            var count = community.AnnouncementSummaryCount > 99 ? "99+" : community.AnnouncementSummaryCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            body = community.Announcement && community.AnnouncementSummaryCount > 0
+                ? Local($"有 {count} 条新公告。", $"有 {count} 則新公告。",
+                    community.AnnouncementSummaryCount == 1 ? "1 new announcement." : $"{count} new announcements.")
+                : community.Announcement ? Local("有新公告。", "有新公告。", "New announcement.")
+                : community.Management ? Local("有新的加入申请待处理。", "有新的加入申請待處理。", "New join requests need your review.")
                 : notice.Preview == "fullContent" ? (string.IsNullOrWhiteSpace(community.Callsign) ? "" : community.Callsign + ": ") + community.Text
                 : Local("有新的组织聊天消息。", "有新的組織聊天訊息。", "New organization chat message.");
+        }
+        if (notice.Reminder is { } reminder) {
+            // Host-written and not personal: shown even with hidden details.
+            title = reminder.Title;
+            body = reminder.Body;
         }
         if (notice.GameIdentityMismatch && !hidden) {
             title = Local("游戏身份需要核对", "遊戲身分需要核對", "Review your game identity");
@@ -123,8 +133,8 @@ internal sealed class DesktopNotificationCard : Border
         var assemblyName = Uri.EscapeDataString(typeof(DesktopNotificationCard).Assembly.GetName().Name!);
         brand.Source = new BitmapImage(new Uri($"pack://application:,,,/{assemblyName};component/Assets/Brand/notification_mark_{(light ? "light" : "dark")}.png"));
         header.Children.Add(brand);
-        header.Children.Add(Text("StarBridge", primary, 13, true));
-        header.Children.Add(Text("  ·  " + (notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.ExecHangar != null ? Local("行政机库", "行政機庫", "Executive hangar") : notice.GameIdentityMismatch ? Local("游戏身份", "遊戲身分", "Game identity") : notice.FriendRequests > 0 ? Local("好友申请", "好友申請", "Friend requests") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.SourceKind == OrganizationNotificationSourceKind.OfficialFleet ? Local("主舰队聊天", "主艦隊聊天", "Main fleet chat") : group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
+        header.Children.Add(Text(Local("星海舰桥", "星海艦橋", "StarBridge"), primary, 13, true));
+        header.Children.Add(Text("  ·  " + (notice.Reminder is { } reminderLabel ? reminderLabel.Label : notice.Activity != null ? Local("玩家动态", "玩家動態", "Player activity") : notice.Test ? Local("当前设备", "目前裝置", "This device") : hidden ? Local("通知", "通知", "Notification") : notice.ExecHangar != null ? Local("行政机库", "行政機庫", "Executive hangar") : notice.GameIdentityMismatch ? Local("游戏身份", "遊戲身分", "Game identity") : notice.FriendRequests > 0 ? Local("好友申请", "好友申請", "Friend requests") : notice.DirectMessage != null ? Local("私信", "私訊", "Direct messages") : notice.Community is {} group ? (group.Announcement ? Local("公告", "公告", "Announcement") : group.SourceKind == OrganizationNotificationSourceKind.OfficialFleet ? Local("主舰队聊天", "主艦隊聊天", "Main fleet chat") : group.Management ? Local("管理待办", "管理待辦", "Management tasks") : Local("组织聊天", "組織聊天", "Organization chat")) : Local("房间", "房間", "Rooms")), secondary, 12));
         content.Children.Add(header);
         var text = new StackPanel { Margin = new(0,9,0,0) };
         text.Children.Add(Text(title, primary, 15, true));
@@ -150,13 +160,15 @@ internal sealed class DesktopNotificationCard : Border
             ? new ExecHangarNotificationPanel(liveHangar, notice.Locale, light, primary, secondary, accent, notice.IsCurrent, dismiss) : text);
         Grid.SetRow(identity,1); content.Children.Add(identity);
         var footer = new DockPanel();
-        var action = MakeButton(notice.Activated == null || hidden ? Local("打开应用 →", "開啟應用程式 →", "Open app →")
+        var action = MakeButton(notice.Reminder != null ? Local("知道了", "知道了", "Got it")
+            : notice.Activated == null || hidden ? Local("打开应用 →", "開啟應用程式 →", "Open app →")
             : notice.ExecHangar != null ? Local("查看倒计时 →", "查看倒計時 →", "View countdown →")
             : notice.GameIdentityMismatch ? Local("打开应用核对 →", "開啟應用程式核對 →", "Open app to review →")
             : notice.FriendRequests > 0 ? Local("查看好友申请 →", "查看好友申請 →", "View friend requests →")
             : notice.DirectMessage != null ? Local("查看私信 →", "查看私訊 →", "View direct messages →")
+            : notice.Community is { Announcement: true } ? Local("查看公告 →", "查看公告 →", "View announcements →")
             : notice.Community != null ? Local("查看组织 →", "查看組織 →", "View organizations →")
-            : Local("查看房间提醒 →", "查看房間提醒 →", "View room reminders →"), accent, open, light);
+            : Local("查看房间提醒 →", "查看房間提醒 →", "View room reminders →"), accent, notice.Reminder != null ? dismiss : open, light);
         DockPanel.SetDock(action, Dock.Right); footer.Children.Add(action);
         _idleHint = Local("悬停暂停收起", "游標停留時暫停收起", "Hover to keep open");
         _pausedHint = notice.ExecHangar is not null ? Local("鼠标移开后收起", "滑鼠移開後收起", "Dismisses after you move away")
@@ -275,6 +287,19 @@ internal sealed class NotificationBrandWatermark : FrameworkElement
         dc.PushOpacityMask(mask);
         dc.DrawRectangle(_light ? LightInk : DarkInk, null, new Rect(RenderSize));
         dc.Pop();
+    }
+
+    /// <summary>
+    /// The passive cards' rule (activity and compact hangar cards, 86 px inside their border): a 60 px mark, right-aligned
+    /// 12 px from the inner edge and vertically centred, whole. A card of another inner height scales size and inset alike.
+    /// </summary>
+    internal const double ReferenceInnerHeight = 86, ReferenceSize = 60, ReferenceInset = 12;
+    internal static NotificationBrandWatermark ForCard(bool light, double innerHeight)
+    {
+        var scale = innerHeight / ReferenceInnerHeight;
+        var mark = new NotificationBrandWatermark(light, Math.Round(ReferenceSize * scale));
+        mark.Margin = new(0, 0, ReferenceInset * scale, 0);
+        return mark;
     }
 
     // Pure decoration is not announced as a second logo or focusable control.

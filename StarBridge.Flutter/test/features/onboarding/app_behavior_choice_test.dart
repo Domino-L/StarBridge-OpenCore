@@ -39,6 +39,16 @@ final class _FlakyPreferences implements AppPreferencesPort {
   @override
   Future<bool> setHolidayAppearance(bool enabled) =>
       _inner.setHolidayAppearance(enabled);
+
+  @override
+  Future<bool> setReadOwnHealth(bool enabled) =>
+      _inner.setReadOwnHealth(enabled);
+  @override
+  Future<bool> setReadOwnHealthInBackground(bool enabled) =>
+      _inner.setReadOwnHealthInBackground(enabled);
+  @override
+  Future<bool> setPerformanceMode(bool enabled) =>
+      _inner.setPerformanceMode(enabled);
   @override
   Future<bool> setMotionPreference(MotionPreference preference) =>
       _inner.setMotionPreference(preference);

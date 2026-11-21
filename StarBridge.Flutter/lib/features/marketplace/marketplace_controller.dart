@@ -4,6 +4,10 @@ import 'package:flutter/widgets.dart';
 
 import 'marketplace_category_recheck.dart';
 import 'marketplace_best_prices.dart';
+import 'marketplace_order_full.dart';
+import 'marketplace_trade_locations.dart';
+import 'marketplace_controller_catalog.dart';
+export 'marketplace_controller_catalog.dart';
 import 'marketplace_chat_controller.dart';
 import 'marketplace_port.dart';
 import 'marketplace_browser.dart';
@@ -48,9 +52,17 @@ final class MarketplaceController extends ChangeNotifier
   /// Opens another destination (e.g. /messages); set by the hall page, whose
   /// context reaches the shell's navigation actions.
   void Function(String route)? openDestination;
+
+  /// Over the game (the menu overlay) the trade profile is not edited, because
+  /// the form shows the contact number. The summary points to the client.
+  bool profileEditedInClient = false;
+  late final fullOrders = MarketOrderFull(
+    port, language: () => locale == 'en' ? 'EN' : 'CN',
+  );
+  late final tradeLocations = MarketTradeLocations(port);
   late final browser = MarketplaceBrowser(port);
   @override
-  late final trades = MarketplaceTradesController(port);
+  late final trades = MarketplaceTradesController(port, language: () => locale == 'en' ? 'EN' : 'CN');
   int _itemOrigin = 0;
 
   /// Where 返回 goes (user 10-29: "返回永远是返回上一页"). Each in-hall step —
@@ -88,6 +100,11 @@ final class MarketplaceController extends ChangeNotifier
   final _versions = <String, int>{};
   bool _disposed = false, _initialized = false;
   int _context = 0, side = 1, mainTab = 0, itemTab = 0;
+
+  /// The open item tab's block: offers (single or checklist), trend, sources.
+  String get itemTabKey => itemTab < 2
+      ? offerKey(itemTab == 1)
+      : const ['trend', 'acquisition'][itemTab - 2];
   @override
   int? itemId;
   int? categoryId;
@@ -158,34 +175,21 @@ final class MarketplaceController extends ChangeNotifier
     await Future.wait([refreshCatalog(), saveView()]);
   }
 
-  Future<void> refreshCatalog() async {
-    await Future.wait([
-      load(
-        'catalog',
-        relation.isEmpty ? 'search' : relation,
-        id: relatedId,
-        query: keyword,
-        category: categoryId ?? 0,
-      ),
-      // A catalog restored from the saved view has not read its item yet.
-      if (relation.isNotEmpty &&
-          relatedId > 0 &&
-          blocks['recent:$relatedId'] == null &&
-          !loading.contains('recent:$relatedId'))
-        load('recent:$relatedId', 'item', id: relatedId),
+  Future<void> refreshHall() {
+    fullOrders.clear();
+    return Future.wait([
+      load('categories', 'categories'),
+      load('trending', 'trending'),
+      loadLatest(),
+      loadFavorites(),
+      load('reputation', 'reputation'),
+      load('categoryListings', 'categoryListings'),
+      refreshMyOrders(),
+      loadTradeProfile(),
+      trades.refresh(),
+      load('timezones', 'timezones'),
     ]);
   }
-
-  Future<void> refreshHall() => Future.wait([
-    load('categories', 'categories'),
-    load('trending', 'trending'),
-    loadLatest(),
-    loadFavorites(),
-    load('reputation', 'reputation'),
-    load('categoryListings', 'categoryListings'),
-    refreshMyOrders(),
-    loadTradeProfile(),
-  ]);
   Future<void> refreshItem() async {
     final id = itemId;
     if (id == null) return;
@@ -213,9 +217,10 @@ final class MarketplaceController extends ChangeNotifier
     await Future.wait([
       loadLatest(),
       if (browser.result != null) browser.reload(),
+      if (trades.listLoaded) trades.refresh(),
       load('trending', 'trending'),
-      if (itemId != null) load('sell', 'offers', id: itemId!, side: 1),
-      if (itemId != null) load('buy', 'offers', id: itemId!, side: 0),
+      // Both sides again in the current mode (single or checklist) and filters.
+      if (itemId != null) loadOffers(itemId!),
     ]);
   }
 
@@ -291,11 +296,11 @@ final class MarketplaceController extends ChangeNotifier
     },
   );
   bool hasBestPrice(int itemId, int side) => _bestPrices.has(itemId, side);
-
+  bool bestPriceNone(int itemId, int side) => _bestPrices.none(itemId, side);
   /// The price tags only decorate cards: they wait for the first screen so
   /// they never take a read slot from categories, latest or trending.
-  Future<void> ensureBestPrices(Iterable<(int, int)> wanted) async {
-    if (_initialized && !_firstScreenDone.isCompleted) {
+  @override Future<void> ensureBestPrices(Iterable<(int, int)> wanted, {bool urgent = false}) async {
+    if (!urgent && _initialized && !_firstScreenDone.isCompleted) {
       await _firstScreenDone.future;
     }
     if (_disposed) return;
@@ -449,15 +454,44 @@ final class MarketplaceController extends ChangeNotifier
   final refiltering = <String>{};
   final _refilterUndo = <String, VoidCallback>{};
 
+  /// The rows each refiltered key showed before the change, with that change's
+  /// undo. Cancelling puts back every key of the change, including a side
+  /// whose new rows already arrived (CX-HALL-CHECKLIST-A2-REVIEW P2).
+  final _refilterBefore = <String, (VoidCallback, MarketRead)>{};
+
   /// Keeps [keys]' current rows on screen until the new filter's rows arrive;
   /// [undo] puts the previous filter back if the wait is cancelled.
   @override
   void refilter(Iterable<String> keys, VoidCallback undo) {
+    // Changes that can no longer be cancelled keep nothing.
+    _refilterBefore.removeWhere(
+      (_, entry) => !_refilterUndo.values.any((u) => identical(u, entry.$1)),
+    );
+    // A key still waiting on an earlier change merges the two: cancelling
+    // undoes both, newest first, with the rows from before the earlier one
+    // (CX-HALL-CHECKLIST-A2-REVIEW-R2 P2).
+    final earlier = [for (final key in keys) ?_refilterUndo[key]];
+    var change = undo;
+    if (earlier.isNotEmpty) {
+      bool merged(VoidCallback u) => earlier.any((e) => identical(e, u));
+      change = () {
+        undo();
+        earlier.reversed.toSet().forEach((u) => u());
+      };
+      _refilterUndo.updateAll((_, u) => merged(u) ? change : u);
+      _refilterBefore.updateAll(
+        (_, entry) => merged(entry.$1) ? (change, entry.$2) : entry,
+      );
+    }
     for (final key in keys) {
       failures.remove(key);
-      if (blocks[key] == null) continue;
+      final read = blocks[key];
+      if (read == null) continue;
       refiltering.add(key);
-      _refilterUndo[key] = undo;
+      _refilterUndo[key] = change;
+      if (!identical(_refilterBefore[key]?.$1, change)) {
+        _refilterBefore[key] = (change, read);
+      }
     }
   }
 
@@ -465,16 +499,24 @@ final class MarketplaceController extends ChangeNotifier
   void cancelRefilter(String key) {
     final undo = _refilterUndo[key];
     if (undo == null) return;
-    final keys = [
+    final keys = {
       for (final entry in _refilterUndo.entries)
         if (identical(entry.value, undo)) entry.key,
-    ];
+      for (final entry in _refilterBefore.entries)
+        if (identical(entry.value.$1, undo)) entry.key,
+    };
     for (final k in keys) {
       _refilterUndo.remove(k);
       refiltering.remove(k);
       _rereads.remove(k);
       loading.remove(k);
       _versions[k] = (_versions[k] ?? 0) + 1;
+      // A side that already showed the new filter's rows goes back too.
+      final before = _refilterBefore.remove(k);
+      if (before != null) {
+        blocks[k] = before.$2;
+        failures.remove(k);
+      }
     }
     undo();
     notifyListeners();
@@ -508,12 +550,17 @@ final class MarketplaceController extends ChangeNotifier
 
   Future<void> browse({String query = '', int? category}) async {
     // Refining filters inside the catalog replaces the step instead of piling up history.
-    final inCatalog = itemId == null &&
+    final inCatalog =
+        itemId == null &&
         mainTab == 0 &&
         (relation.isNotEmpty || keyword.isNotEmpty || categoryId != null);
     if (!inCatalog) _remember();
-    final (beforeRelation, beforeId, beforeKeyword, beforeCategory) =
-        (relation, relatedId, keyword, categoryId);
+    final (beforeRelation, beforeId, beforeKeyword, beforeCategory) = (
+      relation,
+      relatedId,
+      keyword,
+      categoryId,
+    );
     if (inCatalog) {
       refilter(const ['catalog'], () {
         relation = beforeRelation;
@@ -539,7 +586,7 @@ final class MarketplaceController extends ChangeNotifier
     mainTab = 1;
     itemId = null;
     notifyListeners();
-    await browser.choose(category: id);
+    await browser.choose(category: id, kind: 'items');
   }
 
   Future<void> moreCatalog() {
@@ -571,6 +618,8 @@ final class MarketplaceController extends ChangeNotifier
       'item',
       'sell',
       'buy',
+      'sell-checklist',
+      'buy-checklist',
       'trend',
       'acquisition',
       'blueprints',
@@ -581,6 +630,7 @@ final class MarketplaceController extends ChangeNotifier
       loading.remove(key);
       refiltering.remove(key);
       _refilterUndo.remove(key);
+      _refilterBefore.remove(key);
     }
     if (itemId == null) _itemOrigin = mainTab;
     itemId = id;
@@ -650,6 +700,7 @@ final class MarketplaceController extends ChangeNotifier
 
   @override
   void tab(int value) {
+    if (value == 0) return hall();
     _history.clear();
     itemId = null;
     mainTab = value;
@@ -667,7 +718,6 @@ final class MarketplaceController extends ChangeNotifier
   @override
   Future<void> loadFavorites() async {
     final keys = favorites
-        .take(12)
         .expand((id) => ['watch:$id', 'watch-price:$id', 'watch-buy:$id'])
         .toSet();
     blocks.removeWhere(
@@ -687,6 +737,8 @@ final class MarketplaceController extends ChangeNotifier
   }
 
   void contextChanged() {
+    fullOrders.clear(forgetRecent: true);
+    tradeLocations.clear();
     _history.clear();
     marketMyOrders.clear();
     tradeProfile = null;
@@ -694,6 +746,7 @@ final class MarketplaceController extends ChangeNotifier
     qualityTiers.clear();
     myListings = const [];
     myListingsLoaded = false;
+    myListingsError = null;
     trades.reset();
     browser.reset();
     final active = _initialized;
@@ -716,6 +769,7 @@ final class MarketplaceController extends ChangeNotifier
     loading.clear();
     refiltering.clear();
     _refilterUndo.clear();
+    _refilterBefore.clear();
     itemId = null;
     categoryId = null;
     keyword = '';
@@ -728,11 +782,14 @@ final class MarketplaceController extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    fullOrders.dispose();
+    tradeLocations.clear();
     _context++;
     _rereadTimer?.cancel();
     _rereadTimer = null;
     _categoryRecheck.cancel();
     focusRequests.dispose();
+    pageRefresh.dispose();
     browser.dispose();
     trades.dispose();
     port.dispose();

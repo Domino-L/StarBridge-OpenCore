@@ -333,10 +333,17 @@ Future<CommunityChatDetail> assembleCommunityChatDetail(
     if (identity != null) {
       final person = officialChatDetailPerson(row, senderRef ?? '');
       answered = person.author;
+      // A verified avatar-free answer narrows every held portrait even when
+      // its new identity version cannot authorize this older detail request.
+      if (person.author.admit(identity.now()).visible &&
+          !person.author.hasAvatar) {
+        identity.narrow(person.author);
+      }
       // A hidden answer stays hidden, whatever this request expected.
       observed = person.author.state == CommunityAuthorState.hidden
           ? person.author
-          : identity.current() && person.author.sameIdentityAs(identity.expected)
+          : identity.current() &&
+                person.author.sameIdentityAs(identity.expected)
           ? person.author.admit(identity.now())
           : const CommunityAuthorProjection.unavailable();
       // Retire the person before an obsolete byte assembly can fail or restart.

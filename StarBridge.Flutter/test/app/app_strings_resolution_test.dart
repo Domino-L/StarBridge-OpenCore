@@ -70,7 +70,7 @@ void main() {
     ]);
     expect(
       AppStrings.resolve(const Locale('zh', 'CN')).text('app.name'),
-      '星海舰桥',
+      'SCM 星海舰桥',
     );
   });
 }

@@ -10,7 +10,7 @@ internal static class OverlayArrivalSourceTests
     internal static void RunAll()
     {
         var failures = new List<string>();
-        foreach (var test in new Action[] { NavigationTargetsUseActualStationNames, ArrivalUsesCurrentTarget, SharedArrivalFollowsAuthorizedTarget, LocalArrivalConfirmationMerges, LocalFirstLocationIsNotLost, SelectedSourceKeepsItsKind })
+        foreach (var test in new Action[] { NavigationTargetsUseActualStationNames, ArrivalUsesCurrentTarget, SharedArrivalFollowsAuthorizedTarget, LocalArrivalConfirmationMerges, LocalPlaceholderIsNotAPlace, SelectedSourceKeepsItsKind })
             try { test(); } catch (Exception error) { failures.Add(test.Method.Name + ": " + error.Message); }
         if (failures.Count > 0) throw new Exception(string.Join(Environment.NewLine, failures));
     }
@@ -105,7 +105,7 @@ internal static class OverlayArrivalSourceTests
                 new("fixture", "Community", []), OverlayScenePreference.PartyRoom, "en");
             model.Refresh(new(selectedRoom.Scene.Players), OverlayDisplaySettings.Default, OverlayRosterSelectionSettings.Default,
                 "en", selectedRoom.Scene.HasContent, selectedRoom.Command, PlayerPresenceKind.AppOnline, "", selectedRoom.Scene.Context);
-            Check(model.SquadsTitle == "PARTY OVERVIEW" && selectedRoom.Scene.Players.Count == 0 &&
+            Check(model.SquadsTitle == "ROOM OVERVIEW" && selectedRoom.Scene.Players.Count == 0 &&
                 model.Members.Single().DisplayName == "No visible members" &&
                 model.SquadStatusPrimaryName == "Room information unavailable", "an unavailable explicitly selected room keeps room semantics without substituting organization");
         }
@@ -191,6 +191,39 @@ internal static class OverlayArrivalSourceTests
             model.EventNotifications.Clear();
             Refresh(baseline with { Location = baseline.Location with { ArrivalPendingConfirmation = true, ArrivalTargetCode = null } });
             Check(model.Members.Single().Location == "地点待确认" && !model.EventNotifications.Single().Detail.Contains("Old place"), "arrival without a current target cannot substitute history");
+
+            // 11-13 user ("为什么我没有改变位置还是会弹地点更新和量子抵达事件"): an arrival confirmed where the member was
+            // before the jump changed nothing: no "location confirmed" card, and the provisional card goes too
+            Refresh(baseline);
+            model.EventNotifications.Clear();
+            Refresh(baseline with { Location = baseline.Location with { ArrivalPendingConfirmation = true, ArrivalTargetCode = "Current target" } });
+            Check(model.EventNotifications.Count == 1, "a quantum arrival still shows while it waits");
+            Refresh(baseline);
+            Check(model.EventNotifications.Count == 0, "confirmed at the same place as before the jump: no card, nothing kept");
+            Refresh(baseline with { Location = baseline.Location with { ArrivalPendingConfirmation = true, ArrivalTargetCode = "Current target" } });
+            Refresh(baseline with { Location = new("confirmed", "Current target", "Current target") });
+            Check(model.EventNotifications.Count == 1 && model.EventNotifications.Single().Title == "地点已确认",
+                "confirmed at a different place is still announced");
+            // review R3: a later jump confirmed where it started takes only its own provisional card, never the earlier one
+            var earlier = model.EventNotifications.Single();
+            Refresh(baseline with { Location = new("confirmed", "Current target", "Current target") { ArrivalPendingConfirmation = true, ArrivalTargetCode = "Elsewhere" } });
+            Refresh(baseline with { Location = new("confirmed", "Current target", "Current target") });
+            Check(model.EventNotifications.Count == 1 && ReferenceEquals(earlier, model.EventNotifications.Single()) && earlier.Title == "地点已确认",
+                "the earlier confirmed card of the same member stays");
+
+            // 11-13 user ("现在我的地点一直是待确认"): the location score decaying between log lines is not an arrival
+            Refresh(baseline);
+            model.EventNotifications.Clear();
+            var settled = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, "zh",
+                localSession: baseline, localPresence: PlayerPresenceKind.InGame);
+            foreach (var confidence in new[] { "Medium", "Low", "中", "低" })
+            {
+                model.Refresh(new(settled.Scene.Players.Select(p => p with { LocationConfidence = confidence })), settings,
+                    OverlayRosterSelectionSettings.Default, "zh", true, settled.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!,
+                    settled.Scene.Context);
+                Check(model.EventNotifications.Count == 0 && !model.Members.Single().Location.Contains("待确认"),
+                    $"confidence {confidence}: no card, the place shows as it is");
+            }
         }
         finally { model.ClearAuthorizedContent(); }
     }
@@ -199,31 +232,68 @@ internal static class OverlayArrivalSourceTests
         ShowEventNotifications = true, AnimationFrameRate = OverlayAnimationFrameRate.Off,
         EventNotificationTypes = OverlayEventNotificationTypes.LocationChange };
 
-    private static void LocalFirstLocationIsNotLost()
+    // 11-15 user on b99 ("还会出现莫名出现到达地点待确认 确认为当前地点的问题，我一直在现在这个地点连船都没上"):
+    // the self row's stand-in text ("等待位置确认" / "Location pending", "等待舰船确认" / "Ship pending") is not a place
+    // or a ship. Not known -> known and known -> not known fire nothing; only a real A -> B change is announced.
+    private static void LocalPlaceholderIsNotAPlace()
     {
-        var room = new InformationOverlayRoomContent("fixture", "Room", "", 4, "",
-            [new("Self", "Self", true, "InGame", "", "", "US") { IsSelf = true }], []);
-        var baseline = new GameLogSessionSnapshot(new("connected", "US", "pub_test_local_1"),
-            new("unknown", null, null), new("unknown", null, null, null));
-        var initial = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, "zh",
-            localSession: baseline, localPresence: PlayerPresenceKind.InGame);
-        var settings = Settings();
-        var model = new OverlayViewModel(new(initial.Scene.Players), settings, OverlayRosterSelectionSettings.Default,
-            "zh", true, initial.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!, initial.Scene.Context);
-        try
+        foreach (var language in new[] { "zh", "en" })
         {
-            model.EventNotifications.Clear();
-            var known = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, "zh",
-                localSession: baseline with { Location = new("confirmed", "First place", "First place") },
-                localPresence: PlayerPresenceKind.InGame);
-            model.Refresh(new(known.Scene.Players), settings, OverlayRosterSelectionSettings.Default, "zh", true,
-                known.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!, known.Scene.Context);
-            Check(model.EventNotifications.Single().Detail.Contains("First place"), "the first live location after the unknown baseline is a new event, not discarded as missing history");
-            model.Refresh(new(known.Scene.Players), settings, OverlayRosterSelectionSettings.Default, "zh", true,
-                known.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!, known.Scene.Context);
-            Check(model.EventNotifications.Count == 1, "unchanged confirmed snapshot is not replayed");
+            var room = new InformationOverlayRoomContent("fixture", "Room", "", 4, "",
+                [new("Self", "Self", true, "InGame", "", "", "US") { IsSelf = true }], []);
+            var baseline = new GameLogSessionSnapshot(new("connected", "US", "pub_test_local_1"),
+                new("unknown", null, null), new("unknown", null, null, null));
+            var settings = Settings() with { EventNotificationTypes =
+                OverlayEventNotificationTypes.LocationChange | OverlayEventNotificationTypes.ShipChange };
+            var initial = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, language,
+                localSession: baseline, localPresence: PlayerPresenceKind.InGame);
+            var model = new OverlayViewModel(new(initial.Scene.Players), settings, OverlayRosterSelectionSettings.Default,
+                language, true, initial.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!, initial.Scene.Context);
+            try
+            {
+                void Refresh(GameLogSessionSnapshot session)
+                {
+                    var next = NativeInformationOverlayRuntime.ProjectSource(room, null, OverlayScenePreference.Auto, language,
+                        localSession: session, localPresence: PlayerPresenceKind.InGame);
+                    model.Refresh(new(next.Scene.Players), settings, OverlayRosterSelectionSettings.Default, language, true,
+                        next.Command, PlayerPresenceKind.InGame, baseline.Server.Shard!, next.Scene.Context);
+                }
+                var zh = language == "zh";
+                // the projected self row carries the stand-in; the member list shows its own "not recognised yet" text
+                // for it (review CX-LOC-PLACEHOLDER-073-R1 P2), never the stand-in as a place
+                Check(initial.Scene.Players.Single(p => p.IsSelf).Location == (zh ? "等待位置确认" : "Location pending"),
+                    $"{language}: the self row carries the stand-in while the place is not known");
+                Check(!model.Members.Single().Location.Contains(zh ? "等待位置确认" : "Location pending"),
+                    $"{language}: the member list does not show the stand-in as a recognised place");
+                model.EventNotifications.Clear();
+
+                var first = baseline with { Location = new("confirmed", "First place", "First place") };
+                Refresh(first);
+                Check(model.EventNotifications.Count == 0 && model.Members.Single().Location.Contains("First place"),
+                    $"{language}: the first place after not known is shown, but it is not an arrival");
+                Refresh(first);
+                Check(model.EventNotifications.Count == 0, $"{language}: an unchanged place is not replayed");
+
+                Refresh(baseline);
+                Check(model.EventNotifications.Count == 0, $"{language}: losing the place is not an arrival at the stand-in text");
+                Refresh(first);
+                Check(model.EventNotifications.Count == 0, $"{language}: getting the same place back is not an arrival");
+
+                Refresh(baseline with { Location = new("confirmed", "Second place", "Second place") });
+                Check(model.EventNotifications.Count == 1 && model.EventNotifications.Single().Detail.Contains("Second place"),
+                    $"{language}: a real change from one place to another is still announced");
+
+                // the ship stand-in never reaches a card either (the self row shares no ship events today; this guards
+                // the stand-in itself should that change)
+                model.EventNotifications.Clear();
+                var placed = baseline with { Location = new("confirmed", "Second place", "Second place") };
+                Refresh(placed with { Ship = new("confirmed", "Ship A", "Ship A", "Ship A") });
+                Refresh(placed);
+                Refresh(placed with { Ship = new("confirmed", "Ship A", "Ship A", "Ship A") });
+                Check(model.EventNotifications.Count == 0, $"{language}: a ship coming and going behind the stand-in fires nothing");
+            }
+            finally { model.ClearAuthorizedContent(); }
         }
-        finally { model.ClearAuthorizedContent(); }
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 }

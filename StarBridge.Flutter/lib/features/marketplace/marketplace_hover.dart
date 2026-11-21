@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../../app/runtime/frame_governor.dart';
+
 import '../../design_system/interaction/starbridge_action_row.dart';
 
 import '../../design_system/styles/marketplace_palette.dart';
@@ -63,6 +66,8 @@ class _MarketHoverCardState extends State<MarketHoverCard>
   bool _inCard = false, _inDrawer = false, _focused = false, _above = false;
   double _width = 0;
   Timer? _timer;
+  final _drawerContent = GlobalKey();
+  bool _drawerSettled = false;
 
   bool get _active => _inCard || _inDrawer || _focused;
 
@@ -90,6 +95,7 @@ class _MarketHoverCardState extends State<MarketHoverCard>
 
   void _show() {
     if (!mounted || !_active) return;
+    _drawerSettled = false;
     final box = context.findRenderObject();
     if (box is RenderBox && box.attached) {
       _width = box.size.width;
@@ -166,7 +172,13 @@ class _MarketHoverCardState extends State<MarketHoverCard>
     );
   }
 
-  Widget _drawer(BuildContext context) {
+  Widget _drawer(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _buildDrawer(context, lightOnly),
+  );
+
+  Widget _buildDrawer(BuildContext context, bool lightOnly) {
+    if (lightOnly) _drawerSettled = true;
     final t = context.tokens;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final color = (widget.color ?? t.colors.accent).withValues(alpha: .38);
@@ -194,50 +206,65 @@ class _MarketHoverCardState extends State<MarketHoverCard>
             _inDrawer = false;
             _sync();
           },
+          // Once light visuals were on during this opening, a settled tween
+          // replaces the running one (the content moves with its GlobalKey,
+          // keeping its state), so turning them off never returns half-way
+          // (review CX-C-FULL-073-REVIEW2).
           child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: _still ? 1 : 0, end: 1),
+            key: ValueKey(_drawerSettled),
+            tween: Tween(begin: _still || _drawerSettled ? 1 : 0, end: 1),
             duration: const Duration(milliseconds: 160),
             builder: (context, v, child) => Opacity(
-              opacity: v,
+              opacity: lightOnly ? 1 : v,
               child: Transform.translate(
-                offset: Offset(0, (_above ? 6 : -6) * (1 - v)),
+                offset: Offset(
+                  0,
+                  (_above ? 6 : -6) * (1 - (lightOnly ? 1 : v)),
+                ),
                 child: child,
               ),
             ),
-            child: _HoverScope(
-              close: close,
-              child: Material(
-                key: widget.drawerKey,
-                type: MaterialType.transparency,
-                child: Container(
-                  width: width,
-                  padding: const EdgeInsets.fromLTRB(12, 9, 12, 11),
-                  decoration: BoxDecoration(
-                    color: dark ? MarketplacePalette.drawerDark : t.surfaces.raised.fill,
-                    border: widget.drawerWidth != null || width > _width + 1
-                        ? Border.fromBorderSide(side)
-                        : Border(
-                            left: side,
-                            right: side,
-                            top: _above ? side : BorderSide.none,
-                            bottom: _above ? BorderSide.none : side,
+            child: KeyedSubtree(
+              key: _drawerContent,
+              child: _HoverScope(
+                close: close,
+                child: Material(
+                  key: widget.drawerKey,
+                  type: MaterialType.transparency,
+                  child: Container(
+                    width: width,
+                    padding: const EdgeInsets.fromLTRB(12, 9, 12, 11),
+                    decoration: BoxDecoration(
+                      color: dark
+                          ? MarketplacePalette.drawerDark
+                          : t.surfaces.raised.fill,
+                      border: widget.drawerWidth != null || width > _width + 1
+                          ? Border.fromBorderSide(side)
+                          : Border(
+                              left: side,
+                              right: side,
+                              top: _above ? side : BorderSide.none,
+                              bottom: _above ? BorderSide.none : side,
+                            ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: dark ? .75 : .18,
                           ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: dark ? .75 : .18),
-                        offset: const Offset(0, 14),
-                        blurRadius: 24,
-                        spreadRadius: -12,
-                      ),
-                    ],
-                  ),
-                  child: DefaultTextStyle.merge(
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      height: 1.35,
-                      color: t.colors.textSecondary,
+                          offset: const Offset(0, 14),
+                          blurRadius: lightOnly ? 0 : 24,
+                          spreadRadius: -12,
+                        ),
+                      ],
                     ),
-                    child: widget.drawer!(context),
+                    child: DefaultTextStyle.merge(
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.35,
+                        color: t.colors.textSecondary,
+                      ),
+                      child: widget.drawer!(context),
+                    ),
                   ),
                 ),
               ),
@@ -307,7 +334,13 @@ class _HoverEdgePainter extends CustomPainter {
 
 /// "比最低价　+20.5%": a label on the left, its value right-aligned.
 class MarketDrawerRow extends StatelessWidget {
-  const MarketDrawerRow(this.label, this.value, {this.color, this.mono = false, super.key});
+  const MarketDrawerRow(
+    this.label,
+    this.value, {
+    this.color,
+    this.mono = false,
+    super.key,
+  });
   final String label;
   final Object value;
   final Color? color;
@@ -324,7 +357,10 @@ class MarketDrawerRow extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: value is Widget
-                ? Align(alignment: Alignment.centerRight, child: value as Widget)
+                ? Align(
+                    alignment: Alignment.centerRight,
+                    child: value as Widget,
+                  )
                 : Text(
                     '$value',
                     textAlign: TextAlign.right,
@@ -369,12 +405,20 @@ class MarketSlantButton extends StatelessWidget {
   final Color? color;
   final bool filled;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
-    final tone = color ?? t.colors.accent;
     final enabled = onTap != null;
+    final alpha = lightOnly && !enabled ? .45 : 1.0;
+    Color faded(Color color) =>
+        alpha == 1 ? color : color.withValues(alpha: color.a * alpha);
+    final tone = color ?? t.colors.accent;
     return Opacity(
-      opacity: enabled ? 1 : .45,
+      opacity: lightOnly || enabled ? 1 : .45,
       child: Material(
         type: MaterialType.transparency,
         child: StarBridgeActionRow(
@@ -391,21 +435,29 @@ class MarketSlantButton extends StatelessWidget {
               : null,
           child: CustomPaint(
             painter: MarketParallelogramPainter(
-              fill: filled ? tone : tone.withValues(alpha: .08),
-              border: filled ? tone : t.colors.textSecondary.withValues(alpha: .45),
+              fill: faded(filled ? tone : tone.withValues(alpha: .08)),
+              border: faded(
+                filled ? tone : t.colors.textSecondary.withValues(alpha: .45),
+              ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 3.5),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 13,
+                vertical: 3.5,
+              ),
               child: Text(
                 label,
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: filled
-                      ? (ThemeData.estimateBrightnessForColor(tone) == Brightness.dark
-                          ? Colors.white
-                          : MarketplacePalette.onAccent)
-                      : t.colors.textPrimary,
+                  color: faded(
+                    filled
+                        ? (ThemeData.estimateBrightnessForColor(tone) ==
+                                  Brightness.dark
+                              ? Colors.white
+                              : MarketplacePalette.onAccent)
+                        : t.colors.textPrimary,
+                  ),
                 ),
               ),
             ),

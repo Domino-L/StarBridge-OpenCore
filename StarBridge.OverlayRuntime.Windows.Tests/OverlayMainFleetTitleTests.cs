@@ -81,8 +81,8 @@ internal static class OverlayMainFleetTitleTests
             new("confirmed", "Local fixture", "本机地点"), new("confirmed", "fixture", "Local ship", "本机舰船"));
         foreach (var (language, overview, members) in new[]
         {
-            ("zh", "组织概况", "组织成员"),
-            ("en", "ORGANIZATION OVERVIEW", "ORGANIZATION MEMBERS"),
+            ("zh", "组织概况", "Domino Pizza"),
+            ("en", "ORGANIZATION OVERVIEW", "Domino Pizza"),
         })
         {
             var fleet = new InformationOverlayCommunityContent("fleet", "Domino Pizza",

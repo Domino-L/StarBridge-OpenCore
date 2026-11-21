@@ -61,6 +61,7 @@ internal sealed partial class CommunityClient
             foreach (var key in new[] { "isSelf", "isOwner", "online", "hasAvatar", "arrivalPendingConfirmation" }) fields[key] = member.GetProperty(key).GetBoolean();
             foreach (var key in new[] { "ship", "location", "locationConfidence", "serverRegion", "serverShard", "arrivalTargetCode" }) fields[key] = Optional(member, key, 512);
             fields["hasServerSession"] = OptionalServerSession(member);
+            fields["lastOnlineDays"] = Support.LastOnlineDays.Resolve(Support.LastOnlineDays.ReadHour(member), null, DateTimeOffset.UtcNow);
             var offline = StarBridge.Core.Presence.OrganizationMemberPresence.IsOffline(
                 fields["liveStatus"] as string, (bool)fields["online"]!);
             if (offline)
@@ -247,13 +248,18 @@ internal sealed partial class CommunityClient
             "/api/official-fleets/ships" => "official-ships-http",
             _ => null
         };
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
+        var endpoint = new Uri(_origin, path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        if (route.StartsWith("/api/official-fleets/", StringComparison.Ordinal))
+            request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
         if (officialImages) request.Headers.Add(OfficialImageHeader, "2");
+        if (route == "/api/fleets/workspace") Support.LastOnlineDays.Apply(request);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
         try
         {
+            var identityStarted = _identityClock.Start();
             Privacy.OfficialAnnouncementReadObservation.Sending();
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             Privacy.OfficialAnnouncementReadObservation.Response(response.StatusCode);
@@ -273,6 +279,8 @@ internal sealed partial class CommunityClient
                 buffer.Write(chunk, 0, count);
             }
             using var document = JsonDocument.Parse(buffer.ToArray());
+            if (route.StartsWith("/api/official-fleets/", StringComparison.Ordinal))
+                _identityClock.Observe(identityStarted, response, document.RootElement, endpoint);
             return document.RootElement.Clone();
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw new AccountBridgeHostException("communities.unavailable", true); }

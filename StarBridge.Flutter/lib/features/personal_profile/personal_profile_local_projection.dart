@@ -1,8 +1,38 @@
+import '../hangar/local_hangar_manufacturers.dart';
 import '../hangar/local_hangar_port.dart';
 import '../../shared/ships/ship_catalog_display.dart';
+import 'personal_profile_main_role.dart';
 import 'personal_profile_models.dart';
+import 'personal_profile_showcases.dart';
 import 'personal_profile_collaboration.dart';
 import 'personal_profile_favorite_modules.dart';
+
+/// Both layouts on disk predate versioned pages. Read their saved selections
+/// before projection can inherit any of the server's module picks.
+List<String>? savedProfileFavoriteIds(Map<String, Object?>? content) {
+  final flat = (content?['favoriteShipIds'] as List?)?.cast<String>();
+  if (flat != null) return flat;
+  final ids = [
+    for (final module in (content?['modules'] as List? ?? const []).cast<Map>())
+      ...?(module['favoriteShipIds'] as List?)?.cast<String>(),
+  ];
+  return ids.isEmpty ? null : ids;
+}
+
+List<PersonalProfileModuleLayoutItem> savedProfileLayout(
+  Map<String, Object?> content,
+) => PersonalProfileShowcases.merge([
+  for (final item in (content['modules'] as List? ?? const []).cast<Map>())
+    PersonalProfileModuleLayoutItem(
+      moduleId: item['id'] as String,
+      size: PersonalProfileModuleSize.values.firstWhere(
+        (size) => size.span == item['span'],
+      ),
+      isVisible: item['isVisible'] as bool,
+      position: item['position'] as int,
+      favoriteShipIds: (item['favoriteShipIds'] as List?)?.cast<String>(),
+    ),
+], PersonalProfileShowcases.parse(content['showcases']));
 
 PersonalProfileSnapshot projectLocalProfile(
   PersonalProfileSnapshot remote,
@@ -15,15 +45,27 @@ PersonalProfileSnapshot projectLocalProfile(
   bool accountCallSign = false,
   Map<String, String> timeZones = const {},
   bool readOnly = false,
+  Set<String> preferLocalGroups = const {},
+  bool autoImportPending = false,
 }) {
   final remoteAvailable =
       remote.availability == PersonalProfileAvailability.available;
+  bool preferLocal(String group) =>
+      preferLocalGroups.contains(group) &&
+      remote.presentation?.canAutoImport(group) == true;
+  bool authoritative(String group) =>
+      !legacyAccount &&
+      remoteAvailable &&
+      remote.presentation != null &&
+      remote.presentation!.origins[group] != 'unknown' &&
+      !preferLocal(group);
+  final localFavoriteIds = preferLocal('favorites')
+      ? savedProfileFavoriteIds(content)
+      : null;
   if (!legacyAccount &&
       remoteAvailable &&
       remote.presentation != null &&
       content != null) {
-    final origins = remote.presentation!.origins;
-    bool authoritative(String group) => origins[group] != 'unknown';
     content = {...content}; // Never rewrite local storage during projection.
     for (final entry in const {
       'introduction': 'introduction',
@@ -34,7 +76,12 @@ PersonalProfileSnapshot projectLocalProfile(
     }.entries) {
       if (authoritative(entry.key)) content.remove(entry.value);
     }
+    if (authoritative('playStyle')) content.remove('mainRole');
     if (authoritative('layout')) {
+      // The remote layout already holds its showcase list and picks.
+      content
+        ..remove('showcases')
+        ..remove('achievementShowcase');
       content['modules'] = [
         for (final module in remote.moduleLayout)
           {
@@ -51,29 +98,39 @@ PersonalProfileSnapshot projectLocalProfile(
       );
     }
   }
-  // Earlier S2 builds materialized empty defaults while skipping Relay reads.
-  // Recover only those empty defaults in memory; an explicit new save records
-  // clear intent. Never rewrite the prior file or replace nonempty local edits.
-  if (legacyAccount &&
+  // Retain the S2 display fallback for profiles saved without a Relay read.
+  if ((legacyAccount || preferLocalGroups.isNotEmpty) &&
       remoteAvailable &&
-      content != null &&
-      content['preserveEmptyFields'] != true) {
+      content != null) {
+    final importingLayout = preferLocal('layout');
     final inheritedFavorites =
         (content['favoriteShipIds'] as List?)?.isEmpty == true &&
-        remote.favoriteShips.isNotEmpty;
+        (!legacyAccount || content['preserveEmptyFields'] != true) &&
+        (importingLayout || remote.favoriteShips.isNotEmpty);
+    final remotePicks = {
+      for (final item in remote.moduleLayout)
+        item.moduleId: item.favoriteShipIds,
+    };
     content = {
       ...content,
-      if ((content['introduction'] as String? ?? '').trim().isEmpty)
+      if (legacyAccount &&
+          (content['introduction'] as String? ?? '').trim().isEmpty &&
+          content['preserveEmptyFields'] != true)
         'introduction': remote.about,
       if (inheritedFavorites) 'favoriteShipIds': null,
-      if (inheritedFavorites)
+      if (inheritedFavorites || importingLayout)
         'modules': [
-          for (final item in (content['modules'] as List).cast<Map>())
+          for (final item
+              in (content['modules'] as List? ?? const []).cast<Map>())
             {
               for (final entry in item.entries)
                 if (entry.key != 'favoriteShipIds' ||
                     (entry.value as List?)?.isNotEmpty == true)
                   entry.key: entry.value,
+              if (remotePicks[item['id']] case final picks?
+                  when importingLayout &&
+                      (item['favoriteShipIds'] as List?)?.isNotEmpty != true)
+                'favoriteShipIds': picks,
             },
         ],
     };
@@ -97,24 +154,32 @@ PersonalProfileSnapshot projectLocalProfile(
     for (final ship in [...retainedChoices, ...choices])
       ship.identity.runtimeId: ship,
   };
-  final favorites = ids == null
+  var favoriteIds = ids;
+  if (preferLocal('favorites')) {
+    favoriteIds = localFavoriteIds;
+    if (favoriteIds?.isEmpty == true) {
+      favoriteIds = null;
+    }
+  } else if (authoritative('favorites')) {
+    favoriteIds = null;
+  }
+  final favorites = favoriteIds == null
       ? _projectRemoteFavorites(remote.favoriteShips, hangar)
-      : [for (final id in ids) ?byId[id]];
-  final unresolved = ids == null
+      : [for (final id in favoriteIds) ?byId[id]];
+  final unresolved = favoriteIds == null
       ? remote.hangarSummary.unresolvedFavoriteCount
-      : ids.where((id) => !byId.containsKey(id)).length;
+      : favoriteIds.where((id) => !byId.containsKey(id)).length;
   final counts = <String, int>{};
   var knownCents = 0, unpriced = 0;
   LocalHangarShip? recent;
   if (available) {
     for (final ship in hangar.ships) {
-      // Use the current inventory's known admission time, not the profile's
-      // remote history or this snapshot's save time. Equal-time batch entries
-      // retain their inventory order; removed and undated ships cannot win.
-      if (ship.addedAt case final addedAt?) {
-        // Older contracts use MinValue for an unknown admission time.
-        if (addedAt.year > 1 &&
-            (recent == null || addedAt.isAfter(recent.addedAt!))) {
+      // "最近入库" uses the official RSI pledge date of the current inventory
+      // (user 11-12), never the client import time or this snapshot's save
+      // time. Equal dates retain inventory order; removed ships and ships
+      // without an official date are skipped.
+      if (ship.acquiredOn case final acquiredOn?) {
+        if (recent == null || acquiredOn.isAfter(recent.acquiredOn!)) {
           recent = ship;
         }
       }
@@ -164,7 +229,7 @@ PersonalProfileSnapshot projectLocalProfile(
               ? ''
               : projectProfileShip(recent).imageAsset,
           recentlyAddedAtLabel:
-              recent?.addedAt?.toLocal().toString().split(' ').first ?? '',
+              recent?.acquiredOn?.toString().split(' ').first ?? '',
           sourceLabelKey: hangar.partial
               ? 'profile.local.hangarPartial'
               : 'profile.local.hangarSource',
@@ -188,22 +253,21 @@ PersonalProfileSnapshot projectLocalProfile(
             position: 3,
           ),
         ]
-      : content == null
+      : content == null ||
+            !const [
+              'modules',
+              'showcases',
+              'achievementShowcase',
+            ].any(content.containsKey)
       ? remote.moduleLayout
-      : [
-          for (final item in (content['modules'] as List).cast<Map>())
-            PersonalProfileModuleLayoutItem(
-              moduleId: item['id'] as String,
-              size: PersonalProfileModuleSize.values.firstWhere(
-                (s) => s.span == item['span'],
-              ),
-              isVisible: item['isVisible'] as bool,
-              position: item['position'] as int,
-              favoriteShipIds: (item['favoriteShipIds'] as List?)
-                  ?.cast<String>(),
-            ),
-        ];
+      : savedProfileLayout(content);
   final style = (content?['playStyle'] as Map?)?.cast<String, Object?>();
+  final recoverEmptyStyle =
+      preferLocal('playStyle') && content?['preserveEmptyFields'] != true;
+  Object? styleTags(String field) =>
+      recoverEmptyStyle && (style?[field] as List?)?.isEmpty == true
+      ? null
+      : style?[field];
   final schedule = (content?['schedule'] as Map?)?.cast<String, Object?>();
   return PersonalProfileSnapshot.available(
     cachedAtUtc: readOnly ? savedAt : null,
@@ -232,17 +296,70 @@ PersonalProfileSnapshot projectLocalProfile(
         : PersonalProfileActivityRhythm.values.byName(
             schedule['rhythm'] as String,
           ),
-    roles: ProfileCollaboration.tags(style?['roles'], 'roles') ?? remote.roles,
+    roles: ProfileMainRole.mark(
+      ProfileCollaboration.tags(styleTags('roles'), 'roles') ?? remote.roles,
+      recoverEmptyStyle && content?['mainRole'] == ''
+          ? null
+          : content?['mainRole'],
+    ),
     participationInterests:
-        ProfileCollaboration.tags(style?['interests'], 'interests') ??
+        ProfileCollaboration.tags(styleTags('interests'), 'interests') ??
         remote.participationInterests,
     supportCapabilities:
-        ProfileCollaboration.tags(style?['support'], 'support') ??
+        ProfileCollaboration.tags(styleTags('support'), 'support') ??
         remote.supportCapabilities,
     shipWishlist: remote.shipWishlist,
-    favoriteShips: List.unmodifiable(favorites),
+    favoriteShips: List.unmodifiable(
+      ProfileFavoriteModules.firstShipOfEachModel(favorites),
+    ),
     hangarSummary: summary,
-    moduleLayout: ProfileFavoriteModules.materialize(layout, ids),
+    // Only the HK page holds the 4th showcase ship; the local path keeps 3.
+    // Offered once the HK read shows the second HK release (it carries
+    // `mainRole`): an older server would refuse the field.
+    // The third HK release holds a 4th per favourite module (user 11-06).
+    // User 11-07: each model once on the page. Repeats an older client saved
+    // are hidden here only; the next layout save drops them.
+    moduleLayout: ProfileFavoriteModules.firstOfEachModel(
+      !legacyAccount &&
+              remoteAvailable &&
+              PersonalProfileFavoriteExtra.serverHoldsEach(
+                remote.presentation?.content,
+              )
+          ? PersonalProfileFavoriteExtra.attachEach(
+              ProfileFavoriteModules.materialize(layout, ids),
+              PersonalProfileFavoriteExtra.eachOf(remote.moduleLayout),
+            )
+          : PersonalProfileFavoriteExtra.attach(
+              ProfileFavoriteModules.materialize(layout, ids),
+              !legacyAccount &&
+                      remoteAvailable &&
+                      PersonalProfileFavoriteExtra.serverHolds(
+                        remote.presentation?.content,
+                      )
+                  ? PersonalProfileFavoriteExtra.of(remote.moduleLayout) ??
+                        const []
+                  : null,
+            ),
+      ProfileFavoriteModules.modelsOf([...favorites, ...byId.values]),
+    ),
+    showcaseData: PersonalProfileShowcaseData(
+      achievementShowcase:
+          PersonalProfileShowcases.parseAchievements(
+            content?['achievementShowcase'],
+          ) ??
+          remote.showcaseData.achievementShowcase,
+      mainRoleEditable: true, // Saved beside the local file (11-05).
+      achievementCount: remoteAvailable
+          ? remote.showcaseData.achievementCount
+          : null,
+      favoriteExtrasEach:
+          !legacyAccount &&
+          remoteAvailable &&
+          PersonalProfileFavoriteExtra.serverHoldsEach(
+            remote.presentation?.content,
+          ),
+    ),
+    defaultedPage: remote.defaultedPage,
     allowEditing: !readOnly && (!remoteAvailable || remote.allowEditing),
     local: PersonalProfileLocalView(
       choices: List.unmodifiable(choices),
@@ -251,6 +368,13 @@ PersonalProfileSnapshot projectLocalProfile(
       hangarAvailable: available,
       remoteAvailable: remoteAvailable,
       accountCallSign: accountCallSign,
+      autoImportPending: autoImportPending,
+      showLocalFavoriteShips:
+          preferLocal('favorites') &&
+          favoriteIds != null &&
+          authoritative('layout'),
+      localOnlyEdits:
+          accountCallSign && remoteAvailable && remote.presentation == null,
       needsCreation: needsCreation,
       savedAt: savedAt,
       partial: hangar?.partial ?? false,
@@ -304,7 +428,13 @@ PersonalProfileShipSummary projectProfileShip(
     simplifiedChineseName: ship.cn ?? ship.title,
     traditionalChineseName: ship.tw ?? ship.title,
   ),
-  manufacturer: ship.liner ?? '',
+  // The hangar's own maker rule (catalog maker, then a liner that names one),
+  // so the large favourite card finds the same mark as the hangar wall.
+  manufacturer:
+      LocalHangarManufacturers.of(ship)?.en ??
+      ship.manufacturer ??
+      ship.liner ??
+      '',
   imageAsset: ShipCatalogDisplay.image(ship.imageAsset) ?? '',
   thumbnailAsset: ShipCatalogDisplay.image(ship.thumbnailAsset) ?? '',
   roleKey:

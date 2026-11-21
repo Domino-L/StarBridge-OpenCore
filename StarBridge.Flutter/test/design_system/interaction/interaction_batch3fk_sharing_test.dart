@@ -108,9 +108,17 @@ class _HeldPrivacy extends NoticePrivacy {
   final applySources = <InteractionSource>[];
   final applyRevisions = <int?>[];
   @override
-  Future<PrivacyPublicationView> publication(String action, {int? revision}) {
+  Future<PrivacyPublicationView> publication(
+    String action, {
+    int? revision,
+    bool firstOfficialDefault = false,
+  }) {
     if (action != 'apply') {
-      return super.publication(action, revision: revision);
+      return super.publication(
+        action,
+        revision: revision,
+        firstOfficialDefault: firstOfficialDefault,
+      );
     }
     actions.add(action);
     applySources.add(currentStarBridgeActivationSource);

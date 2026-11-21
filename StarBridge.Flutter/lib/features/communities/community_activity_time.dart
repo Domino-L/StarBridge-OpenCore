@@ -87,12 +87,56 @@ String communityViewerActivitySummary(
   Iterable<CommunityActivityWindow> windows,
   int? organizationOffsetMinutes, {
   int? viewerOffsetMinutes,
+  bool approximate = false,
 }) {
   if (organizationOffsetMinutes == null || windows.isEmpty) return '';
   final viewer = viewerOffsetMinutes ?? DateTime.now().timeZoneOffset.inMinutes;
   final shift = viewer - organizationOffsetMinutes;
   if (shift == 0) return '';
-  return communityActivitySummary(context, windows, shiftMinutes: shift);
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  final converted = windows.map((window) {
+    final start = communityClockMinutes(window.startTime) + shift;
+    final end = communityClockMinutes(window.endTime) + shift;
+    final dayShift = (start / 1440).floor();
+    return CommunityActivityWindow.parse({
+      'days': [
+        for (final day in window.days.map((day) => day.toLowerCase()))
+          if (days.contains(day)) days[(days.indexOf(day) + dayShift) % 7],
+      ],
+      'startTime': communityClockText(start % 1440),
+      'endTime': communityClockText(end % 1440),
+      'endsNextDay': end % 1440 <= start % 1440,
+    });
+  });
+  final summary = communityActivitySummary(context, converted);
+  return approximate
+      ? '${workspaceText(context, 'viewerTimeApproximate')} $summary'
+      : summary;
+}
+
+/// The viewer's current local offset includes local DST. The organization
+/// provides only its standard offset; no DST rule is inferred from a region.
+String communityViewerTimeZoneSummary(
+  BuildContext context,
+  CommunityWorkspace workspace, {
+  int? viewerOffsetMinutes,
+}) {
+  final organization = workspace.timeZoneStandardOffsetMinutes;
+  final viewer = viewerOffsetMinutes ?? DateTime.now().timeZoneOffset.inMinutes;
+  if (organization == null || organization == viewer) return '';
+  final absolute = viewer.abs();
+  final offset =
+      'UTC${viewer < 0 ? '−' : '+'}'
+      '${(absolute ~/ 60).toString().padLeft(2, '0')}:'
+      '${(absolute % 60).toString().padLeft(2, '0')}';
+  final activity = communityViewerActivitySummary(
+    context,
+    workspace.activityWindows,
+    organization,
+    viewerOffsetMinutes: viewer,
+    approximate: workspace.timeZoneUsesDaylightSaving,
+  );
+  return [offset, if (activity.isNotEmpty) activity].join(' · ');
 }
 
 int communityClockMinutes(String value) {

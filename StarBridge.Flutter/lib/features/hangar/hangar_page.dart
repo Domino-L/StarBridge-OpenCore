@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../design_system/interaction/starbridge_action_button.dart';
+import '../../design_system/interaction/starbridge_checkbox_tile.dart';
 import '../../design_system/interaction/starbridge_icon_action.dart';
 import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
@@ -20,6 +21,7 @@ import '../account/account_models.dart';
 import '../communities/community_hangar_sharing_port.dart';
 import '../../app/routing/open_destination_intent.dart';
 import 'hangar_browser_viewport.dart';
+import 'hangar_clear_dialogs.dart';
 import 'hangar_reader_controller.dart';
 import 'hangar_reader_copy.dart';
 import 'hangar_reader_waiting.dart';
@@ -69,6 +71,7 @@ class _HangarPageState extends State<HangarPage> {
   InteractionSource _readerSource = InteractionSource.programmatic;
   InteractionSource? _returnSource;
   int _readerWaitPhase = 0;
+  bool _clearFlowActive = false;
   HangarInventoryModule? _inventory;
   bool _testAvailable = false;
   int _localRevision = 0;
@@ -209,6 +212,48 @@ class _HangarPageState extends State<HangarPage> {
       ++_readerWaitPhase;
     });
     unawaited(runStarBridgeActivation<void>(source, action));
+  }
+
+  Future<void> _confirmClear(
+    HangarReaderController reader,
+    InteractionSource source,
+  ) async {
+    if (!reader.canAct || reader.busy || _clearFlowActive) return;
+    final generation = _generation;
+    bool current() =>
+        mounted && identical(_reader, reader) && _generation == generation;
+    final hub = GuideScope.maybeOf(context);
+    guideFlowClosed(hub, guideFlowHangarReader);
+    if (hub?.run.value?.spec.id == 'hangar') hub?.finish();
+    setState(() => _clearFlowActive = true);
+    try {
+      // Hide the native viewport before pushing a root dialog. The workspace
+      // route remains current in its nested Navigator while that dialog opens.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !current()) return;
+      final confirmed = await showHangarClearConfirmation(context, source);
+      if (confirmed != true || !current() || !reader.canAct || reader.busy) {
+        return;
+      }
+      setState(() {
+        _readerSource = source;
+        ++_readerWaitPhase;
+      });
+      await runStarBridgeActivation<void>(source, reader.clearData);
+      if (!mounted ||
+          !current() ||
+          ![
+            'cleared',
+            'clear_busy',
+            'clear_unsafe',
+            'clear_failed',
+          ].contains(reader.phase)) {
+        return;
+      }
+      await showHangarClearResult(context, source, reader.phase);
+    } finally {
+      if (mounted) setState(() => _clearFlowActive = false);
+    }
   }
 
   @override
@@ -381,7 +426,17 @@ class _HangarPageState extends State<HangarPage> {
           'reading',
           'verifying',
           'complete',
+          'clearing',
+          'cleared',
+          'forgotten',
         ].contains(reader.phase);
+        final remember = reader.remember == true;
+        // Not remembering, but a clear did not finish: say so and keep the
+        // manual clear within reach.
+        final uncleared = !remember && reader.uncleared;
+        // The choice could not be read: nothing clears by itself, so the
+        // "cleared after reading" line would be untrue.
+        final unknown = !remember && reader.unknown;
         final tone = warning
             ? tokens.colors.warning
             : complete
@@ -468,7 +523,24 @@ class _HangarPageState extends State<HangarPage> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        if (reader.busy)
+                        // Only a remembered sign-in, or one a clear missed,
+                        // has anything to clear.
+                        if (remember || uncleared || unknown)
+                          GuideAnchor(
+                            id: 'hangar.clear',
+                            child: StarBridgeActionButton(
+                              controlKey: const Key('hangar-reader-clear'),
+                              onActivate:
+                                  reader.canAct &&
+                                      !reader.busy &&
+                                      !_clearFlowActive
+                                  ? (source) =>
+                                        unawaited(_confirmClear(reader, source))
+                                  : null,
+                              child: Text(copy.clearData),
+                            ),
+                          ),
+                        if (reader.busy && reader.phase != 'clearing')
                           StarBridgeActionButton(
                             controlKey: const Key('hangar-reader-cancel'),
                             onActivate: (_) => unawaited(reader.cancel()),
@@ -591,7 +663,7 @@ class _HangarPageState extends State<HangarPage> {
                                     child: HangarBrowserViewport(
                                       key: ValueKey(reader.browserRevision),
                                       browser: reader.browser,
-                                      visible: true,
+                                      visible: !_clearFlowActive,
                                       interactive: !reader.busy,
                                     ),
                                   ),
@@ -611,8 +683,15 @@ class _HangarPageState extends State<HangarPage> {
                                         ),
                                         const SizedBox(height: 16),
                                         Text(
-                                          copy.instructions,
+                                          reader.phase == 'clearing'
+                                              ? copy.status('clearing')
+                                              : copy.instructions,
                                           textAlign: TextAlign.center,
+                                          style: reader.phase == 'clearing'
+                                              ? Theme.of(context)
+                                                    .textTheme
+                                                    .titleLarge
+                                              : null,
                                         ),
                                       ],
                                     ),
@@ -654,11 +733,31 @@ class _HangarPageState extends State<HangarPage> {
                         },
                       ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                copy.safety,
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: tokens.colors.textSecondary),
+              const SizedBox(height: 6),
+              // The sign-in choice sits in plain sight under the RSI page,
+              // never in settings. Its line says what each choice means.
+              StarBridgeCheckboxTile(
+                controlKey: const Key('hangar-reader-remember'),
+                value: remember,
+                label: copy.remember,
+                subtitle: [
+                  if (unknown) copy.unknownChoice else copy.safety(remember),
+                  if (uncleared) copy.uncleared,
+                  if (reader.choiceError != null && complete)
+                    copy.status(reader.choiceError!),
+                  if (reader.busy)
+                    copy.rememberLocked
+                  else if (reader.browserOpen)
+                    copy.rememberReopens,
+                ].join(' '),
+                visualDensity: VisualDensity.compact,
+                onChanged:
+                    reader.remember != null &&
+                        reader.canAct &&
+                        !reader.busy &&
+                        !_clearFlowActive
+                    ? (value) => unawaited(reader.setRemember(value))
+                    : null,
               ),
             ],
           ),

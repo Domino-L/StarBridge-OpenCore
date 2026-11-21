@@ -6,6 +6,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_choice_chip.dart';
 import '../../design_system/interaction/starbridge_field_frame.dart';
+import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/interaction/starbridge_select_form_field.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'achievement_art.dart';
@@ -52,13 +53,12 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
   AchievementPresentation p(AchievementDefinition d) =>
       AchievementPresentation(d, widget.collection, s);
   String groupKey(AchievementDefinition d) => '${d.source.name}:${d.groupId}';
-  late Map<String, List<AchievementDefinition>> _groups;
-  Map<String, List<AchievementDefinition>> get groups => _groups;
+  late Map<String, List<AchievementDefinition>> groups;
 
   void _groupCatalog() {
-    _groups = {};
+    groups = {};
     for (final d in widget.catalog) {
-      (_groups[groupKey(d)] ??= []).add(d);
+      (groups[groupKey(d)] ??= []).add(d);
     }
   }
 
@@ -169,18 +169,12 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
     int? columns,
   }) => LayoutBuilder(
     builder: (context, c) {
-      final n =
-          columns ??
-          (wall
-              ? narrow
-                    ? 2
-                    : math.max(
-                        1,
-                        (c.maxWidth / ((compact ? 180 : 150) + 16)).floor(),
-                      )
-              : narrow
-              ? 1
-              : 2);
+      final capacity = (c.maxWidth + 16) ~/ (compact ? 196 : 166);
+      final maxColumns = math.max(1, capacity);
+      final n = math.min(
+        columns ?? (wall ? (narrow ? 2 : maxColumns) : (narrow ? 1 : 2)),
+        maxColumns,
+      );
       final gap = wall ? 16.0 : 10.0;
       final width = ((c.maxWidth - gap * (n - 1)) / n).clamp(
         1.0,
@@ -269,17 +263,33 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
       ? items.where((d) => p(d).earned).length / items.length
       : null;
 
-  Widget _collectionProgress(double fraction, {Key? key}) =>
-      LinearProgressIndicator(
-        key: key,
-        value: fraction,
-        minHeight: 3,
-        borderRadius: BorderRadius.circular(3),
-        color: context.tokens.colors.accent,
-        backgroundColor: context.tokens.colors.textSecondary.withValues(
-          alpha: .2,
-        ),
-      );
+  Widget _collectionProgress(double fraction, {Key? key}) {
+    final colors = context.tokens.colors;
+    final background = colors.textSecondary.withValues(alpha: .2);
+    return widget.collection.isRefreshing &&
+            resolveStarBridgeInteraction(context).reduceMotion
+        ? Container(
+            key: key,
+            height: 3,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(3),
+              gradient: LinearGradient(
+                begin: AlignmentDirectional.centerStart,
+                end: AlignmentDirectional.centerEnd,
+                colors: [colors.accent, background],
+                stops: [fraction, fraction],
+              ),
+            ),
+          )
+        : LinearProgressIndicator(
+            key: key,
+            value: fraction,
+            minHeight: 3,
+            borderRadius: BorderRadius.circular(3),
+            color: colors.accent,
+            backgroundColor: background,
+          );
+  }
 
   Widget _navButton(
     String id,
@@ -484,8 +494,7 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
             spacing: 6,
             runSpacing: 6,
             children: [
-              for (final d in thumbs)
-                AchievementArt(definition: d, earned: p(d).earned, size: 42),
+              for (final d in thumbs) AchievementArt.of(p(d), size: 42),
             ],
           ),
           if (fraction != null) ...[
@@ -714,11 +723,11 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
     builder: (context, c) {
       final narrow =
           c.maxWidth < 760 || MediaQuery.textScalerOf(context).scale(1) >= 1.5;
-      final directory = groups.length >= 4 || widget.catalog.length > 24;
+      final directory = groups.length >= 3 || widget.catalog.length > 24;
       final padding = context.tokens.density.pagePadding;
       Widget scroll(
         Widget body, {
-        Widget? prefix,
+        List<Widget> prefix = const [],
         bool besideDirectory = false,
       }) => SingleChildScrollView(
         key: const Key('achievement-collection-scroll'),
@@ -726,13 +735,12 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
         padding: besideDirectory
             ? EdgeInsets.only(top: padding, bottom: padding)
             : EdgeInsets.all(padding),
-        child: Align(
-          alignment: Alignment.topCenter,
+        child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1160),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [?prefix, body],
+              children: [...prefix, body],
             ),
           ),
         ),
@@ -742,14 +750,23 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
           widget.collection.status == AchievementCollectionStatus.loading
               ? const SizedBox.shrink()
               : _sections(widget.catalog, narrow, compact: true),
-          prefix: widget.header,
+          prefix: [widget.header],
         );
       }
       final main = _search.text.trim().isEmpty && _group == 'all'
           ? _overview(narrow)
           : _library(narrow);
-      return Align(
-        alignment: Alignment.topCenter,
+      if (narrow) {
+        return scroll(
+          main,
+          prefix: [
+            widget.header,
+            _navigation(true),
+            const SizedBox(height: 24),
+          ],
+        );
+      }
+      return Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 196 + 28 + 1160 + padding * 2),
           child: Column(
@@ -759,34 +776,19 @@ class _AchievementCollectionViewState extends State<AchievementCollectionView> {
                 padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
                 child: widget.header,
               ),
-              if (narrow)
-                Padding(
-                  padding: EdgeInsets.fromLTRB(padding, 0, padding, 0),
-                  child: _navigation(true),
-                ),
               Expanded(
-                child: narrow
-                    ? scroll(main)
-                    : Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              padding,
-                              0,
-                              0,
-                              padding,
-                            ),
-                            child: SizedBox(
-                              width: 196,
-                              child: _navigation(false),
-                            ),
-                          ),
-                          const SizedBox(width: 28),
-                          Expanded(child: scroll(main, besideDirectory: true)),
-                          SizedBox(width: padding),
-                        ],
-                      ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(padding, 0, 0, padding),
+                      child: SizedBox(width: 196, child: _navigation(false)),
+                    ),
+                    const SizedBox(width: 28),
+                    Expanded(child: scroll(main, besideDirectory: true)),
+                    SizedBox(width: padding),
+                  ],
+                ),
               ),
             ],
           ),

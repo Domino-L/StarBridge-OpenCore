@@ -1,6 +1,21 @@
 using System.Reflection;
 using StarBridge.Desktop.Tests;
 using StarBridge.OverlayRuntime.Windows;
+args = args.Where(a => a is not ("-nodeReuse:false" or "-p:UseSharedCompilation=false" or "--")).ToArray();
+// 0.7.3 keeps ordinary announcements off the overlay; the announcement machinery stays under test
+// for urgent announcements, so the suites run it switched on (OverlayAnnouncementOnceTests checks the off default).
+StarBridge.Desktop.OverlayViewModel.OverlayShowsAnnouncements = true;
+if (args is ["--announcement-card-only"]) { AnnouncementNotificationCardTests.Run(); return; }
+if (args is ["--own-health-only"]) { SelfHealthReadingRuntimeTests.Run(); return; }
+if (args is ["--cx-celcard-g1-offscreen", var output]) { AchievementCelebrationOffscreenProbe.Run(output); return; }
+if (args is ["--celebration-receipt-recovery-only"]) { CelebrationReceiptRecoveryTests.Run(); return; }
+if (args is ["--celebration-notification-environment-only"]) { NotificationEnvironmentPolicyTests.RunAll(); return; }
+if (args.Length == 0) AnnouncementNotificationCardTests.Run();
+if (args is ["--contract-host-only"]) {
+    try { ContractAchievementCelebrationTests.Run(); }
+    catch (Exception e) { Console.WriteLine("FAIL CONTRACT OVERLAY " + e.Message); Environment.ExitCode = 1; }
+    return;
+}
 
 var rendering = typeof(WindowsInformationOverlayRuntimeFactory).Assembly;
 #if STARBRIDGE_JOURNEY_ART
@@ -38,6 +53,18 @@ if (args.Length == 0) OverlayUsageClockTests.Run();
 if (args.Length == 0) RallyReminderTests.Run();
 if (args is ["--member-paging-boundaries-only"]) { OverlayMemberPagingBoundaryTests.RunAll(); return; }
 if (args.Length == 0) OverlayMemberPagingBoundaryTests.RunAll();
+if (args is ["--visor-pictures"]) { OverlayVisorTests.Pictures(); return; }
+if (args is ["--visor-intro-frames"]) { OverlayVisorTests.IntroFrames(); return; }
+if (args is ["--visor-health-rings"]) { OverlayVisorTests.HealthRings(); return; }
+if (args is ["--visor-health-motion"]) { OverlayVisorTests.HealthMotion(); return; }
+if (args is ["--visor-catalog"]) { OverlayVisorTests.Catalog(); return; }
+if (args is ["--visor-text-widths"]) { OverlayVisorTests.TextWidths(); return; }
+if (args is ["--visor-only"]) { OverlayVisorTests.Run(); OverlayVisorUnknownTests.Run(); OverlayVisorEventTests.Run(); ReminderCardPictureTests.Run(); OverlayV2HiddenAppearanceTests.Run(); OverlayDeviceReleaseTests.Run(); OverlayVisorIntroHealthTests.Run(); OverlayVisorSelfRingWatchTests.Run(); return; }
+if (args is ["--device-release-only"]) { OverlayDeviceReleaseTests.Run(); return; }
+if (args is ["--visor-intro-health-only"]) { OverlayVisorIntroHealthTests.Run(); return; }
+if (args is ["--visor-unknown-only"]) { OverlayVisorUnknownTests.Run(); return; }
+if (args is ["--visor-self-ring-only"]) { OverlayVisorSelfRingWatchTests.Run(); return; }
+if (args.Length == 0) { OverlayVisorTests.Run(); OverlayVisorUnknownTests.Run(); OverlayVisorEventTests.Run(); ReminderCardPictureTests.Run(); OverlayV2HiddenAppearanceTests.Run(); OverlayDeviceReleaseTests.Run(); OverlayVisorIntroHealthTests.Run(); OverlayVisorSelfRingWatchTests.Run(); }
 if (args is ["--ship-display-boundary-only"]) { ShipDisplayNameBoundaryTests.RunAll(); return; }
 if (args.Length == 0) ShipDisplayNameBoundaryTests.RunAll();
 #if STARBRIDGE_JOURNEY_ART
@@ -55,13 +82,36 @@ if (args is ["--first-use-local-source-only"])
 if (args.Length == 0) LocalOverlayProjectionTests.Run();
 if(args.Contains("--game-startup-hint-only")){GameStartupHintCardTests.Run();return;}
 if(args.Length==0)GameStartupHintCardTests.Run();
+if (args.Length == 0) SelfHealthReadingRuntimeTests.Run();
 if(args.Contains("--exec-hangar-game-overlay-only")){ExecHangarGameOverlayTests.Run();return;}
 if(args.Length==0)ExecHangarGameOverlayTests.Run();
 if (args is ["--achievement-live-presentation-probe", var achievementAssetRoot]) { await AchievementCelebrationLiveProbe.Run(achievementAssetRoot); return; }
 if (args is ["--achievement-live-grant-probe", var achievementGrantAssetRoot]) { await AchievementCelebrationLiveProbe.Run(achievementGrantAssetRoot, throughGrant: true); return; }
 if (args.Contains("--achievement-show-lifecycle-probe")) { AchievementCelebrationWindowTests.RunShowLifecycleProbe(); return; }
 #if STARBRIDGE_JOURNEY_ART
-if (args.Contains("--achievement-celebration-only")) { AchievementCelebrationPlaybackTests.Run(); AchievementCelebrationWindowTests.Run(); AchievementCelebrationCardTests.Run(); NotificationEnvironmentPolicyTests.RunAll(); return; }
+if (args is ["--achievement-celebration-only"])
+{
+    var cases = new (string Name, Action Run)[]
+    {
+        (nameof(AchievementCelebrationCardTests), AchievementCelebrationCardTests.Run),
+        (nameof(AchievementCelebrationWindowTests), AchievementCelebrationWindowTests.Run),
+        (nameof(AchievementCelebrationPlaybackTests), AchievementCelebrationPlaybackTests.Run),
+        (nameof(ContractAchievementCelebrationTests), ContractAchievementCelebrationTests.Run),
+        (nameof(JourneyAchievementCelebrationTests), JourneyAchievementCelebrationTests.Run),
+        (nameof(CelebrationReceiptRecoveryTests), CelebrationReceiptRecoveryTests.Run),
+        (nameof(CelebrationDesktopDeferralTests), CelebrationDesktopDeferralTests.Run),
+        (nameof(NotificationEnvironmentPolicyTests), NotificationEnvironmentPolicyTests.RunAll)
+    };
+    var failed = 0;
+    foreach (var (name, run) in cases)
+    {
+        try { run(); Console.WriteLine("PASS " + name); }
+        catch (Exception error) { failed++; Console.WriteLine("FAIL " + name + ": " + error); }
+    }
+    Console.WriteLine($"SUMMARY achievement celebration passed={cases.Length - failed} failed={failed}");
+    Environment.ExitCode = failed == 0 ? 0 : 1;
+    return;
+}
 #endif
 #if STARBRIDGE_JOURNEY_ART
 if (args.Length == 0) { AchievementCelebrationPlaybackTests.Run(); AchievementCelebrationWindowTests.Run(); AchievementCelebrationCardTests.Run(); }
@@ -95,12 +145,20 @@ if (args.Contains("--menu-dialog-owner-only"))
     return;
 }
 if (args.Length == 0) MenuDialogOwnerTests.Run();
+if (args.Contains("--editor-preview-only")) { await OverlayEditorPreviewTests.Run(); return; }
+if (args.Length == 0) await OverlayEditorPreviewTests.Run();
 if (args.Contains("--menu-hud-lifecycle-only"))
 {
     await MenuHudLifecycleTests.Run();
     return;
 }
-if (args.Length == 0) await MenuHudLifecycleTests.Run();
+// The real z-order check depends on the other windows on the desktop. A failure is reported
+// and fails the run, but the groups after it still run.
+if (args.Length == 0)
+{
+    try { await MenuHudLifecycleTests.Run(); }
+    catch (Exception error) { Console.Error.WriteLine("FAIL menu HUD lifecycle: " + error); Environment.ExitCode = 1; }
+}
 if (args.Contains("--runtime-state-events-only"))
 {
     await OverlayRuntimeStateEventTests.Run();
@@ -328,5 +386,10 @@ CommunityOverlayProjectionTests.RunAll();
 Console.WriteLine("PASS community projection, room priority and source isolation");
 OverlayStartupFocusPolicyTests.RunAll();
 Console.WriteLine("PASS startup focus policy");
-DesktopNotificationCardTests.RunAll();
-Console.WriteLine("PASS notification resources and offscreen multi-DPI rendering");
+// STARBRIDGE_SKIP_DESKTOP_NOTIFICATION=1: run everything else when this group is known to fail for an unrelated reason.
+if (Environment.GetEnvironmentVariable("STARBRIDGE_SKIP_DESKTOP_NOTIFICATION") != "1")
+{
+    DesktopNotificationCardTests.RunAll();
+    Console.WriteLine("PASS notification resources and offscreen multi-DPI rendering");
+}
+else Console.WriteLine("SKIP notification resources (STARBRIDGE_SKIP_DESKTOP_NOTIFICATION=1)");

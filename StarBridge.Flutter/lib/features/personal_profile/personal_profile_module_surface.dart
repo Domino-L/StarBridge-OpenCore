@@ -6,6 +6,7 @@ import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'personal_profile_showcase_frame.dart';
 
 class PersonalProfileModuleSurface extends StatelessWidget {
   const PersonalProfileModuleSurface({
@@ -14,9 +15,12 @@ class PersonalProfileModuleSurface extends StatelessWidget {
     required this.child,
     this.accentRole,
     this.headerTrailing,
+    this.showcasePadding,
     super.key,
   });
 
+  /// Content inset in the single column; null keeps the band default.
+  final EdgeInsetsGeometry? showcasePadding;
   final StarBridgeIconSemantic icon;
   final String titleKey;
   final Widget child;
@@ -27,6 +31,19 @@ class PersonalProfileModuleSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
+    if (ProfileShowcaseScope.of(context)) {
+      // Single column: a flat band whose height follows its content unless
+      // the caller bounds it (fixed-height bodies keep their Expanded).
+      return LayoutBuilder(
+        builder: (context, constraints) => ProfileShowcaseBand(
+          title: strings.text(titleKey),
+          trailing: headerTrailing,
+          fill: constraints.hasBoundedHeight,
+          padding: showcasePadding,
+          child: child,
+        ),
+      );
+    }
     final iconColor = accentRole == null
         ? tokens.colors.textSecondary
         : tokens.domainColors.resolve(accentRole!).foreground;

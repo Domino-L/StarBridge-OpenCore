@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:starbridge_interaction/starbridge_interaction.dart'
+    show SuitePressable;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/menu_overlay/menu_overlay_surface_app.dart';
@@ -567,7 +569,7 @@ void main() {
         jsonDecode((update.arguments as Map)['payload'] as String) as Map;
     expect(sent['binding'], 'F8');
     expect(sent['closeWithHotkey'], false);
-    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+    expect(_pressHandler(tester, save), isNull);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -857,11 +859,7 @@ void main() {
       expect(find.textContaining('通讯连接中断'), findsOneWidget);
       expect(tester.widget<TextField>(field).controller!.text, 'unsaved');
       expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const ValueKey('menu-message-send')),
-            )
-            .onPressed,
+        _pressHandler(tester, find.byKey(const ValueKey('menu-message-send'))),
         isNull,
       );
       await tester.pumpWidget(const SizedBox());
@@ -1263,3 +1261,11 @@ void main() {
     },
   );
 }
+
+// Button enabled state whatever the interaction suite (default is scan since 0.7.3).
+Object? _pressHandler(WidgetTester tester, Finder finder) =>
+    switch (tester.widget(finder)) {
+      final ButtonStyleButton button => button.onPressed,
+      final SuitePressable pressable => pressable.onActivate,
+      final other => throw StateError('Unexpected button ${other.runtimeType}'),
+    };

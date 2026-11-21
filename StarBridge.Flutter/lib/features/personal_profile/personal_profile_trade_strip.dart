@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'personal_profile_showcase_frame.dart';
 
 /// What the profile's trade strip shows, already converted to the viewer's
 /// local time by the composition layer (the strip never reads SCM itself).
@@ -50,8 +51,10 @@ enum ProfileTradeStripView {
   restrictedVisitor,
 }
 
-typedef ProfileTradeStripBuilder =
-    Widget Function(BuildContext context, ProfileTradeStripView view);
+typedef ProfileTradeStripBuilder = Widget Function(
+  BuildContext context,
+  ProfileTradeStripView view,
+);
 
 /// Supplies the owner's trade strip to the profile page from the composition
 /// layer, so the page itself only decides where it goes and for whom.
@@ -98,6 +101,48 @@ class ProfileTradeStrip extends StatelessWidget {
     final t = context.tokens;
     final copy = _ProfileTradeCopy.of(context);
     final data = this.data;
+    if (ProfileShowcaseScope.of(context)) {
+      // Rail block of the single-column page: its band already names it.
+      final edit = isSelf && onEdit != null
+          ? TextButton(
+              key: const Key('profile-trade-edit'),
+              onPressed: onEdit,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+              child: Text(data == null ? copy.setUp : copy.edit),
+            )
+          : null;
+      return Column(
+        key: const Key('profile-trade-strip'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (data == null)
+            Text(
+              isSelf ? copy.missingSelf : copy.missingOther,
+              key: const Key('profile-trade-missing'),
+              style: TextStyle(color: t.colors.textSecondary, fontSize: 12.5),
+            )
+          else ...[
+            _Days(data.localDays, copy.weekdays),
+            const SizedBox(height: 7),
+            _Window(data, copy),
+            if (data.contact case final String contact)
+              Text(
+                '${copy.contact} $contact',
+                style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
+              ),
+            if (data.reputation case final String reputation)
+              Text(
+                '${copy.reputation} $reputation',
+                style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
+              ),
+          ],
+          ?edit,
+        ],
+      );
+    }
     final title = Row(
       mainAxisSize: MainAxisSize.min,
       children: [

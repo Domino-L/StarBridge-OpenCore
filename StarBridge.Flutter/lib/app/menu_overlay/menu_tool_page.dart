@@ -11,18 +11,21 @@ final class MenuToolPageOpener {
   /// Current menu opening, or null while the menu is not wanted.
   final int? Function() opening;
 
-  Future<bool> openHudSettings() async {
+  /// One of the fixed client pages [MenuToolPageRequests] names.
+  Future<bool> openClientPage(String method) async {
     final current = opening();
     if (current == null || current <= 0) return false;
     try {
       final opened = await channel
-          .invokeMethod<bool>('openHudSettings', {'opening': current})
+          .invokeMethod<bool>(method, {'opening': current})
           .timeout(const Duration(seconds: 6));
       return opened == true;
     } on Object {
       return false;
     }
   }
+
+  Future<bool> openHudSettings() => openClientPage('openHudSettings');
 }
 
 /// Lets menu panels reach the opener without threading it through the

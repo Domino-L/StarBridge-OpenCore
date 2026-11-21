@@ -79,9 +79,61 @@ public sealed record OverlayDisplaySettings(
     double CalmIdleOpacity,
     double CalmLitOpacity,
     OverlayCalmLightWhen CalmLightWhen,
-    string CalmPeekHotkey)
+    string CalmPeekHotkey,
+    // 0.7.3 visor projection settings at CSV 81..82; older files read the defaults. CSV 80 is a
+    // reserved column (see Serialize).
+    OverlayVisorSize VisorSize = OverlayVisorSize.Medium,
+    bool VisorHolidayGold = false,
+    // 11-06 user: the DM badge moves freely ("角标自由"). CSV 83..84: the badge's screen-edge side (its right
+    // edge on the right half, else its left edge) and its top, as screen fractions; -1 = the default spot.
+    double VisorBadgeX = OverlayDisplaySettings.UnsetVisorBadge,
+    double VisorBadgeY = OverlayDisplaySettings.UnsetVisorBadge,
+    // 0.7.3 visor (11-07): how far the side panels fold toward the screen centre, in degrees (0-60 since 11-14, user "可以"; default 15).
+    // CSV 85; older files read the default.
+    double VisorTilt = OverlayDisplaySettings.DefaultVisorTilt,
+    // 0.7.3 visor (11-07 user: "可选"): the chat group keeps its faint plate and outline (on), or shows the text only.
+    // CSV 86; older files read on.
+    bool VisorChatPlate = true,
+    // 0.7.3 visor members size (11-07 user: "宽度自适应是不是该和高度自适应分开"): CSV 87..90. With a dimension adaptive,
+    // the members follow their content up to its value (a maximum); otherwise the value is the fixed size. Visor
+    // design units (scaled by resolution and the visor size); older files read adaptive with the defaults.
+    bool VisorMembersAutoWidth = true,
+    bool VisorMembersAutoHeight = true,
+    double VisorMembersWidth = OverlayDisplaySettings.DefaultVisorMembersWidth,
+    double VisorMembersHeight = OverlayDisplaySettings.DefaultVisorMembersHeight,
+    // 0.7.3 visor events and chat width (11-07 user: "2放"), CSV 91..94: as the members width, adaptive (the value is
+    // the maximum) or fixed; their height comes from the existing line counts.
+    bool VisorEventsAutoWidth = true,
+    bool VisorChatAutoWidth = true,
+    double VisorEventsWidth = OverlayDisplaySettings.DefaultVisorMembersWidth,
+    double VisorChatWidth = OverlayDisplaySettings.DefaultVisorMembersWidth,
+    // 0.7.3 visor (11-11 user: "浮层外观应该让视距也可调"): how far the visor's camera is from the screen, in design
+    // units of a 1080-high screen (600-3000 in steps of 50, default 1000: the look before it was adjustable). Nearer
+    // gives a stronger perspective, farther a flatter one; with no tilt it changes nothing. CSV 95; older files read
+    // the default.
+    double VisorViewingDistance = OverlayDisplaySettings.DefaultVisorViewingDistance,
+    // 0.7.3 visor (11-12 user: "我觉得应该允许事件随意调整位置了"): where the events sit across the screen, as a
+    // screen fraction of their screen-edge side (the right edge when EventNotificationSide is Right, else the left edge);
+    // -1 keeps them at the screen edge as before. CSV 96; older files read -1.
+    double VisorEventsX = OverlayDisplaySettings.UnsetVisorBadge)
 {
     private const int CurrentEventNotificationSchemaVersion = 3;
+    private const string ReservedVisorColumn = "Visor";
+    /// <summary>A DM badge coordinate that means "the default spot".</summary>
+    public const double UnsetVisorBadge = -1;
+    /// <summary>The visor's fold angle (立体程度) range and default, in degrees.</summary>
+    public const double DefaultVisorTilt = 15, MinVisorTilt = 0, MaxVisorTilt = 60;
+    /// <summary>The visor camera's viewing distance (视距) range, step and default, in design units of a 1080-high screen.</summary>
+    public const double DefaultVisorViewingDistance = 1000, MinVisorViewingDistance = 600, MaxVisorViewingDistance = 3000,
+        VisorViewingDistanceStep = 50;
+    /// <summary>
+    /// The visor members size in visor design units (×0.707 = pixels at 2560x1440, medium size). Defaults ("小而精"):
+    /// the width of the two member columns at their caps, the height of eight members with the counts and a page line.
+    /// The tallest holds twenty rows, the roster's own page limit.
+    /// </summary>
+    public const double DefaultVisorMembersWidth = 364, MinVisorMembersWidth = 220, MaxVisorMembersWidth = 480;
+    // 11-07 (user: "youat可以"): "你在" joined the title line, so eight rows need 394 and twenty 874.
+    public const double DefaultVisorMembersHeight = 394, MinVisorMembersHeight = 191, MaxVisorMembersHeight = 874;
     // Runtime projection only. CSV and the constructor-based settings wire remain unchanged.
     // OverlayWorkspaceStore owns persistence as part of the preset transaction.
     public OverlayAppearanceOptions AppearanceOptions { get; init; } = OverlayAppearanceOptions.Empty;
@@ -100,7 +152,9 @@ public sealed record OverlayDisplaySettings(
         HideOfflineMembers: false,
         HideSquadIcons: false,
         EnableTrayMode: false,
-        Opacity: 0.85,
+        // 11-10 user ("默认改成 100%"): the overall opacity never took effect before 0.7.3; its old defaults are moved to
+        // full once (InformationOverlayDefaults.MigrateLegacyOpacity) and the default is full
+        Opacity: 1.0,
         ShowNotice: true,
         ShowSquads: true,
         ShowMission: false,
@@ -164,7 +218,8 @@ public sealed record OverlayDisplaySettings(
         CommunicationEventDurationSeconds: 5,
         FleetChatScope: OverlayFleetChatScope.Fleet,
         EventNotificationTextOpacity: 1.0,
-        EventNotificationBackgroundOpacity: 1.0,
+        // 11-13: the plate's real opacity; 15% is the faint plate the visor always had
+        EventNotificationBackgroundOpacity: InformationOverlayDefaults.LegacyBackgroundScale,
         SkipStartupTransitionWhenGameForeground: false,
         RequestedSkin: OverlaySkin.Default,
         EventNotificationDecorationOpacity: 1.0,
@@ -267,7 +322,27 @@ public sealed record OverlayDisplaySettings(
             OverlayCalmDisplayLevels.NormalizeOpacity(CalmIdleOpacity).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             OverlayCalmDisplayLevels.NormalizeOpacity(CalmLitOpacity).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             CalmLightWhen,
-            OverlayCalmDisplayLevels.NormalizePeekHotkey(CalmPeekHotkey));
+            OverlayCalmDisplayLevels.NormalizePeekHotkey(CalmPeekHotkey),
+            // CSV 80 held a visor style for a short while on 11-06 (user then kept only the visor
+            // projection: "只保留默认的吧"). The column stays so 81..82 keep their place; it is always
+            // written as "Visor" and never read.
+            ReservedVisorColumn,
+            VisorSize,
+            VisorHolidayGold ? "1" : "0",
+            NormalizeVisorBadge(VisorBadgeX).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorBadge(VisorBadgeY).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorTilt(VisorTilt).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+            VisorChatPlate ? "1" : "0",
+            VisorMembersAutoWidth ? "1" : "0",
+            VisorMembersAutoHeight ? "1" : "0",
+            NormalizeVisorMembersWidth(VisorMembersWidth).ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorMembersHeight(VisorMembersHeight).ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            VisorEventsAutoWidth ? "1" : "0",
+            VisorChatAutoWidth ? "1" : "0",
+            NormalizeVisorMembersWidth(VisorEventsWidth).ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorMembersWidth(VisorChatWidth).ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorViewingDistance(VisorViewingDistance).ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            NormalizeVisorBadge(VisorEventsX).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public static OverlayDisplaySettings Parse(string? value)
@@ -433,7 +508,8 @@ public sealed record OverlayDisplaySettings(
                 : Default.EventNotificationTextOpacity,
             parts.Length > 70 && TryParseFiniteDouble(parts[70], out var eventNotificationBackgroundOpacity)
                 ? NormalizeBackgroundOpacity(eventNotificationBackgroundOpacity)
-                : Default.EventNotificationBackgroundOpacity,
+                // a file from before this field drew the full faint plate: 100% on the old scale, scaled on load (11-13)
+                : 1.0,
             parts.Length > 71
                 ? parts[71] == "1"
                 : Default.SkipStartupTransitionWhenGameForeground,
@@ -461,7 +537,25 @@ public sealed record OverlayDisplaySettings(
             parts.Length > 78 && TryParseDefinedEnum<OverlayCalmLightWhen>(parts[78], out var calmLightWhen)
                 ? calmLightWhen
                 : OverlayCalmLightWhen.Relevant,
-            parts.Length > 79 ? OverlayCalmDisplayLevels.NormalizePeekHotkey(parts[79]) : "");
+            parts.Length > 79 ? OverlayCalmDisplayLevels.NormalizePeekHotkey(parts[79]) : "",
+            parts.Length > 81 && TryParseDefinedEnum<OverlayVisorSize>(parts[81], out var visorSize) ? visorSize : OverlayVisorSize.Medium,
+            parts.Length > 82 && parts[82] == "1",
+            parts.Length > 83 && TryParseFiniteDouble(parts[83], out var badgeX) ? NormalizeVisorBadge(badgeX) : -1,
+            parts.Length > 84 && TryParseFiniteDouble(parts[84], out var badgeY) ? NormalizeVisorBadge(badgeY) : -1,
+            parts.Length > 85 && TryParseFiniteDouble(parts[85], out var visorTilt) ? NormalizeVisorTilt(visorTilt) : DefaultVisorTilt,
+            parts.Length <= 86 || parts[86] != "0",
+            parts.Length <= 87 || parts[87] != "0",
+            parts.Length <= 88 || parts[88] != "0",
+            parts.Length > 89 && TryParseFiniteDouble(parts[89], out var membersWidth) ? NormalizeVisorMembersWidth(membersWidth) : DefaultVisorMembersWidth,
+            parts.Length > 90 && TryParseFiniteDouble(parts[90], out var membersHeight) ? NormalizeVisorMembersHeight(membersHeight) : DefaultVisorMembersHeight,
+            parts.Length <= 91 || parts[91] != "0",
+            parts.Length <= 92 || parts[92] != "0",
+            parts.Length > 93 && TryParseFiniteDouble(parts[93], out var eventsWidth) ? NormalizeVisorMembersWidth(eventsWidth) : DefaultVisorMembersWidth,
+            parts.Length > 94 && TryParseFiniteDouble(parts[94], out var chatWidth) ? NormalizeVisorMembersWidth(chatWidth) : DefaultVisorMembersWidth,
+            parts.Length > 95 && TryParseFiniteDouble(parts[95], out var viewingDistance)
+                ? NormalizeVisorViewingDistance(viewingDistance)
+                : DefaultVisorViewingDistance,
+            parts.Length > 96 && TryParseFiniteDouble(parts[96], out var eventsX) ? NormalizeVisorBadge(eventsX) : UnsetVisorBadge);
     }
 
     public static int NormalizeChatVisibleCount(int value) =>
@@ -574,6 +668,28 @@ public sealed record OverlayDisplaySettings(
     {
         return double.IsFinite(value) ? Math.Clamp(value, 0.18, 0.82) : Default.MemberNameColumnRatio;
     }
+
+    /// <summary>A badge coordinate is a screen fraction 0..1; anything else (including -1) means the default spot.</summary>
+    public static double NormalizeVisorBadge(double value) => value is >= 0 and <= 1 ? value : -1;
+
+    /// <summary>Whole design units within the members width range; anything not a finite number is the default.</summary>
+    public static double NormalizeVisorMembersWidth(double value) =>
+        double.IsFinite(value) ? Math.Round(Math.Clamp(value, MinVisorMembersWidth, MaxVisorMembersWidth)) : DefaultVisorMembersWidth;
+
+    /// <summary>Whole design units within the members height range; anything not a finite number is the default.</summary>
+    public static double NormalizeVisorMembersHeight(double value) =>
+        double.IsFinite(value) ? Math.Round(Math.Clamp(value, MinVisorMembersHeight, MaxVisorMembersHeight)) : DefaultVisorMembersHeight;
+
+    /// <summary>Whole degrees within 0-60; anything not a finite number is the default.</summary>
+    public static double NormalizeVisorTilt(double value) =>
+        double.IsFinite(value) ? Math.Round(Math.Clamp(value, MinVisorTilt, MaxVisorTilt)) : DefaultVisorTilt;
+
+    /// <summary>Within 600-3000 in steps of 50; anything not a finite number is the default (1000).</summary>
+    public static double NormalizeVisorViewingDistance(double value) =>
+        double.IsFinite(value)
+            ? Math.Round(Math.Clamp(value, MinVisorViewingDistance, MaxVisorViewingDistance) / VisorViewingDistanceStep) *
+              VisorViewingDistanceStep
+            : DefaultVisorViewingDistance;
 
     private static bool TryParseFiniteDouble(string value, out double parsed) =>
         double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) &&

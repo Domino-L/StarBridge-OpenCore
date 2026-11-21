@@ -17,6 +17,7 @@ internal static class DiagnosticConnectionProbe
             cancellationToken = deadline.Token;
             using var handler = transport ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
+            RelayClientVersion.Apply(client);
             using var response = await client.GetAsync(new Uri(origin.AbsoluteUri.TrimEnd('/') + "/health"),
                 HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode) return new(ApplicationSupportStates.ActionRequired, "connectionFailed");

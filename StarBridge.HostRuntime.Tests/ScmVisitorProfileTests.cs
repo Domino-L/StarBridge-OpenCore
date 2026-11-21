@@ -374,6 +374,8 @@ internal static partial class LegacyPasswordLoginTests
         {
             var target = "scm-v1:" + new string('a', 64);
             var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+            if (path.Contains("/account-facts/", StringComparison.Ordinal))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             if (AllowOwnProfile && path == "/app-api/starbridge/v1/personal-profile")
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
                     Content = new StringContent(WireBody!, System.Text.Encoding.UTF8, "application/json") });
@@ -391,7 +393,8 @@ internal static partial class LegacyPasswordLoginTests
                     Content = JsonContent.Create(new { code = LegacyStatus == HttpStatusCode.NotFound
                         ? "PERSONAL_PROFILE_NOT_AVAILABLE" : "PROFILE_IDENTITY_TEMPORARILY_UNAVAILABLE" }) });
                 return Complete(new HttpResponseMessage(LegacyStatus) { Content = JsonContent.Create(new {
-                    schemaVersion = 1, legacyAccountId = WrongLegacyId ? "other-historical-member" : "historical-member", profile = new PersonalProfileDocumentContract(
+                    schemaVersion = 1, legacyAccountId = WrongLegacyId ? "other-historical-member" : "historical-member",
+                    profile = WireBody is not null ? System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(WireBody) : (object)new PersonalProfileDocumentContract(
                         3, "opaque-public-profile", false, 7, DateTimeOffset.UtcNow, new("Visitor", ""),
                         PersonalProfileContentContract.Empty, null, Visibility: "friendsAndMainFleet")
                 }) });

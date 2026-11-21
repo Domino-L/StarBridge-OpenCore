@@ -13,6 +13,11 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     private readonly Func<(BridgeAccountContext? Context, long Generation)> _current;
     private readonly Func<string?> _verifiedHandle;
     private readonly Func<bool> _recordingAllowed;
+    private readonly Func<GameplayContinuity>? _continuity;
+    private bool _identityMismatchDuringOutage;
+    private long _identityRejectionVersion;
+    internal long IdentityRejectionVersion => Interlocked.Read(ref _identityRejectionVersion);
+    private readonly GameLogIdentityReader _transientIdentityReader = new();
     private readonly Func<GameProcessSession> _probe;
     private readonly TimeProvider _time;
     private readonly GameLogSessionTracker _session;
@@ -53,11 +58,12 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     private bool _disposed;
     private bool _stopped;
     private string? _error;
+    private string _samplingStage = "resolve";
     private sealed record Published((BridgeAccountContext? Context, long Generation) Owner, string Handle,
         string Channel, DateTimeOffset At);
     private sealed record PublishedIdentityCheck(
         (BridgeAccountContext? Context, long Generation) Owner,
-        LocalIdentityCheckState State);
+        LocalIdentityCheckState State, BridgeAccountContext? Authentication, DateTimeOffset ConfirmedAt, string? HandleHash);
     private sealed record PublishedSession(
         (BridgeAccountContext? Context, long Generation) Owner,
         GameLogSessionSnapshot Snapshot,
@@ -74,7 +80,8 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     private void NotifyPublicationChanged()
     {
         var state = new PublicationState(_published is { } identity ? identity with { At = default } : null,
-            _publishedSession is { } session ? session with { At = default } : null, _publishedIdentityCheck);
+            _publishedSession is { } session ? session with { At = default } : null,
+            _publishedIdentityCheck is { } check ? check with { ConfirmedAt = default } : null);
         if (state == _lastPublication) return;
         _lastPublication = state;
         // Consumers only schedule work; sampling never awaits remote publication.
@@ -86,9 +93,10 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         Func<(BridgeAccountContext? Context, long Generation)> current, Func<string?> verifiedHandle,
         Func<GameProcessSession>? probe = null, TimeProvider? time = null, bool startTimer = true,
         GameLogLocator? locator = null, Support.LocalGameEventJournal? journal = null,
-        Func<bool>? recordingAllowed = null)
+        Func<bool>? recordingAllowed = null, Func<GameplayContinuity>? continuity = null)
     {
         _store = store; _current = current; _verifiedHandle = verifiedHandle;
+        _continuity = continuity;
         _recordingAllowed = recordingAllowed ?? (() => true);
         _probe = probe ?? GameLogIdentityReader.Probe; _time = time ?? TimeProvider.System;
         _locator = locator ?? new();
@@ -97,6 +105,12 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         _session.CityArrived += AddCityArrival;
         _reader = new(_session, _journal);
         _reader.SourceReset += _cityArrivals.Clear;
+        _reader.SourceReset += _contractEvents.Clear;
+        _reader.ContractReadInterrupted += BreakContractReading;
+        _session.ContractFault += ContractReadFault;
+        _session.ContractReadingBlocked = () => _contractReadFaulted;
+        _session.ContractLineSkipped = QuarantineContractLine;
+        _reader.ContractSourceEnded += CompleteContractSource;
         _timer = new(_time, () => { Sample(); return Task.CompletedTask; },
             TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         if (startTimer) _timer.Start();
@@ -105,10 +119,10 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     {
         var expected = _verifiedHandle();
         _cityArrivals.RemoveAll(candidate => !candidate.Handle.Equals(expected, StringComparison.OrdinalIgnoreCase));
-        // Retain the first arrival for each of the four known cities while identity is still reading.
+        // Retain the first arrival for each known location token while identity is still reading.
         // Repeated arrivals cannot grow the list or evict another city's valid evidence.
         if (expected is not null && handle.Equals(expected, StringComparison.OrdinalIgnoreCase) &&
-            Core.Achievements.JourneyAchievementPolicy.IsCity(city) &&
+            Core.Achievements.JourneyAchievementPolicy.IsToken(city) &&
             !_cityArrivals.Any(candidate => candidate.City == city))
             _cityArrivals.Add((handle, city, evidence));
     }
@@ -157,6 +171,21 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         {
             if (AccountSlotBlocked) return LocalIdentityCheckState.NotObserved;
             var published = Volatile.Read(ref _publishedIdentityCheck);
+            if (published is not null && _continuity is not null)
+            {
+                var state = _continuity();
+                var expected = _verifiedHandle();
+                if (state.Authentication != published.Authentication || state.Generation != published.Owner.Generation ||
+                    state.Identity != "match" || expected is null)
+                    return LocalIdentityCheckState.NotObserved;
+                if (published.HandleHash is not null && IdentityHash(expected) != published.HandleHash)
+                    return LocalIdentityCheckState.Mismatch;
+                if (published.State == LocalIdentityCheckState.Mismatch) return published.State;
+                if (!state.OwnerAvailable)
+                    return _time.GetUtcNow() >= published.ConfirmedAt &&
+                        _time.GetUtcNow() - published.ConfirmedAt < TimeSpan.FromMinutes(30)
+                        ? published.State : LocalIdentityCheckState.NotObserved;
+            }
             return published is not null && _current() == published.Owner && !AccountSlotBlocked
                 ? published.State
                 : LocalIdentityCheckState.NotObserved;
@@ -177,12 +206,15 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     }
     public void Suspend()
     {
+        _identityMismatchDuringOutage = false;
+        _transientIdentityReader.Reset();
         Volatile.Write(ref _recentPublished, null);
         Volatile.Write(ref _published, null);
         Volatile.Write(ref _publishedIdentityCheck, null);
         Volatile.Write(ref _publishedSession, null);
         lock (_sync)
         {
+            BreakContractReading();
             _lease?.Dispose(); _lease = null; _settings = null; _owner = default;
             _observation = new("notSelected"); _error = null; _stopped = false;
             _reader.Reset(); _recentReader.Reset();
@@ -238,8 +270,18 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         }
     }
 
+    private void InvalidateSettingsCache()
+    {
+        try { _lease?.Dispose(); } catch (Exception) { /* Best effort: the next Resolve reopens. */ }
+        _lease = null; _settings = null;
+    }
+
+    private string DescribeStorageError(Exception error) =>
+        $"code={_samplingStage} exception={Support.IdentityGateJournal.Type(error)}";
+
     private bool Resolve()
     {
+        _samplingStage = "resolve";
         if (AccountSlotBlocked) return false;
         var owner = _current();
         if (_owner != owner) { Suspend(); _owner = owner; }
@@ -252,7 +294,9 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         }
         if (_settings is null)
         {
+            _samplingStage = "lease-open";
             _lease ??= _store.Open(owner.Context);
+            _samplingStage = "settings-read";
             _settings = _lease.Read();
             PublishIdentityCheck();
         }
@@ -278,11 +322,21 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
             if (_usingLocalSlot) { _localSlot?.Suspend(); _usingLocalSlot = false; }
             work = _accountWork.Enter(default);
             if (work is null) return;
+            if (ObserveTransientIdentity()) return;
             if (!Resolve()) return;
+            // A temporary owner/storage failure is not a permanent identity
+            // veto. This sample has revalidated the owner and settings lease;
+            // any new observation failure below still sets storage as before.
+            _error = null;
             Observe(work.Token);
         }
-        catch
+        catch (Exception sampleError)
         {
+            Support.IdentityGateJournal.Changed("gamelog-sample", DescribeStorageError(sampleError));
+            // Drop the cached settings/lease: the next sample must reopen and reread them,
+            // so a persistent storage fault stays visible instead of being masked by cache.
+            InvalidateSettingsCache();
+            BreakContractReading();
             _cityArrivals.Clear();
             _journal?.Reset();
             _error = "storage";
@@ -296,16 +350,26 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
     }
     private void Observe(CancellationToken token = default, bool rediscover = false)
     {
+        _samplingStage = "observe";
+        _contractReadToken = token;
+        _contractReadFaulted = false;
+        ContractStep(ContractHeartbeat);
+        if (_contractEvents.Count == 0)
+        {
+            try { _contractHistoryRevision = _contractHistory?.ClearRevision ?? 0; }
+            catch (Exception error) { Support.IdentityGateJournal.Changed("contract-history", $"code=read exception={Support.IdentityGateJournal.Type(error)}"); }
+        }
         var settings = _settings!;
         GameLogIdentityObservation? recent = null;
         if (!settings.Enabled || _stopped)
         {
+            BreakContractReading();
             _reader.Reset(); _recentReader.Reset(); _observation = new("stopped");
         }
         else
         {
             var process = _probe();
-            if (token.IsCancellationRequested || !AccountSlotCurrent()) { _cityArrivals.Clear(); return; }
+            if (token.IsCancellationRequested || !AccountSlotCurrent()) { BreakContractReading(); _cityArrivals.Clear(); return; }
             var now = _time.GetUtcNow();
             var key = process.State + "|" + process.LogPath + "|" + process.SessionId;
             if (settings.Selection == "automatic" &&
@@ -325,6 +389,7 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                 running != settings.Channel;
             if (otherVersion || path is null)
             {
+                BreakContractReading();
                 _reader.Reset(); _recentReader.Reset();
                 _observation = new(otherVersion ? "otherVersion" : _location.State);
             }
@@ -346,6 +411,9 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         {
             var before = _settings!;
             var matches = _observation.Handle.Equals(expected, StringComparison.OrdinalIgnoreCase);
+            if (!matches && !_identityMismatchDuringOutage) Interlocked.Increment(ref _identityRejectionVersion);
+            _identityMismatchDuringOutage = !matches;
+            if (!matches) PublishIdentityCheck();
             var desired = before with {
                 IdentityCheck = matches ? "match" : "mismatch",
                 IdentityHandleHash = IdentityHash(expected),
@@ -380,14 +448,32 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
             _observation.Handle is not null && AccountSlotCurrent()
             ? new(_owner, _observation.Handle, _settings!.Channel, _observedAt) : null);
         var identity = Volatile.Read(ref _published);
+        ContractStep(() => CompleteContractRead(token, expected));
         if (identity is not null && _owner.Context is not null && identity.Owner == _owner &&
             identity.At == _observedAt && expected is not null &&
             identity.Handle.Equals(expected, StringComparison.OrdinalIgnoreCase))
+        {
+            // City achievements are a downstream consumer, like contracts: a fault there
+            // (for example an unreadable outbox) drops these arrivals and never turns
+            // the whole recognition into a storage error or replays every sample.
+            var cityFaulted = false;
             foreach (var candidate in _cityArrivals)
-                if (candidate.Handle.Equals(expected, StringComparison.OrdinalIgnoreCase) &&
+                if (!cityFaulted && candidate.Handle.Equals(expected, StringComparison.OrdinalIgnoreCase) &&
                     !token.IsCancellationRequested && AccountSlotCurrent())
-                    CityArrival?.Invoke(new(_owner.Context, _owner.Generation,
-                        new(1, Achievements.FirstEntryObservation.HashHandle(identity.Handle), candidate.City, candidate.Evidence)));
+                {
+                    try
+                    {
+                        CityArrival?.Invoke(new(_owner.Context, _owner.Generation,
+                            new(1, Achievements.FirstEntryObservation.HashHandle(identity.Handle), candidate.City, candidate.Evidence)));
+                    }
+                    catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
+                    {
+                        cityFaulted = true;
+                        Support.IdentityGateJournal.Event("city-arrival", $"code=deliver exception={Support.IdentityGateJournal.Type(error)}");
+                    }
+                }
+            if (cityFaulted) _cityArrivals.Clear();
+        }
         // A bounded read may consume live events before it can verify the whole identity.
         // Only the same account/source may carry them forward; Reset/Suspend clear them.
         if (_observation.State != "reading" || _reader.IdentityInvalidated || _error is not null ||
@@ -412,9 +498,48 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                 _ => LocalIdentityCheckState.NotObserved
             };
         }
+        if (_identityMismatchDuringOutage) state = LocalIdentityCheckState.Mismatch;
+        var continuity = _continuity?.Invoke();
         Volatile.Write(ref _publishedIdentityCheck,
-            _owner.Context is null || AccountSlotBlocked ? null : new(_owner, state));
+            _owner.Context is null || AccountSlotBlocked ? null : new(_owner, state,
+                continuity?.Authentication ?? _owner.Context, continuity?.ConfirmedAt ?? _time.GetUtcNow(),
+                expected is null ? null : IdentityHash(expected)));
     }
+    // Keep identity observation alive without opening or writing any owner file.
+    // No session/event publication is granted by this retained Match.
+    private bool ObserveTransientIdentity()
+    {
+        if (_continuity is null) return false;
+        var state = _continuity();
+        if (state.OwnerAvailable) return false;
+        var check = Volatile.Read(ref _publishedIdentityCheck);
+        if (check is null || state.Authentication is null || check.Authentication != state.Authentication ||
+            check.Owner.Generation != state.Generation)
+        { Suspend(); return true; }
+        BreakContractReading();
+        _cityArrivals.Clear(); _journal?.Reset();
+        Volatile.Write(ref _published, null);
+        Volatile.Write(ref _recentPublished, null);
+        Volatile.Write(ref _publishedSession, null);
+        var expected = _verifiedHandle();
+        if (_settings is { Enabled: true } && !_stopped && expected is not null)
+        {
+            var path = _settings.Selection == "automatic" ? _location.Path : _settings.Path;
+            if (path is not null)
+            {
+                _transientIdentityReader.ReadCurrent(path, _probe(), _time.GetUtcNow());
+                if (_transientIdentityReader.HasObservedOtherHandle(expected))
+                {
+                    if (!_identityMismatchDuringOutage) Interlocked.Increment(ref _identityRejectionVersion);
+                    _identityMismatchDuringOutage = true;
+                    Volatile.Write(ref _publishedIdentityCheck, check with { State = LocalIdentityCheckState.Mismatch });
+                }
+            }
+        }
+        NotifyPublicationChanged();
+        return true;
+    }
+
     private bool AccountSlotCurrent() => !AccountSlotBlocked && _current() == _owner && !AccountSlotBlocked;
 
     private static string IdentityHash(string handle) =>
@@ -432,6 +557,7 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
         {
             try
             {
+                _samplingStage = "request";
                 BridgeEnvelopeValidator.ValidateWireShape(request);
                 BridgeEnvelopeValidator.RequireCurrentVersion(request);
                 if (AccountSlotBlocked) return Error(request, "localMode");
@@ -457,7 +583,9 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                 Profiles.LocalPersonalProfileStore.RejectDuplicates(body);
                 token.ThrowIfCancellationRequested();
                 if (!Resolve()) return Error(request, "accountChanged");
+                _samplingStage = "request";
                 if (request.Name == "gameLog.stop") {
+                    BreakContractReading();
                     _stopped = true; _observation = new("stopped"); _reader.Reset();
                     _recentReader.Reset(); Volatile.Write(ref _recentPublished, null);
                     Volatile.Write(ref _published, null);
@@ -505,7 +633,7 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                 else if (request.Name == "gameLog.find") next = next with { Selection = "automatic", Enabled = true };
                 else if (request.Name == "gameLog.resume") next = next with { Enabled = true };
                 else if (request.Name == "gameLog.stop") next = next with { Enabled = false };
-                else if (request.Name == "gameLog.retry") { _settings = _lease!.Read(); next = _settings; }
+                else if (request.Name == "gameLog.retry") { _samplingStage = "settings-read"; _settings = _lease!.Read(); next = _settings; }
                 bool Current() => !token.IsCancellationRequested && !AccountSlotBlocked && _current() == owner &&
                     !AccountSlotBlocked;
                 if (next != _settings)
@@ -514,8 +642,11 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                     Volatile.Write(ref _recentPublished, null); _recentReader.Reset();
                     Volatile.Write(ref _published, null);
                     Volatile.Write(ref _publishedSession, null);
+                    _samplingStage = "settings-write";
                     _settings = _lease!.Save(_settings!, next, Current);
+                    _samplingStage = "request";
                     _stopped = !_settings.Enabled;
+                    BreakContractReading();
                     _reader.Reset(); _lastDiscovery = null;
                     _searchHint = configure || removeVersion ? hint : next.Path;
                 }
@@ -570,11 +701,14 @@ public sealed partial class GameLogRuntime : IDisposable, IAsyncDisposable
                     }
                 }), []);
             }
-            catch (OperationCanceledException) { _cityArrivals.Clear(); return Error(request, "cancelled"); }
-            catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+            catch (OperationCanceledException) { BreakContractReading(); _cityArrivals.Clear(); return Error(request, "cancelled"); }
+            catch (Exception e) when (_samplingStage == "request" && e is (JsonException or InvalidOperationException or KeyNotFoundException or FormatException))
             { return Error(request, "invalid"); }
-            catch
+            catch (Exception commandError)
             {
+                Support.IdentityGateJournal.Event("gamelog-command", DescribeStorageError(commandError));
+                InvalidateSettingsCache();
+                BreakContractReading();
                 _cityArrivals.Clear();
                 _error = "storage";
                 _observation = new("unknown");

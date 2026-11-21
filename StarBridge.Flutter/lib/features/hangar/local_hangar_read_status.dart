@@ -20,6 +20,7 @@ class LocalHangarReadStatus extends StatelessWidget {
     required this.favoriteFailed,
     required this.failed,
     required this.onRetry,
+    this.showSaved = true,
     this.readSource = InteractionSource.programmatic,
     this.favoriteSource = InteractionSource.programmatic,
     this.readPhase = 0,
@@ -29,6 +30,9 @@ class LocalHangarReadStatus extends StatelessWidget {
   });
   final LocalHangarSnapshot? snapshot;
   final bool saved, loading, favoriteBusy, favoriteFailed, failed;
+
+  /// Off when the overview line above already says when the hangar was saved.
+  final bool showSaved;
   final VoidCallback onRetry;
   final InteractionSource readSource, favoriteSource;
   final int readPhase, favoritePhase;
@@ -39,7 +43,7 @@ class LocalHangarReadStatus extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (saved)
+        if (saved && showSaved)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: StarBridgeTooltip(

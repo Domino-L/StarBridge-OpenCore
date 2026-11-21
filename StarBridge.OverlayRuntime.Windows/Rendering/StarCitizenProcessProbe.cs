@@ -14,8 +14,9 @@ internal static class StarCitizenProcessProbe
         "StarCitizen_TECH-PREVIEW"
     ];
 
-    // Names only, so no handle to the game is opened.
-    public static bool IsRunning() => StarBridge.HostRuntime.Presence.ProcessSnapshotNames.Any(IsGameImageName);
+    // The host's shared observation: one process list per freshness window for every timer,
+    // and a running game is watched through its own handle instead of being listed again.
+    public static bool IsRunning() => StarBridge.HostRuntime.Presence.SharedGameProcesses.IsRunning();
 
     internal static bool IsGameImageName(string imageName) =>
         ProcessNames.Any(processName => processName.Equals(

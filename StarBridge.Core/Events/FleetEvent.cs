@@ -17,4 +17,5 @@ public sealed record FleetEvent(
     string? LocationEvidence = null,
     DateTimeOffset? NavigationTargetSelectedAt = null,
     string? NavigationOriginLocation = null,
-    LifeEventContext LifeContext = LifeEventContext.Unknown);
+    LifeEventContext LifeContext = LifeEventContext.Unknown,
+    ContractLogEvidence? Contract = null);

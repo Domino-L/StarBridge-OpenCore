@@ -189,17 +189,18 @@ internal sealed partial class FirstUseModeRuntime
         var retained = commit.Origin.Local.Phase == "offline";
         if (!await (retained ? commit.Graph.Installation.Owner.ShutdownFirstUseOnlineCandidateAsync() :
                 commit.Graph.Installation.RetireAsync()).ConfigureAwait(false) || _closed ||
-            store.Read() != commit.Pending || store.ReadOnlineOrigin() != commit.Origin)
+            store.Read() != (commit.ReturnedLocal ?? commit.Pending) || store.ReadOnlineOrigin() != commit.Origin)
             return new("recoveryRequired", _accepted?.Revision ?? commit.Pending.Revision);
         bool Current() => !_closed && ReferenceEquals(_onlineCommit, commit) &&
             Interlocked.Read(ref _epoch) == commit.Epoch && HasOriginalRecoveryExit(commit) &&
             store.ReadOnlineOrigin() == commit.Origin;
-        var local = store.ReturnFromOnline(commit.Pending, Guid.NewGuid().ToString("N"), Current);
+        var local = commit.ReturnedLocal ?? store.ReturnFromOnline(commit.Pending, Guid.NewGuid().ToString("N"), Current);
         commit.ReturnedLocal = local; _accepted = local;
         if (retained)
             account.ReturnOfflineAccount(commit.Origin.Local.Revision, local.Revision,
                 () => Current() && store.Read() == local);
-        if (!await account.RestoreFirstUseLocalSourcesAsync(commit.Graph.Sources, commit.Epoch).ConfigureAwait(false) ||
+        if (!(account.HasCurrentFirstUseLocalSources(commit.Epoch) ||
+                await account.RestoreFirstUseLocalSourcesAsync(commit.Graph.Sources, commit.Epoch).ConfigureAwait(false)) ||
             !await commit.Graph.RestoreNativeAsync(commit.Epoch).ConfigureAwait(false) || !Current())
             return new("recoveryRequired", local.Revision);
         commit.LocalRestored = true;

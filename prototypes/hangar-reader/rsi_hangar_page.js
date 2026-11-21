@@ -84,7 +84,7 @@ function readRsiHangarPage(documentRoot = document, pageAddress = location.href)
       if (!sourceKey || sourceKey.length > 128 || /[\s\u0000-\u001f]/u.test(sourceKey) || keys.has(sourceKey)) fail('pledge-key');
       keys.add(sourceKey);
       const date = only(row, ':scope > .basic-infos .date-col');
-      const acquiredText = text(date, 160)?.replace(/^(Created|Acquired|创建|建立|入库|获得|获取)\s*:?\s*/iu, '').trim() || null;
+      const acquiredText = text(date, 160)?.replace(/^(Created|Acquired|创建|建立|入库|获得|获取)\s*[:：]?\s*/iu, '').trim() || null;
       if (acquiredText?.length > 128) fail('date');
       const container = only(row, ':scope > .items');
       const blocks = container.querySelectorAll(':scope > .content-block1');

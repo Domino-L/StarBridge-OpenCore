@@ -7,12 +7,13 @@ public sealed partial class AccountBridgeRuntime
     // disposed here. Candidate timers remain deferred by the actual constructor.
     internal static AccountBridgeRuntime CreateAccountBusinessRuntime(Account.ScmAccountBridgeHost host,
         string dataRoot, Support.LocalGameEventJournal? eventJournal, bool firstUseCandidate,
-        Onboarding.FirstUseOnlineCandidateIntent? candidateIntent, TimeProvider? backgroundTime = null)
+        Onboarding.FirstUseOnlineCandidateIntent? candidateIntent, TimeProvider? backgroundTime = null,
+        Support.LocalContractHistory? contractHistory = null)
     {
         var runtime = new AccountBridgeRuntime(host, new Hangar.LocalHangarStore(dataRoot), new Profiles.LocalPersonalProfileStore(dataRoot),
             new Presence.GameplayTimeStore(dataRoot), new Presence.GameLogSettingsStore(dataRoot),
             new Privacy.LocalPrivacyStore(dataRoot), eventJournal, new Settings.PresenceVisibilityStore(dataRoot),
-            dataRoot, firstUseCandidate: firstUseCandidate, backgroundTime: backgroundTime, candidateIntent: candidateIntent);
+            dataRoot, firstUseCandidate: firstUseCandidate, backgroundTime: backgroundTime, candidateIntent: candidateIntent, contractHistory: contractHistory);
         runtime.InitializeAccountDisplayCache(dataRoot);
         return runtime;
     }

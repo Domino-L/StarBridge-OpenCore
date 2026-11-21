@@ -1,3 +1,4 @@
+import '../../features/common/last_online_days.dart';
 import '../../features/direct_messages/direct_messages_module.dart';
 import '../../features/common/chat_room_invitation.dart';
 import '../../features/communities/community_invitation_attachment.dart';
@@ -14,6 +15,7 @@ Map<String, Object?> encodeConversation(Conversation c) => {
   'key': c.conversationKey,
   'gameId': c.gameId,
   'presence': conversationPresence(c.state, c.presence),
+  'lastOnlineDays': c.state == 'friend' ? c.lastOnlineDays : null,
 };
 Conversation decodeConversation(Map c) => Conversation(
   c['ref'] as String,
@@ -26,6 +28,9 @@ Conversation decodeConversation(Map c) => Conversation(
   conversationKey: c['key'] as String?,
   gameId: c['gameId'] as String? ?? '',
   presence: conversationPresence(c['state'] as String, c['presence']),
+  lastOnlineDays: c['state'] == 'friend'
+      ? readLastOnlineDays(c['lastOnlineDays'])
+      : null,
 );
 Map<String, Object?> encodeMessage(DirectMessage m) => {
   'sequence': m.sequence,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -20,6 +21,7 @@ class GuideTourLayer extends StatefulWidget {
 class _GuideTourLayerState extends State<GuideTourLayer> {
   final _self = GlobalKey();
   Rect? _hole, _cardArea, _beside;
+  List<Rect> _interactiveAreas = const [];
 
   /// Another route (e.g. a picker) sits above the step's anchor: the tour
   /// steps aside until it closes, so that dialog stays fully usable.
@@ -102,15 +104,22 @@ class _GuideTourLayerState extends State<GuideTourLayer> {
     final hole = rect(step?.anchor)?.inflate(6);
     final area = rect(step?.card);
     final beside = rect(step?.beside);
+    final interactiveAreas =
+        (widget.hub.run.value?.spec.interactiveAnchors ?? const <String>[])
+            .map(rect)
+            .whereType<Rect>()
+            .toList();
     if (hole != _hole ||
         area != _cardArea ||
         beside != _beside ||
-        covered != _covered) {
+        covered != _covered ||
+        !listEquals(interactiveAreas, _interactiveAreas)) {
       setState(() {
         _covered = covered;
         _hole = hole;
         _cardArea = area;
         _beside = beside;
+        _interactiveAreas = interactiveAreas;
       });
     }
   }
@@ -141,7 +150,10 @@ class _GuideTourLayerState extends State<GuideTourLayer> {
                     ),
                   )
                 : _HoleBarrier(
-                    hole: wait ? hole : null,
+                    holes: [
+                      if (wait && hole != null) hole,
+                      ..._interactiveAreas,
+                    ],
                     child: CustomPaint(
                       painter: _SpotPainter(
                         hole: hole,
@@ -163,21 +175,21 @@ class _GuideTourLayerState extends State<GuideTourLayer> {
 
 /// Absorbs pointers except inside [hole], which passes through to the app.
 class _HoleBarrier extends SingleChildRenderObjectWidget {
-  const _HoleBarrier({required this.hole, super.child});
-  final Rect? hole;
+  const _HoleBarrier({required this.holes, super.child});
+  final List<Rect> holes;
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderHole(hole);
+  RenderObject createRenderObject(BuildContext context) => _RenderHole(holes);
   @override
   void updateRenderObject(BuildContext context, _RenderHole render) =>
-      render.hole = hole;
+      render.holes = holes;
 }
 
 class _RenderHole extends RenderProxyBox {
-  _RenderHole(this.hole);
-  Rect? hole;
+  _RenderHole(this.holes);
+  List<Rect> holes;
   @override
   bool hitTest(BoxHitTestResult result, {required Offset position}) {
-    if (hole?.contains(position) ?? false) return false;
+    if (holes.any((hole) => hole.contains(position))) return false;
     result.add(BoxHitTestEntry(this, position));
     return true;
   }

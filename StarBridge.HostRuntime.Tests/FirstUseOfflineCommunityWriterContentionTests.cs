@@ -34,7 +34,7 @@ internal static partial class FirstUseModeTests
             if (retire) f.Host.Dispose();
             if (bounded)
             {
-                try { await pending.WaitAsync(TimeSpan.FromSeconds(3)); throw new Exception("Permanent contention unexpectedly succeeded"); }
+                try { await pending.WaitAsync(FirstUseTestWait.Bound); throw new Exception("Permanent contention unexpectedly succeeded"); }
                 catch (StarBridge.HostRuntime.Account.AccountBridgeHostException error) when (error.Code == "communities.readTransient") { }
                 Require(http.Reads == 0, "The bounded writer wait ends without starting unprotected HTTP");
             }
@@ -55,7 +55,7 @@ internal static partial class FirstUseModeTests
         }
         else
         {
-            var targets = await pending.WaitAsync(TimeSpan.FromSeconds(3));
+            var targets = await pending.WaitAsync(FirstUseTestWait.Bound);
             Require(targets.Count == 1 && http.Reads == 1, "Brief ordinary cache writing must not fail a valid directory read or repeat HTTP");
         }
         Require(f.Host.CurrentContext == owner && f.Host.Generation == generation && f.Vault.Deletions == 0,

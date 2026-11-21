@@ -4,6 +4,7 @@ import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/styles/achievement_art_palette.dart';
 import 'achievement_catalog.dart';
+import 'achievement_presentation.dart';
 import 'scm_flat_svg.dart';
 import 'scm_holiday_art.dart';
 import '../../shared/remote_image.dart';
@@ -13,12 +14,27 @@ class AchievementArt extends StatelessWidget {
     required this.definition,
     required this.earned,
     required this.size,
+    this.rank,
     super.key,
   });
+
+  /// Earned state and confirmed rank both come from the presentation.
+  factory AchievementArt.of(
+    AchievementPresentation p, {
+    required double size,
+    Key? key,
+  }) => AchievementArt(
+    definition: p.definition,
+    earned: p.earned,
+    rank: p.rank,
+    size: size,
+    key: key,
+  );
 
   final AchievementDefinition definition;
   final bool earned;
   final double size;
+  final int? rank;
   static const _fallback = Center(
     child: StarBridgeIcon(
       StarBridgeIconSemantic.achievement,
@@ -81,6 +97,7 @@ class AchievementArt extends StatelessWidget {
                       ? definition.hiddenLockedAsset!
                       : definition.artAsset(
                           earned: earned,
+                          rank: rank,
                           logicalSize: size,
                           devicePixelRatio: MediaQuery.devicePixelRatioOf(
                             context,

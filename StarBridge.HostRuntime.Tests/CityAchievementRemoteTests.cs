@@ -42,6 +42,8 @@ internal static class CityAchievementRemoteTests
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             var value = body.RootElement;
             var sample = _sample.RootElement;
+            Require(sample.GetProperty("cities").EnumerateArray().Select(c => c.GetString()).SequenceEqual(
+                StarBridge.Core.Achievements.JourneyAchievementPolicy.Tokens), "shared token order");
             var keys = sample.GetProperty("request").EnumerateObject().Select(p => p.Name).ToHashSet();
             Require(keys.Count == 4 && value.EnumerateObject().Count() == keys.Count &&
                 keys.SetEquals(value.EnumerateObject().Select(p => p.Name)), "shared request key set");
@@ -77,7 +79,7 @@ internal static class CityAchievementRemoteTests
             var owner = host.CurrentContext!;
             var receipt = await remote.ObserveCityAsync(owner, 1, observation, default);
             Require(receipt.NewlyEarned.SequenceEqual(new[] { "journey-orison", "journey-stanton" }), "decode new-grant list");
-            foreach (var city in new[] { "lorville", "area18", "orison", "new-babbage" })
+            foreach (var city in StarBridge.Core.Achievements.JourneyAchievementPolicy.Tokens)
             {
                 handler.ExpectedCity = city; handler.ExpectedEvidence = "inventory";
                 await remote.ObserveCityAsync(owner, 1, observation with { City = city, Evidence = "RequestLocationInventory" }, default);
@@ -94,7 +96,8 @@ internal static class CityAchievementRemoteTests
                 try { await remote.ObserveCityAsync(owner, 1, observation with { Evidence = evidence }, default); throw new Exception("unknown local evidence admitted"); }
                 catch (ArgumentException) { }
             }
-            Require(handler.Posts == 5, "invalid ownership and input rejected before HTTP handler");
+            Require(handler.Posts == StarBridge.Core.Achievements.JourneyAchievementPolicy.Tokens.Count + 1,
+                "invalid ownership and input rejected before HTTP handler");
             // A pre-fix persisted parser name must drain through the actual HTTP mapping after restart.
             var queueRoot = Path.Combine(root, "legacy-outbox");
             var store = new CityAchievementOutbox(queueRoot);

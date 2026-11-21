@@ -44,6 +44,7 @@ class ListingsFixture implements MarketplaceListingsPort {
     if (fail) throw StateError('fixture read failure');
     return {
       'rows': rows.map((r) => Map<String, Object?>.from(r)).toList(),
+      'total': rows.length,
       'limit': 20,
       'items': [
         for (final r in rows)

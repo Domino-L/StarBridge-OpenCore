@@ -147,7 +147,7 @@ internal static class NotificationSettingsTests
             var first = await Rooms(2);
             Check(sink.Seen.Count == 1 && sink.Seen[0].Preview == "hiddenDetails" && sink.Seen[0].IsCurrent(), "Real new invite reaches trusted sink with saved privacy");
             Check(first.Payload.GetProperty("localReminder").GetProperty("overlayHandled").GetBoolean() &&
-                !first.Payload.GetProperty("localReminder").GetProperty("desktopEligible").GetBoolean(), "Only one visual channel");
+                first.Payload.GetProperty("localReminder").GetProperty("desktopEligible").GetBoolean(), "0.7.3: a room invite is a card even when the overlay showed it in game");
             await Rooms(3); Check(sink.Seen.Count == 1, "Same event not repeated");
             invites.Clear(); await Rooms(4);
             Check(!sink.Seen[0].IsCurrent(), "Withdrawn or expired target invalidates visible reminder");

@@ -98,13 +98,15 @@ void main() {
         try {
           expect(
             tester.getRect(_button),
-            const Rect.fromLTRB(503, 281, 777, 311),
+            // The orders tab now opens with the category tree (G3, 2026-11-14).
+            // m99 MK6: the price heading has a "只对单件有效" line (+20).
+            const Rect.fromLTRB(503, 443, 777, 473),
           );
           expect(
             tester.getRect(
               find.descendant(of: _button, matching: find.byType(Icon)),
             ),
-            const Rect.fromLTRB(753, 288, 769, 304),
+            const Rect.fromLTRB(753, 450, 769, 466),
           );
           await tester.tap(_button);
           await tester.pumpAndSettle();

@@ -27,6 +27,11 @@ const communityDisbandCopy = <String, (String, String, String)>{
     '驗證關聯的原帳號，不是 SCM 帳號密碼。密碼僅用於本次確認。',
     'Verifies the linked original account, not your SCM password. Used only for this confirmation.',
   ),
+  'scmRevalidation': (
+    '你的账号已迁入 SCM，这次不需要旧账号密码。确认后，会用你当前的 SCM 登录再核对一次身份。',
+    '你的帳號已遷入 SCM，這次不需要舊帳號密碼。確認後，會用你目前的 SCM 登入再核對一次身分。',
+    "Your account has been migrated into SCM, so no old account password is needed. After you confirm, your current SCM sign-in is checked once more.",
+  ),
   'example': (
     '示例操作：无需输入真实密码，不影响真实组织。',
     '示例操作：無需輸入真實密碼，不影響真實組織。',

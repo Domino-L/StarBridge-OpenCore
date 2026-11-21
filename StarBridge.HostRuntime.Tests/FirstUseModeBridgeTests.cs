@@ -43,7 +43,7 @@ internal static partial class FirstUseModeTests
         await using var native = new NativeAccountRuntimeBinding(f.Runtime);
         using var bridge = native.CreateModeDispatcher()!;
         using var composite = new CompositeBridgeDispatcher(new ModeProbe(), native, new ModeProbe(), firstUseMode: bridge);
-        var batch = await composite.DispatchAsync(OfflineRequest(mode)).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var batch = await composite.DispatchAsync(OfflineRequest(mode)).AsTask().WaitAsync(FirstUseTestWait.Bound);
         Require(batch.Response.Status == "ok" && batch.Response.Payload.GetProperty("state").GetString() == "offline" &&
             batch.Response.Payload.GetProperty("publicationSuspended").GetBoolean() &&
             !batch.Response.Payload.GetProperty("canEnterOffline").GetBoolean() && mode.LocalMode().Active &&
@@ -84,8 +84,8 @@ internal static partial class FirstUseModeTests
         var work = bridge.DispatchAsync(OfflineRequest(mode), observer.Token).AsTask();
         try
         {
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5)); observer.Cancel();
-            Require((await work.WaitAsync(TimeSpan.FromSeconds(5))).Response.Status == BridgeResponseStatuses.Cancelled &&
+            await cancelled.Task.WaitAsync(FirstUseTestWait.Bound); observer.Cancel();
+            Require((await work.WaitAsync(FirstUseTestWait.Bound)).Response.Status == BridgeResponseStatuses.Cancelled &&
                 new FirstUseModeStore(f.Root).Read().Phase == "offlinePending" && !mode.LocalMode().Active,
                 "Cancelled pipe wait cannot abandon or acknowledge the physical transition");
             var state = await bridge.DispatchAsync(ModeRequest(mode, FirstUseModeBridgeDispatcher.ReadRequest, new { schemaVersion = 1 }));
@@ -93,7 +93,7 @@ internal static partial class FirstUseModeTests
                 !state.Response.Payload.GetProperty("canEnterOffline").GetBoolean(), "Independent mode read remains usable during Native drain");
         }
         finally { release.TrySetResult(); await Cancelled(read); }
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
         while (mode.Current.State == "switching") await Task.Delay(10, deadline.Token);
         Require(mode.Current.State == "offline" && mode.LocalMode().Active && f.Vault.Deletions == 0,
             "Original transition finishes after its observer has left");
@@ -110,10 +110,10 @@ internal static partial class FirstUseModeTests
         var work = bridge.DispatchAsync(OfflineRequest(mode)).AsTask();
         try
         {
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await cancelled.Task.WaitAsync(FirstUseTestWait.Bound);
             using var writer = new FileStream(ModePath(f.Root) + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             release.TrySetResult(); await Cancelled(read);
-            var batch = await work.WaitAsync(TimeSpan.FromSeconds(5));
+            var batch = await work.WaitAsync(FirstUseTestWait.Bound);
             Require(batch.Response.Status == "ok" && batch.Response.Payload.GetProperty("state").GetString() == "recoveryRequired" &&
                 !batch.Response.Payload.GetProperty("canEnterOffline").GetBoolean() && !mode.LocalMode().Active && f.Vault.Deletions == 0,
                 "Protocol success transports actual recovery, not a successful mode switch");
@@ -165,7 +165,7 @@ internal static partial class FirstUseModeTests
     {
         var pair = InMemoryBridgeConnection.CreatePair();
         using var dispatcher = new ModeEventProbe();
-        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var lifetime = new CancellationTokenSource(FirstUseTestWait.Bound);
         var server = NativeHostPipeServer.ServeConnectionAsync(pair.Right, dispatcher, lifetime.Token);
         try
         {

@@ -24,7 +24,9 @@ internal static class CommunityShipCatalog
     internal static object[]? Loaners(string code, string? status, string culture,
         ShipLoanerCatalog matrix, Func<string, ShipPresentation> lookup)
     {
-        var concept = status?.ToLowerInvariant() is "concept" or "概念";
+        // User 2026-11-05: "开发中就等于概念". Only flight-ready ships get no loaner.
+        var concept = status?.Trim().ToLowerInvariant() is "concept" or "概念" or "in-concept" or "in concept" or
+            "in development" or "in-development" or "in production" or "in-production" or "开发中" or "開發中";
         if (!concept) return status?.ToLowerInvariant() is "flyable" or "可飞" or "可飛" ? [] : null;
         var source = lookup(code);
         if (!matrix.Available || source.EnglishName is null) return null;

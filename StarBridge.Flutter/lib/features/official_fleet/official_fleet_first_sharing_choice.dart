@@ -115,11 +115,12 @@ class _OfficialFleetFirstSharingChoiceState
     final strings = AppStrings.of(context);
     _applying = true;
     try {
-      final saved = await owner.confirmOfficialFirstChoice(
+      final sharingApplied = await owner.confirmOfficialFirstChoice(
         inherited ? scope.savedFields : 15,
         audience: inherited ? scope.maximumRankValue : null,
+        automaticDefault: !inherited,
       );
-      if (!saved || !mounted) return false;
+      if (!sharingApplied || !mounted) return false;
       messenger
         ?..hideCurrentSnackBar()
         ..showSnackBar(

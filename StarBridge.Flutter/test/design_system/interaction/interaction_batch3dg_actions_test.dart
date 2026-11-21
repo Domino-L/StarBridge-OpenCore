@@ -11,6 +11,7 @@ import 'package:starbridge_flutter/features/onboarding/first_use_setup_entry.dar
 import 'package:starbridge_flutter/features/settings/help_support_port.dart';
 import 'package:starbridge_flutter/features/settings/daily_support_port.dart';
 import 'package:starbridge_flutter/features/settings/help_support_settings_page.dart';
+import 'package:starbridge_flutter/features/settings/spiritual_support_button.dart';
 import 'package:starbridge_flutter/features/settings/help_support_topic_transition.dart';
 import 'package:starbridge_flutter/features/settings/settings_entry_dialog.dart';
 import 'package:starbridge_flutter/shared/release/official_client_profile.dart';
@@ -66,8 +67,8 @@ void main() {
                   builder: (_, value, _) => StarBridgeInteractionConfiguration(
                     suite: value.$1,
                     reduceMotion: value.$2,
-                    child: HelpSupportSettingsPage(
-                      dailySupport: connected ? port : null,
+                    child: SpiritualSupportButton(
+                      port: connected ? port : null,
                     ),
                   ),
                 ),
@@ -109,7 +110,7 @@ void main() {
           final port = FakeSupport();
           try {
             await t.pumpWidget(
-              scopedApp(HelpSupportSettingsPage(dailySupport: port), suite),
+              scopedApp(SpiritualSupportButton(port: port), suite),
             );
             await t.pumpAndSettle();
             await fire(t, 'pointer', 'help-spiritual-support');
@@ -292,7 +293,7 @@ void main() {
           final port = FakeSupport();
           try {
             await t.pumpWidget(
-              scopedApp(HelpSupportSettingsPage(dailySupport: port), suite),
+              scopedApp(SpiritualSupportButton(port: port), suite),
             );
             await t.pumpAndSettle();
             await fire(t, input, 'help-spiritual-support');
@@ -341,7 +342,7 @@ void main() {
                   builder: (_, value, _) => StarBridgeInteractionConfiguration(
                     suite: suite,
                     reduceMotion: value,
-                    child: const HelpSupportSettingsPage(),
+                    child: const SpiritualSupportButton(),
                   ),
                 ),
                 suite,

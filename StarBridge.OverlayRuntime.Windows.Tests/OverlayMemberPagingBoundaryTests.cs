@@ -107,8 +107,8 @@ internal static class OverlayMemberPagingBoundaryTests
                     void Refresh(string state)=>model.Refresh(new([Project(state)]),settings,OverlayRosterSelectionSettings.Default,"zh",true,source.Command,PlayerPresenceKind.InGame,Shard,source.Scene.Context);
                     int Count()=>model.EventNotifications.Count(row=>row.EventType!=OverlayEventNotificationTypes.None)+model.PendingEventNotificationCount;
                     Refresh("Paused");Refresh("InGame");Check(Count()==0,"projected pause does not spam the actual online event rail",new{Cards=Count()});
-                    Refresh("Offline");Check(Count()==1,"actual projected offline exit is announced once",new{Cards=Count()});
-                    Refresh("InGame");Refresh("InGame");Check(Count()==2,"actual projected return is announced once",new{Cards=Count()});
+                    Refresh("Offline");Check(Count()==0,"member offline is a reminder card only, never an overlay event (0.7.3)",new{Cards=Count()});
+                    Refresh("InGame");Refresh("InGame");Check(Count()==0,"member return is a reminder card only, never an overlay event (0.7.3)",new{Cards=Count()});
                 }finally{model.ClearAuthorizedContent();}
             }
         }
@@ -204,10 +204,10 @@ internal static class OverlayMemberPagingBoundaryTests
                 "authorization, source or finished motion invalidates outgoing content and clock",new{Mode=mode});
         }
         var local=Create("device-local",[Player("peer")]);using var localRenderer=local.Window;
-        var enabled=local.Settings with{ShowEventNotifications=true,EventNotificationTypes=OverlayEventNotificationTypes.OnlineSummary};
+        var enabled=local.Settings with{ShowEventNotifications=true,EventNotificationTypes=OverlayEventNotificationTypes.DeathAndRespawn};
         local.Model.Refresh(new([Player("peer")]),enabled,local.Selection,"zh",true,local.Command,PlayerPresenceKind.InGame,Shard,local.Context);
         local.Model.EventNotifications.Clear();
-        local.Model.QueueGameEventNotification(OverlayEventNotificationTypes.OnlineSummary,"device-local-fixture","local",false,true,isDeviceLocal:true);
+        local.Model.QueueGameEventNotification(OverlayEventNotificationTypes.DeathAndRespawn,"device-local-fixture","local",false,true,isDeviceLocal:true);
         Check(local.Model.EventNotifications.Any(row=>row.Title=="device-local-fixture"),"control: local event queued",new{});
         local.Model.ClearAuthorizedContent(preserveDeviceLocalEvents:true);
         Check(local.Model.EventNotifications.Any(row=>row.Title=="device-local-fixture"),"member authorization reset preserves device-local event policy",new{});

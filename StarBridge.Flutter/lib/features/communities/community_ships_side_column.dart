@@ -24,6 +24,7 @@ class CommunityShipsSideColumn extends StatelessWidget {
     this.ownerTargetFactory = communityShipOwnerTarget,
     this.includeSocialActions = true,
     this.onRefreshLibrary,
+    this.onLibraryStale,
     super.key,
   });
 
@@ -37,7 +38,7 @@ class CommunityShipsSideColumn extends StatelessWidget {
   final Uint8List? avatar;
   final OrganizationShipOwnerTargetFactory? ownerTargetFactory;
   final bool includeSocialActions;
-  final VoidCallback? onRefreshLibrary;
+  final VoidCallback? onRefreshLibrary, onLibraryStale;
 
   static const width = 340.0;
 
@@ -63,16 +64,15 @@ class CommunityShipsSideColumn extends StatelessWidget {
         onRefreshLibrary: onRefreshLibrary == null
             ? null
             : (_) => onRefreshLibrary!(),
+        onLibraryStale: onLibraryStale,
       );
     } else if (selectedRef != null && lookingUp) {
       body = const Center(child: CircularProgressIndicator());
     } else {
       body = Text(
         communityShipsText(context, 'sidePick'),
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: tokens.colors.textSecondary,
-          height: 1.6,
-        ),
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: tokens.colors.textSecondary, height: 1.6),
       );
     }
     return Container(

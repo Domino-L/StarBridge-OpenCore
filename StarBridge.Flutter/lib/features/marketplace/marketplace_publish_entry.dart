@@ -8,9 +8,11 @@ import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_listing_errors.dart';
 import 'marketplace_listing_editor.dart';
+import 'marketplace_listing_duplicate.dart';
 import 'marketplace_listing_publish.dart';
 import 'marketplace_listings_controller.dart';
 import 'marketplace_port.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_trade_feedback.dart';
 import 'marketplace_trade_profile.dart';
 import 'marketplace_details.dart';
@@ -30,17 +32,11 @@ Future<void> openMarketListingAction(
   final port = market.port;
   if (port is! BridgeMarketplacePort) return;
   if (action == 'copy') {
-    return openMarketPublish(
-      context,
-      market,
-      draft: ListingDraft(
-        item: {'id': row['itemId'], 'name': row['name']},
-        side: row['side'] as String? ?? 'sell',
-        price: '${row['price'] ?? ''}',
-        quantity: '${row['quantity'] ?? 1}',
-        location: '${row['location'] ?? ''}',
-      ),
-    );
+    if (!listingCanCopy(row, market.fullOrders)) return;
+    final revision = market.contextRevision;
+    final draft = await duplicateListing(row, market.fullOrders);
+    if (!context.mounted || revision != market.contextRevision) return;
+    return openMarketPublish(context, market, draft: draft);
   }
   final visible = row['visible'] == true;
   if (action == 'visibility' && visible) {
@@ -76,7 +72,10 @@ Future<void> openMarketListingAction(
     );
     if (ok != true || !context.mounted) return;
   }
-  final listings = MarketplaceListingsController(BridgeMarketplaceListingsPort(port));
+  final listings = MarketplaceListingsController(BridgeMarketplaceListingsPort(port))
+    ..bestPrice = market.bestPrice
+    ..ensureBestPrices = market.ensureBestPrices
+    ..login = market.login;
   try {
     if (action == 'edit') {
       unawaited(listings.refresh());
@@ -91,6 +90,12 @@ Future<void> openMarketListingAction(
                   ? marketText(context, 'unavailable')
                   : listingErrorText(context, listings.errorCode, listings.error!),
             ),
+            action: marketplaceNeedsLogin(listings.errorCode) && market.login != null
+                ? SnackBarAction(
+                    label: recoveryText(context, listings.errorCode == 'marketplace.reauthorize_required' ? '重新授权' : '登录'),
+                    onPressed: () => market.login!(context),
+                  )
+                : null,
           ),
         );
       }
@@ -107,7 +112,10 @@ Future<void> openMarketPublish(BuildContext context, MarketplaceController marke
   if (port is! BridgeMarketplacePort) return;
   final revision = market.contextRevision;
   final listings = MarketplaceListingsController(BridgeMarketplaceListingsPort(port))
-    ..qualityTiers = market.qualityTiers;
+    ..bestPrice = market.bestPrice
+    ..ensureBestPrices = market.ensureBestPrices
+    ..qualityTiers = market.qualityTiers
+    ..login = market.login;
   // Open at once: the wizard listens to the controller, shows its own load
   // error and retry, and step 1 needs no data. A click must never look dead.
   unawaited(listings.refresh());
@@ -116,8 +124,11 @@ Future<void> openMarketPublish(BuildContext context, MarketplaceController marke
   try {
     await tradeMotionDialog<void>(context, (_) => ListingPublishDialog(listings,
       opened,
+      manageListings: market.openMyListings,
       initialStep: item == null && draft == null ? 0 : 2,
-      editProfile: () async {
+      initialError: draft != null && draft.side == 'barter' && draft.wanted.isEmpty
+          ? '没有读到想要的物品，请重新选择' : null,
+      editProfile: market.profileEditedInClient ? null : () async {
         final profile = await editTradeProfile(context, market);
         if (!context.mounted || market.contextRevision != revision || profile == null) return;
         listings.applyTradeProfile(profile, marketTradeTime(context, profile));

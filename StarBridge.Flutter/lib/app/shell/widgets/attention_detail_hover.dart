@@ -7,7 +7,12 @@ import '../../../design_system/tokens/starbridge_tokens.dart';
 
 /// Shows [detail] beside [child] while the pointer rests on either of them or
 /// focus is inside [child] (0.7.2 sidebar option C). The card stays open while
-/// the pointer moves onto it, so its rows can be clicked; Escape closes it.
+/// the pointer moves onto it, so its rows can be clicked.
+///
+/// It closes when the pointer leaves both, on a click outside both, on Escape
+/// and when focus leaves [child]. A click on [child] also focuses it, so focus
+/// alone must not hold the card after the pointer has gone; once closed this
+/// way it opens again only on a new hover or a new focus.
 class AttentionDetailHover extends StatefulWidget {
   const AttentionDetailHover({
     required this.detail,
@@ -25,21 +30,68 @@ class AttentionDetailHover extends StatefulWidget {
 class _AttentionDetailHoverState extends State<AttentionDetailHover> {
   final _portal = OverlayPortalController();
   final _link = LayerLink();
-  bool _anchor = false, _card = false, _focus = false;
+  bool _anchor = false, _card = false, _focus = false, _dismissed = false;
   Timer? _timer;
 
-  void _update() {
+  bool get _want =>
+      widget.enabled && !_dismissed && (_anchor || _card || _focus);
+
+  void _update({bool leaving = false}) {
     _timer?.cancel();
-    final want = widget.enabled && (_anchor || _card || _focus);
-    if (want == _portal.isShowing) return;
+    if (!leaving && _want == _portal.isShowing) return;
     // Open after a short rest (like tooltips); close a moment later so the
     // pointer can cross the gap onto the card.
-    _timer = Timer(Duration(milliseconds: want ? (_focus ? 0 : 300) : 150), () {
+    final open = _want && !leaving;
+    _timer = Timer(Duration(milliseconds: open ? (_focus ? 0 : 300) : 150), () {
       if (!mounted) return;
-      final still = widget.enabled && (_anchor || _card || _focus);
-      if (still && !_portal.isShowing) _portal.show();
-      if (!still && _portal.isShowing) _portal.hide();
+      if (leaving && !_anchor && !_card) _dismissed = true;
+      if (_want && !_portal.isShowing) _portal.show();
+      if (!_want && _portal.isShowing) _portal.hide();
     });
+  }
+
+  void _enter(void Function() mark) {
+    _dismissed = false;
+    mark();
+    _update();
+  }
+
+  void _dismiss() {
+    _timer?.cancel();
+    _dismissed = true;
+    if (_portal.isShowing) _portal.hide();
+  }
+
+  KeyEventResult _key(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !_portal.isShowing) {
+      return KeyEventResult.ignored;
+    }
+    _dismiss();
+    return KeyEventResult.handled;
+  }
+
+  // Escape with focus elsewhere (the card opened on hover alone). Focus
+  // handlers run first, so Escape inside [child] or the card is not seen twice.
+  bool _escape(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !_portal.isShowing) {
+      return false;
+    }
+    _dismiss();
+    return true;
+  }
+
+  void _tapOutside(PointerDownEvent _) {
+    if (_portal.isShowing || _timer?.isActive == true) _dismiss();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_escape);
   }
 
   @override
@@ -50,6 +102,7 @@ class _AttentionDetailHoverState extends State<AttentionDetailHover> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_escape);
     _timer?.cancel();
     super.dispose();
   }
@@ -68,54 +121,57 @@ class _AttentionDetailHoverState extends State<AttentionDetailHover> {
           offset: const Offset(6, 0),
           child: Align(
             alignment: Alignment.topLeft,
-            child: MouseRegion(
-              onEnter: (_) => setState(() {
-                _card = true;
-                _update();
-              }),
-              onExit: (_) => setState(() {
-                _card = false;
-                _update();
-              }),
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      _portal.hide,
+            child: TapRegion(
+              groupId: this,
+              onTapOutside: _tapOutside,
+              child: MouseRegion(
+                onEnter: (_) => _enter(() => _card = true),
+                onExit: (_) {
+                  _card = false;
+                  _update(leaving: true);
                 },
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: Container(
-                    key: const Key('attention-detail-card'),
-                    width: 250,
-                    decoration: BoxDecoration(
-                      color: t.surfaces.panel.fill,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: t.surfaces.panel.border),
+                child: Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onKeyEvent: _key,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Container(
+                      key: const Key('attention-detail-card'),
+                      width: 250,
+                      decoration: BoxDecoration(
+                        color: t.surfaces.panel.fill,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: t.surfaces.panel.border),
+                      ),
+                      child: widget.detail(context),
                     ),
-                    child: widget.detail(context),
                   ),
                 ),
               ),
             ),
           ),
         ),
-        child: MouseRegion(
-          onEnter: (_) {
-            _anchor = true;
-            _update();
-          },
-          onExit: (_) {
-            _anchor = false;
-            _update();
-          },
-          child: Focus(
-            canRequestFocus: false,
-            skipTraversal: true,
-            onFocusChange: (focused) {
-              _focus = focused;
-              _update();
+        child: TapRegion(
+          groupId: this,
+          onTapOutside: _tapOutside,
+          child: MouseRegion(
+            onEnter: (_) => _enter(() => _anchor = true),
+            onExit: (_) {
+              _anchor = false;
+              _update(leaving: true);
             },
-            child: widget.child,
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _key,
+              onFocusChange: (focused) {
+                if (focused) _dismissed = false;
+                _focus = focused;
+                _update();
+              },
+              child: widget.child,
+            ),
           ),
         ),
       ),

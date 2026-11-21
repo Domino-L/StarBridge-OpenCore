@@ -49,7 +49,7 @@ internal static partial class FirstUseModeTests
     }
     private static async Task Cancelled(Task work)
     {
-        try { await work.WaitAsync(TimeSpan.FromSeconds(3)); } catch (OperationCanceledException) { return; }
+        try { await work.WaitAsync(FirstUseTestWait.Bound); } catch (OperationCanceledException) { return; }
         throw new InvalidOperationException("Expected cancellation");
     }
     private static Task<AccountBridgeRuntime> NoOnline(CancellationToken _) =>
@@ -84,7 +84,7 @@ internal static partial class FirstUseModeTests
         var exited = f.Runtime.RetireFirstUseLocalSourcesAsync();
         Require(!exited.IsCompleted && !await f.Runtime.RestoreFirstUseLocalSourcesAsync(exited, generation),
             "retirement must actually finish before a replacement can be constructed");
-        held.Dispose(); await exited.WaitAsync(TimeSpan.FromSeconds(5));
+        held.Dispose(); await exited.WaitAsync(FirstUseTestWait.Bound);
         Require(clock.Live == 0, "all former timers exited before reconstruction");
         Require(!await f.Runtime.RestoreFirstUseLocalSourcesAsync(Task.CompletedTask, generation) &&
             !await f.Runtime.RestoreFirstUseLocalSourcesAsync(exited, generation + 1),
@@ -110,7 +110,7 @@ internal static partial class FirstUseModeTests
         f.RequireLocalStateUnchanged();
         var secondExit = f.Runtime.RetireFirstUseLocalSourcesAsync();
         Require(!ReferenceEquals(exited, secondExit), "replacement has its own retirement receipt");
-        await secondExit.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondExit.WaitAsync(FirstUseTestWait.Bound);
         Require(clock.Live == 0, "replacement timer also physically exits");
         f.Runtime.Dispose();
         Require(!await f.Runtime.RestoreFirstUseLocalSourcesAsync(secondExit, generation), "closed root cannot reconstruct readers");
@@ -131,7 +131,7 @@ internal static partial class FirstUseModeTests
             "retirement requested during timer construction prevents successful recovery acknowledgement");
         clock.Creating = null;
         Require(racedExit is not null && !ReferenceEquals(racedExit, exited), "new graph owns the raced exit");
-        await racedExit!.WaitAsync(TimeSpan.FromSeconds(5));
+        await racedExit!.WaitAsync(FirstUseTestWait.Bound);
         Require(clock.Live == 0 && bytes.SequenceEqual(File.ReadAllBytes(ModePath(f.Root))),
             "new timer drained and no mode intent changed");
         f.RequireLocalStateUnchanged();
@@ -155,7 +155,7 @@ internal static partial class FirstUseModeTests
         clock.Creating = () => throw failure;
         async Task Faulted(Task work)
         {
-            try { await work.WaitAsync(TimeSpan.FromSeconds(5)); }
+            try { await work.WaitAsync(FirstUseTestWait.Bound); }
             catch (InvalidOperationException error) when (ReferenceEquals(error, failure)) { return; }
             throw new InvalidOperationException("Original timer failure must remain observable");
         }
@@ -197,7 +197,7 @@ internal static partial class FirstUseModeTests
             "invalidated mode or root cannot acknowledge recovery");
         clock.Creating = null;
         var cleanup = f.Runtime.RetireFirstUseLocalSourcesAsync();
-        await cleanup.WaitAsync(TimeSpan.FromSeconds(5));
+        await cleanup.WaitAsync(FirstUseTestWait.Bound);
         Require(clock.Live == 0 && expected.SequenceEqual(File.ReadAllBytes(ModePath(f.Root))),
             "late timer is disposed without overwriting the current durable intent");
         Require(!await f.Runtime.RestoreFirstUseLocalSourcesAsync(cleanup, generation),
@@ -297,7 +297,7 @@ internal static partial class FirstUseModeTests
             // while a real source's synchronous cancellation callback is running.
             observer = Task.Factory.StartNew(() =>
             {
-                if (!callbackEntered.Wait(TimeSpan.FromSeconds(3)))
+                if (!callbackEntered.Wait(FirstUseTestWait.Bound))
                     throw new InvalidOperationException("Source cancellation callback did not run.");
                 var pending = f.Runtime.RetireFirstUseLocalSourcesAsync();
                 observerReturned.Set();
@@ -307,7 +307,7 @@ internal static partial class FirstUseModeTests
         using var callback = reenter ? leases[3].Token.Register(() =>
         {
             callbackEntered.Set();
-            callbackFinished = observerReturned.Wait(TimeSpan.FromSeconds(3));
+            callbackFinished = observerReturned.Wait(FirstUseTestWait.Bound);
             // A failing consumer callback must not prevent subsequent sources
             // from closing or falsely acknowledge outstanding leases.
             throw new InvalidOperationException("Synthetic cancellation callback failure.");
@@ -318,7 +318,7 @@ internal static partial class FirstUseModeTests
             stop = f.Runtime.RetireFirstUseLocalSourcesAsync();
             if (observer is not null)
             {
-                observedExit = await observer.WaitAsync(TimeSpan.FromSeconds(3));
+                observedExit = await observer.WaitAsync(FirstUseTestWait.Bound);
                 Require(callbackFinished && ReferenceEquals(stop, observedExit),
                     "Cancellation can reenter from another thread and receives the same reserved exit.");
             }
@@ -332,7 +332,7 @@ internal static partial class FirstUseModeTests
                 Require(!stop.IsCompleted, "An outstanding original source lease must prevent completion.");
                 leases[index].Dispose();
             }
-            await stop.WaitAsync(TimeSpan.FromSeconds(3));
+            await stop.WaitAsync(FirstUseTestWait.Bound);
             Require(f.Runtime.FirstUseGame!.Current.State == "unavailable" &&
                 f.Runtime.FirstUseStatistics!.Current.State == "inactive" &&
                 f.Runtime.FirstUseOverlaySource!.Capture()!.Read().State == "unavailable" &&
@@ -346,8 +346,8 @@ internal static partial class FirstUseModeTests
         {
             callbackEntered.Set();
             foreach (var lease in leases) lease.Dispose();
-            if (stop is not null) await stop.WaitAsync(TimeSpan.FromSeconds(3));
-            if (observer is not null) await observer.WaitAsync(TimeSpan.FromSeconds(3));
+            if (stop is not null) await stop.WaitAsync(FirstUseTestWait.Bound);
+            if (observer is not null) await observer.WaitAsync(FirstUseTestWait.Bound);
         }
     }
 
@@ -369,7 +369,7 @@ internal static partial class FirstUseModeTests
         using var f = new LocalAccountStopTests.Fixture(sampling: true);
         await AccountBridgeRuntime.CreateWithFirstUseModeAsync(f.Root, _ => Task.FromResult(f.Runtime));
         var mode = f.Runtime.FirstUseMode!;
-        var switched = await mode.ApplyLocalAsync(0, Op(), f.Host.Generation).WaitAsync(TimeSpan.FromSeconds(3));
+        var switched = await mode.ApplyLocalAsync(0, Op(), f.Host.Generation).WaitAsync(FirstUseTestWait.Bound);
         Require(switched is { State: "local", ActiveMode: "local", PublicationSuspended: true, Revision: 2 } &&
             mode.LocalMode().Active && f.Vault.Deleted && f.Host.CurrentContext is null &&
             new FirstUseModeStore(f.Root).Read().Phase == "local", "only actual logout and drain commit local readiness");
@@ -399,7 +399,7 @@ internal static partial class FirstUseModeTests
         await AccountBridgeRuntime.CreateWithFirstUseModeAsync(f.Root, _ => Task.FromResult(f.Runtime));
         f.Transport.HoldProfile = true;
         var reading = f.Runtime.DispatchAsync(Request(f)).AsTask();
-        await f.Transport.ProfileStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.ProfileStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         using var cancellation = new CancellationTokenSource();
         var switching = f.Runtime.FirstUseMode!.ApplyLocalAsync(0, Op(), f.Host.Generation, cancellation.Token);
         Require(!switching.IsCompleted && new FirstUseModeStore(f.Root).Read().Phase == "localPending" &&
@@ -414,7 +414,7 @@ internal static partial class FirstUseModeTests
         var rejected = await f.Runtime.DispatchAsync(Request(f, "account.getCurrent"));
         Require(rejected.Response.Error?.Code == "account.local_mode", "late implicit restore is denied after interrupted intent");
         f.Transport.ProfileRelease.TrySetResult();
-        Require((await reading.WaitAsync(TimeSpan.FromSeconds(3))).Response.Status == BridgeResponseStatuses.Cancelled,
+        Require((await reading.WaitAsync(FirstUseTestWait.Bound)).Response.Status == BridgeResponseStatuses.Cancelled,
             "late profile result cannot regain authority");
         var retry = await f.Runtime.FirstUseMode.ApplyLocalAsync(1, Op(), f.Host.Generation);
         Require(retry.State == "local" && f.Vault.Deletions == 1, "explicit retry resumes retirement, not login");
@@ -488,11 +488,11 @@ internal static partial class FirstUseModeTests
         await AccountBridgeRuntime.CreateWithFirstUseModeAsync(f.Root, _ => Task.FromResult(f.Runtime));
         f.Transport.HoldProfile = true;
         var reading = f.Runtime.DispatchAsync(Request(f)).AsTask();
-        await f.Transport.ProfileStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.ProfileStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         var switching = f.Runtime.FirstUseMode!.ApplyLocalAsync(0, Op(), f.Host.Generation);
         await f.Host.LogoutAsync(f.Host.CurrentContext!, default);
         f.Transport.ProfileRelease.TrySetResult();
-        await reading.WaitAsync(TimeSpan.FromSeconds(3));
+        await reading.WaitAsync(FirstUseTestWait.Bound);
         Require((await switching).State == "contextChanged", "separate lifecycle changes invalidate the original transition");
         var store = new FirstUseModeStore(f.Root); var pending = store.Read();
         var traffic = f.Transport.AllRequests; var loads = f.Vault.Loads;
@@ -659,10 +659,10 @@ internal static partial class FirstUseModeTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var booting = AccountBridgeRuntime.CreateWithFirstUseModeAsync(f.Root, async _ =>
         { entered.TrySetResult(); await release.Task; return f.Runtime; });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await entered.Task.WaitAsync(FirstUseTestWait.Bound);
         new FirstUseModeStore(f.Root).Save(0, Op(), "localPending", () => true);
         release.TrySetResult();
-        try { await booting.WaitAsync(TimeSpan.FromSeconds(3)); }
+        try { await booting.WaitAsync(FirstUseTestWait.Bound); }
         catch (LocalFirstUseException error) when (error.Code == "firstUse.context_changed")
         {
             Require(f.Vault.Loads == 0 && f.Transport.AllRequests == 0 && !f.Vault.Deleted,

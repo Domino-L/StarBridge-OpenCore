@@ -12,7 +12,8 @@ internal sealed record ShipSpecifications(string State, string ModelName, string
     DateTimeOffset? FetchedAt = null, bool Stale = false,
     IReadOnlyList<ShipSpecificationGroup>? Groups = null,
     IReadOnlyList<ShipSpecificationComponent>? Components = null,
-    string? PaintBaseModel = null, string? BundleBaseModel = null);
+    string? PaintBaseModel = null, string? BundleBaseModel = null,
+    string? ThumbnailUrl = null);
 
 internal static class ShipSpecificationProjection
 {

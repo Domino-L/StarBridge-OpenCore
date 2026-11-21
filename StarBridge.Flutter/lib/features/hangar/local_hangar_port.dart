@@ -1,14 +1,28 @@
 import '../../shared/ships/ship_reviewed_display.dart';
 
+/// Reads the Host's `yyyy-MM-dd` pledge date as a local calendar date.
+DateTime? parseAcquiredOn(Object? value) {
+  if (value is! String) return null;
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(value);
+  if (match == null) return null;
+  final year = int.parse(match[1]!), month = int.parse(match[2]!);
+  final day = int.parse(match[3]!);
+  if (year <= 1 || month < 1 || month > 12 || day < 1) return null;
+  final date = DateTime(year, month, day);
+  return date.month == month && date.day == day ? date : null;
+}
+
 class LocalHangarShip {
   const LocalHangarShip({
     required this.id,
     required this.title,
     this.liner,
+    this.manufacturer,
     this.cn,
     this.tw,
     this.size,
     this.addedAt,
+    this.acquiredOn,
     this.removedAt,
     this.catalogId,
     this.category,
@@ -25,7 +39,16 @@ class LocalHangarShip {
   final String id, title;
   final String? nickname, notes;
   final String? liner, cn, tw, size;
+
+  /// The catalog's maker, in the catalog's English spelling.
+  final String? manufacturer;
+
+  /// When this client first saved the ship. Not shown as "入库时间".
   final DateTime? addedAt;
+
+  /// Official RSI hangar pledge date ("入库时间"), a calendar date in local
+  /// time; null when RSI showed none (user 11-12: never the import time).
+  final DateTime? acquiredOn;
   final DateTime? removedAt;
   String get modelKey => catalogId?.trim().isNotEmpty == true
       ? 'catalog:${catalogId!.trim().toLowerCase()}'

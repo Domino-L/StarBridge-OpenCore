@@ -71,13 +71,46 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
     private static readonly Lazy<GameLogLocationNameIndex> LocationNames = new(GameLogLocationNameIndex.Load);
 
     private RegexLogEventParser _parser = new();
+    internal Func<string, FleetEvent?>? EventParser { get; set; }
     private FleetState _fleet = new();
     private readonly QuantumTravelContextTracker _quantumTravelContext = new();
+    private static readonly TimeSpan QuantumShipEvidenceWindow = TimeSpan.FromMinutes(30);
+    private (string? ShipInstanceId, DateTimeOffset SeenAt)? _lastLocalNavigation;
+    private readonly Dictionary<string, DateTimeOffset> _localShipEvidence = new(StringComparer.OrdinalIgnoreCase);
+    // FleetState may retain a ship for display after inventory or an owner-filtered
+    // channel exit. That retained state is not permission for another arrival.
+    // Ordered unique collection, oldest revocation first; bounded to 256 IDs per session.
+    private readonly List<string> _revokedShipInstances = [];
     private string? _localHandle;
     private string? _serverShard;
     private string _serverState = "unknown";
     private string? _serverRegion;
     private string? _publishedServerShard;
+    internal event Action<FleetEvent, bool>? ContractEvidence;
+    internal event Action<Exception, string>? ContractFault;
+    internal Func<bool>? ContractReadingBlocked { get; set; }
+    internal Action<string>? ContractLineSkipped { get; set; }
+    internal bool SkipBlockedContractLine(string line)
+    {
+        // Skip only lines that name a mission (MissionId:, missionId [..], CreateMarker,
+        // MissionShared). Other HUD notifications, such as joining or leaving a ship
+        // channel, still drive the current ship and must keep being parsed.
+        if (ContractReadingBlocked?.Invoke() != true ||
+            !line.Contains("missionId", StringComparison.OrdinalIgnoreCase)) return false;
+        ContractLineSkipped?.Invoke(line);
+        return true;
+    }
+    internal void ReportContractFault(Exception error, string line) => ContractFault?.Invoke(error, line);
+    internal bool TracksContracts => ContractEvidence is not null;
+
+    private void EmitContractEvidence(FleetEvent e, bool live)
+    {
+        if (_localHandle is not null && _serverState == "connected" &&
+            (e.Player.Equals("LocalPlayer", StringComparison.OrdinalIgnoreCase) ||
+             e.Player.Equals(_localHandle, StringComparison.OrdinalIgnoreCase)) &&
+            (e.Contract is not null || e.Type is FleetEventType.PlayerDied or FleetEventType.PlayerRespawned))
+            ContractEvidence?.Invoke(e with { SourceLine = null }, live);
+    }
 
     internal static bool MightContainEvidence(string line) =>
         line.Contains("<Join PU>", StringComparison.OrdinalIgnoreCase) ||
@@ -100,7 +133,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
     {
         _parser = new();
         _fleet = new();
-        _quantumTravelContext.Reset();
+        ResetQuantumEvidence();
         _localHandle = null;
         _serverShard = null;
         _serverState = "unknown";
@@ -121,7 +154,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             _serverRegion = null;
             _publishedServerShard = null;
             _fleet.Clear();
-            _quantumTravelContext.Reset();
+            ResetQuantumEvidence();
             if (wasConnected) journal?.Add(new(Support.LocalGameEventCategories.Server,
                 "ServerLeft", "已离开游戏服务器", "服务器标识已清空"));
             return;
@@ -135,7 +168,7 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
                 !_serverShard.Equals(shard, StringComparison.OrdinalIgnoreCase))
             {
                 _fleet.Clear();
-                _quantumTravelContext.Reset();
+                ResetQuantumEvidence();
             }
             _serverShard = shard;
             _serverState = "connected";
@@ -146,7 +179,16 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
                 _publishedServerShard is null ? "服务器已连接" : $"{_serverRegion} / {_publishedServerShard}", DisplayValue: _serverRegion));
         }
 
-        var gameEvent = _parser.TryParse(line);
+        if (SkipBlockedContractLine(line)) return;
+        FleetEvent? gameEvent;
+        try { gameEvent = EventParser is { } parse ? parse(line) : _parser.TryParse(line); }
+        catch (Exception error) when (TracksContracts)
+        {
+            // This line is consumed by the reader. Losing contract/death evidence
+            // breaks completeness, while identity and session observation continue.
+            ReportContractFault(error, line);
+            return;
+        }
         if (gameEvent is null)
         {
             return;
@@ -158,12 +200,35 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
                 !_localHandle.Equals(gameEvent.Player, StringComparison.OrdinalIgnoreCase))
             {
                 _fleet.Clear();
-                _quantumTravelContext.Reset();
+                ResetQuantumEvidence();
             }
             _localHandle = gameEvent.Player;
             Record(gameEvent);
             return;
         }
+
+        // Arrival rows have no player identity: the parser's LocalPlayer alias
+        // alone proves nothing. AUTH/NOT AUTH is not an ownership discriminator.
+        // Reject before context resolution (which consumes a route), journaling,
+        // FleetState.Apply or any downstream observer can see the arrival.
+        if (gameEvent.Type == FleetEventType.PlayerLocationChanged &&
+            gameEvent.LocationEvidence == "Quantum arrival" && !IsLocalQuantumArrival(gameEvent))
+            return;
+
+        var isLocalActor = _localHandle is not null &&
+            (gameEvent.Player.Equals("LocalPlayer", StringComparison.OrdinalIgnoreCase) ||
+             gameEvent.Player.Equals(_localHandle, StringComparison.OrdinalIgnoreCase));
+        // Channel notifications always describe the local occupant; ShipOwner is
+        // the owner of the channel, not the player entering or leaving it.
+        // Maintain occupancy before the separate FleetState owner filter below.
+        var revokeCurrentShipOnExit = isLocalActor && gameEvent.Type == FleetEventType.PlayerExitedShip &&
+            ExitRevokesCurrentShip(gameEvent.Ship);
+        if (revokeCurrentShipOnExit)
+            RevokeQuantumOccupancy();
+        // Channel joins still reach FleetState below, but prove no instance.
+
+        try { EmitContractEvidence(gameEvent, live); }
+        catch (Exception error) { ReportContractFault(error, line); }
 
         // MainWindow resolves this same bounded navigation context before both
         // journaling and FleetState.Apply. Keep it local to the accepted owner;
@@ -173,6 +238,11 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
              gameEvent.Player.Equals(_localHandle, StringComparison.OrdinalIgnoreCase)) &&
             (gameEvent.ShipOwner is null || gameEvent.ShipOwner.Equals(_localHandle, StringComparison.OrdinalIgnoreCase)))
         {
+            if (gameEvent.Type == FleetEventType.PlayerNavigationTargetChanged)
+                _lastLocalNavigation = (gameEvent.ShipInstanceId, gameEvent.Timestamp ?? DateTimeOffset.Now);
+            if ((gameEvent.Type is FleetEventType.PlayerNavigationTargetChanged or FleetEventType.PlayerControllingShip) &&
+                !string.IsNullOrWhiteSpace(gameEvent.ShipInstanceId))
+                _revokedShipInstances.RemoveAll(id => id.Equals(gameEvent.ShipInstanceId, StringComparison.OrdinalIgnoreCase));
             var name = GameShipNames.FindRuntimeIdentity(gameEvent.Ship);
             gameEvent = _quantumTravelContext.Resolve(gameEvent with
                 { Ship = name?.RuntimeId ?? name?.EnglishName ?? gameEvent.Ship });
@@ -218,8 +288,115 @@ internal sealed class GameLogSessionTracker(Support.GameLogJournalBatch? journal
             CityArrived?.Invoke(_localHandle, city, gameEvent.LocationEvidenceScore == 95 ? "RequestLocationInventory" : "PLAYER_LOCATION");
 
         var shipName = GameShipNames.FindRuntimeIdentity(gameEvent.Ship);
+        var previousPlayer = _fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer");
+        var previousShipId = previousPlayer?.ShipInstanceId;
+        var previousLastKnownShipId = previousPlayer?.LastKnownShipInstanceId;
         _fleet.Apply(gameEvent with { Player = "LocalPlayer",
             Ship = shipName?.RuntimeId ?? shipName?.EnglishName ?? gameEvent.Ship });
+
+        // Keep the original instance-evidence time for FleetPlayer's LastKnown
+        // fallback. Snapshot refreshes and unrelated events cannot renew it.
+        var player = _fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer");
+        if (player?.ShipInstanceId is { } shipId && player.LastShipInstanceSeenAt is { } seenAt)
+            _localShipEvidence[shipId] = seenAt;
+        // Only current and LastKnown instances can qualify; retain at most those
+        // two times, including LastKnown when a different ship becomes current.
+        foreach (var id in _localShipEvidence.Keys.Where(id =>
+                     !id.Equals(player?.ShipInstanceId, StringComparison.OrdinalIgnoreCase) &&
+                     !id.Equals(player?.LastKnownShipInstanceId, StringComparison.OrdinalIgnoreCase)).ToArray())
+            _localShipEvidence.Remove(id);
+
+        // Core decides whether ClearDriver is disembarkation or just leaving a seat.
+        // Clear after Apply and evidence refresh: inventory within 15 seconds of an
+        // arrival may retain the current ship, but must not restore these proofs.
+        // Leave the accepted arrival and its location confirmation to FleetState.
+        if (revokeCurrentShipOnExit ||
+            (gameEvent.Type == FleetEventType.PlayerStoppedDrivingShip &&
+             previousShipId is not null && player?.ShipInstanceId is null) ||
+            (gameEvent.Type == FleetEventType.PlayerLocationChanged &&
+             gameEvent.LocationEvidence == "Location inventory context"))
+        {
+            RevokeQuantumOccupancy(previousShipId, previousLastKnownShipId);
+        }
+    }
+
+    private bool IsLocalQuantumArrival(FleetEvent arrival)
+    {
+        if (_localHandle is null || string.IsNullOrWhiteSpace(arrival.ShipInstanceId)) return false;
+        var shipId = arrival.ShipInstanceId;
+        var timestamp = arrival.Timestamp ?? DateTimeOffset.Now;
+        if (_lastLocalNavigation is { } navigation &&
+            shipId.Equals(navigation.ShipInstanceId, StringComparison.OrdinalIgnoreCase) &&
+            IsRecentShipEvidence(navigation.SeenAt, timestamp)) return true;
+
+        if (_revokedShipInstances.Contains(shipId, StringComparer.OrdinalIgnoreCase)) return false;
+        var player = _fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer");
+        if (shipId.Equals(player?.ShipInstanceId, StringComparison.OrdinalIgnoreCase)) return true;
+        if (shipId.Equals(player?.LastKnownShipInstanceId, StringComparison.OrdinalIgnoreCase) &&
+               _localShipEvidence.TryGetValue(shipId, out var seenAt) &&
+               IsRecentShipEvidence(seenAt, timestamp)) return true;
+
+        // A channel/model match alone cannot identify the occupied instance.
+        return false;
+    }
+
+    private bool ExitRevokesCurrentShip(string? exitedShip)
+    {
+        var occupant = _fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer");
+        var exited = GameShipNames.FindRuntimeIdentity(exitedShip);
+        var current = GameShipNames.FindRuntimeIdentity(occupant?.Ship);
+        // Unknown models remain conservative. A known different channel cannot
+        // revoke the current ship or erase its pending navigation journey.
+        if (exited is null || current is null ||
+            string.Equals(exited.RuntimeId ?? exited.EnglishName, current.RuntimeId ?? current.EnglishName,
+                StringComparison.OrdinalIgnoreCase)) return true;
+
+        var lastKnown = GameShipNames.FindRuntimeIdentity(occupant?.LastKnownShip);
+        if (lastKnown is not null &&
+            string.Equals(exited.RuntimeId ?? exited.EnglishName, lastKnown.RuntimeId ?? lastKnown.EnglishName,
+                StringComparison.OrdinalIgnoreCase))
+            RememberRevokedInstance(occupant?.LastKnownShipInstanceId);
+        return false;
+    }
+
+    private void RememberRevokedInstance(string? shipId)
+    {
+        if (string.IsNullOrWhiteSpace(shipId)) return;
+        _revokedShipInstances.RemoveAll(id => id.Equals(shipId, StringComparison.OrdinalIgnoreCase));
+        _revokedShipInstances.Add(shipId);
+        if (_revokedShipInstances.Count > 256) _revokedShipInstances.RemoveAt(0);
+    }
+
+    private void RevokeQuantumOccupancy(string? previousShipId = null, string? previousLastKnownShipId = null)
+    {
+        // Core may already have cleared both IDs on an immediate vehicle exit.
+        RememberRevokedInstance(previousShipId);
+        RememberRevokedInstance(previousLastKnownShipId);
+        var occupant = _fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer");
+        RememberRevokedInstance(occupant?.ShipInstanceId);
+        RememberRevokedInstance(occupant?.LastKnownShipInstanceId);
+        _quantumTravelContext.Reset();
+        _lastLocalNavigation = null;
+        _localShipEvidence.Clear();
+        // ResolveArrivalTarget and journal presentation also read FleetPlayer's
+        // pending journey. Clear that fallback without touching arrival confirmation.
+        if (_fleet.Players.FirstOrDefault(p => p.Name == "LocalPlayer") is { } player)
+        {
+            player.NavigationTarget = "None";
+            player.NavigationTargetSelectedAt = null;
+            player.NavigationOriginLocation = null;
+        }
+    }
+
+    private static bool IsRecentShipEvidence(DateTimeOffset seenAt, DateTimeOffset arrivalAt) =>
+        arrivalAt >= seenAt && arrivalAt - seenAt <= QuantumShipEvidenceWindow;
+
+    private void ResetQuantumEvidence()
+    {
+        _quantumTravelContext.Reset();
+        _lastLocalNavigation = null;
+        _localShipEvidence.Clear();
+        _revokedShipInstances.Clear();
     }
 
 

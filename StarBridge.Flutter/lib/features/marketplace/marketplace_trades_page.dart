@@ -2,6 +2,7 @@ import '../../shared/guide/guide_empty_state.dart';
 import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/icons/marketplace_icon.dart';
 import 'marketplace_trade_copy.dart';
+import 'marketplace_trade_details.dart';
 import 'marketplace_trade_feedback.dart';
 
 import 'package:flutter/material.dart';
@@ -33,7 +34,7 @@ class MarketplaceTradesPage extends StatefulWidget {
 }
 
 class _TradesPageState extends State<MarketplaceTradesPage> {
-  bool history = false;
+  bool history = false, reviewing = false;
   String role = 'all';
 
   @override
@@ -66,27 +67,20 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
     return ListenableBuilder(
       listenable: t,
       builder: (context, _) {
-        final filtered = t.rows
+        final source = !history && !reviewing && t.ongoingLoaded ? t.ongoing : t.rows;
+        final filtered = source
             .where(
               (r) =>
                   (role == 'all' || r['actorRole'] == role) &&
-                  (history
-                      ? [3, 4].contains(r['deliveryStatus']) &&
-                            tradeAction(r) == null
-                      : ![3, 4].contains(r['deliveryStatus']) ||
-                            tradeAction(r) != null),
+                  (reviewing ? tradeAction(r) == 'review' : history
+                      ? r['transactionStatus'] != 1 && tradeAction(r) != 'review'
+                      : r['transactionStatus'] == 1),
             )
             .toList();
         final mine = filtered.where((r) => tradeAction(r) != null).toList();
         final waiting = filtered.where((r) => tradeAction(r) == null).toList();
-        final active = t.rows
-            .where(
-              (r) =>
-                  (role == 'all' || r['actorRole'] == role) &&
-                  (![3, 4].contains(r['deliveryStatus']) ||
-                      tradeAction(r) != null),
-            )
-            .length;
+        final active = role == 'all' ? t.activeCountLabel
+            : '${(t.ongoingLoaded ? t.ongoing : t.rows).where((r) => r['transactionStatus'] == 1 && r['actorRole'] == role).length}${t.ongoingComplete ? '' : '+'}';
         final entries = <(String, List<MarketRow>)>[
           if (mine.isNotEmpty) (tradeText(context, '需要我处理'), mine),
           if (waiting.isNotEmpty)
@@ -107,13 +101,20 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                   MarketSubTab(
                     tradeText(context, '进行中'),
                     count: active,
-                    selected: !history,
-                    onTap: () => setState(() => history = false),
+                    selected: !history && !reviewing,
+                    onTap: () => setState(() { history = false; reviewing = false; }),
+                  ),
+                  MarketSubTab(
+                    tradeText(context, '待评价'),
+                    count: role == 'all' ? t.reviewCountLabel
+                        : '${t.reviewsTodo.where((r) => r['actorRole'] == role).length}+',
+                    selected: reviewing,
+                    onTap: () => setState(() { reviewing = true; history = false; }),
                   ),
                   MarketSubTab(
                     tradeText(context, '已结束'),
                     selected: history,
-                    onTap: () => setState(() => history = true),
+                    onTap: () => setState(() { history = true; reviewing = false; }),
                   ),
                 ]),
                 MarketSubTabs(key: const Key('market-trades-role'), [
@@ -138,20 +139,26 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                 t.ended &&
                 !t.loading &&
                 t.error == null &&
-                !(t.rows.isEmpty && GuideEmptyState.active(context)))
+                (role != 'all' || !(t.rows.isEmpty && GuideEmptyState.active(context))))
               MarketActivityEmpty(
                 key: const Key('market-trades-empty'),
                 title: tradeText(
                   context,
-                  history ? '还没有已结束的交易' : '还没有进行中的交易',
+                  role != 'all' ? '这个筛选下没有交易' : reviewing ? '没有待评价的交易' : history ? '还没有已结束的交易' : '还没有进行中的交易',
                 ),
                 body: tradeText(
                   context,
-                  history
+                  role != 'all' ? '切换到全部查看其他交易。' : reviewing ? '交易完成后，可以在这里评价对方。' : history
                       ? '交易完成或取消后会出现在这里。'
                       : '在市场里下单，或者发布挂单等别人来买，交易就会出现在这里。已经结束的交易在“已结束”里。',
                 ),
                 actions: [
+                  if (role != 'all')
+                    OutlinedButton(
+                      onPressed: () => setState(() => role = 'all'),
+                      child: Text(tradeText(context, '看全部')),
+                    )
+                  else ...[
                   OutlinedButton(
                     key: const Key('market-trades-empty-market'),
                     onPressed: () => widget.c.tab(1),
@@ -163,6 +170,7 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                     onPressed: () => openMarketPublish(context, widget.c),
                     child: Text(tradeText(context, '发布挂单')),
                   ),
+                  ],
                 ],
               )
             else
@@ -180,7 +188,7 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                   itemCount: entries.length + 1,
                   itemBuilder: (context, i) {
                     if (i == entries.length) {
-                      if (t.error == null &&
+                      if (!t.listFailed &&
                           t.ended &&
                           t.rows.isEmpty &&
                           GuideEmptyState.active(context)) {
@@ -191,7 +199,7 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                       }
                       return Padding(
                         padding: EdgeInsets.all(24),
-                        child: t.error != null
+                        child: t.listFailed
                             ? marketTextAction(
                                 key: const Key('market-trades-retry'),
                                 onPressed: t.refresh,
@@ -200,6 +208,8 @@ class _TradesPageState extends State<MarketplaceTradesPage> {
                             : Text(
                                 t.loading
                                     ? tradeText(context, '正在读取交易…')
+                                    : !history && !reviewing && !t.ongoingComplete
+                                    ? tradeText(context, '进行中交易尚未读全')
                                     : t.ended
                                     ? (t.rows.isEmpty
                                           ? tradeText(context, '还没有交易，去市场看看。')
@@ -324,7 +334,7 @@ class TradeRow extends StatelessWidget {
                   Text(
                     tradeItemName(context, row),
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                   ),
@@ -335,9 +345,9 @@ class TradeRow extends StatelessWidget {
                       SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '×${row['number'] ?? ''} · ${row['actorRole'] == 'seller' ? tradeText(context, '买家') : tradeText(context, '卖家')} ${row['counterpartyName'] ?? tradeText(context, '资料待更新')}',
+                          '${tradeQuantity(context, row)} · ${row['actorRole'] == 'seller' ? tradeText(context, '买家') : tradeText(context, '卖家')} ${row['counterpartyName'] ?? tradeText(context, '资料待更新')}',
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                           style: TextStyle(
                             fontSize: 11,
@@ -427,6 +437,8 @@ class TradeRow extends StatelessWidget {
 
 String tradeActionLabel(BuildContext context, MarketRow row) =>
     {
+      'approve': tradeText(context, '去同意'),
+      'receive': tradeText(context, '去收货'),
       'ship': tradeText(context, '去发货'),
       'review': tradeText(context, '去评价'),
     }[tradeAction(row)] ??
@@ -453,7 +465,7 @@ class TradeTodo extends StatelessWidget {
                   child: MarketHeading(
                     tradeText(context, '待我处理'),
                     trailing: Text(
-                      '${rows.length}${c.trades.ended ? '' : '+'} ${tradeText(context, '笔交易')}',
+                      '${c.trades.todoCountLabel} ${tradeText(context, '笔交易')}',
                       style: TextStyle(
                         fontSize: 12,
                         color: context.tokens.colors.textSecondary,
@@ -553,9 +565,9 @@ class TradeTodoCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${tradeItemName(context, row)} ×${row['number'] ?? ''}',
+                      '${tradeItemName(context, row)} ${tradeQuantity(context, row)}',
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(
                         fontSize: 13,
@@ -566,7 +578,7 @@ class TradeTodoCard extends StatelessWidget {
                     Text(
                       '$label ${who ?? tradeText(context, '资料待更新')}',
                       maxLines: 1,
-                      overflow: TextOverflow.fade,
+                      overflow: fadeOverflow(context),
                       softWrap: false,
                       style: TextStyle(
                         fontSize: 11.5,
@@ -580,7 +592,7 @@ class TradeTodoCard extends StatelessWidget {
                           child: Text(
                             tradeText(context, tradeStatus(row)),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: TextStyle(
                               color: edge,

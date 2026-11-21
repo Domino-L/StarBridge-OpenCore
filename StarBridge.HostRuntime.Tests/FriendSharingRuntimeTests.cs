@@ -11,7 +11,8 @@ internal static class FriendSharingRuntimeTests
     {
         internal FriendSharingRemoteSnapshot Saved = new(1, 1, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, FriendSharedFields.All);
         internal List<string> Calls = [];
-        internal bool FailPublish, FailStop, FailRead, RejectStaleRevision;
+        internal bool FailPublish, FailStop, FailRead, RejectStaleRevision, BridgeConflict;
+        internal Action? OnRead;
         internal int Reads;
         internal List<long> Sequences = [];
         internal List<FriendSharingSource> Sources = [];
@@ -19,6 +20,7 @@ internal static class FriendSharingRuntimeTests
         public Task<FriendSharingRemoteSnapshot> ReadFriendSharingAsync(BridgeAccountContext owner, long generation, CancellationToken token)
         {
             Reads++;
+            OnRead?.Invoke();
             return FailRead ? Task.FromException<FriendSharingRemoteSnapshot>(new HttpRequestException()) : Task.FromResult(Saved);
         }
         public Task<FriendSharingRemoteSnapshot> SaveFriendSharingAsync(BridgeAccountContext owner, long generation, long revision, string operation,
@@ -27,7 +29,8 @@ internal static class FriendSharingRuntimeTests
         {
             Calls.Add(action);
             if (action == "publish" && RejectStaleRevision && revision != Saved.Revision)
-                throw new HttpRequestException("revision changed", null, System.Net.HttpStatusCode.Conflict);
+                throw BridgeConflict ? new AccountBridgeHostException("events.conflict") :
+                    new HttpRequestException("revision changed", null, System.Net.HttpStatusCode.Conflict);
             if (action == "publish") { Sequences.Add(sequence); Sources.Add(source!); }
             if (action == "publish" && PublishRelease is { } release) {
                 PublishRelease = null;
@@ -41,6 +44,7 @@ internal static class FriendSharingRuntimeTests
     }
     internal static async Task Run()
     {
+        await VerifyReducedReads();
         await VerifyTransportContinuity();
         await VerifyPendingRefresh();
         var remote = new Remote();
@@ -139,7 +143,7 @@ internal static class FriendSharingRuntimeTests
         Check(!remote.Calls.Contains("stop"), "transport failure must not author an explicit offline withdrawal");
         remote.FailPublish = false;
         remote.FailRead = true;
-        clock.Advance(TimeSpan.FromSeconds(16));
+        clock.Advance(TimeSpan.FromMinutes(5));
         await runtime.TickAsync();
         Check(remote.Reads == 2 && remote.Calls.Count(c => c == "publish") == 3 &&
             !remote.Calls.Contains("stop") && runtime.State == "active",
@@ -171,6 +175,68 @@ internal static class FriendSharingRuntimeTests
             !FriendSharingPublication.IsTransient(new HttpRequestException("fixture", null, System.Net.HttpStatusCode.Unauthorized), default),
             "permission rejection and invalid responses are never softened to transport continuity");
     }
+    private static async Task VerifyReducedReads()
+    {
+        var remote = new Remote();
+        var clock = new ManualTimeProvider();
+        var input = new PrivacyPublicationInput(new("test", "legacy", "polling"), 1, "Fixture", true, null, GameLogSessionSnapshot.Empty);
+        using var runtime = new FriendSharingRuntime(remote, () => input, () => true,
+            () => PlayerPresenceVisibilityMode.Online, false, clock);
+        for (var tick = 0; tick < 720; tick++) {
+            if (tick > 0) clock.Advance(TimeSpan.FromSeconds(5));
+            await runtime.TickAsync();
+        }
+        Check(remote.Reads == 12 && remote.Calls.Count(c => c == "publish") == 720,
+            "one online hour reads settings twelve times and still checks/publishes every five seconds");
+        input = input with { Generation = 2 };
+        await runtime.TickAsync();
+        Check(remote.Reads == 13, "new generation immediately discards cached settings");
+        input = input with { Owner = new("test", "legacy", "other") };
+        await runtime.TickAsync();
+        Check(remote.Reads == 14, "another account immediately reads its own settings");
+        input = input with { IdentityConfirmed = false };
+        var publishes = remote.Calls.Count(c => c == "publish");
+        await runtime.TickAsync();
+        Check(remote.Calls.Count(c => c == "publish") == publishes,
+            "a cached revision cannot bypass the current identity gate");
+
+        foreach (var bridgeConflict in new[] { false, true }) {
+            var policy = new Remote { RejectStaleRevision = true, BridgeConflict = bridgeConflict };
+            var current = input with { IdentityConfirmed = true };
+            using var conflictRuntime = new FriendSharingRuntime(policy, () => current, () => true,
+                () => PlayerPresenceVisibilityMode.Online, false, clock);
+            await conflictRuntime.TickAsync();
+            policy.Saved = policy.Saved with { Revision = 2, Fields = FriendSharedFields.None };
+            await conflictRuntime.TickAsync();
+            Check(policy.Reads == 2 && policy.Calls[^1] == "stop" && conflictRuntime.State == "unconfirmed",
+                "revision rejection immediately retires and rereads without retrying a publication");
+            await conflictRuntime.TickAsync();
+            Check(policy.Reads == 2 && policy.Calls.Count(c => c == "publish") == 2 && conflictRuntime.State == "inactive",
+                "fresh remote revocation stays off without waiting five minutes");
+        }
+
+        var failing = new Remote { RejectStaleRevision = true };
+        input = input with { IdentityConfirmed = true };
+        using var recovery = new FriendSharingRuntime(failing, () => input, () => true,
+            () => PlayerPresenceVisibilityMode.Online, false, clock);
+        await recovery.TickAsync();
+        failing.Saved = failing.Saved with { Revision = 2 };
+        failing.FailRead = true;
+        await recovery.TickAsync();
+        Check(failing.Reads == 2, "rejected revision triggers a read even inside its five-minute window");
+        await recovery.TickAsync();
+        Check(failing.Reads == 3 && failing.Calls.Count(c => c == "publish") == 2,
+            "failed conflict read leaves no cached policy available to publish");
+        failing.FailRead = false;
+        failing.OnRead = () => input = input with { Generation = 3 };
+        await recovery.TickAsync();
+        Check(failing.Calls.Count(c => c == "publish") == 2,
+            "generation change during recovery cannot install the old owner's result");
+        failing.OnRead = null;
+        await recovery.TickAsync();
+        Check(failing.Reads == 5 && recovery.State == "active", "new generation immediately reads before resuming");
+    }
+
     private sealed class ManualTimeProvider : TimeProvider
     {
         private DateTimeOffset _now = DateTimeOffset.UtcNow;

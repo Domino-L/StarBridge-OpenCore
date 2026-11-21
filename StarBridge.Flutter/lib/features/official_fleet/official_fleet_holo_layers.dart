@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/styles/official_fleet_holo_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../common/organization_holo_art.dart';
@@ -11,25 +12,82 @@ import 'official_fleet_models.dart';
 /// Image layers of the main-fleet holo header: the banner, its colour bleed,
 /// its reflection, the sunken SID and the emblem.
 class OfficialFleetHoloBannerImage extends StatelessWidget {
-  const OfficialFleetHoloBannerImage(this.art, {super.key});
+  const OfficialFleetHoloBannerImage(this.art, {this.opacity = 1, super.key});
+
+  final OrganizationHoloArt? art;
+
+  /// Below 1 the banner fades through its own paint (no layer) and the
+  /// caller lays the ground under it: the screen switch's soft banner.
+  final double opacity;
+
+  @override
+  Widget build(BuildContext context) {
+    final fade = opacity >= 1
+        ? null
+        : AlwaysStoppedAnimation(opacity.clamp(0.0, 1.0));
+    final placeholder = _BannerPlaceholder(
+      light: Theme.of(context).brightness == Brightness.light,
+      opacity: fade,
+    );
+    final image = art == null
+        ? placeholder
+        : art!.image(
+            gaplessPlayback: true,
+            opacity: fade,
+            errorBuilder: (_, _, _) => placeholder,
+          );
+    if (fade != null) return image;
+    return ColoredBox(color: context.tokens.surfaces.raised.fill, child: image);
+  }
+}
+
+/// The banner softened as if blurred, laid under the sharp one while the
+/// screen switch shrinks it (user report 2026-11-07). The softness is a
+/// small decode drawn large, like the ambient and the mirrors, so no frame
+/// recomputes an image filter over the whole banner.
+class OfficialFleetHoloSoftBanner extends StatelessWidget {
+  const OfficialFleetHoloSoftBanner(this.art, {super.key});
+
+  /// One decoded pixel per this many logical pixels of width: drawn that
+  /// large it reads like the former 8-pixel blur (review pictures 11-07).
+  static const pixelsPerTexel = 25;
+
+  /// Decode width for a banner this wide, in steps so a resize rarely
+  /// decodes again.
+  static int decodeWidth(double width) =>
+      ((width / pixelsPerTexel / 16).ceil() * 16).clamp(48, 160);
 
   final OrganizationHoloArt? art;
 
   @override
-  Widget build(BuildContext context) {
-    final placeholder = _BannerPlaceholder(
-      light: Theme.of(context).brightness == Brightness.light,
-    );
-    return ColoredBox(
-      color: context.tokens.surfaces.raised.fill,
-      child: art == null
-          ? placeholder
-          : art!.image(
-              gaplessPlayback: true,
-              errorBuilder: (_, _, _) => placeholder,
-            ),
-    );
-  }
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final width = decodeWidth(box.hasBoundedWidth ? box.maxWidth : 2560);
+      // No banner, or it failed to load: the theme's default picture, as
+      // the sharp layer falls back to it too.
+      final fallback = Image.asset(
+        _BannerPlaceholder.asset(
+          Theme.of(context).brightness == Brightness.light,
+        ),
+        key: const Key('official-fleet-holo-soft-banner-placeholder'),
+        fit: BoxFit.cover,
+        cacheWidth: width,
+        filterQuality: FilterQuality.high,
+        gaplessPlayback: true,
+        excludeFromSemantics: true,
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      );
+      final art = this.art;
+      if (art == null) return fallback;
+      return art.image(
+        cacheWidth: width,
+        filterQuality: FilterQuality.high,
+        gaplessPlayback: true,
+        excludeFromSemantics: true,
+        errorBuilder: (_, _, _) => fallback,
+      );
+    },
+  );
 }
 
 /// No banner, or it failed to load: a picture of slanted glass panes on a dim
@@ -37,17 +95,21 @@ class OfficialFleetHoloBannerImage extends StatelessWidget {
 /// screen switch and the process over 3 GB when maximized (user report and lab,
 /// 2026-10-31). See docs/brand-assets/default-banner/README.md.
 class _BannerPlaceholder extends StatelessWidget {
-  const _BannerPlaceholder({required this.light});
+  const _BannerPlaceholder({required this.light, this.opacity});
 
   final bool light;
+  final Animation<double>? opacity;
+
+  static String asset(bool light) => light
+      ? 'assets/brand/default_banner_light.png'
+      : 'assets/brand/default_banner_dark.png';
 
   @override
   Widget build(BuildContext context) => Image.asset(
-    light
-        ? 'assets/brand/default_banner_light.png'
-        : 'assets/brand/default_banner_dark.png',
+    asset(light),
     key: const Key('official-fleet-holo-banner-placeholder'),
     fit: BoxFit.cover,
+    opacity: opacity,
     gaplessPlayback: true,
     excludeFromSemantics: true,
     errorBuilder: (_, _, _) => const SizedBox.shrink(),
@@ -85,7 +147,13 @@ class OfficialFleetHoloMirror extends StatelessWidget {
   @override
   // Performance (2026-10-24): the slight blur comes from a smaller decode and
   // the opacity from the image itself; only the fade keeps one mask layer.
-  Widget build(BuildContext context) => ShaderMask(
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) =>
+        lightOnly ? const SizedBox.shrink() : _mirror(context),
+  );
+
+  Widget _mirror(BuildContext context) => ShaderMask(
     blendMode: BlendMode.dstIn,
     shaderCallback: (bounds) => const LinearGradient(
       begin: Alignment.topCenter,
@@ -138,7 +206,12 @@ class OfficialFleetHoloGhostSid extends StatelessWidget {
       (((a + 1) * 73856093) ^ ((b + 7) * 19349663)) % 1000 / 1000;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+
+  Widget _build(BuildContext context, bool lightOnly) {
     final ink = light
         ? OfficialFleetHoloPalette.outlineLight
         : OfficialFleetHoloPalette.outlineDark;
@@ -230,7 +303,7 @@ class OfficialFleetHoloGhostSid extends StatelessWidget {
     return AnimatedBuilder(
       animation: reveal,
       builder: (context, _) {
-        final settled = reveal.value >= 1;
+        final settled = lightOnly || reveal.value >= 1;
         final row = Transform(
           transform: Matrix4.skewX(-12 * math.pi / 180),
           child: Row(
@@ -238,7 +311,7 @@ class OfficialFleetHoloGhostSid extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final (index, character) in letters.indexed)
-                letter(index, character, reveal.value, settled),
+                letter(index, character, lightOnly ? 1 : reveal.value, settled),
             ],
           ),
         );

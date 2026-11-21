@@ -84,6 +84,8 @@ class LocalPrivacyMainFleetPlaceholder extends StatelessWidget {
         ? 'privacy.official.unavailable'
         : owner.officialCancelSavedScope
         ? 'privacy.official.cancelPending'
+        : owner.officialReconfirmRequired
+        ? 'privacy.official.reconfirm'
         : scope!.savedForCurrentSource
         ? 'privacy.official.selected'
         : 'privacy.official.unselected';
@@ -126,7 +128,10 @@ class LocalPrivacyMainFleetPlaceholder extends StatelessWidget {
                         : (_) => owner.refreshOfficialRuntimePrivacy(),
                     child: Text(strings.text('privacy.scope.retry')),
                   ),
-                if (owner.officialSaveStage != OfficialPrivacySaveStage.idle)
+                // The reconfirm status above already says what to do; an older
+                // save stage would contradict it.
+                if (owner.officialSaveStage != OfficialPrivacySaveStage.idle &&
+                    !owner.officialReconfirmRequired)
                   Text(
                     strings.text(
                       'privacy.official.stage.${owner.officialSaveStage.name}',

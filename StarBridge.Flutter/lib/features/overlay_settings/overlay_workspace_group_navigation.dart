@@ -324,6 +324,7 @@ class _GroupNavigationItem extends StatelessWidget {
   }
 
   static StarBridgeIconSemantic _groupIcon(String group) => switch (group) {
+    'global' => StarBridgeIconSemantic.settings,
     'notice' => StarBridgeIconSemantic.notifications,
     'fleetOverview' => StarBridgeIconSemantic.officialFleet,
     'members' => StarBridgeIconSemantic.friends,

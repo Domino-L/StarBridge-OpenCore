@@ -33,7 +33,8 @@ internal static partial class AccountSessionRestoreTests
                 }
                 return JsonResponse(HttpStatusCode.OK, "{\"subject\":\"subject-1\",\"capabilities\":[\"profile.read\"]}");
             });
-            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             var first = oauth.TryRestoreSessionAsync(default);
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var others = Enumerable.Range(0, 4).Select(_ => oauth.TryRestoreSessionAsync(default)).ToArray();
@@ -57,6 +58,7 @@ internal static partial class AccountSessionRestoreTests
             AssertEqual(outcome == "invalid_grant" ? null : key, vault.LoadActiveAccountKey(), outcome + " selected account");
             if (outcome is not "invalid_grant" and not "success")
             {
+                clock.Now = clock.Now.AddMinutes(5);
                 recovering = true;
                 AssertEqual(true, await oauth.TryRestoreSessionAsync(default) is not null, "later independent call can recover");
                 AssertEqual(2, refreshes, "later recovery refreshes once");

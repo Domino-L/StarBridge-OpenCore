@@ -5,6 +5,17 @@ namespace StarBridge.HostRuntime.Auth;
 
 public sealed partial class OAuthPkceClient
 {
+    internal async Task<ScmOAuthSession> PrepareParticipantSessionAsync(ScmOAuthSession session, CancellationToken token)
+    {
+        // Reusing a stable business key never reuses authentication. Preserve
+        // the resource reader's normal expiry/refresh and owner lifecycle gate.
+        var active = await EnsureActiveSessionAsync(session, token);
+        token.ThrowIfCancellationRequested();
+        if (!active.Capabilities.Contains("profile.read", StringComparer.Ordinal))
+            throw new ScmApiAuthenticationException("account.reauthorization_required");
+        return active;
+    }
+
     // Explicit authenticated self participation, never a target selected by search.
     internal async Task RegisterParticipantAsync(ScmOAuthSession session, string expectedId, CancellationToken token,
         bool refreshOnly = false)

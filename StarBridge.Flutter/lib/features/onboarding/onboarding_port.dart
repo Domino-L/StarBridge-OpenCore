@@ -19,3 +19,11 @@ abstract interface class OnboardingPort {
   Future<OnboardingReply> save(OnboardingCheckpoint checkpoint);
   Future<OnboardingReply> finish(OnboardingCheckpoint checkpoint);
 }
+
+/// Index of the latest Host-issued observation; never a renderer-provided path.
+abstract interface class OnboardingLogCandidatePort {
+  Future<OnboardingReply> selectLogCandidate(
+    int index,
+    OnboardingCheckpoint checkpoint,
+  );
+}

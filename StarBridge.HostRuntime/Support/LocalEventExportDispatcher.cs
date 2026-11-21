@@ -52,7 +52,7 @@ public sealed class LocalEventExportDispatcher(LocalEventJournalReader reader, F
             if (destination is null) return Result(request, "cancelled", 0, false);
             var snapshot = Read(); // Refresh after the picker: cleared/corrupt history is not resurrected.
             _writer.WriteNew(destination, LocalEventJournalReader.FormatExport(snapshot), Current, cancellation.Token);
-            return Result(request, "saved", snapshot.Entries.Count, snapshot.State == "recovered");
+            return Result(request, "saved", snapshot.Entries.Count, snapshot.State == "recovered", snapshot.UnavailableSources);
         }
         catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
         catch (LocalEventExportException e) { return Error(request, e.Code); }
@@ -68,9 +68,18 @@ public sealed class LocalEventExportDispatcher(LocalEventJournalReader reader, F
         if (snapshot.Entries.Count == 0) throw new LocalEventExportException("empty");
         return snapshot;
     }
-    private static BridgeDispatchBatch Result(BridgeEnvelope request, string outcome, int count, bool recovered) =>
-        new(BridgeEnvelope.Response(request, new { schemaVersion = 1, outcome, count, recovered },
-            preserveRequestAccountContext: false), []);
+    private static BridgeDispatchBatch Result(BridgeEnvelope request, string outcome, int count, bool recovered,
+        IReadOnlyList<string>? unavailableSources = null)
+    {
+        var payload = new Dictionary<string, object?> { ["schemaVersion"] = 1, ["outcome"] = outcome,
+            ["count"] = count, ["recovered"] = recovered };
+        if (unavailableSources is { Count: > 0 })
+        {
+            payload["partial"] = true;
+            payload["unavailableSources"] = unavailableSources;
+        }
+        return new(BridgeEnvelope.Response(request, payload, preserveRequestAccountContext: false), []);
+    }
     private static BridgeDispatchBatch Error(BridgeEnvelope request, string code) => new(
         BridgeEnvelope.ErrorResponse(request, new(code, "Local event history export did not complete.", true)), []);
     public void Dispose()

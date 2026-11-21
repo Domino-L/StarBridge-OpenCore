@@ -9,6 +9,7 @@ internal static class FlutterInstallerUpdateTests
 {
     internal static async Task Verify()
     {
+        await FlutterUpdateHeroTests.Verify();
         using var rsa = RSA.Create(2048);
         var keys = new Dictionary<string, string> { ["fixture"] = rsa.ToXmlString(false) };
         using (var buildVersionSource = new FlutterInstallerUpdateSource(new Uri("https://example.invalid/manifest.json"),

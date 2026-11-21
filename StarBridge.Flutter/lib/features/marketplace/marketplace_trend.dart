@@ -5,6 +5,8 @@
 // listing hides the buy line and column instead of a column of dashes.
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
+
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_diagonal.dart' show MarketHeadingMark, MarketSlantDivider;
@@ -96,7 +98,14 @@ class _MarketplaceTrendState extends State<MarketplaceTrend> {
     );
   }
 
-  Widget _header(BuildContext context, bool hasBuy) {
+  Widget _header(BuildContext context, bool hasBuy) =>
+      ValueListenableBuilder<bool>(
+        valueListenable: lightVisuals(),
+        builder: (context, lightOnly, _) =>
+            _headerContent(context, hasBuy, lightOnly),
+      );
+
+  Widget _headerContent(BuildContext context, bool hasBuy, bool lightOnly) {
     final t = context.tokens;
     Widget legend(
       String key,
@@ -105,6 +114,15 @@ class _MarketplaceTrendState extends State<MarketplaceTrend> {
       VoidCallback? onTap, {
       bool dashed = false,
     }) {
+      final alpha = lightOnly && (off || onTap == null) ? .45 : 1.0;
+      final lineColor = alpha == 1
+          ? color
+          : color.withValues(alpha: color.a * alpha);
+      final textColor = alpha == 1
+          ? t.colors.textSecondary
+          : t.colors.textSecondary.withValues(
+              alpha: t.colors.textSecondary.a * alpha,
+            );
       final face = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -115,23 +133,25 @@ class _MarketplaceTrendState extends State<MarketplaceTrend> {
                 ? Row(
                     children: [
                       for (var i = 0; i < 3; i++) ...[
-                        Container(width: 4, height: 2, color: color),
+                        Container(width: 4, height: 2, color: lineColor),
                         if (i < 2) const SizedBox(width: 2),
                       ],
                     ],
                   )
-                : ColoredBox(color: color),
+                : ColoredBox(color: lineColor),
           ),
           const SizedBox(width: 6),
           Text(
             trendText(context, key),
-            style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
+            style: TextStyle(fontSize: 12, color: textColor),
           ),
         ],
       );
-      if (onTap == null) return Opacity(opacity: .45, child: face);
+      if (onTap == null) {
+        return Opacity(opacity: lightOnly ? 1 : .45, child: face);
+      }
       return Opacity(
-        opacity: off ? .45 : 1,
+        opacity: lightOnly || !off ? 1 : .45,
         child: MergeSemantics(
           child: Semantics(
             toggled: !off,

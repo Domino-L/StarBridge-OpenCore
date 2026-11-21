@@ -37,9 +37,11 @@ const overlayScenesZhCn = <String, String>{
   'overlay.source.inGameHint': '在游戏里按 Alt+M › 信息浮层 也能切换，两边是同一个选择。',
   'overlay.source.localName': '本地模式',
   'overlay.source.presetSettings': '方案设置',
-  'overlay.source.autoSwitchRequiresBinding': '当前关闭。先选择一个固定来源（当前房间或具体组织），才能开启自动使用。',
+  'overlay.source.autoSwitchRequiresBinding':
+      '当前关闭。先选择一个固定来源（当前房间或具体组织），才能开启自动使用。',
   'overlay.source.autoSwitch': '进入该来源时自动使用此方案',
-  'overlay.source.autoSwitchHelp': '离开来源后回到之前的方案。手动切换方案后，暂停自动使用，直到来源再次变化。',
+  'overlay.source.autoSwitchHelp':
+      '开启时如果已经在这个来源里，会立刻使用此方案。离开来源后回到之前的方案。手动切换方案后暂停自动使用，直到来源再次变化或重新开启。',
   'overlay.source.replaceAutoSwitch': '将替换“{name}”的自动使用。它的其他设置保持不变。',
   'overlay.source.replace': '替换并保存',
   'overlay.source.save': '保存方案设置',
@@ -106,9 +108,11 @@ const overlayScenesZhTw = <String, String>{
   'overlay.source.inGameHint': '在遊戲裡按 Alt+M › 資訊浮層 也能切換，兩邊是同一個選擇。',
   'overlay.source.localName': '本機模式',
   'overlay.source.presetSettings': '方案設定',
-  'overlay.source.autoSwitchRequiresBinding': '目前關閉。先選擇一個固定來源（目前房間或指定組織），才能開啟自動使用。',
+  'overlay.source.autoSwitchRequiresBinding':
+      '目前關閉。先選擇一個固定來源（目前房間或指定組織），才能開啟自動使用。',
   'overlay.source.autoSwitch': '進入此來源時自動使用此方案',
-  'overlay.source.autoSwitchHelp': '離開來源後回到之前的方案。手動切換方案後，暫停自動使用，直到來源再次變更。',
+  'overlay.source.autoSwitchHelp':
+      '開啟時如果已在此來源中，會立即使用此方案。離開來源後回到之前的方案。手動切換方案後暫停自動使用，直到來源再次變更或重新開啟。',
   'overlay.source.replaceAutoSwitch': '將取代「{name}」的自動使用。它的其他設定保持不變。',
   'overlay.source.replace': '取代並儲存',
   'overlay.source.save': '儲存方案設定',
@@ -140,7 +144,8 @@ const overlayScenesEn = <String, String>{
   'overlay.shareCard.kind': 'Overlay profile · Sample layout',
   'overlay.shareCard.appearance': 'Appearance',
   'overlay.shareCard.inspect': 'View details and import',
-  'overlay.shareCard.previewUnavailable': 'Layout preview unavailable. View details before importing.',
+  'overlay.shareCard.previewUnavailable':
+      'Layout preview unavailable. View details before importing.',
   'overlay.source.chatTransferFallback': 'All original chat sources were organizations; those bindings were removed. The imported chat source is shown above. You can choose sources again in chat settings.',
   'overlay.source.selectChat': 'Choose chat sources',
   'overlay.source.chatSelection': '{count} / 8 chat sources selected',
@@ -160,14 +165,17 @@ const overlayScenesEn = <String, String>{
   'overlay.source.cardTitle': 'Show info from',
   'overlay.source.moduleField': 'Source',
   'overlay.source.planField': 'Fixed source (optional)',
-  'overlay.source.moduleFollowHelp': 'Follows "Show info from" above by default.',
-  'overlay.source.moduleOwnHelp': 'Only this module; the others still follow the choice above.',
+  'overlay.source.moduleFollowHelp':
+      'Follows "Show info from" above by default.',
+  'overlay.source.moduleOwnHelp':
+      'Only this module; the others still follow the choice above.',
   'overlay.source.nowShowing': 'Now showing',
   'overlay.source.autoNow': 'Automatic (now {source})',
   'overlay.source.why.autoRoom': 'Automatic: you are in a room, so the room is shown. After you leave, the organization you viewed last is shown.',
   'overlay.source.why.autoOrg': 'Automatic: you are not in a room, so the organization you viewed last in the app is shown. Joining a room switches to it.',
   'overlay.source.why.autoLocal': 'Automatic: no room or organization is available, so only your own information is shown.',
-  'overlay.source.why.fixed': 'Always shows this source until you choose another.',
+  'overlay.source.why.fixed':
+      'Always shows this source until you choose another.',
   'overlay.source.overrides': '{count} modules use their own source:',
   'overlay.source.overridesNone': 'Every module shows the source chosen here. Each module also has a Source row that follows this choice by default.',
   'overlay.source.clearOverrides': 'Follow this choice everywhere',
@@ -177,7 +185,7 @@ const overlayScenesEn = <String, String>{
   'overlay.source.autoSwitchRequiresBinding': 'Off. Choose a fixed source (the current room or a specific organization) to use this profile automatically.',
   'overlay.source.autoSwitch':
       'Use this profile automatically when entering this source',
-  'overlay.source.autoSwitchHelp': 'Return to the previous profile when leaving. Choosing a profile yourself pauses automatic use until the source changes again.',
+  'overlay.source.autoSwitchHelp': 'If you are already in this source when this is turned on, the profile is used right away. Return to the previous profile when leaving. Choosing a profile yourself pauses automatic use until the source changes again or this is turned on again.',
   'overlay.source.replaceAutoSwitch': 'This replaces automatic use for “{name}”. Its other settings stay unchanged.',
   'overlay.source.replace': 'Replace and save',
   'overlay.source.save': 'Save profile settings',

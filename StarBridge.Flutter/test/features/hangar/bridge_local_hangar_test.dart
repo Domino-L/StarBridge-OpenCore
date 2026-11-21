@@ -44,6 +44,21 @@ void main() {
       );
     },
   );
+  test(
+    'saved rows carry the official pledge date apart from import time',
+    () async {
+      final connection = LocalConnection();
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 7,
+      );
+      addTearDown(session.close);
+      final ships = (await BridgeLocalHangar(session).read()).ships;
+      expect(ships.first.acquiredOn, DateTime(2024, 9, 1));
+      expect(ships.first.addedAt, DateTime.utc(2026, 10, 16, 14));
+      expect(ships[1].acquiredOn, isNull);
+    },
+  );
   for (final mode in ['online', 'offline', 'retained']) {
     test(
       'separate inventory timestamp survives $mode projection and legacy fallback',
@@ -240,6 +255,7 @@ void main() {
       final inventory = await port.read();
       expect(inventory.ships.length, 201);
       expect(inventory.ships.first.priceUsd, 600);
+      expect(inventory.ships.first.manufacturer, 'Anvil Aerospace');
       expect(inventory.ships.first.category, 'exploration');
       expect(inventory.ships.first.sizeClass, 'large');
       expect(inventory.ships.first.size, isNull);
@@ -538,11 +554,16 @@ class LocalConnection implements BridgeConnection {
                 'id': '${former ? 'former' : 'ship'}-${offset + i}',
                 if (former) 'removedAt': '2026-09-20T00:00:00Z',
                 'title': 'Ship ${offset + i}',
+                if (offset + i == 0) ...{
+                  'addedAt': '2026-10-16T14:00:00Z',
+                  'acquiredOn': '2024-09-01',
+                },
                 if (nickname != null) 'nickname': nickname,
                 if (notes != null) 'notes': notes,
                 'names': {'zhHans': '舰船 ${offset + i}'},
                 'catalogId': former ? 'catalog-former' : 'catalog-carrack',
                 'category': 'exploration',
+                'manufacturer': 'Anvil Aerospace',
                 'sizeClass': 'large',
                 'deliveryStatus': 'flyable',
                 'priceUsd': 600,

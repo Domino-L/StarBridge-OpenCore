@@ -41,6 +41,13 @@ String helpLiveText(BuildContext context, String key) {
       '僅統計星橋註冊帳號，暫不包含 SCM 帳號。',
       'StarBridge registrations only; SCM accounts are not included.',
     ],
+    // Shown only once the service returns scmUserCount (user 11-07: "用户数").
+    'scmUserCount': ['用户数', '使用者數', 'Users'],
+    'usersScope': [
+      '统计用 SCM 账号登录过星桥的用户。',
+      '統計以 SCM 帳號登入過星橋的使用者。',
+      'People who have signed in to StarBridge with an SCM account.',
+    ],
     'unavailable': ['暂不可用', '暫無法使用', 'Unavailable'],
     'fleetCount': ['社区组织数量', '社群組織數量', 'Community organizations'],
     'overlayUsageSeconds': ['浮层累计时长（小时）', '浮層累計時長（小時）', 'Overlay hours'],
@@ -164,6 +171,12 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
     final data = _value;
     final history = widget.name == 'helpSupport.history';
     final stats = widget.name == 'helpSupport.stats';
+    // The new label only with a real count: an older service keeps the old
+    // label and scope, so the words always match the number shown.
+    final users =
+        stats &&
+        data?['scmUserCount'] is int &&
+        (data!['scmUserCount'] as int) >= 0;
     return StarBridgeSurface(
       role: SurfaceRole.panel,
       child: Column(
@@ -217,7 +230,7 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
               children: [
                 for (final key in [
                   'downloadCount',
-                  'registeredAccountCount',
+                  users ? 'scmUserCount' : 'registeredAccountCount',
                   'onlineUserCount',
                   'fleetCount',
                   'overlayUsageSeconds',
@@ -248,7 +261,7 @@ class _HelpSupportReadCardState extends State<HelpSupportReadCard> {
                   ),
               ],
             ),
-            Text(t('accountsScope')),
+            Text(t(users ? 'usersScope' : 'accountsScope')),
             Text(
               '${t('updated')} · ${DateTime.parse(data['updatedAt']).toLocal()}',
             ),

@@ -209,6 +209,8 @@ class PersonalProfileUnavailableView extends StatelessWidget {
                       strings.text(
                         retrying
                             ? 'profile.retrying'
+                            : failureKey == 'profile.error.ownerReadFailed'
+                            ? 'profile.ownerRead.retry'
                             : 'profile.unavailable.retry',
                       ),
                     ),

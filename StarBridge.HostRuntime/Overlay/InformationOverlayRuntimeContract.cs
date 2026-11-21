@@ -144,6 +144,53 @@ public interface IInformationOverlayAppearancePreviewRuntime
     ValueTask CloseAppearancePreviewAsync(string sessionId, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Optional: what the visor would show, for the client's layout editor to draw its own simplified panels with (11-12 user:
+/// "编辑里还是要用模拟面板，只不过信息都一致", "可以是简化版的面板，只有框和背景那种，其他都按照真实的来"). The given draft
+/// workspace with the live sources read the way the overlay reads them: the members (samples when there are none, flagged
+/// <see cref="InformationOverlayEditorContent.Sample"/>), the events the overlay shows right now (samples filling the box
+/// when there are none), the chat (samples when there is none), and the decoration colour
+/// the visor draws with. Nothing shows on screen, nothing is saved, the live overlay's state is untouched, and no image is
+/// drawn.
+/// </summary>
+public interface IInformationOverlayEditorPreviewRuntime
+{
+    ValueTask<InformationOverlayEditorContent> ReadEditorContentAsync(
+        InformationOverlayRuntimeWorkspace workspace, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The visor's content for the editor; <paramref name="Decoration"/> is "#RRGGBB" (the theme or ship colour).</summary>
+public sealed record InformationOverlayEditorContent(bool Sample, string Decoration,
+    InformationOverlayEditorMembers Members, InformationOverlayEditorEvents Events, InformationOverlayEditorChat Chat);
+
+/// <summary>
+/// The members block: its title, "you are at", the counts with their labels (online, in game, same server, in the
+/// overlay's language), the page line and the rows shown.
+/// </summary>
+public sealed record InformationOverlayEditorMembers(string Title, string YouAt, int Online, int InGame, int SameServer,
+    string Page, IReadOnlyList<InformationOverlayEditorMember> Rows, IReadOnlyList<string> CountLabels);
+
+/// <summary>
+/// One member row: <paramref name="State"/> is InGame, AppOnly, Away or Offline; <paramref name="Vitals"/> is Unknown, Alive,
+/// Downed or Dead (only the local player's own row may know it), <paramref name="Health"/> 0..1.
+/// </summary>
+public sealed record InformationOverlayEditorMember(string Name, string Ship, string Place, string Status, string State,
+    bool SameServer, bool Pinned, string Vitals, double Health);
+
+/// <summary>
+/// The events block: its title and the events the overlay shows right now, each with its kind's colour name, or sample
+/// events (<paramref name="Sample"/>) when it shows none.
+/// </summary>
+public sealed record InformationOverlayEditorEvents(string Title, bool Sample, IReadOnlyList<InformationOverlayEditorEvent> Rows);
+
+/// <summary>An event: <paramref name="Tone"/> is None, Place, Ship, Server, SameServer, Bad, Good or Reminder.</summary>
+public sealed record InformationOverlayEditorEvent(string Title, string Detail, string Time, string Tone);
+
+/// <summary>The chat block: its title and lines; <paramref name="Sample"/> when there is no chat to show.</summary>
+public sealed record InformationOverlayEditorChat(string Title, bool Sample, IReadOnlyList<InformationOverlayEditorChatLine> Rows);
+
+public sealed record InformationOverlayEditorChatLine(string Who, string Text);
+
 /// <summary>Host changes schedule a coalesced native refresh; no HWND or render
 /// implementation crosses this boundary.</summary>
 public interface IInformationOverlayLiveUpdateSink

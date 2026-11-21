@@ -114,22 +114,33 @@ void main() {
 }
 
 final class Harness {
-  Harness() {
+  Harness({
+    Future<void> Function(BridgeEnvelope, BridgeConnection)? onFriendRequest,
+  }) {
     final pair = InMemoryBridgeConnection.createPair();
     connection = pair.host;
     session = BridgeClientSession(
       connection: pair.client,
       sessionGeneration: 4,
     );
-    session.acceptHostCapabilities(const ['eventSharing.settings']);
+    session.acceptHostCapabilities([
+      'eventSharing.settings',
+      if (onFriendRequest != null) 'friendSharing.settings',
+    ]);
     subscription = connection.incoming.listen((request) {
-      unawaited(reply(request));
+      if (onFriendRequest != null && request.name.startsWith('friendSharing.')) {
+        unawaited(onFriendRequest(request, connection));
+      } else {
+        unawaited(reply(request));
+      }
     });
     controller = EventSharingController(session);
   }
   static const joined = '2026-09-01T00:00:00.1234567+00:00';
   String joinedAt = joined;
+  final codes = ['A', 'B'];
   String subject = 'synthetic-owner';
+  String publicationState = 'inactive';
   bool failSave = false;
   late final BridgeConnection connection;
   late final BridgeClientSession session;
@@ -186,11 +197,11 @@ final class Harness {
                 'schemaVersion': 2,
                 'primaryFleetCode': null,
                 'communities': [
-                  for (final code in ['A', 'B'])
+                  for (final code in codes)
                     {'code': code, 'name': code, 'joinedAt': joinedAt},
                 ],
               }
-            : {'snapshot': snapshot, 'state': 'inactive'},
+            : {'snapshot': snapshot, 'state': publicationState},
       ),
     );
   }

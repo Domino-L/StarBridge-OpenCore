@@ -96,10 +96,13 @@ internal sealed partial class CommunityClient
     private async Task<JsonElement> OfficialAuthorJson(string bearer, string path, object body, int maximum, CancellationToken token, bool allowChatAuthorsFallback = false,
         Privacy.OfficialChatAuthorReadObservation? chatDiagnostic = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_origin, path)) { Content = JsonContent.Create(body) };
+        var endpoint = new Uri(_origin, path);
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(body) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
         try
         {
+            var started = _identityClock.Start();
             Privacy.OfficialAnnouncementReadObservation.Sending();
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             Privacy.OfficialAnnouncementReadObservation.Response(response.StatusCode);
@@ -113,7 +116,9 @@ internal sealed partial class CommunityClient
             if (!response.IsSuccessStatusCode) throw new AccountBridgeHostException("communities.unavailable", true, response.StatusCode);
             using var stream = await response.Content.ReadAsStreamAsync(token); using var output = new MemoryStream(); var buffer = new byte[8192]; int count;
             while ((count = await stream.ReadAsync(buffer, token)) > 0) { if (output.Length + count > maximum) throw Invalid(); output.Write(buffer, 0, count); }
-            using var document = JsonDocument.Parse(output.ToArray()); return document.RootElement.Clone();
+            using var document = JsonDocument.Parse(output.ToArray());
+            _identityClock.Observe(started, response, document.RootElement, endpoint);
+            return document.RootElement.Clone();
         }
         catch (HttpRequestException error) { throw new AccountBridgeHostException("communities.unavailable", true, error.StatusCode); }
         catch (IOException) { throw new AccountBridgeHostException("communities.unavailable", true); }

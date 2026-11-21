@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'marketplace_order_full.dart';
+import 'marketplace_order_full_copy.dart';
+import 'marketplace_display_copy.dart';
 import '../../design_system/icons/marketplace_icon.dart';
 import '../../design_system/interaction/starbridge_compact_select.dart';
 import '../../design_system/interaction/starbridge_native_icon_action.dart';
@@ -7,6 +11,7 @@ import 'marketplace_trade_feedback.dart';
 import 'marketplace_trade_profile.dart';
 import 'marketplace_trade_profile_copy.dart';
 import 'marketplace_trade_copy.dart';
+import 'marketplace_bundle_copy.dart';
 
 import 'package:flutter/material.dart';
 
@@ -25,8 +30,9 @@ import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 Future<void> confirmMarketTrade(
   BuildContext context,
   MarketplaceController c,
-  MarketRow row,
-) {
+  MarketRow row, {
+  bool fromOrderDetail = false,
+}) {
   // Last guard: never open a trade against your own listing.
   if (marketIsMine(row)) {
     ScaffoldMessenger.maybeOf(context)?.showOnly(
@@ -34,11 +40,12 @@ Future<void> confirmMarketTrade(
     );
     return Future.value();
   }
-  return tradeMotionDialog<void>(context, (_) => _ConfirmTrade(c, row));
+  return tradeMotionDialog<void>(context, (_) => _ConfirmTrade(c, row, fromOrderDetail));
 }
 
 class _ConfirmTrade extends StatefulWidget {
-  const _ConfirmTrade(this.c, this.row);
+  const _ConfirmTrade(this.c, this.row, this.fromOrderDetail);
+  final bool fromOrderDetail;
   final MarketplaceController c;
   final MarketRow row;
   @override
@@ -46,10 +53,58 @@ class _ConfirmTrade extends StatefulWidget {
 }
 
 class _ConfirmTradeState extends State<_ConfirmTrade> {
+  List<MarketRow>? _locations;
+  bool _locationsLoading = true;
+  int? _location;
+  Future<void> _readLocations() async {
+    setState(() => _locationsLoading = true);
+    final rows = await widget.c.tradeLocations.load();
+    if (!mounted || contextRevision != widget.c.contextRevision) return;
+    setState(() {
+      _locations = rows;
+      _locationsLoading = false;
+      final last = widget.c.tradeLocations.selected;
+      _location = rows?.any((r) => marketNumber(r['id']) == last) == true ? last : null;
+    });
+  }
+  MarketRow? _fullRow;
+  bool _fullLoading = false;
+  bool get _incomplete => widget.row['displayType'] == 2 &&
+      MarketOrderFull.needs(_fullRow ?? widget.row);
+
+  // MK3 cap: the read tradable quantity; else the list row's own (a full read
+  // may carry it as null); else remaining. One rule for the clamp and build.
+  int? get _max => marketNumber(_fullRow?['availableQuantity'] ??
+          widget.row['availableQuantity'] ??
+          _fullRow?['remainingQuantity'] ?? widget.row['remainingQuantity'])
+      ?.toInt();
+
+  @override
+  void initState() {
+    super.initState();
+    // Bind the dialog to the account it opened under, before any read.
+    contextRevision = widget.c.contextRevision;
+    unawaited(_readFull());
+    unawaited(_readLocations());
+  }
+
+  Future<void> _readFull({bool retry = false}) async {
+    setState(() => _fullLoading = true);
+    final result = await widget.c.fullOrders.fullOrder(widget.row,
+        retry: retry, quantity: true);
+    if (!mounted || contextRevision != widget.c.contextRevision) return;
+    setState(() {
+      _fullRow = result;
+      _fullLoading = false;
+      final max = _max;
+      if (max != null && max > 0 && quantity > max) quantity = max;
+    });
+  }
+
   int quantity = 1, method = 0;
   bool submitted = false;
   final fee = TextEditingController(text: '0');
-  late final contextRevision = widget.c.contextRevision;
+  late final int contextRevision;
   @override
   void dispose() {
     fee.dispose();
@@ -58,12 +113,13 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
 
   @override
   Widget build(BuildContext context) {
-    final c = widget.c, t = c.trades, r = widget.row;
-    final max = marketNumber(r['availableQuantity'] ?? r['remainingQuantity'])
-        ?.toInt();
-    final location = marketNumber(r['locationId'])?.toInt();
+    final c = widget.c, t = c.trades, r = _fullRow ?? widget.row;
+    final max = _max;
+    final location = _locationsLoading || _locations == null ? null : _location;
     final unit = marketNumber(r['unitPrice']);
     final buy = r['creatorType'] == 1;
+    final checklist = marketIsChecklist(r);
+    final contents = marketRows(r['items']);
     return ListenableBuilder(
       listenable: t,
       builder: (context, _) => PopScope(
@@ -96,7 +152,7 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                                 ? tradeText(context, '确认购买')
                                 : tradeText(context, '确认出售给他'),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: TextStyle(
                               fontSize: 18,
@@ -130,12 +186,17 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                tradeItemName(context, {
-                                  ...r,
-                                  'itemName':
-                                      r['itemName'] ??
-                                      c.blocks['item']?.data['itemName'],
-                                }),
+                                checklist
+                                    ? marketOrderTitle(context, r)
+                                    : tradeItemName(context, r).isNotEmpty
+                                    ? tradeItemName(context, r)
+                                    // The open item page's localized name, but
+                                    // only when it is this order's own item.
+                                    : c.blocks['item']?.data['id'] != null &&
+                                          c.blocks['item']?.data['id'] ==
+                                              marketItemId(r)
+                                    ? tradeItemName(context, c.blocks['item']!.data)
+                                    : marketOrderTitle(context, r),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -144,18 +205,40 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                                 ),
                               ),
                               SizedBox(height: 3),
+                              if (marketNumber(_fullRow?['availableQuantity']) case final available?)
+                                Text('${marketDisplayText(context, 'available')} ${available.toInt()}'),
+                              if (!checklist && _fullLoading)
+                                Text(orderFullText(context, 'loading')),
+                              if (!_fullLoading && !_incomplete &&
+                                  marketNumber(_fullRow?['availableQuantity']) == null)
+                                Text(marketDisplayText(context, 'quantityMissing')),
+                              if (checklist && _incomplete) ...[
+                                Text(orderFullText(context, _fullLoading ? 'loading' : 'blocked')),
+                                if (!_fullLoading) TextButton(
+                                  key: const Key('market-confirm-full-retry'),
+                                  onPressed: () => _readFull(retry: true),
+                                  child: Text(orderFullText(context, 'retry')),
+                                ),
+                              ],
+                              if (checklist) ...[
+                                for (final item in contents.take(4))
+                                  Text('${marketName(item, marketLocale(context))} × ${marketNumber(item['quantity'])?.toInt() ?? 1}',
+                                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                                if (contents.length > 4)
+                                  Text(bundleText(context, '等 {n} 件', {'n': '${contents.length - 4}'})),
+                              ],
                               Text(
                                 [
                                   if (unit != null || max != null)
-                                    tradeText(context, 'cfMeta', {
+                                    checklist ? '${bundleText(context, '每套价格')} ${marketMoney(unit)} · ${max ?? '—'} ${bundleText(context, '套')}' : tradeText(context, 'cfMeta', {
                                       'price': marketMoney(unit),
-                                      'left': '${max ?? '—'}',
+                                      'left': '${marketNumber(r['remainingQuantity'])?.toInt() ?? '—'}',
                                     }),
-                                  if (marketQuality(r) case final q?)
-                                    tradeText(context, 'cfQuality', {'q': q}),
+                                  if (!checklist && marketQuality(r) != null)
+                                    tradeText(context, 'cfQuality', {'q': marketQuality(r)!}),
                                 ].join(' · '),
                                 maxLines: 1,
-                                overflow: TextOverflow.fade,
+                                overflow: fadeOverflow(context),
                                 softWrap: false,
                                 style: TextStyle(
                                   fontSize: 11.5,
@@ -192,15 +275,15 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                               ),
                               SizedBox(
                                 width: 36,
-                                child: Text(
-                                  '$quantity',
+                                child: FittedBox(fit: BoxFit.scaleDown, child: Text(
+                                  '$quantity ${bundleText(context, checklist ? '套' : '件')}',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontFamily:
                                         context.tokens.typography.monoFamily,
                                     fontSize: 15,
                                   ),
-                                ),
+                                )),
                               ),
                               StarBridgeNativeIconAction(
                                 key: const Key('market-confirm-quantity-add'),
@@ -240,8 +323,36 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                     Container(height: 1, color: marketLine(context)),
                     SizedBox(height: 6),
                     _ConfirmRow(
-                      tradeText(context, 'cfLocation'),
+                      tradeText(context, '对方的地点'),
                       Text(marketLocation(context, r)),
+                    ),
+                    _ConfirmRow(
+                      tradeText(context, buy ? '收货位置' : '发货位置'),
+                      _locationsLoading ? const LinearProgressIndicator()
+                        : _locations == null ? Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(tradeText(context, '地点读取失败')),
+                            TextButton(onPressed: _readLocations,
+                              child: Text(tradeText(context, '重试'))),
+                          ])
+                        : StarBridgeCompactSelect<int>(
+                            identity: 'market-confirm-location',
+                            controlKey: const Key('market-confirm-location'),
+                            semanticLabel: tradeText(context, buy ? '收货位置' : '发货位置'),
+                            placeholder: tradeText(context, '请选择地点'),
+                            isExpanded: true,
+                            value: location,
+                            options: [
+                              for (final r in _locations!)
+                                StarBridgeSelectOption(
+                                  value: marketNumber(r['id'])!.toInt(),
+                                  label: marketName(r, marketLocale(context), field: 'name')),
+                            ],
+                            onSelected: t.pending ? null : (v, _) => setState(() {
+                              _location = v;
+                              c.tradeLocations.choose(v);
+                            }),
+                          ),
+                      key: const Key('market-confirm-location-row'),
                     ),
                     _ConfirmRow(
                       tradeText(context, 'cfHours'),
@@ -345,14 +456,14 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                           : tradeText(context, '收购方同意后才进入待发货，请先确认数量和交付安排。'),
                       warning: true,
                     ),
-                    if (location == null || max == null)
+                    if (max == null)
                       Padding(
                         padding: EdgeInsets.only(top: 10),
                         child: Text(
                           tradeText(context, '当前报价缺少交易地点或库存，请刷新报价后再试。'),
                         ),
                       ),
-                    if (submitted && t.writeError != null)
+                    if (t.writeUncertain || submitted && t.writeError != null)
                       Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: TradeFailure(
@@ -369,7 +480,7 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                           },
                         ),
                       ),
-                    if (submitted && (t.writeErrorCode == 'marketplace.trade_time_required' || t.writeErrorCode == 'marketplace.contact_required'))
+                    if (!c.profileEditedInClient && submitted && (t.writeErrorCode == 'marketplace.trade_time_required' || t.writeErrorCode == 'marketplace.contact_required'))
                       marketButtonAction(TextButton(onPressed: t.pending ? null : () async {
                         final result = await editTradeProfile(context, c, missing: t.writeErrorCode);
                         if (mounted && c.contextRevision == contextRevision && result != null) {
@@ -389,7 +500,7 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                                       .context;
                                   dismissStarBridgeDialog<void>(context,
                                       source: StarBridgeActivationOrigin.sourceOf(context));
-                                  showMarketOrder(hostContext, c, r);
+                                  if (!widget.fromOrderDetail) showMarketOrder(hostContext, c, r);
                                 },
                           child: Text(tradeText(context, '查看订单详情')),
                         ), key: const Key('market-confirm-details')),
@@ -411,6 +522,8 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
                                 t.pending ||
                                     t.writeUncertain ||
                                     location == null ||
+                                    _incomplete ||
+                                    _fullLoading ||
                                     max == null ||
                                     max < quantity ||
                                     num.tryParse(fee.text) == null ||
@@ -486,7 +599,7 @@ class _ConfirmTradeState extends State<_ConfirmTrade> {
 }
 
 class _ConfirmRow extends StatelessWidget {
-  const _ConfirmRow(this.label, this.value);
+  const _ConfirmRow(this.label, this.value, {super.key});
   final String label;
   final Widget value;
   @override

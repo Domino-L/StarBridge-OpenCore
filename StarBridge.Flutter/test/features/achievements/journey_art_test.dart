@@ -9,8 +9,15 @@ import 'package:starbridge_flutter/features/achievements/achievement_catalog.dar
 // 斯坦顿旅程五项的正式图（用户 10-29 定稿的交付包）：
 // 192 列表图 / 512 详情图，已获得 / 未解锁各一套，按物理边长选图。
 void main() {
+  const stanton = {
+    'journey-lorville',
+    'journey-area18',
+    'journey-orison',
+    'journey-new-babbage',
+    'journey-stanton',
+  };
   final journey = achievementCatalog
-      .where((d) => d.id.startsWith('journey-'))
+      .where((d) => stanton.contains(d.id))
       .toList();
 
   test('五项都齐：两种状态 × 两档尺寸，文件名按成就 id', () {
@@ -50,6 +57,91 @@ void main() {
       legacy.artAsset(earned: true, logicalSize: 240, devicePixelRatio: 2),
       legacy.earnedAsset,
     );
+  });
+
+  test(
+    'new journey entries follow Stanton with their own earned and locked art',
+    () {
+      final ids = achievementCatalog.map((d) => d.id).toList();
+      final additions = achievementCatalog.skip(
+        ids.indexOf('journey-stanton') + 1,
+      );
+      expect(additions.map((d) => d.id), [
+        'journey-levski',
+        'journey-pyro-majors',
+        'journey-pyro-all',
+        'journey-grimhex',
+      ]);
+      expect(additions.map((d) => d.target), [null, 3, 23, null]);
+      for (final d in additions) {
+        expect(d.groupId, 'journey');
+        expect(d.hidden, isFalse);
+        expect(d.earnedAsset, 'assets/achievements/${d.id}-earned-192.webp');
+        expect(d.lockedAsset, 'assets/achievements/${d.id}-locked-192.webp');
+        expect(
+          d.earnedDetailAsset,
+          'assets/achievements/${d.id}-earned-512.webp',
+        );
+        expect(
+          d.lockedDetailAsset,
+          'assets/achievements/${d.id}-locked-512.webp',
+        );
+      }
+    },
+  );
+
+  // 11-05 双状态交付包：新旅程三项和 TSG 四项各有已解锁 / 未解锁两套。
+  // 11-07：法外六角湾交付包，以及用户确认为正式稿的开张大吉（11-05 候选），同样双状态。
+  testWidgets('11-05 / 11-07 art decodes at 192 / 512; locked is neutral gray', (
+    tester,
+  ) async {
+    const ids = [
+      'journey-levski',
+      'journey-pyro-majors',
+      'journey-pyro-all',
+      'journey-grimhex',
+      'contract-tsg-lead',
+      'contract-tsg-complete',
+      'contract-tsg-swift',
+      'contract-tsg-deathless',
+      'contract-first',
+    ];
+    final byId = {for (final d in achievementCatalog) d.id: d};
+    await tester.runAsync(() async {
+      for (final id in ids) {
+        final d = byId[id]!;
+        for (final (asset, size) in [
+          (d.earnedAsset, 192),
+          (d.lockedAsset, 192),
+          (d.earnedDetailAsset!, 512),
+          (d.lockedDetailAsset!, 512),
+        ]) {
+          expect(asset, contains(id));
+          final bytes = await rootBundle.load(asset);
+          final image = await decodeImageFromList(bytes.buffer.asUint8List());
+          expect(image.width, size, reason: asset);
+          expect(image.height, size, reason: asset);
+          if (asset.contains('-locked-')) {
+            final data = (await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!;
+            var maxChroma = 0;
+            for (var i = 0; i < data.lengthInBytes; i += 4) {
+              final r = data.getUint8(i);
+              final g = data.getUint8(i + 1);
+              final b = data.getUint8(i + 2);
+              final chroma =
+                  [r, g, b].reduce((a, b) => a > b ? a : b) -
+                  [r, g, b].reduce((a, b) => a < b ? a : b);
+              if (chroma > maxChroma) maxChroma = chroma;
+              expect(data.getUint8(i + 3), 255, reason: '$asset 不透明');
+            }
+            expect(maxChroma, 0, reason: '$asset 必须是严格中性灰');
+          }
+          image.dispose();
+        }
+      }
+    });
   });
 
   testWidgets('20 张图都能解码，尺寸正确；未解锁版每个像素 R=G=B', (tester) async {

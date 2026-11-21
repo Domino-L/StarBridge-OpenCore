@@ -70,6 +70,13 @@ public sealed record HangarAchievementReceipt(int SchemaVersion, Dictionary<stri
 }
 internal interface IAchievementRemote
 {
+    Task<TsgSwiftLeaderboard> ReadLeaderboardAsync(BridgeAccountContext owner, long generation, CancellationToken token) => throw new NotSupportedException();
+    Task<LeaderboardConsent> ReadLeaderboardConsentAsync(BridgeAccountContext owner, long generation, CancellationToken token) => throw new NotSupportedException();
+    Task<LeaderboardConsent> WriteLeaderboardConsentAsync(BridgeAccountContext owner, long generation, bool optIn, CancellationToken token) => throw new NotSupportedException();
+    Task<AchievementRarity?> ReadRarityAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
+        Task.FromResult<AchievementRarity?>(null);
+    Task<ContractAchievementReceipt> ObserveContractAsync(BridgeAccountContext owner, long generation,
+        ContractObservation observation, CancellationToken token) => throw new NotSupportedException();
     Task<AchievementSnapshot> ReadAchievementsAsync(BridgeAccountContext owner, long generation, CancellationToken token);
     Task<AchievementReceipt> ObserveFirstEntryAsync(BridgeAccountContext owner, long generation, FirstEntryObservation observation, CancellationToken token);
     Task<CityAchievementReceipt> ObserveCityAsync(BridgeAccountContext owner, long generation,

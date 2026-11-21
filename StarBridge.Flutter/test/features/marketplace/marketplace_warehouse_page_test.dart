@@ -60,7 +60,7 @@ class WarehousePort extends FixturePort implements MarketplaceWarehousePort {
           {
             'id': 1,
             'itemName': '科力晶（单个矿块）',
-            'quality': 'Q880',
+            'qualityData': '{"type":"material","quality":880}',
             'onHand': 24,
             'reserved': 8,
             'available': 16,
@@ -129,6 +129,26 @@ Future<void> _render(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets('audit2 warehouse quantities, labels, real quality and partial escrow', (tester) async {
+    size(tester, const Size(1440, 1000));
+    final market = MarketplaceController(AuditWarehousePort());
+    addTearDown(market.dispose);
+    await tester.pumpWidget(scopedApp(Scaffold(body: MarketplaceWarehousePage(market)), InteractionSuite.scan));
+    await tester.pumpAndSettle();
+    expect(find.text('18 行 · 可用 312'), findsOneWidget);
+    expect(find.text('锁定'), findsOneWidget);
+    expect(find.textContaining('44136'), findsNothing);
+    expect(find.text('品质 880'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<(String, int)>(('market-warehouse-view', 1))));
+    await tester.pumpAndSettle();
+    expect(find.text('账本（只显示最近 30 天）'), findsOneWidget);
+    for (final text in ['移动 50', '锁定 +16', '锁定 -16', '库存锁定', '释放锁定', '交易扣减', '容器迁移']) {
+      expect(find.text(text), findsWidgets);
+    }
+    // The count rides inside the tab title: "托管 1+" (one row, more pages).
+    expect(find.text('托管 1+'), findsOneWidget);
+  });
+
   setUpAll(() async {
     if (const String.fromEnvironment('OUT').isEmpty) return;
     for (final (family, file) in [
@@ -195,4 +215,25 @@ void main() {
       'escrow',
     }, reason: 'reads only');
   });
+}
+
+class AuditWarehousePort extends WarehousePort {
+  @override
+  Future<MarketRow> warehouse(String operation, [MarketRow input = const {}]) async {
+    if (operation == 'ledger') {
+      return {
+        'rows': <MarketRow>[
+          {'id': 1, 'operationType': 'TRANSFER', 'itemName': '矿石', 'deltaOnHand': 0, 'movedQuantity': 50, 'from': 'A', 'to': 'B'},
+          {'id': 2, 'operationType': 'RESERVE', 'itemName': '矿石', 'deltaOnHand': 0, 'deltaReserved': 16},
+          {'id': 3, 'operationType': 'RELEASE', 'itemName': '矿石', 'deltaOnHand': 0, 'deltaReserved': -16},
+          {'id': 4, 'operationType': 'CONSUME', 'itemName': '矿石', 'deltaOnHand': -8},
+          {'id': 5, 'operationType': 'CONTAINER_TRANSFER', 'itemName': '矿石', 'deltaOnHand': 0, 'movedQuantity': 50, 'from': 'A', 'to': 'B'},
+          // A transfer whose space names SCM left empty still shows its moved quantity.
+          {'id': 6, 'operationType': 'TRANSFER', 'itemName': '矿石', 'deltaOnHand': 0, 'movedQuantity': 7},
+        ], 'total': 6,
+      };
+    }
+    if (operation == 'escrow') return {'rows': <MarketRow>[{'id': 40, 'quantity': 8}], 'next': 41, 'more': true};
+    return super.warehouse(operation, input);
+  }
 }

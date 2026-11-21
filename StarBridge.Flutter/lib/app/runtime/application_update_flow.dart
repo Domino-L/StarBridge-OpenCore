@@ -48,7 +48,7 @@ final class ApplicationUpdateFlow {
     try {
       _operation = session.beginRequest(
         'applicationUpdates.check',
-        payload: const {'schemaVersion': 1},
+        payload: const {'schemaVersion': 1, 'automatic': true},
         timeout: const Duration(seconds: 35),
       );
       final response = await _operation!.future;

@@ -877,6 +877,9 @@ void main() {
         );
         await pick(t, finder, NotificationSourceMode.doNotDisturb, 'keyboard');
         expect(port.writes, 0);
+        final staleChange = t
+            .widget<StarBridgeSelectFormField<NotificationSourceMode>>(finder)
+            .onChanged!;
         await press(t, const Key('notification-save'));
         expect(port.writes, 1);
         expect(
@@ -897,6 +900,14 @@ void main() {
               .widget<StarBridgeSelectFormField<NotificationSourceMode>>(finder)
               .onChanged,
           isNull,
+        );
+        // A callback captured before submission must not replace the frozen
+        // draft after an unconfirmed write or cause an automatic replay.
+        staleChange(NotificationSourceMode.importantOnly);
+        await t.pumpAndSettle();
+        expect(
+          t.state<FormFieldState<NotificationSourceMode>>(finder).value,
+          NotificationSourceMode.doNotDisturb,
         );
         expect(port.writes, 1);
         await t.pumpWidget(const SizedBox());

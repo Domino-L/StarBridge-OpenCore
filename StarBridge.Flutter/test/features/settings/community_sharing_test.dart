@@ -191,6 +191,7 @@ class SharingFixture
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     if (action == 'apply') applies++;
     return PrivacyPublicationView(publicationState, firstUseRequired: false);

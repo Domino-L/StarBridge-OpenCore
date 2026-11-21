@@ -1,3 +1,4 @@
+#include <cwchar>
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
@@ -16,8 +17,12 @@ namespace {
 constexpr wchar_t kSingleInstanceMutex[] =
     L"Local\\StarBridge.Flutter.Singleton.v1";
 constexpr wchar_t kFlutterWindowClass[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
-// Keep the old title discoverable when an earlier client is already running.
+// The first three are the product names (0.7.3, user 11-07: "SCM \u661f\u6d77\u8230\u6865"). The
+// rest stay so a new client still finds and activates an earlier one that runs
+// under its old title; the window title is matched, never stored.
 constexpr const wchar_t* kWindowTitles[] = {
+    L"SCM StarBridge", L"SCM \u661f\u6d77\u8230\u6865",
+    L"SCM \u661f\u6d77\u8266\u6a4b",
     L"StarBridge", L"\u661f\u6d77\u8230\u6865", L"\u661f\u6d77\u8266\u6a4b",
     L"starbridge_flutter"};
 
@@ -91,6 +96,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   flutter::DartProject project(L"data");
+  // Main window: Skia. With Star Citizen running, the user felt the default
+  // renderer still stutter and Skia not (in-game, 11-10); raster per frame was
+  // lower on Skia drawing the full look than on Impeller drawing the light
+  // look. The menu window has run on Skia since 10-18.
+  // STARBRIDGE_MAIN_RENDERER=impeller keeps the default renderer (fallback only;
+  // not offered in settings).
+  {
+    wchar_t renderer[16]{};
+    const bool impeller =
+        GetEnvironmentVariableW(L"STARBRIDGE_MAIN_RENDERER", renderer, 16) == 8 &&
+        _wcsicmp(renderer, L"impeller") == 0;
+    if (!impeller) project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+  }
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();

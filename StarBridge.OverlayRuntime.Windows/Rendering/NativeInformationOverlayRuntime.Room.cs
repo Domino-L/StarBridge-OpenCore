@@ -27,7 +27,8 @@ public sealed partial class NativeInformationOverlayRuntime
             RoomTitle: room.Title, RoomGoal: room.Goal, RoomMemberCount: room.Members.Count,
             RoomHostDisplay: room.Members.FirstOrDefault(member => member.IsHost)?.Callsign,
             RoomCapacity: room.Capacity, RoomId: room.RoomId, ChatChannelId: room.RoomId,
-            ChatChannelTitle: room.Title);
+            ChatChannelTitle: room.Title)
+        { RealtimeUnknown = room.Members.Count > 0 && room.Members.All(member => member.Presence == "Unknown") };
         var players = room.Members.Select(member => OverlaySceneResolver.CreateRoomPlayer(
             new PartyLobbyMemberPreview(member.Callsign, member.GameId, IsHost: member.IsHost)
             {
@@ -44,7 +45,7 @@ public sealed partial class NativeInformationOverlayRuntime
         var scene = new OverlaySceneSnapshot(players, true, context);
         var command = BuildCommandState(language) with
         {
-            NoticeTitle = traditional ? "房間接入" : zh ? "房间接入" : "PARTY LINK",
+            NoticeTitle = traditional ? "房間接入" : zh ? "房间接入" : "ROOM LINK",
             NoticeText = traditional ? $"已接入 {room.Title} · {room.Members.Count}/{room.Capacity} 人"
                 : zh ? $"已接入 {room.Title} · {room.Members.Count}/{room.Capacity} 人"
                 : $"Linked to {room.Title} · {room.Members.Count}/{room.Capacity}"

@@ -23,6 +23,11 @@ internal static class OverlayAnnouncementOnceTests
 
     internal static void Run()
     {
+        var previous = OverlayViewModel.OverlayShowsAnnouncements;
+        OverlayViewModel.OverlayShowsAnnouncements = false;
+        try { Check(!Shows(Scene(), "Ordinary announcement", "owner-off:1"), "0.7.3: an ordinary announcement is a card only, not shown on the overlay"); }
+        finally { OverlayViewModel.OverlayShowsAnnouncements = previous; }
+        OverlayViewModel.OverlayShowsAnnouncements = true;
         Countdown();
         var scene = Scene();
         Check(Shows(scene, "Drill on Saturday", "owner-a:1"), "a new announcement shows");

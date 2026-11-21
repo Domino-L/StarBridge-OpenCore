@@ -16,6 +16,7 @@ class MarketplaceWarehouseController extends ChangeNotifier {
   List<MarketRow> spaces = const [];
   MarketRow? summary;
   bool spacesLoading = false, spacesFailed = false;
+  String? spacesError;
   int? spaceId; // null = every space
   String keyword = '';
   bool onlyAvailable = false;
@@ -37,6 +38,7 @@ class MarketplaceWarehouseController extends ChangeNotifier {
     final epoch = _epoch;
     spacesLoading = true;
     spacesFailed = false;
+    spacesError = null;
     _notify();
     try {
       final results = await Future.wait([
@@ -46,9 +48,10 @@ class MarketplaceWarehouseController extends ChangeNotifier {
       if (!_live(epoch)) return;
       spaces = hallRows(results[0]);
       summary = results[1];
-    } on Object {
+    } on Object catch (e) {
       if (!_live(epoch)) return;
       spacesFailed = true;
+      spacesError = e is MarketplaceTradeError ? e.code : null;
     } finally {
       if (_live(epoch)) {
         spacesLoading = false;

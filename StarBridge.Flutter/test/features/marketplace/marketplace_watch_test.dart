@@ -9,6 +9,21 @@ import 'package:starbridge_flutter/features/marketplace/marketplace_watch_page.d
 
 import 'marketplace_test.dart' show FixturePort, app;
 
+class _WatchPrices extends FixturePort {
+  @override
+  Future<MarketRead> read(String operation, {int id = 0, String keyword = '',
+    int category = 0, int side = 1, int page = 1, String language = 'CN',
+    Map<String, String> options = const {}}) async {
+    if (operation == 'bestPrices') {
+      return MarketRead({'rows': [
+        {'id': 7, 'side': 1, 'price': 1200000},
+      ]}, DateTime.now());
+    }
+    return super.read(operation, id: id, keyword: keyword, category: category,
+      side: side, page: page, language: language, options: options);
+  }
+}
+
 MarketRead _offers(String price, int total) => MarketRead({
   'rows': [
     {'unitPrice': price, 'itemName': 'Watched $total', 'seller': 'A*****y'},
@@ -49,10 +64,11 @@ void main() {
   test(
     'following records a snapshot; undo restores the original one',
     () async {
-      final port = FixturePort();
+      final port = _WatchPrices();
       final c = MarketplaceController(port);
       addTearDown(c.dispose);
       await c.readPreferences();
+      await c.ensureBestPrices([(7, 1)]);
       c.blocks['watch-price:7'] = _offers('1200000', 4);
       await c.toggleFavorite(7);
       final snapshot = c.watchSnapshot(7)!;

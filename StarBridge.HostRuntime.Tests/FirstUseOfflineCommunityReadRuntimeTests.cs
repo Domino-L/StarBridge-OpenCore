@@ -70,10 +70,10 @@ internal static partial class FirstUseModeTests
         var late = ((StarBridge.HostRuntime.Overlay.IOverlayCommunityReader)f.Host).ReadTargetsAsync(owner, default);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            Require((await Read().WaitAsync(TimeSpan.FromSeconds(3))).Error?.Code == "communities.notAllowed", "Independent refusal completes while old HTTP is held");
+            await entered.Task.WaitAsync(FirstUseTestWait.Bound);
+            Require((await Read().WaitAsync(FirstUseTestWait.Bound)).Error?.Code == "communities.notAllowed", "Independent refusal completes while old HTTP is held");
         }
-        finally { release.TrySetResult(OfflineCommunityHttp.OrganizationReply("Late success")); await late.WaitAsync(TimeSpan.FromSeconds(5)); }
+        finally { release.TrySetResult(OfflineCommunityHttp.OrganizationReply("Late success")); await late.WaitAsync(FirstUseTestWait.Bound); }
         Require(new OfflineAccountStore(f.Root).ReadSelectedOrganizations(owner, () => true) is null,
             "An actual late HTTP success cannot restore rejected names and bytes");
     }

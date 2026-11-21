@@ -138,7 +138,9 @@ void main() {
           ),
         );
         await t.pumpAndSettle();
-        expect(find.byType(StarBridgeSwitch), findsNWidgets(2));
+        // Only the recording switch: the profile display switch is gone
+        // (user 11-08, page visibility is the one privacy setting).
+        expect(find.byType(StarBridgeSwitch), findsOneWidget);
         expect(find.byType(StarBridgeActionButton), findsNWidgets(3));
       } finally {
         await t.pumpWidget(const SizedBox());

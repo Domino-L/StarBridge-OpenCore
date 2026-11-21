@@ -12,6 +12,10 @@ import 'notification_editor_frame.dart';
 import 'notification_settings_common.dart';
 import 'notification_settings_models.dart';
 import 'notification_settings_sources.dart';
+import 'notification_organization_options.dart';
+import 'notification_organization_controls.dart';
+import '../../app/localization/app_strings.dart';
+import '../../platform/bridge/bridge_client_session.dart';
 
 class NotificationSourcesConnectedPanel extends StatefulWidget {
   const NotificationSourcesConnectedPanel({required this.port, super.key});
@@ -22,7 +26,8 @@ class NotificationSourcesConnectedPanel extends StatefulWidget {
 
 class _State extends State<NotificationSourcesConnectedPanel> {
   NotificationSourcesValue? value;
-  bool loading = true, failed = false, uncertain = false;
+  bool loading = true, failed = false, saveFailed = false;
+  bool uncertain = false;
   int request = 0;
   int _binding = 0, _completed = 0;
   InteractionSource _source = InteractionSource.programmatic;
@@ -42,6 +47,7 @@ class _State extends State<NotificationSourcesConnectedPanel> {
       if (!mounted) return;
       _binding++;
       value = null;
+      saveFailed = false;
       uncertain = false;
       read();
     });
@@ -57,6 +63,7 @@ class _State extends State<NotificationSourcesConnectedPanel> {
       _source = InteractionSource.programmatic;
       unawaited(events?.cancel());
       value = null;
+      saveFailed = false;
       uncertain = false;
       draftEpoch = null;
       _attach();
@@ -79,6 +86,7 @@ class _State extends State<NotificationSourcesConnectedPanel> {
       setState(() {
         value = next;
         loading = false;
+        saveFailed = false;
         uncertain = false;
         _completed++;
       });
@@ -110,7 +118,7 @@ class _State extends State<NotificationSourcesConnectedPanel> {
     if (draftEpoch != drafts?.epoch) {
       final initial = draftEpoch == null;
       draftEpoch = drafts?.epoch;
-      if (!initial && uncertain) {
+      if (!initial && saveFailed) {
         loading = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) read();
@@ -118,9 +126,88 @@ class _State extends State<NotificationSourcesConnectedPanel> {
       }
     }
     final saved = value;
-    final modes = saved == null
-        ? <String, NotificationSourceMode>{}
-        : drafts?.value('notification-sources', saved.modes) ?? saved.modes;
+    final initial =
+        <String, (NotificationSourceMode, NotificationOrganizationOptions)>{
+          if (saved != null)
+            for (final s in saved.sources)
+              s.sourceRef: (s.mode, s.organizationOptions),
+        };
+    final choices = drafts?.value('notification-sources', initial) ?? initial;
+    Future<bool> editChoices(
+      Map<String, (NotificationSourceMode, NotificationOrganizationOptions)>
+      next,
+    ) async {
+      if (saved == null ||
+          drafts == null ||
+          drafts.saving ||
+          !mounted ||
+          !identical(owner, widget.port) ||
+          binding != _binding ||
+          loading ||
+          failed ||
+          uncertain) {
+        return false;
+      }
+      final epoch = drafts.epoch;
+      drafts.edit('notification-sources', initial, next, (next) async {
+        try {
+          if (!mounted ||
+              !identical(owner, widget.port) ||
+              binding != _binding ||
+              epoch != drafts.epoch) {
+            return false;
+          }
+          // Invalid local drafts have not been sent. Keep their controls
+          // editable instead of treating them as an uncertain Host write.
+          if (next.values.any((choice) => !choice.$2.valid)) return false;
+          final result =
+              owner is OrganizationNotificationSourcesPort &&
+                  saved.supportsOrganizationOptions
+              ? await owner.saveOrganizationOptions(
+                  saved,
+                  {for (final e in next.entries) e.key: e.value.$1},
+                  {
+                    for (final s in saved.sources)
+                      if (s.kind == NotificationSourceKind.community ||
+                          s.kind == NotificationSourceKind.officialFleet)
+                        s.sourceRef: next[s.sourceRef]!.$2,
+                  },
+                )
+              : await owner.save(saved, {
+                  for (final e in next.entries) e.key: e.value.$1,
+                });
+          if (!mounted ||
+              !identical(owner, widget.port) ||
+              binding != _binding ||
+              epoch != drafts.epoch) {
+            return false;
+          }
+          setState(() {
+            value = result;
+            saveFailed = false;
+            uncertain = false;
+          });
+          return true;
+        } catch (error) {
+          if (mounted &&
+              identical(owner, widget.port) &&
+              binding == _binding &&
+              epoch == drafts.epoch) {
+            // A known write failure permits editing. An unconfirmed write
+            // freezes the submitted draft so an explicit retry reuses it.
+            setState(() {
+              saveFailed = true;
+              uncertain =
+                  error is! BridgeRemoteException ||
+                  error.code != 'notificationPolicies.save_failed';
+            });
+          }
+          return false;
+        }
+      });
+      return true;
+    }
+
     return NotificationSettingsPanel(
       icon: StarBridgeIconSemantic.community,
       titleKey: 'settings.notification.sources.title',
@@ -201,100 +288,100 @@ class _State extends State<NotificationSourcesConnectedPanel> {
                       for (final source in saved.sources)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
-                          child: NotificationSourceRuleRow(
-                            rule: NotificationSourceRule(
-                              sourceRef: source.sourceRef,
-                              kind: source.kind,
-                              displayName: switch (source.sourceRef) {
-                                'room' => copy(
-                                  '房间提醒',
-                                  '房間提醒',
-                                  'Room reminders',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              NotificationSourceRuleRow(
+                                rule: NotificationSourceRule(
+                                  sourceRef: source.sourceRef,
+                                  kind: source.kind,
+                                  displayName: switch (source.sourceRef) {
+                                    'room' => copy(
+                                      '房间提醒',
+                                      '房間提醒',
+                                      'Room reminders',
+                                    ),
+                                    'friends' => copy(
+                                      '好友动态',
+                                      '好友動態',
+                                      'Friend activity',
+                                    ),
+                                    'directMessages' => copy(
+                                      '私信',
+                                      '私訊',
+                                      'Private messages',
+                                    ),
+                                    _ => source.displayName,
+                                  },
+                                  contextLabel: '',
+                                  mode: choices[source.sourceRef]!.$1,
+                                  logoImageData: source.logoImageData,
                                 ),
-                                'friends' => copy(
-                                  '好友动态',
-                                  '好友動態',
-                                  'Friend activity',
-                                ),
-                                'directMessages' => copy(
-                                  '私信',
-                                  '私訊',
-                                  'Private messages',
-                                ),
-                                _ => source.displayName,
-                              },
-                              contextLabel: '',
-                              mode: modes[source.sourceRef]!,
-                              logoImageData: source.logoImageData,
-                            ),
-                            enabled:
-                                drafts != null &&
-                                !drafts.saving &&
-                                !uncertain &&
-                                !loading &&
-                                !failed,
-                            onChanged: (mode) async {
-                              if (drafts == null ||
-                                  drafts.saving ||
-                                  uncertain ||
-                                  !mounted ||
-                                  !identical(owner, widget.port) ||
-                                  binding != _binding ||
-                                  loading ||
-                                  failed) {
-                                return false;
-                              }
-                              final epoch = drafts.epoch;
-                              drafts.edit(
-                                'notification-sources',
-                                saved.modes,
-                                {...modes, source.sourceRef: mode},
-                                (next) async {
-                                  try {
-                                    if (!mounted ||
-                                        !identical(owner, widget.port) ||
-                                        binding != _binding ||
-                                        epoch != drafts.epoch) {
-                                      return false;
-                                    }
-                                    final result = await owner.save(
-                                      saved,
-                                      next,
-                                    );
-                                    if (!mounted ||
-                                        !identical(owner, widget.port) ||
-                                        binding != _binding ||
-                                        epoch != drafts.epoch) {
-                                      return false;
-                                    }
-                                    setState(() {
-                                      value = result;
-                                      uncertain = false;
-                                    });
-                                    return true;
-                                  } catch (_) {
-                                    if (mounted &&
-                                        identical(owner, widget.port) &&
-                                        binding == _binding &&
-                                        epoch == drafts.epoch) {
-                                      setState(() => uncertain = true);
-                                    }
-                                    return false;
-                                  }
-                                },
-                              );
-                              return true;
-                            },
+                                enabled:
+                                    drafts != null &&
+                                    !drafts.saving &&
+                                    !loading &&
+                                    !failed &&
+                                    !uncertain,
+                                onChanged: (mode) => editChoices({
+                                  ...choices,
+                                  source.sourceRef: (
+                                    mode,
+                                    choices[source.sourceRef]!.$2,
+                                  ),
+                                }),
+                              ),
+                              if (source.kind ==
+                                      NotificationSourceKind.community ||
+                                  source.kind ==
+                                      NotificationSourceKind.officialFleet)
+                                if (saved.supportsOrganizationOptions &&
+                                    owner
+                                        is OrganizationNotificationSourcesPort)
+                                  NotificationOrganizationControls(
+                                    key: ValueKey(source.sourceRef),
+                                    sourceRef: source.sourceRef,
+                                    official:
+                                        source.kind ==
+                                        NotificationSourceKind.officialFleet,
+                                    value: choices[source.sourceRef]!.$2,
+                                    enabled:
+                                        drafts != null &&
+                                        !drafts.saving &&
+                                        !loading &&
+                                        !failed &&
+                                        !uncertain,
+                                    onChanged: (options) => unawaited(
+                                      editChoices({
+                                        ...choices,
+                                        source.sourceRef: (
+                                          choices[source.sourceRef]!.$1,
+                                          options,
+                                        ),
+                                      }),
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    AppStrings.of(context).text(
+                                      'settings.notification.organization.upgrade',
+                                    ),
+                                  ),
+                            ],
                           ),
                         ),
-                      if (uncertain)
+                      if (saveFailed)
                         Padding(
                           padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            copy(
-                              '尚未确认来源规则已保存。可再次点击“保存更改”；放弃更改将重新读取已生效的设置。',
-                              '尚未確認來源規則已儲存。可再次點選「儲存變更」；放棄變更將重新讀取已生效的設定。',
-                              'Saving has not been confirmed. Retry Save changes, or discard to reload the settings currently in effect.',
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              AppStrings.of(
+                                context,
+                              ).text('settings.notification.error.writeFailed'),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
                             ),
                           ),
                         ),

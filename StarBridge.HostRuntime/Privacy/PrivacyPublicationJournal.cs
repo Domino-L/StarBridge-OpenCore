@@ -25,6 +25,7 @@ internal sealed class PrivacyPublicationJournal(string root)
             "privacy_publication.response_invalid" => "invalidReceipt",
             "privacy_publication.route_retired" => "retiredRoute",
             "privacy_local.owner_unavailable" => "localOwnerPending",
+            "official_fleet.choice_changed" => "officialChoiceChanged",
             "privacy_local.read_unavailable" => "localReadPending",
             "privacy_local.read_failed" or "privacy_local.write_failed" or "privacy_local.conflict" => "localPolicy",
             _ => "unclassified"

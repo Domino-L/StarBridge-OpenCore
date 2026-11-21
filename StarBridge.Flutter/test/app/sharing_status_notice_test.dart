@@ -76,7 +76,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 31));
+    await tester.pump(const Duration(minutes: 5, seconds: 1));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('sharing-status-retry')));
     await tester.pumpAndSettle();
@@ -100,7 +100,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 31));
     await tester.pumpAndSettle();
-    expect(find.text('共享服务异常'), findsOneWidget);
+    expect(find.text('暂时连不上服务器'), findsNothing,
+        reason: 'An unreachable server waits five minutes before the strip.');
+    await tester.pump(const Duration(minutes: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('暂时连不上服务器'), findsOneWidget);
     expect(find.text('实时共享未生效'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     monitor.dispose();
@@ -307,6 +311,7 @@ class NoticePrivacy extends PublishingPrivacy {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     actions.add(action);
     if (failStatus) throw StateError('fixture status unavailable');

@@ -8,7 +8,7 @@ import 'marketplace_widgets.dart';
 import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
 
 /// 交易单「私信对方」 / 订单详情「联系卖家」 (0.7.2 G9): open the conversation in
-/// 好友与私信 · 交易消息, with this order attached to the composer.
+/// 好友与私信 · 交易消息. Only an order detail supplies an order attachment.
 const tradeChatEntryCopy = <String, List<String>>{
   '私信对方': ['私信对方', '私訊對方', 'Message them'],
   '联系卖家': ['联系卖家', '聯絡賣家', 'Contact seller'],
@@ -21,15 +21,19 @@ const tradeChatEntryCopy = <String, List<String>>{
 };
 
 MarketChatAttachment? tradeChatAttachment(MarketRow row) {
-  final id = (row['orderId'] as num?)?.toInt() ?? (row['id'] as num?)?.toInt();
-  if (id == null || id <= 0) return null;
+  final number = row['orderNumber'];
+  if (number is! String || number.length > 64 ||
+      !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(number) ||
+      number.endsWith('\n')) {
+    return null;
+  }
   final name = row['itemsName'] ?? row['productName'] ?? row['name'] ?? '';
-  final number = row['transactionNumber'] ?? row['orderNumber'];
+
   return MarketChatAttachment(
-    id,
+    number,
     [
       '$name ×${row['number'] ?? row['quantity'] ?? 1}',
-      if (number != null) '#$number',
+      '#$number',
     ].join(' · '),
   );
 }
@@ -42,7 +46,14 @@ Future<void> messageTradeCounterparty(
 ) async {
   final chat = c.tradeChat, reference = trade['counterpartyChat'];
   if (chat == null || reference is! String) return;
-  chat.requestOpen(reference, attach: tradeChatAttachment(trade));
+  final opened = await chat.openCounterparty(reference);
+  if (!sheet.mounted) return;
+  if (!opened) {
+    ScaffoldMessenger.maybeOf(sheet)?.showOnly(
+      starBridgeTimedSnackBar(content: Text(_entryText(sheet, '暂时打不开会话，请稍后再试。'))),
+    );
+    return;
+  }
   await Navigator.of(sheet).maybePop();
   c.openDestination?.call('/messages');
 }

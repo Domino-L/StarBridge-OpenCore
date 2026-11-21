@@ -121,7 +121,7 @@ internal sealed partial class FriendSharingRuntime : IDisposable
             if (_paused != 0 || _shutdown || !_allowed() || !input.IdentityConfirmed ||
                 _visibility() is not (PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame))
             { await _publisher.StopAsync(_lifetime.Token); State = "inactive"; return; }
-            if (_saved is null || _time.GetUtcNow() - _lastRead >= TimeSpan.FromSeconds(15))
+            if (_saved is null || _time.GetUtcNow() - _lastRead >= TimeSpan.FromMinutes(5))
             {
                 try {
                     var value = await Observe("read", () => _remote.ReadFriendSharingAsync(input.Owner, input.Generation, _lifetime.Token));
@@ -146,10 +146,27 @@ internal sealed partial class FriendSharingRuntime : IDisposable
             // the bounded session and last verified revision; a later tick can
             // renew it, and the server rejects a revoked or superseded policy.
             if (!FriendSharingPublication.IsTransient(error, _lifetime.Token)) {
+                var owner = _owner;
                 _saved = null; _lastRead = default;
                 try { await _publisher.StopAsync(_lifetime.Token); } catch { }
+                if (owner is not null && IsRevisionRejection(error)) {
+                    // Retire first, then read the current policy in this round.
+                    // Never retry a rejected publication or reuse its revision.
+                    try { await RefreshSettingsAsync(owner); } catch { }
+                }
             }
         }
+    }
+    private static bool IsRevisionRejection(Exception error) =>
+        error is AccountBridgeHostException { Code: "events.conflict" } or
+            HttpRequestException { StatusCode: System.Net.HttpStatusCode.Conflict };
+
+    private async Task RefreshSettingsAsync(PrivacyPublicationInput input)
+    {
+        if (_disposed || _current() is not { } before || before.Owner != input.Owner || before.Generation != input.Generation) return;
+        var value = await Observe("read", () => _remote.ReadFriendSharingAsync(input.Owner, input.Generation, _lifetime.Token));
+        if (_disposed || _current() is not { } current || current.Owner != input.Owner || current.Generation != input.Generation) return;
+        _saved = value; _lastRead = _time.GetUtcNow();
     }
     internal async Task<FriendSharingRemoteSnapshot> ReadAsync(BridgeAccountContext owner, long generation, CancellationToken token)
     {

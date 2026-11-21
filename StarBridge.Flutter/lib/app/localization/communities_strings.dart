@@ -18,7 +18,7 @@ const communitiesZhCn = <String, String>{
   'communities.joinedShortcuts': '已加入组织',
   'communities.noJoinedShortcuts': '尚未加入组织',
   'communities.shortcutsUnavailable': '登录后显示已加入组织',
-  'communities.shortcutsLoadFailed': '组织暂时无法加载，将自动重试',
+  'communities.shortcutsLoadFailed': '组织列表暂时读不到，稍后自动刷新',
   'communities.shortcutsOnlinePaused': '联机组织读取已暂停',
   'communities.cachedOrganizations': '组织缓存',
   'communities.cachedReadOnly': '缓存内容 · 仅供查看',
@@ -149,6 +149,10 @@ const communitiesZhCn = <String, String>{
   'communities.dataInvalid': '未能读取有效的组织资料，请重试。',
   'communities.refreshRequired': '组织状态可能已变化，请核对刷新后的资料再操作。',
   'communities.outcomeUnknown': '暂时无法确认操作结果。请核对刷新后的组织状态，不要重复提交。',
+  'communities.identityRequired':
+      '这个 SCM 账号还没有验证游戏身份，这次操作没有执行。请先到 设置 › 账号与识别 点“验证游戏身份”，完成后再试。',
+  'communities.identityAmbiguous':
+      '这次操作没有执行：组织里有同名的不同账号，暂时分不清是谁。不用重复提交，请联系组织管理员。',
 };
 const communitiesZhTw = <String, String>{
   'communities.details.title': '組織詳情',
@@ -170,7 +174,7 @@ const communitiesZhTw = <String, String>{
   'communities.joinedShortcuts': '已加入組織',
   'communities.noJoinedShortcuts': '尚未加入組織',
   'communities.shortcutsUnavailable': '登入後顯示已加入組織',
-  'communities.shortcutsLoadFailed': '組織暫時無法載入，將自動重試',
+  'communities.shortcutsLoadFailed': '組織列表暫時讀不到，稍後自動重新整理',
   'communities.shortcutsOnlinePaused': '連線組織讀取已暫停',
   'communities.cachedOrganizations': '組織快取',
   'communities.cachedReadOnly': '快取內容 · 僅供查看',
@@ -301,6 +305,10 @@ const communitiesZhTw = <String, String>{
   'communities.dataInvalid': '未能讀取有效的組織資料，請重試。',
   'communities.refreshRequired': '組織狀態可能已變更，請核對重新整理後的資料再操作。',
   'communities.outcomeUnknown': '暫時無法確認操作結果。請核對重新整理後的組織狀態，不要重複提交。',
+  'communities.identityRequired':
+      '這個 SCM 帳號還沒有驗證遊戲身分，這次操作沒有執行。請先到 設定 › 帳號與識別 點「驗證遊戲身分」，完成後再試。',
+  'communities.identityAmbiguous':
+      '這次操作沒有執行：組織裡有同名的不同帳號，暫時分不清是誰。不用重複提交，請聯絡組織管理員。',
 };
 const communitiesEn = <String, String>{
   'communities.details.title': 'Organization details',
@@ -324,7 +332,7 @@ const communitiesEn = <String, String>{
   'communities.noJoinedShortcuts': 'No joined organizations',
   'communities.shortcutsUnavailable': 'Sign in to view your organizations',
   'communities.shortcutsLoadFailed':
-      'Organizations unavailable. Retrying automatically.',
+      'Organization list unavailable right now. It refreshes automatically.',
   'communities.shortcutsOnlinePaused': 'Online organization updates are paused',
   'communities.cachedOrganizations': 'Cached organizations',
   'communities.cachedReadOnly': 'Cached · View only',
@@ -467,4 +475,6 @@ const communitiesEn = <String, String>{
   'communities.dataInvalid': 'Could not read valid community details. Retry.',
   'communities.refreshRequired': 'The community may have changed. Check the refreshed details before acting.',
   'communities.outcomeUnknown': 'The result is unconfirmed. Check the refreshed community state before submitting again.',
+  'communities.identityRequired': "This SCM account hasn't verified its game identity, so nothing was changed. Go to Settings › Account & identity, choose Verify game identity, then try again.",
+  'communities.identityAmbiguous': "Nothing was changed: different accounts in this organization share the same name, so the person can't be told apart yet. Don't submit again; contact an organization admin.",
 };

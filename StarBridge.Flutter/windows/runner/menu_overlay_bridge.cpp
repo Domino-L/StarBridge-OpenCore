@@ -1,4 +1,5 @@
 #include "menu_overlay_bridge.h"
+#include "frame_pressure_channel.h"
 #include "menu_image_epoch.h"
 #include "menu_overlay_window.h"
 #include "menu_image_native.h"
@@ -108,7 +109,7 @@ class MenuOverlayBridge::Impl {
           next[Value("startupMode")] = Value(*startup);
         const auto* interaction_raw = Field(*args, "interactionPresentation");
         const auto* interaction = interaction_raw ? std::get_if<std::string>(interaction_raw) : nullptr;
-        if (interaction && interaction->size() <= 128)
+        if (interaction && interaction->size() <= 160)
           next[Value("interactionPresentation")] = Value(*interaction);
         const auto* recovery = Field(*args, "recoveryPending");
         next[Value("recoveryPending")] = Value(live_friends_ && recovery && std::get_if<bool>(recovery) && std::get<bool>(*recovery));
@@ -117,6 +118,8 @@ class MenuOverlayBridge::Impl {
         next[Value("liveComms")] = Value(live_comms_);
         const auto* features = Field(*args, "liveFeatures");
         next[Value("liveFeatures")] = Value(live_friends_ && features && std::get_if<bool>(features) && std::get<bool>(*features));
+        const auto* page_relay = Field(*args, "pageRelay");
+        next[Value("pageRelay")] = Value(live_friends_ && page_relay && std::get_if<bool>(page_relay) && std::get<bool>(*page_relay));
         const auto* hangar = Field(*args, "execHangar");
         next[Value("execHangar")] = Value(live_friends_ && hangar && std::get_if<bool>(hangar) && std::get<bool>(*hangar));
         const auto* game_hangar = Field(*args, "execHangarGameOverlay");
@@ -130,14 +133,14 @@ class MenuOverlayBridge::Impl {
           if (!opening) result->Error("menu.unavailable", "Menu could not prepare a frame.");
           else result->Success(Value(static_cast<int64_t>(opening)));
         } else result->Success();
-      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView" || call.method_name() == "attentionView" || call.method_name() == "noticeView" || call.method_name() == "interactionPresentation") {
+      } else if (call.method_name() == "friendsView" || call.method_name() == "commsView" || call.method_name() == "profileView" || call.method_name() == "featureView" || call.method_name() == "preferencesState" || call.method_name() == "contextView" || call.method_name() == "attentionView" || call.method_name() == "noticeView" || call.method_name() == "bridgeEvent" || call.method_name() == "interactionPresentation") {
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto* raw = args ? Field(*args, "payload") : nullptr;
         const auto* payload = raw ? std::get_if<std::string>(raw) : nullptr;
         if (!args || !payload || payload->size() > 1048576 ||
             (call.method_name() == "attentionView" && payload->size() > 256) ||
             (call.method_name() == "noticeView" && payload->size() > 65536) ||
-            (call.method_name() == "interactionPresentation" && payload->size() > 128) ||
+            (call.method_name() == "interactionPresentation" && payload->size() > 160) ||
             (call.method_name() != "preferencesState" && call.method_name() != "interactionPresentation" && !(call.method_name() == "commsView" ? live_comms_ : live_friends_)) || !window_.session().wanted() ||
             Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation()) ||
             Integer(*args, "revision") < 0) {
@@ -214,6 +217,7 @@ class MenuOverlayBridge::Impl {
     window_.Hide();
     if (secondary_) secondary_->SetMethodCallHandler(nullptr);
     secondary_.reset();
+    frame_pressure_.reset();
     local_tools_.reset();
     controller_.reset();
   }
@@ -256,6 +260,57 @@ class MenuOverlayBridge::Impl {
         },
         [life, reply]() { if (*life) reply->Error("menu.imageMaintenanceUnavailable"); }));
   }
+  // Client pages shown in the menu reach the Host through the primary engine.
+  // A request needs the current opening. Its answer returns even if the menu
+  // hid meanwhile, so a finished trade write never reads as a failure.
+  void HandleBridgeRelay(const Value* raw, std::unique_ptr<flutter::MethodResult<Value>> result) {
+    const auto* args = raw ? std::get_if<Map>(raw) : nullptr;
+    const auto* action_raw = args ? Field(*args, "action") : nullptr;
+    const auto* action = action_raw ? std::get_if<std::string>(action_raw) : nullptr;
+    const auto* payload_raw = args ? Field(*args, "payload") : nullptr;
+    const auto* payload = payload_raw ? std::get_if<std::string>(payload_raw) : nullptr;
+    const auto* capability = Field(snapshot_, "pageRelay");
+    const bool allowed = capability && std::get_if<bool>(capability) && std::get<bool>(*capability);
+    // The menu may say the cancelled work of an opening that hid has exited:
+    // the current one while hidden, or an earlier one even after reopening.
+    // It carries no payload and only ends a wait the primary still tracks.
+    const bool exited = action && *action == "exited";
+    const auto exited_opening = args ? Integer(*args, "opening") : -1;
+    const auto current = static_cast<int64_t>(window_.session().generation());
+    if (exited && args->size() == 2 && live_friends_ && exited_opening > 0 &&
+        (exited_opening < current || (exited_opening == current && !window_.session().wanted()))) {
+      ForwardBridgeRelay(*args, std::move(result)); return;
+    }
+    if (!args || !action || !allowed || !live_friends_ || !window_.session().wanted() ||
+        Integer(*args, "opening") != static_cast<int64_t>(window_.session().generation()) ||
+        !(*action == "hello" ? args->size() == 2
+          : (*action == "request" || *action == "cancel" || *action == "paused") && args->size() == 3 && payload &&
+            payload->size() <= (*action == "request" ? kBridgeRelayRequestBytes : kBridgeRelayCancelBytes))) {
+      result->Error("menu.closed", "Menu is closed"); return;
+    }
+    ForwardBridgeRelay(*args, std::move(result));
+  }
+  void ForwardBridgeRelay(const Map& args, std::unique_ptr<flutter::MethodResult<Value>> result) {
+    const auto life = alive_;
+    auto pending = std::shared_ptr<flutter::MethodResult<Value>>(std::move(result));
+    primary_.InvokeMethod("bridgeRelay", std::make_unique<Value>(args),
+      std::make_unique<flutter::MethodResultFunctions<Value>>(
+        [this, pending, life](const Value* value) {
+          if (!*life) return;
+          const auto* text = value ? std::get_if<std::string>(value) : nullptr;
+          if (!live_friends_) pending->Error("menu.closed", "Menu session changed");
+          else if (text && text->size() > kBridgeRelayReplyBytes) pending->Error("menu.relayTooLarge", "Reply too large");
+          else if (value) pending->Success(*value);
+          else pending->Success();
+        },
+        [pending, life](const std::string& code, const std::string&, const Value*) {
+          if (*life) pending->Error(code, "Relay unavailable");
+        },
+        [pending, life]() { if (*life) pending->Error("menu.closed", "Relay unavailable"); }));
+  }
+  static constexpr size_t kBridgeRelayCancelBytes = 256;
+  static constexpr size_t kBridgeRelayRequestBytes = 2 * 1024 * 1024;
+  static constexpr size_t kBridgeRelayReplyBytes = 10 * 1024 * 1024;
   int64_t request_ = 0;
   bool OwnsRequest(const Value* value) const {
     const auto* args = value ? std::get_if<Map>(value) : nullptr;
@@ -319,16 +374,20 @@ class MenuOverlayBridge::Impl {
         [this]() { return window_.session().wanted(); },
         [this](bool modal) { window_.SetLocalModal(modal); },
         [this]() { window_.Hide(true, "tool"); });
+    frame_pressure_ = std::make_unique<frame_pressure::Channel>(
+        controller_->engine()->messenger());
     secondary_ = std::make_unique<Channel>(controller_->engine()->messenger(),
         "starbridge/menu-surface", &flutter::StandardMethodCodec::GetInstance());
     secondary_->SetMethodCallHandler([this](const auto& call, auto result) {
       if (call.method_name() == "ready") {
         dart_ready_ = true;
         result->Success(Value(Snapshot()));
-      } else if (call.method_name() == "openExecHangar" || call.method_name() == "openHudSettings") {
-        // Both hand the user to one fixed client page. The overlay settings
-        // page always exists, so only the hangar needs its capability flag.
-        const bool hud = call.method_name() == "openHudSettings";
+      } else if (call.method_name() == "openExecHangar" || call.method_name() == "openHudSettings" ||
+                 call.method_name() == "openFleetPage" || call.method_name() == "openCommunitiesPage") {
+        // Each hands the user to one fixed client page. The overlay settings,
+        // main fleet and organization pages always exist; only the hangar
+        // needs its capability flag.
+        const bool hud = call.method_name() != "openExecHangar";
         const std::string unavailable = hud ? "menuToolPage.session_unavailable" : "menuExecHangar.session_unavailable";
         const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
         const auto opening = window_.session().generation();
@@ -361,6 +420,8 @@ class MenuOverlayBridge::Impl {
               if (*life) pending->Error(code, "Tool unavailable");
             },
             [pending, life, hud]() { if (*life) pending->Error(hud ? "menuToolPage.unavailable" : "menuExecHangar.unavailable", "Tool unavailable"); }));
+      } else if (call.method_name() == "bridgeRelay") {
+        HandleBridgeRelay(call.arguments(), std::move(result));
       } else if (call.method_name() == "execHangarSummary" || call.method_name() == "execHangarGameOverlay" || call.method_name() == "shortcutSettings" || call.method_name() == "recoveryAction" || call.method_name() == "browserResume" || call.method_name() == "screenshotDirectory") {
         const bool game_hangar = call.method_name() == "execHangarGameOverlay";
         const bool hangar = call.method_name() == "execHangarSummary" || game_hangar;
@@ -640,6 +701,7 @@ class MenuOverlayBridge::Impl {
   int64_t local_tools_epoch_ = 0;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<Channel> secondary_;
+  std::unique_ptr<frame_pressure::Channel> frame_pressure_;
   std::unique_ptr<MenuLocalTools> local_tools_;
 };
 

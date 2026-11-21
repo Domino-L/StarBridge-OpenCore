@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../diagnostics/frame_pace_recorder.dart';
 import '../../diagnostics/loading_diagnostics.dart';
 import '../../../shared/diagnostics/loading_content_probe.dart';
 import '../../../shared/diagnostics/loading_metrics.dart';
@@ -24,6 +25,8 @@ class ShellWorkspace extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    // Static route only; a field write unless the opt-in recording is on.
+    FramePaceScope.maybeOf(context)?.page = selected.route;
     return LoadingRouteProbe(
       route: selected.route,
       child: ColoredBox(

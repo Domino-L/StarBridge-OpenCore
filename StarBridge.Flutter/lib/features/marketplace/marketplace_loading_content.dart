@@ -74,7 +74,7 @@ _Content _selected(MarketplaceController c) {
   if (c.hasItem) {
     return _combine([
       block('item', identity: true),
-      block(['sell', 'buy', 'trend', 'acquisition'][c.itemTab]),
+      block(c.itemTabKey),
     ]);
   }
   if (c.hasCatalog) return block('catalog');

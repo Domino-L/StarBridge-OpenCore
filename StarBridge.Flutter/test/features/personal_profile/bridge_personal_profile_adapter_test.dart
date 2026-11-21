@@ -595,8 +595,10 @@ void main() {
       expect(summary.estimatedValueLabel, r'$200 USD');
       expect(summary.unpricedCount, 1);
       expect(summary.categories.map((c) => c.count), [2, 1]);
-      expect(summary.recentlyAddedShip?.englishName, 'industrial-model');
-      expect(summary.recentlyAddedAtLabel, '2026-04-01');
+      // The synced importedAt may be a 0.7.2 import moment, not the RSI
+      // pledge date: no "最近入库" from it (user 11-12).
+      expect(summary.recentlyAddedShip, isNull);
+      expect(summary.recentlyAddedAtLabel, isEmpty);
       expect(summary.syncedAtLabel, '2026-01-02');
       expect(snapshot.favoriteShips.map((s) => s.identity.englishName), [
         'fighter-runtime-alias',

@@ -3,6 +3,7 @@ namespace StarBridge.HostRuntime;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Auth;
 using StarBridge.NativeBridge;
+using StarBridge.HostRuntime.Support;
 
 /// <summary>
 /// Owns the single SCM OAuth/session/cache projection for the headless Host.
@@ -55,27 +56,49 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 presetRoomTrigger: () => (_host as ScmAccountBridgeHost)?.ReadOverlayPresetTrigger() ?? (false, null),
                 moduleDemand: () => _liveOverlaySink?.ModuleDemand,
                 moduleRoomLease: () => (_host as ScmAccountBridgeHost)?.CurrentRoomOverlaySource?.Lease);
-            _overlayCommunities.DirectoryMembershipConfirmed += (owner, generation, codes) =>
-                _moduleSourceBudget.ConfirmCommunities(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, codes);
-            _overlayCommunities.MembershipRevoked += (owner, generation, code) =>
-                _moduleSourceBudget.RevokeCommunity(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, code);
+            _overlayCommunities.DirectoryMembershipConfirmed += ConfirmOverlayCommunities;
+            _overlayCommunities.MembershipRevoked += RevokeOverlayCommunity;
         }
         if (_host is ScmAccountBridgeHost source)
         {
-            source.FleetMembershipObserved = (owner, generation, sourceRef) =>
-            {
-                _overlayCommunities?.ObserveFleetMembership(owner, generation, sourceRef);
-                _moduleSourceBudget.ConfirmFleet(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, sourceRef is not null);
-            };
-            source.CommunityNameChanged = (owner, generation, code, name) =>
-                _overlayCommunities?.Rename(owner, generation, code, name);
-            source.CommunityRosterObserved = (owner, generation, sequence, startedAt, roster) =>
-                _overlayCommunities?.ObserveWorkspace(owner, generation, sequence, startedAt, roster);
-            source.CommunityDirectoryObserved = (owner, generation, sequence, startedAt, rosters) =>
-                _overlayCommunities?.ObserveDirectory(owner, generation, sequence, startedAt, rosters);
-            source.CommunityRosterRevoked = (owner, generation, sequence, code) =>
-                _overlayCommunities?.RevokeWorkspace(owner, generation, sequence, code);
+            source.FleetMembershipObserved += ObserveOverlayFleetMembership;
+            source.CommunityNameChanged += RenameOverlayCommunity;
+            source.CommunityRosterObserved += ObserveOverlayCommunityRoster;
+            source.CommunityDirectoryObserved += ObserveOverlayCommunityDirectory;
+            source.CommunityRosterRevoked += RevokeOverlayCommunityRoster;
         }
+    }
+    private void ConfirmOverlayCommunities(BridgeAccountContext owner, long generation, IReadOnlySet<string> codes)
+    {
+        if (!_disposed) _moduleSourceBudget.ConfirmCommunities(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, codes);
+    }
+    private void RevokeOverlayCommunity(BridgeAccountContext owner, long generation, string code)
+    {
+        if (!_disposed) _moduleSourceBudget.RevokeCommunity(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, code);
+    }
+    private void ObserveOverlayFleetMembership(BridgeAccountContext owner, long generation, string? sourceRef)
+    {
+        if (_disposed) return;
+        _overlayCommunities?.ObserveFleetMembership(owner, generation, sourceRef);
+        _moduleSourceBudget.ConfirmFleet(Overlay.OverlaySceneChoiceStore.Hash(owner), generation, sourceRef is not null);
+    }
+    private void RenameOverlayCommunity(BridgeAccountContext owner, long generation, string code, string name)
+    {
+        if (!_disposed) _overlayCommunities?.Rename(owner, generation, code, name);
+    }
+    private void ObserveOverlayCommunityRoster(BridgeAccountContext owner, long generation, long sequence,
+        DateTimeOffset startedAt, Overlay.InformationOverlayCommunityContent roster)
+    {
+        if (!_disposed) _overlayCommunities?.ObserveWorkspace(owner, generation, sequence, startedAt, roster);
+    }
+    private void ObserveOverlayCommunityDirectory(BridgeAccountContext owner, long generation, long sequence,
+        DateTimeOffset startedAt, IReadOnlyList<Overlay.InformationOverlayCommunityContent> rosters)
+    {
+        if (!_disposed) _overlayCommunities?.ObserveDirectory(owner, generation, sequence, startedAt, rosters);
+    }
+    private void RevokeOverlayCommunityRoster(BridgeAccountContext owner, long generation, long sequence, string code)
+    {
+        if (!_disposed) _overlayCommunities?.RevokeWorkspace(owner, generation, sequence, code);
     }
     public Overlay.InformationOverlayCommunityContent? CurrentCommunityOverlay => _overlayCommunities?.ReadForDisplay();
     public Task PrepareCommunityOverlayAsync(CancellationToken cancellation) =>
@@ -202,6 +225,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.UpdateAvatar,
         AccountBridgeRequestNames.ReadAvatar,
         AccountBridgeRequestNames.UpdateCallSign,
+        AccountBridgeRequestNames.RefreshRsiData,
         GameIdentityBridge.RequestCode,
         GameIdentityBridge.Verify,
         GameIdentityBridge.OpenProfile,
@@ -211,6 +235,9 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.SendPasswordResetCode,
         AccountBridgeRequestNames.ConfirmPasswordReset,
         AccountBridgeRequestNames.LinkLegacyAccount,
+        AccountBridgeRequestNames.ReadLegacyMigration,
+        AccountBridgeRequestNames.RetryLegacyMigration,
+        AccountBridgeRequestNames.AcknowledgeLegacyMigration,
         AccountBridgeRequestNames.Login,
         AccountBridgeRequestNames.CancelLogin,
         AccountBridgeRequestNames.Logout,
@@ -222,6 +249,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         AccountBridgeRequestNames.ClearProfileCache,
         AccountBridgeRequestNames.GetPersonalProfile,
         "personalProfile.readVisibility",
+        "personalProfile.readAccountFacts",
         "personalProfile.saveVisibility",
         "personalProfile.readBackground",
         "personalProfile.saveBackground",
@@ -362,6 +390,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         "account.redeemLegacyEntitlements",
             "account.legacySession",
             "account.compatibility.linkExisting",
+            "account.migration",
             "account.lifecycle",
             "account.scmRouteRead",
             "account.scmRouteSave",
@@ -369,6 +398,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "account.profileCache.clear",
             "profile.stagedRead",
             "personalProfile.read",
+            "personalProfile.accountFacts.read.v1",
+            "personalProfile.visitorAccountFacts.v1",
             "personalProfile.write",
             "personalProfile.presentation.write.v1",
             "officialFleet.read",
@@ -429,6 +460,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "officialFleet.readGovernanceOutcome",
             "officialFleet.wait",
             "officialFleet.governanceRole",
+            "account.refreshRsiData",
             "officialFleet.readRoleTemplates",
             "officialFleet.manageRoleTemplates",
             "officialFleet.readRoleTemplateOutcome",
@@ -478,8 +510,11 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "hangar.localFavorites",
             "hangar.localReconciliation",
             "hangar.localPersonalData",
+            "hangar.cloud",
             "ships.specifications",
             "marketplace.read",
+            "catalog.read",
+            "catalog.openScm",
             "marketplace.trade",
             "marketplace.records",
             "marketplace.notices",
@@ -495,6 +530,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "eventSharing.settings",
             "friendSharing.settings",
             "gameIdVisibility.settings",
+            "gameIdVisibility.callsign",
             "privacy.publication",
             "privacy.publicationEvents",
         "privacy.communityScopes",
@@ -506,8 +542,13 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             "gameplayTime.history",
             "gameplayTime.historyProgress",
             "gameplayTime.reset",
+            "missionRecords.read",
+            "missionRecords.import",
             "gameLog.local",
             "achievements.read",
+            "achievements.leaderboard.read",
+            "achievements.leaderboard.consent.read",
+            "achievements.leaderboard.consent.write",
             "scmAchievements.read"
         ]);
 
@@ -518,6 +559,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     private readonly AccountBridgeDispatcher _dispatcher;
     private readonly StarBridge.HostRuntime.Hangar.HangarReaderDispatcher _hangarReader;
     private readonly Hangar.HangarAutoSync? _hangarAutoSync;
+    private readonly Hangar.HangarCloudSync? _hangarCloud;
     private bool _disposed;
     private readonly Profiles.LocalPersonalProfileDispatcher? _localProfile;
     private readonly Privacy.LocalPrivacyDispatcher? _localPrivacy;
@@ -531,6 +573,9 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     private readonly Privacy.GameIdSettingsDispatcher? _gameIdSettings;
     private readonly Presence.GameplayTimeRuntime? _gameplayTime;
     private Presence.GameLogRuntime? _gameLog;
+    private readonly Support.LocalContractHistory? _contractHistory;
+    internal Support.LocalContractHistory? ContractHistory => _contractHistory;
+    internal BridgeAccountContext? LocalEventHistoryOwner => _disposed ? null : GameplayOwner().Context;
     private readonly Func<Presence.GameLogRuntime>? _newDormantGameLog;
     private readonly Achievements.AchievementRuntime? _achievements;
     private AppActivityObservation? _appActivity;
@@ -541,11 +586,12 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         Support.LocalGameEventJournal? eventJournal = null, Settings.PresenceVisibilityStore? visibility = null,
         string? achievementDataRoot = null, bool firstUseCandidate = false, TimeProvider? backgroundTime = null,
         Onboarding.FirstUseOnlineCandidateIntent? candidateIntent = null,
-        Ships.ScmShipSpecificationReader? shipSpecifications = null)
+        Ships.ScmShipSpecificationReader? shipSpecifications = null, Support.LocalContractHistory? contractHistory = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _shipSpecifications = shipSpecifications;
         _eventJournal = eventJournal;
+        _contractHistory = contractHistory;
         if (firstUseCandidate && host is not ScmAccountBridgeHost { BusinessStartupDeferred: true })
             throw new ArgumentException("A first-use candidate requires a deferred SCM owner.", nameof(host));
         if (firstUseCandidate && candidateIntent?.IsCurrent != true)
@@ -574,6 +620,14 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             _hangarAutoSync = new(_host.UpdateSharedHangarAfterSaveAsync,
                 generation => _dispatcher.PublishDomainInvalidation("hangarReader.changed", generation));
             _host.AccountChanged += _hangarAutoSync.Invalidate;
+            if (_host is Account.IHangarArchiveRemote archiveRemote)
+            {
+                // Account copy of the local hangar (user 11-05, default on). SCM sign-in only.
+                _hangarCloud = new(localHangar, new Hangar.HangarCloudSettingsStore(localHangar.Root), archiveRemote,
+                    () => _host.HangarIdentity,
+                    generation => _dispatcher.PublishDomainInvalidation("hangarReader.changed", generation));
+                _host.AccountChanged += OnHangarCloudAccountChanged;
+            }
         }
         if (privacy is not null)
         {
@@ -656,8 +710,13 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             gameLog.ResolveOwner = _host.ResolveLocalDataOwner;
             // Reading the selected log supplies identity review; it cannot wait
             // for that same review to finish. Recording retains its own gate.
-            _newDormantGameLog = () => new(gameLog, GameplayOwner, GameplayHandle, time: backgroundTime,
-                startTimer: false, journal: eventJournal, recordingAllowed: () => FirstUseGameIdentityReady);
+            _newDormantGameLog = () => {
+                var runtime = new Presence.GameLogRuntime(gameLog, GameplayOwner, GameplayHandle, time: backgroundTime,
+                    startTimer: false, journal: eventJournal, recordingAllowed: () => GameRecordingIdentityReady,
+                    continuity: GameplayOwnerContinuity);
+                if (_localMissionRecords is not null) runtime.ConfigureMissionRecords(_localMissionRecords);
+                return runtime;
+            };
             _gameLog = _newDormantGameLog();
             _gameLog.PublicationChanged += WakeGamePublication;
             _host.AccountChanged += SuspendGameLog;
@@ -669,21 +728,27 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             scmProfile.ProfileImportCoordinator = new(localProfile, localHangar);
         if (gameplayTime is not null)
         {
-            gameplayTime.ResolveOwner = _host.ResolveLocalDataOwner;
+            gameplayTime.ResolveOwner = _host is ScmAccountBridgeHost gameplayScm
+                ? gameplayScm.ResolveGameplayDataOwner : _host.ResolveLocalDataOwner;
             _gameplayTime = new(gameplayTime, GameplayRecordingOwner, verifiedHandle: GameplayHandle,
+                recordingAllowed: () => GameRecordingIdentityReady, continuity: GameplayContinuityState,
                 time: backgroundTime, startTimer: !firstUseCandidate,
                 historyEligibility: GameplayHistoryEligibilityAsync,
                 resetRemote: _host as Presence.IGameplayTimeResetRemote,
                 historyRemote: _host as Presence.IGameplayHistoryRemote,
-                boundLiveLog: () => _gameLog?.BoundLivePathForHistory);
+                boundLiveLog: () => _gameLog?.BoundLivePathForHistory,
+                visitorGameplayTimeRemote: _host as Presence.IVisitorGameplayTimeRemote);
             _host.AccountChanged += SuspendGameplayTime;
         }
+        if (achievementDataRoot is not null) ConfigureMissionRecords(achievementDataRoot);
         if (achievementDataRoot is not null && _host is Achievements.IAchievementRemote achievementRemote)
         {
+            var contractStore = new Achievements.ContractAchievementStore(achievementDataRoot);
+            _contractRecordStore = new(achievementDataRoot);
             _achievementCelebration = new(GameplayOwner, achievementDataRoot);
             _host.AccountChanged += _achievementCelebration.Invalidate;
             _scmAchievementUnlocks = new(achievementDataRoot, GameplayOwner, _host.TriggerScmAchievementsAsync,
-                _host.ReadScmAchievementsAsync, PublishScmAchievementEarned, backgroundTime);
+                _host.ReadScmAchievementsAsync, PublishScmAchievementEarned, backgroundTime, summary: PublishScmAchievementSummary);
             _scmAchievementUnlockStore = new(achievementDataRoot);
             _host.AccountChanged += _scmAchievementUnlocks.Invalidate;
             _achievements = new(new(achievementDataRoot), achievementRemote, GameplayOwner, () => _gameLog?.CaptureFirstEntry(),
@@ -691,8 +756,11 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 time: backgroundTime, startTimer: !firstUseCandidate,
                 earned: PublishFirstEntryEarned, hangarStore: new(achievementDataRoot),
                 hangarEvidence: CaptureHangarAchievementEvidence, seriesEarned: PublishSeriesEarned,
-                confirmed: ObserveConfirmedAchievements, cached: ReadCachedAchievements, cityStore: new(achievementDataRoot));
+                confirmed: ObserveConfirmedAchievements, cached: ReadCachedAchievements, cityStore: new(achievementDataRoot), contractStore: contractStore,
+                contractRecords: _contractRecordStore);
             if (_gameLog is not null) _gameLog.CityArrival += ObserveCityArrival;
+            if (_gameLog is not null) { _gameLog.ConfigureContracts(contractStore, _contractRecordStore,
+                _contractHistory); _gameLog.ContractQueued += WakeContractAchievements; }
             _host.AccountChanged += _achievements.Invalidate;
         }
         }
@@ -707,7 +775,18 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         }
     }
 
-    private void SuspendGameplayTime(long _) => _gameplayTime?.Suspend();
+    private void OnHangarCloudAccountChanged(long generation)
+    {
+        _hangarCloud?.Invalidate(generation);
+        // Restore only into a never-saved local hangar; a slow server never blocks the account change.
+        if (_hangarCloud is { } cloud) _ = Task.Run(() => cloud.RestoreIfEmptyAsync());
+    }
+
+    private void SuspendGameplayTime(long generation)
+    {
+        _gameplayTime?.Suspend();
+        if (_gameplayTime is { } gameplay) _ = gameplay.RefreshAccountTotalAsync(once: true);
+    }
     private void SuspendGameLog(long _) => _gameLog?.Suspend();
     private void WakeGamePublication()
     {
@@ -761,6 +840,15 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
 
     // Withdrawal/observation ownership is independent of a publishable Handle,
     // game identity and realtime visibility. Never sample visibility here.
+    private string? _publicationOwnerDiagnostic;
+    private void RecordPublicationOwnerInput(string facts)
+    {
+        // Each runtime owns its own transitions; a staged candidate and its
+        // original account must not repeatedly overwrite one shared last value.
+        if (Interlocked.Exchange(ref _publicationOwnerDiagnostic, facts) != facts)
+            Support.IdentityGateJournal.Event("publication-input", facts);
+    }
+
     private Privacy.PrivacyPublicationInput? PublicationOwnerInput()
     {
         var owner = GameplayOwner();
@@ -770,19 +858,28 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             owner = (_host.GameplayTimeContext, _host.Generation);
         var identity = _host.HangarIdentity;
         var handle = GameplayHandle();
-        if (_disposed || owner.Context is null) return null;
-        handle ??= "";
         var check = _gameLog?.IdentityPolicyState ?? StarBridge.Core.Identity.LocalIdentityCheckState.NotObserved;
+        if (_disposed || owner.Context is null)
+        {
+            RecordPublicationOwnerInput(
+                $"code=no-owner confirmed=False policyAllows=False localCheck={check} localRetired={_localBusinessRetired} firstUseUnavailable={FirstUseBusinessUnavailable} firstUseCandidate={_firstUseCandidate}");
+            return null;
+        }
+        handle ??= "";
         var confirmed = identity is not null && check == StarBridge.Core.Identity.LocalIdentityCheckState.Match &&
             StarBridge.Core.Identity.IdentityBindingPolicy.Evaluate(identity.Identity, check).CanUseIdentitySensitiveNetworkWrites;
         // Use the same authoritative assessment as the account page for both
         // SCM and legacy sessions. A verified account need not launch the game
         // again just to share app presence; observed mismatch/revocation still
         // blocks through that assessment. Game telemetry retains its own gate.
-        if (_host.ReadCurrentGameIdentityPolicy(owner.Context) is { } policy)
+        var gatePolicy = _host.ReadCurrentGameIdentityPolicy(owner.Context);
+        if (gatePolicy is { } policy)
             confirmed = policy.SensitiveWritesAllowed;
         // All three publishers treat unconfirmed inputs as withdrawal-only.
         // Preserve owner/handle equality without restoring publication authority.
+        RecordPublicationOwnerInput(
+            $"code=confirmed-input confirmed={confirmed && !_localBusinessRetired && !FirstUseBusinessUnavailable} policyAllows={gatePolicy?.SensitiveWritesAllowed.ToString() ?? "none"} policyState={gatePolicy?.State ?? "none"} " +
+            $"localCheck={check} localRetired={_localBusinessRetired} firstUseUnavailable={FirstUseBusinessUnavailable} firstUseCandidate={_firstUseCandidate} handleEmpty={handle.Length == 0}");
         if (_localBusinessRetired || FirstUseBusinessUnavailable) confirmed = false;
         var activity = Volatile.Read(ref _appActivity);
         return new(owner.Context, owner.Generation, handle, confirmed, ConfirmedGameVersion, CurrentGameSession,
@@ -827,6 +924,9 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
 
     private string? GameplayHandle()
     {
+        // FromSession uses the current session's AuthoritativeGameIdentity.
+        // DisplayHandle accepts only Verified status with consistent Handle /
+        // CanonicalHandle; the same source also gates setup consent adoption.
         var identity = _host.HangarIdentity;
         if (identity is null || identity.Account != _host.GameplayTimeContext || identity.Generation != _host.Generation)
             return null;
@@ -903,19 +1003,23 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
     public static Task<AccountBridgeRuntime> CreateDefaultAsync(
         Func<string?>? detectedGameIdentity = null,
         CancellationToken cancellationToken = default,
-        Support.LocalGameEventJournal? eventJournal = null, bool enableFirstUseModes = true)
+        Support.LocalGameEventJournal? eventJournal = null, bool enableFirstUseModes = true,
+        Support.LocalContractHistory? contractHistory = null)
     {
         var root = HostDataRoot.CurrentRoot;
         return CreateWithFirstUseModeAsync(root,
-            token => CreateOnlineDefaultAsync(root, false, detectedGameIdentity, token, eventJournal), cancellationToken,
-            eventJournal: eventJournal, enableFirstUseModes: enableFirstUseModes);
+            token => CreateOnlineDefaultAsync(root, false, detectedGameIdentity, token, eventJournal, contractHistory: contractHistory), cancellationToken,
+            eventJournal: eventJournal, enableFirstUseModes: enableFirstUseModes, contractHistory: contractHistory);
     }
 
     private static async Task<AccountBridgeRuntime> CreateOnlineDefaultAsync(string dataRoot, bool requireFreshSignIn,
         Func<string?>? detectedGameIdentity, CancellationToken cancellationToken,
-        Support.LocalGameEventJournal? eventJournal, Onboarding.FirstUseOnlineCandidateIntent? candidateIntent = null)
+        Support.LocalGameEventJournal? eventJournal, Onboarding.FirstUseOnlineCandidateIntent? candidateIntent = null,
+        Support.LocalContractHistory? contractHistory = null)
     {
         var firstUseCandidate = candidateIntent is not null;
+        Support.IdentityGateJournal.Configure(dataRoot);
+        Support.IdentityGateJournal.Event("runtime-create", $"firstUseCandidate={firstUseCandidate} requireFreshSignIn={requireFreshSignIn}");
         if ((requireFreshSignIn || firstUseCandidate) && candidateIntent?.IsCurrent != true ||
             firstUseCandidate && requireFreshSignIn == candidateIntent!.RetainSession)
             throw new Onboarding.LocalFirstUseException("firstUse.context_changed");
@@ -927,7 +1031,7 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         {
             if (firstUseCandidate) throw new Onboarding.LocalFirstUseException("firstUse.online_unavailable");
             return new AccountBridgeRuntime(
-                new EnvironmentLockedAccountBridgeHost(configuration.EnvironmentId)) { RouteState = configuration.RouteState };
+                new EnvironmentLockedAccountBridgeHost(configuration.EnvironmentId), contractHistory: contractHistory) { RouteState = configuration.RouteState };
         }
 
         var http = new ScmHttpClient();
@@ -973,14 +1077,20 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                             System.Text.Encoding.UTF8.GetBytes(configuration.LegacyRelayBaseUri.AbsoluteUri)))[..16] + ".dat")),
                 requireFreshSignIn: requireFreshSignIn, deferBusinessStartup: firstUseCandidate,
-                requireRetainedFirstUseSession: candidateIntent?.RetainSession == true),
-            dataRoot, eventJournal, firstUseCandidate, candidateIntent);
+                requireRetainedFirstUseSession: candidateIntent?.RetainSession == true)
+                {
+                    LocalOwnerAliases = new LocalOwnerAliasStore(dataRoot),
+                    LegacyMigration = new LegacyMigrationClient(configuration.LegacyRelayBaseUri),
+                    MigrationResultMarks = new LegacyMigrationResultMarks(dataRoot)
+                },
+            dataRoot, eventJournal, firstUseCandidate, candidateIntent, contractHistory: contractHistory);
         try
         {
             runtime = ConstructRuntime();
             runtime.RouteState = configuration.RouteState;
             runtime._shipSpecifications = new(configuration.OAuthOptions.AuthorizationServerBaseUri);
             runtime._marketplace = new(configuration.OAuthOptions.AuthorizationServerBaseUri);
+            runtime.InstallCatalogReader(configuration.OAuthOptions.AuthorizationServerBaseUri);
             runtime._marketplacePreferences = new(dataRoot);
         }
         catch { createdHost?.Dispose(); throw; }
@@ -1025,6 +1135,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (MissionRecordsRuntime.Handles(request.Name) && MissionRecordsLocalMode)
+            return await DispatchMissionRecordsAsync(request, cancellationToken).ConfigureAwait(false);
         if (_firstUseCandidate && _candidateIntent?.IsCurrent != true)
             return new(BridgeEnvelope.ErrorResponse(request,
                 new BridgeError("firstUse.context_changed", "Account setup has changed. Return to setup and try again.")), []);
@@ -1094,6 +1206,8 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         BridgeEnvelope request,
         CancellationToken cancellationToken)
     {
+        if (MissionRecordsRuntime.Handles(request.Name))
+            return await DispatchMissionRecordsAsync(request, cancellationToken).ConfigureAwait(false);
         if (request.Name is "account.scmRouteRead" or "account.scmRouteSave")
             return DispatchScmRoute(request, cancellationToken);
         if (Images.RemoteImageCacheBridge.Requests.Contains(request.Name))
@@ -1110,8 +1224,27 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
             return await _eventSharingBridge.DispatchAsync(request, cancellationToken);
         if (_friendSharingBridge is not null && request.Name is "friendSharing.read" or "friendSharing.save")
             return await _friendSharingBridge.DispatchAsync(request, cancellationToken);
-        if (_gameIdSettings is not null && request.Name is "gameIdVisibility.read" or "gameIdVisibility.save")
-            return await _gameIdSettings.DispatchAsync(request, cancellationToken);
+        if (_gameIdSettings is not null && request.Name is "gameIdVisibility.read" or "gameIdVisibility.save" or
+            "gameIdVisibility.saveCallsign" or "gameIdVisibility.retrySync")
+        {
+            var confirmedBefore = (_host as Account.IGameIdSettingsRemote)?.HkCallsignConfirmations ?? 0;
+            var gameIdResult = await _gameIdSettings.DispatchAsync(request, cancellationToken);
+            // One callsign (decision 甲): a Settings rename changes the same name the profile editor does, and the
+            // top bar / friends header read it from Hong Kong. Announce it like account.updateCallSign: after a
+            // successful Settings save (the Relay changed), and after any retry, tapped or automatic, that got
+            // Hong Kong to confirm the name (even while the locations half stays pending). A retry that pushed
+            // nothing announces nothing, so the card's automatic retries do not re-read the account each time.
+            // The event rides back with this response instead of the shared queue: another account request that
+            // is cancelled while draining that queue must not take it along (review P2).
+            var ok = gameIdResult.Response.Status == BridgeResponseStatuses.Ok;
+            var confirmedNow = (_host as Account.IGameIdSettingsRemote)?.HkCallsignConfirmations ?? 0;
+            if (ok && request.SessionGeneration == _host.Generation &&
+                (request.Name == "gameIdVisibility.saveCallsign" ||
+                 request.Name == "gameIdVisibility.retrySync" && confirmedNow != confirmedBefore))
+                return gameIdResult with { Events = [.. gameIdResult.Events,
+                    _dispatcher.DomainInvalidation("account.presentationChanged", request.SessionGeneration)] };
+            return gameIdResult;
+        }
         if (_overlayCommunities is not null && request.Name is "overlayRoster.read" or "overlayRoster.update")
             return await _overlayCommunities.DispatchRosterAsync(request, cancellationToken);
         if (_overlayCommunities is not null && request.Name is "overlayScenes.read" or "overlayScenes.select" or "overlayScenes.focusCommunity" or "overlayScenes.focusFleet")
@@ -1153,12 +1286,13 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 Privacy.LocalPrivacyStore.RejectDuplicates(request.Payload);
                 if (request.Payload.GetRawText().Length > 1024 || request.Payload.GetProperty("schemaVersion").GetInt32() != 1 ||
                     request.Payload.EnumerateObject().Any(p => p.Name != "schemaVersion" &&
-                        !(request.Name == "privacy.applyPublication" && p.Name is "expectedRevision" or "preservePause")))
+                        !(request.Name == "privacy.applyPublication" && p.Name is "expectedRevision" or "preservePause" or "firstOfficialDefault")))
                     throw new Privacy.LocalPrivacyException("privacy_publication.invalid_request");
                 if (request.Name == "privacy.applyPublication")
                     await _privacyPublication.ApplyAsync(owner.Context, owner.Generation,
                         request.Payload.GetProperty("expectedRevision").GetInt64(), cancellationToken,
-                        request.Payload.TryGetProperty("preservePause", out var preservePause) && preservePause.GetBoolean()).ConfigureAwait(false);
+                        request.Payload.TryGetProperty("preservePause", out var preservePause) && preservePause.GetBoolean(),
+                        request.Payload.TryGetProperty("firstOfficialDefault", out var firstOfficialDefault) && firstOfficialDefault.GetBoolean()).ConfigureAwait(false);
                 else if (request.Name == "privacy.stopPublication")
                 {
                     _eventSharing?.Pause();
@@ -1200,11 +1334,20 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
                 new(BridgeEnvelope.ErrorResponse(request, new("achievements.unavailable", "Cloud achievement collection is unavailable.", true)), []);
         if (request.Name == "ships.specifications")
             return await ReadShipSpecificationsAsync(request, cancellationToken).ConfigureAwait(false);
+        if (IsCatalogRequest(request.Name))
+            return await DispatchCatalogAsync(request, cancellationToken).ConfigureAwait(false);
         if (request.Name is "marketplace.read" or "marketplace.preferences" or "marketplace.trade" or "marketplace.records" or "marketplace.contracts" or "marketplace.warehouse" or "marketplace.notices" or "marketplace.chat" or "marketplace.listings" or "tradeProfile.read" or "tradeProfile.write")
             return await DispatchMarketplaceAsync(request, cancellationToken).ConfigureAwait(false);
+        if (request.Name.StartsWith("hangarReader.cloud", StringComparison.Ordinal))
+            return _hangarCloud is not null
+                ? await _hangarCloud.DispatchAsync(request, cancellationToken).ConfigureAwait(false)
+                : new(BridgeEnvelope.ErrorResponse(request, new("hangar.cloud_unavailable", "The account hangar copy is unavailable.")), []);
         if (request.Name.StartsWith("hangarReader.", StringComparison.Ordinal))
         {
             var batch = _hangarReader.Dispatch(request, cancellationToken);
+            if (request.Name is "hangarReader.favorite" or "hangarReader.personalData" or "hangarReader.save" &&
+                batch.Response.Status == BridgeResponseStatuses.Ok)
+                _hangarCloud?.LocalSaved(request.AccountContext!, request.SessionGeneration);
             if (request.Name is "hangarReader.favorite" or "hangarReader.personalData" && batch.Response.Status == BridgeResponseStatuses.Ok)
                 return new(batch.Response, [_dispatcher.DomainInvalidation("hangarReader.changed", request.SessionGeneration)]);
             if (request.Name == "hangarReader.save" && batch.Response.Status == BridgeResponseStatuses.Ok)
@@ -1241,6 +1384,11 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         }
         if (_gameplayExport is not null && request.Name == Support.GameplayDataExportDispatcher.RequestName)
             return await _gameplayExport.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
+        if (_gameplayTime is not null && request.Name == "gameplayTime.read" &&
+            request.AccountContext == _host.CurrentContext && request.SessionGeneration == _host.Generation)
+            // Account totals are independent of the local read/consent lane.
+            // A slow Relay must not hold the statistics settings behind IO.
+            _ = _gameplayTime.RefreshAccountTotalAsync(once: true);
         if (_gameplayTime is not null && request.Name.StartsWith("gameplayTime.", StringComparison.Ordinal))
             return request.Name.StartsWith("gameplayTime.reset", StringComparison.Ordinal) && _host is Presence.IGameplayTimeResetRemote resetRemote
                 ? await _gameplayTime.DispatchResetAsync(request, resetRemote, cancellationToken).ConfigureAwait(false)
@@ -1280,6 +1428,19 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         }
 
         _disposed = true;
+        if (_host is ScmAccountBridgeHost overlaySource)
+        {
+            overlaySource.FleetMembershipObserved -= ObserveOverlayFleetMembership;
+            overlaySource.CommunityNameChanged -= RenameOverlayCommunity;
+            overlaySource.CommunityRosterObserved -= ObserveOverlayCommunityRoster;
+            overlaySource.CommunityDirectoryObserved -= ObserveOverlayCommunityDirectory;
+            overlaySource.CommunityRosterRevoked -= RevokeOverlayCommunityRoster;
+        }
+        if (_overlayCommunities is not null)
+        {
+            _overlayCommunities.DirectoryMembershipConfirmed -= ConfirmOverlayCommunities;
+            _overlayCommunities.MembershipRevoked -= RevokeOverlayCommunity;
+        }
         _host.AccountChanged -= InvalidateFriendsPages;
         _friendPages.Clear();
         if (_host is ScmAccountBridgeHost offlineSource)
@@ -1299,10 +1460,18 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         _host.AccountChanged -= InvalidateMenuHotkeys;
         _menuHotkeys?.Invalidate();
         _host.AccountChanged -= InvalidateCommunityNotifications;
+        if (_host is ScmAccountBridgeHost notificationSource) {
+            notificationSource.NotificationMembershipChanged -= InvalidateOrganizationNotifications;
+            notificationSource.FleetMembershipObserved -= ObserveNotificationOfficialMembership;
+            notificationSource.CommunityDirectoryObserved -= ConfirmNotificationCommunityDirectory;
+            notificationSource.CommunityRosterRevoked -= RevokeNotificationCommunity;
+        }
         _communityNotifications?.Dispose();
         _overlayCommunities?.Dispose();
         if (_hangarAutoSync is not null) _host.AccountChanged -= _hangarAutoSync.Invalidate;
         _hangarAutoSync?.Dispose();
+        if (_hangarCloud is not null) _host.AccountChanged -= OnHangarCloudAccountChanged;
+        _hangarCloud?.Dispose();
         _host.AccountChanged -= ResetPlayerActivity;
         if (_host is ScmAccountBridgeHost activitySource) {
             activitySource.PlayerActivityObserved = null;
@@ -1342,13 +1511,16 @@ public sealed partial class AccountBridgeRuntime : IBridgeRequestDispatcher
         if (_scmAchievementUnlocks is not null) _host.AccountChanged -= _scmAchievementUnlocks.Invalidate;
         _scmAchievementUnlocks?.Dispose();
         if (_gameLog is not null) _gameLog.CityArrival -= ObserveCityArrival;
+        if (_gameLog is not null) _gameLog.ContractQueued -= WakeContractAchievements;
         if (_gameLog is not null) _gameLog.PublicationChanged -= WakeGamePublication;
         _gameLog?.Dispose();
         _gameplayTime?.Dispose();
+        if (_missionRecords is not null) _missionRecords.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _dispatcher.Dispose();
         _hangarReader.Dispose();
         _shipSpecifications?.Dispose();
         _marketplace?.Dispose();
+        _catalog?.Dispose();
         if (_host is IDisposable disposableHost)
         {
             disposableHost.Dispose();

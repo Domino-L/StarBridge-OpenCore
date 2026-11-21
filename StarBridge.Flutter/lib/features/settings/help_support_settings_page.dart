@@ -21,6 +21,7 @@ import 'help_support_port.dart';
 import 'help_support_live_content.dart';
 import 'daily_support_port.dart';
 import 'help_support_header.dart';
+import 'scm_route_port.dart';
 import 'help_support_action.dart';
 import 'help_support_disclosure.dart';
 import 'help_support_topic_transition.dart';
@@ -35,12 +36,14 @@ class HelpSupportSettingsPage extends StatefulWidget {
     this.initialTopic = HelpSupportTopic.gameLog,
     this.port,
     this.dailySupport,
+    this.scmRoute,
     super.key,
   });
 
   final HelpSupportTopic initialTopic;
   final HelpSupportPort? port;
   final DailySupportPort? dailySupport;
+  final ScmRoutePort? scmRoute;
 
   @override
   State<HelpSupportSettingsPage> createState() =>
@@ -49,6 +52,7 @@ class HelpSupportSettingsPage extends StatefulWidget {
 
 class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
   late HelpSupportTopic _selected;
+  String _scmHost = 'scm.flowcld.com';
   bool _topicInstant = false;
   InteractionSource _topicSource = InteractionSource.programmatic;
   final _feedbackContact = TextEditingController();
@@ -65,6 +69,7 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
   void initState() {
     super.initState();
     _selected = widget.initialTopic;
+    _readScmRoute();
   }
 
   @override
@@ -87,7 +92,22 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
             children: [
               HelpSupportHeader(
                 onOpenScm: widget.port == null ? null : _openScm,
+                onOpenWebsite: widget.port == null
+                    ? null
+                    : (source) => _openLink(
+                        'helpSupport.openWebsite',
+                        HelpSupportHeader.websiteHost,
+                        source,
+                      ),
+                onOpenGitHub: widget.port == null
+                    ? null
+                    : (source) => _openLink(
+                        'helpSupport.openGitHub',
+                        HelpSupportHeader.gitHubPath,
+                        source,
+                      ),
                 dailySupport: widget.dailySupport,
+                scmHost: _scmHost,
               ),
               SizedBox(height: tokens.space.lg),
               if (FirstUseSetupEntry.of(context) case final open?)
@@ -143,6 +163,31 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
     );
   }
 
+  @override
+  void didUpdateWidget(covariant HelpSupportSettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scmRoute != widget.scmRoute) {
+      _scmHost = 'scm.flowcld.com';
+      _readScmRoute();
+    }
+  }
+
+  Future<void> _readScmRoute() async {
+    final port = widget.scmRoute;
+    if (port == null) return;
+    try {
+      final status = await port.read();
+      if (!mounted || port != widget.scmRoute) return;
+      setState(() {
+        _scmHost = status.active == ScmRouteActive.domestic
+            ? 'flowcld.xyz' : 'scm.flowcld.com';
+      });
+    } catch (_) {
+      if (!mounted || port != widget.scmRoute) return;
+      setState(() => _scmHost = 'scm.flowcld.com');
+    }
+  }
+
   void _select(HelpSupportTopic topic, InteractionSource source) {
     if (topic != _selected) {
       setState(() {
@@ -153,9 +198,16 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
     }
   }
 
-  Future<void> _openScm(InteractionSource source) async {
+  Future<void> _openScm(InteractionSource source) =>
+      _openLink('helpSupport.openScm', _scmHost, source);
+
+  Future<void> _openLink(
+    String command,
+    String host,
+    InteractionSource source,
+  ) async {
     try {
-      final result = await widget.port!.read('helpSupport.openScm');
+      final result = await widget.port!.read(command);
       if (result['schemaVersion'] != 1 || result['opened'] != true) {
         throw const FormatException('Unconfirmed browser launch');
       }
@@ -164,7 +216,11 @@ class _HelpSupportSettingsPageState extends State<HelpSupportSettingsPage> {
       showStarBridgeSnackBar(
         context,
         starBridgeTimedSnackBar(
-          content: Text(AppStrings.of(context).text('help.scm.openFailed')),
+          content: Text(
+            AppStrings.of(context)
+                .text('help.scm.openFailed')
+                .replaceAll('{host}', host),
+          ),
         ),
         source: source,
       );
@@ -343,6 +399,8 @@ class _GameLogHelp extends StatelessWidget {
     ('help.log.ship.title', 'help.log.ship.body'),
     ('help.log.location.title', 'help.log.location.body'),
     ('help.log.health.title', 'help.log.health.body'),
+    ('help.log.contracts.title', 'help.log.contracts.body'),
+    ('help.log.achievements.title', 'help.log.achievements.body'),
     ('help.log.records.title', 'help.log.records.body'),
     ('help.log.confidence.title', 'help.log.confidence.body'),
   ];

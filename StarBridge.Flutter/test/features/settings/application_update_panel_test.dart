@@ -70,7 +70,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('官网下载'), findsOneWidget);
       expect(find.textContaining('尚未开放'), findsNothing);
-      expect(find.text('下载更新'), findsNothing);
+      expect(find.text('更新并重启'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

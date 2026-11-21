@@ -112,6 +112,7 @@ internal sealed partial class PartyRoomReader : IDisposable
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
         })
             { Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal async Task<RoomDirectoryView> ReadAsync(string bearer, CancellationToken token)

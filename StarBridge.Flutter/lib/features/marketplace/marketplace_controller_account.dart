@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import 'marketplace_details.dart' show marketMyOrders;
 import 'marketplace_port.dart';
+import 'marketplace_numbers.dart';
+import 'marketplace_refresh.dart' show MarketRefreshTarget;
 import 'marketplace_trades_controller.dart';
 
 /// The signed-in trader's own side of the hall: 我的挂单 and the SCM profile.
@@ -25,29 +27,40 @@ mixin MarketplaceAccount on ChangeNotifier {
     final context = contextRevision;
     final found = <String>{};
     final listings = <MarketRow>[];
+    int? listingTotal;
     try {
       for (var page = 1; page <= 10; page++) {
         final data = await source.listings('read', {'page': page});
         if (isDisposed || context != contextRevision) return;
         final rows = marketRows(data['rows']);
+        // Pages can shift while read; an order seen twice counts once.
+        listings.addAll(rows.where((r) => !found.contains('${r['id']}')));
         found.addAll(rows.map((r) => '${r['id']}'));
-        listings.addAll(rows);
         final total = marketNumber(data['total']);
+        listingTotal = total?.toInt();
         if (rows.isEmpty || total == null || found.length >= total) break;
       }
-    } on Object {
+    } on Object catch (e) {
+      if (isDisposed || context != contextRevision) return;
+      myListingsError = e is MarketplaceTradeError ? e.code : 'marketplace.read_failed';
+      notifyListeners();
       return;
     }
     marketMyOrders
       ..clear()
       ..addAll(found);
     myListings = listings;
+    myListingsTotal = listingTotal;
+    myListingsError = null;
     myListingsLoaded = true;
     notifyListeners();
   }
 
   /// Own listings as last read from 我的挂单 (every page).
   List<MarketRow> myListings = const [];
+  int? myListingsTotal;
+  int? get activeSingleListingCount => !myListingsLoaded || myListingsError != null
+      ? null : marketListingCount(myListings, myListingsTotal);
 
   /// The signed-in trader's SCM profile (reputation, completed deals, trade
   /// window, listing limit) for the hall banner. Null when unavailable.
@@ -72,11 +85,7 @@ mixin MarketplaceAccount on ChangeNotifier {
   }
 
   /// Trades still in progress (same rule as 我的交易「进行中」).
-  int get activeTradeCount => trades.rows
-      .where(
-        (r) => ![3, 4].contains(r['deliveryStatus']) || tradeAction(r) != null,
-      )
-      .length;
+  int get activeTradeCount => trades.activeCount;
 
   /// Whether this client can read 我的挂单 (Host advertises listings).
   bool get myListingsSupported {
@@ -87,11 +96,27 @@ mixin MarketplaceAccount on ChangeNotifier {
 
   /// True once 我的挂单 has been read at least once for this account.
   bool myListingsLoaded = false;
+  String? myListingsError;
 
-  /// Sub-tab 我的交易 should open on next (0 交易, 1 挂单, 2 清单); read once.
+  final pageRefresh = MarketRefreshTarget();
+
+  /// Explicit navigation requests also reach an already mounted activity page.
   int activityTab = 0;
+  int activityRequest = 0;
+  void openMyTrades() {
+    activityTab = 0;
+    activityRequest++;
+    tab(3);
+  }
+
+  void applyTradeProfile(MarketRow profile) {
+    if (isDisposed) return;
+    tradeProfile = profile;
+    notifyListeners();
+  }
   void openMyListings() {
     activityTab = 1;
+    activityRequest++;
     tab(3);
   }
 }

@@ -8,6 +8,7 @@ import 'community_disband_copy.dart';
 import 'community_ownership_exit_copy.dart';
 import 'community_settings_workspace.dart' show communitySettingsText;
 import 'community_workspace_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 // Presentation only. The original workspace retains permission/capability
 // checks, confirmation routes, draft protection and the actual commands.
@@ -88,7 +89,7 @@ Widget communityWorkspaceManagementHeader(
         name,
         style: Theme.of(context).textTheme.titleMedium,
         maxLines: 1,
-        overflow: TextOverflow.fade,
+        overflow: fadeOverflow(context),
         softWrap: false,
       ),
     ),

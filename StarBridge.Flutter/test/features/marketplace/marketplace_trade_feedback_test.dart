@@ -109,7 +109,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(trigger.hasFocus, isFalse);
       expect(FocusManager.instance.primaryFocus?.context, isNotNull);
-      await tester.tap(find.text('取消'));
+      // The location row (TR4) makes the dialog taller than the default test
+      // screen: bring 取消 into view before tapping it.
+      await tester.ensureVisible(find.text('取消').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消').last);
       await tester.pumpAndSettle();
       expect(trigger.hasFocus, isTrue);
       await tester.pumpWidget(const SizedBox.shrink());

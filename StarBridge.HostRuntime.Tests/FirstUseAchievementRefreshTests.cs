@@ -104,6 +104,7 @@ internal static partial class FirstUseBusinessOwnerTests
         f.Original.Transport.RotateAccessToken = true;
         f.Original.Transport.HoldAchievementTrigger = true;
         f.Original.Transport.FailAchievementTrigger = fail;
+        f.Original.Transport.AllowScmCatalogRead = true;
         await f.Start();
         using var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
         var (prepared, callbacks, sources) = await AdmissionPreparation(f, native);
@@ -206,6 +207,7 @@ internal static partial class FirstUseBusinessOwnerTests
     {
         using var f = new Fixture(); f.Original.Clock.AllowTimers = true;
         f.Original.Transport.HoldAchievementTrigger = true;
+        f.Original.Transport.AllowScmCatalogRead = true;
         await f.Start();
         using var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
         var (prepared, callbacks, sources) = await AdmissionPreparation(f, native);

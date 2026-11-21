@@ -80,6 +80,8 @@ final class CommunityMemberRemovalOutcome {
               'refreshRequired',
               'requestChanged',
               'identityUnavailable',
+              'identityRequired',
+              'identityAmbiguous',
               'notAllowed',
               'unavailable',
               'invalidDraft',

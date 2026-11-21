@@ -10,11 +10,17 @@ class HangarCatalogIcon extends StatefulWidget {
     required this.iconKey,
     required this.elapsed,
     this.active = true,
+    this.duration,
+    this.builder,
     super.key,
   });
   final String iconKey;
   final Duration elapsed;
   final bool active;
+
+  /// Other one-shot artwork keeps this arrival lifecycle; both are set together.
+  final Duration? duration;
+  final Widget Function(BuildContext, Animation<double>)? builder;
 
   @override
   State<HangarCatalogIcon> createState() => _HangarCatalogIconState();
@@ -29,7 +35,8 @@ class _HangarCatalogIconState extends State<HangarCatalogIcon>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final duration = CatalogVehicleIcon.motionDuration(widget.iconKey)!;
+    final duration =
+        widget.duration ?? CatalogVehicleIcon.motionDuration(widget.iconKey)!;
     _motion = AnimationController(
       vsync: this,
       duration: duration,
@@ -81,5 +88,6 @@ class _HangarCatalogIconState extends State<HangarCatalogIcon>
 
   @override
   Widget build(BuildContext context) =>
+      widget.builder?.call(context, _motion) ??
       CatalogVehicleIcon.byKey(iconKey: widget.iconKey, motion: _motion);
 }

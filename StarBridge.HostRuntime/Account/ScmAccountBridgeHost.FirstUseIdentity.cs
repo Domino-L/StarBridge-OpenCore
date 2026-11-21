@@ -11,6 +11,20 @@ internal sealed record FirstUseScmIdentityRead(string State, FirstUseScmIdentity
 
 internal sealed partial class ScmAccountBridgeHost
 {
+    // Display only, from the already authenticated session; no refresh, network
+    // request, confirmation key or installation authority is issued here.
+    internal Onboarding.FirstUseOnlineIdentityObservation FirstUseAccountDisplay
+    {
+        get
+        {
+            var session = Volatile.Read(ref _session);
+            if (session is null || !IsFirstUseIdentityCurrent(new(ToContext(session), Generation, session))) return new("unavailable");
+            var identity = session.AuthoritativeGameIdentity;
+            var verified = Core.Identity.IdentityBindingPolicy.Evaluate(identity, (string?)null).State == Core.Identity.IdentityVerificationState.Verified;
+            return new("needsLocalIdentity", AuthoritativeHandle: verified ? identity.Handle ?? identity.NormalizedHandle : null,
+                AccountDisplayName: session.DisplayName);
+        }
+    }
     internal string FirstUseSignInState
     {
         get
@@ -18,7 +32,8 @@ internal sealed partial class ScmAccountBridgeHost
             if (!IsFirstUseAuthenticationCandidate) return "contextChanged";
             lock (_loginGate) if (_loginCancellation is not null) return "authorizing";
             var session = Volatile.Read(ref _session);
-            if (_reauthorizationRequired || _credentialTemporarilyUnavailable) return "reauthorizationRequired";
+            if (_credentialTemporarilyUnavailable && !_reauthorizationRequired) return "unavailable";
+            if (_reauthorizationRequired) return "reauthorizationRequired";
             if (_freshSignInPending || session is null) return "signInRequired";
             if (session.ExpiresAt <= _oauth.SessionNow) return "sessionExpired";
             return IsFirstUseIdentityCurrent(new(ToContext(session), Generation, session))
@@ -45,7 +60,8 @@ internal sealed partial class ScmAccountBridgeHost
             var coldReview = !IsFirstUseAuthenticationCandidate && _firstUseGameIdentityReady is not null;
             if ((!IsFirstUseAuthenticationCandidate && !coldReview) || _legacySession is not null) return new("unavailable");
             var session = Volatile.Read(ref _session);
-            if (_reauthorizationRequired || _credentialTemporarilyUnavailable) return new("reauthorizationRequired");
+            if (_credentialTemporarilyUnavailable && !_reauthorizationRequired) return new("unavailable");
+            if (_reauthorizationRequired) return new("reauthorizationRequired");
             if (_freshSignInPending || session is null) return new("signInRequired");
             if (!installedReview && session.ExpiresAt <= _oauth.SessionNow) return new("sessionExpired");
             var context = ToContext(session); var generation = Generation;
@@ -68,6 +84,7 @@ internal sealed partial class ScmAccountBridgeHost
             return (installedReview ? InstalledFirstUseIdentityCurrent(facts) : IsFirstUseIdentityCurrent(facts))
                 ? new("observed", facts) : new("contextChanged");
         }
+        catch (ScmRefreshTemporarilyUnavailableException) { return new("unavailable"); }
         catch (ScmApiAuthenticationException) { return new("reauthorizationRequired"); }
         finally { _mutationGate.Release(); }
     }

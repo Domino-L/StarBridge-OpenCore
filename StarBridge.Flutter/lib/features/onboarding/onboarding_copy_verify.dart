@@ -18,9 +18,9 @@ const onboardingVerifyWords = <String, (String, String, String)>{
   'progress.verifyPassed': ('已通过', '已通過', 'Passed'),
   'progress.verifySkipped': ('已跳过', '已跳過', 'Skipped'),
   'progress.where': (
-    '第 {n} 步，共 {total} 步 · {name}',
-    '第 {n} 步，共 {total} 步 · {name}',
-    'Step {n} of {total} · {name}',
+    '第 {n} 步 · {name}',
+    '第 {n} 步 · {name}',
+    'Step {n} · {name}',
   ),
   'progress.allDone': (
     '全部 {total} 步已完成',

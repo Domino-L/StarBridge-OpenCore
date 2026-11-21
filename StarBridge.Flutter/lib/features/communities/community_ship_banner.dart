@@ -19,6 +19,7 @@ import 'community_ships_port.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'community_ships_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// WPF-style horizontal inventory entry; only compact windows wrap metadata.
 class CommunityShipBanner extends StatelessWidget {
@@ -213,7 +214,7 @@ class CommunityShipColumnHeader extends StatelessWidget {
               Text(
                 communityShipsText(context, key),
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: context.tokens.colors.textSecondary),
@@ -290,7 +291,7 @@ class CommunitySharedShipRow extends StatelessWidget {
       child: Text(
         text,
         maxLines: 1,
-        overflow: TextOverflow.fade,
+        overflow: fadeOverflow(context),
         softWrap: false,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
           color: color ?? colors.textPrimary,
@@ -377,6 +378,7 @@ class CommunitySharedShipRow extends StatelessWidget {
                   ),
                   // Contain, never crop (user decision 2026-10-22).
                   child: CommunityCatalogShipImage(
+                    model: ship.code,
                     asset: ship.catalogImageAsset ?? ship.catalogThumbnailAsset,
                   ),
                 )
@@ -388,6 +390,7 @@ class CommunitySharedShipRow extends StatelessWidget {
                   width: 48,
                   height: 48,
                   child: CommunityCatalogShipImage(
+                    model: ship.code,
                     asset: ship.catalogThumbnailAsset ?? ship.catalogImageAsset,
                     compact: true,
                   ),

@@ -58,7 +58,7 @@ internal static class PlayerActivityPolicyTests
             }
             sink.Seen.Clear(); runtime.Reset(); Save();
             await Observe("friends", "offline");
-            var file = Directory.GetFiles(Path.Combine(root, "notification-policies-v1"), "*.json").Single();
+            var file = Directory.GetFiles(Path.Combine(root, "notification-policies-v2"), "*.json").Single();
             var original = File.ReadAllBytes(file);
             File.WriteAllText(file, "invalid");
             await Observe("friends", "online");

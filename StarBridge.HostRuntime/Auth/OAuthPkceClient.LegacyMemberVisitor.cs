@@ -51,7 +51,7 @@ public sealed partial class OAuthPkceClient
                 root.EnumerateObject().Select(p => p.Name).Distinct().Count() != 3 ||
                 root.GetProperty("schemaVersion").GetInt32() != 1 || root.GetProperty("legacyAccountId").GetString() != legacyId)
                 throw new AccountBridgeHostException("profile.visitor_identity_unavailable");
-            var profile = root.GetProperty("profile").Deserialize<PersonalProfileDocumentContract>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var profile = ReadVisitorProfile(root.GetProperty("profile"));
             if (profile is null || profile.SchemaVersion != PersonalProfileContractPolicy.CurrentSchemaVersion ||
                 profile.Revision < 0 || string.IsNullOrWhiteSpace(profile.PublicId) || profile.Identity is null || profile.Content is null)
                 throw new ScmApiProtocolException("个人页面响应无效。");

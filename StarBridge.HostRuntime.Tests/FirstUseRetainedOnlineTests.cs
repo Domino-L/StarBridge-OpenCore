@@ -34,6 +34,7 @@ internal static partial class FirstUseBusinessOwnerTests
 
     internal static async Task RunRetainedAccountFirst()
     {
+        await Case("completed setup cannot use retained account-only restoration to skip local identity", () => RetainedBeforeLocalIdentity(false, completedBeforeResume: true));
         await Case("retained account restores before unconfirmed local game identity", () => RetainedBeforeLocalIdentity(false));
         await Case("cold SCM authority does not manufacture local recording consent", () => RetainedBeforeLocalIdentity(true));
         await Case("retained account restores independently of a mismatching local profile", () => RetainedBeforeLocalIdentity(false, true));
@@ -42,7 +43,7 @@ internal static partial class FirstUseBusinessOwnerTests
         await Case("confirmed identity survives installed resource token renewal", () => RetainedBeforeLocalIdentity(false, boundExpire: true));
     }
 
-    private static async Task RetainedBeforeLocalIdentity(bool cold, bool mismatching = false, bool completedCold = false, bool expire = false, bool boundExpire = false)
+    private static async Task RetainedBeforeLocalIdentity(bool cold, bool mismatching = false, bool completedCold = false, bool expire = false, bool boundExpire = false, bool completedBeforeResume = false)
     {
         using var f = new Fixture(); f.Original.Clock.AllowTimers = true;
         await f.Original.PrepareOrdinary();
@@ -59,11 +60,33 @@ internal static partial class FirstUseBusinessOwnerTests
         await using var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
         var mode = f.Original.Mode;
         Check((await Finish(mode.ApplyRootOfflineAsync(0, Id(), native.Generation, native))).State == "offline", "Original online owner must actually exit.");
+        byte[]? historical = null;
+        var completionPath = Path.Combine(f.Original.Local.Root, "first-use-completion-deferred-v1", "state.bin");
+        if (completedBeforeResume)
+        {
+            new FirstUseCompletionStore(f.Original.Local.Root).Save(null, Id(), "local", null, null, () => true, true);
+            historical = File.ReadAllBytes(completionPath);
+        }
         mode.RequestResume(mode.Current.Revision, Id());
         var revision = mode.Current.Revision;
         if (expire || boundExpire) { f.Original.Transport.TokenLifetimeSeconds = 10; f.Original.Transport.RotateAccessToken = true; }
         Check(await Finish(mode.ResumeOnlineCandidateAsync(revision)) == "observed", "Retained session must be freshly authenticated.");
         var review = await mode.ReadOnlineIdentityAsync(revision);
+        if (completedBeforeResume)
+        {
+            Check(review.State == "needsLocalIdentity" && review.ConfirmationKey is null &&
+                !mode.HasConfirmedOnlineAccount(revision), "Historical completion never replaces current local identity proof");
+            try
+            {
+                await native.InstallConfirmedOnlineAsync(revision, _ => throw new Exception("Unexpected installation"));
+                throw new InvalidOperationException("Missing local identity installed online");
+            }
+            catch (LocalFirstUseException) { }
+            Check(mode.Current.ActiveMode == "local" && File.ReadAllBytes(completionPath).SequenceEqual(historical!),
+                "Rejected retained switch preserves local mode and exact completion bytes");
+            await mode.CancelOnlineAsync(revision, Id());
+            return;
+        }
         Check(review.State == "accountReviewRequired" && review.ConfirmationKey is not null && review.LocalHandle is null,
             "Account restoration must not wait for the first local Handle confirmation.");
         Check((await mode.ConfirmOnlineIdentityAsync(revision, review.ConfirmationKey!)).State == "accountConfirmedForHandoff", "Re-read the same authenticated account before handoff.");
@@ -178,7 +201,7 @@ internal static partial class FirstUseBusinessOwnerTests
         var generation = native.Generation;
         using var bridge = native.CreateModeDispatcher()!;
         var batch = await bridge.DispatchAsync(BridgeEnvelope.Request(FirstUseModeBridgeDispatcher.OfflineRequest,
-            Id(), generation, new { schemaVersion = 1, revision = 4 })).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Id(), generation, new { schemaVersion = 1, revision = 4 })).AsTask().WaitAsync(FirstUseTestWait.Bound);
         Check(batch.Response.Status == "ok" && batch.Response.Payload.GetProperty("state").GetString() == "offline",
             "Actual installed offline success must be returned to the original transport, not context_changed.");
         Check(mode.ControlGeneration >= generation && native.Generation == mode.ControlGeneration,
@@ -310,7 +333,7 @@ internal static partial class FirstUseBusinessOwnerTests
 
     private static async Task WaitRefresh(Fixture f)
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
         while (f.Original.Transport.TokenRequests < 2) await Task.Delay(10, deadline.Token);
     }
 

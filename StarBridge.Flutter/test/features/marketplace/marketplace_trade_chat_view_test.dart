@@ -17,6 +17,8 @@ import 'package:starbridge_flutter/features/direct_messages/direct_messages_page
 import 'package:starbridge_flutter/features/marketplace/marketplace_chat_controller.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_port.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_trade_chat_view.dart';
+import 'package:starbridge_flutter/features/marketplace/marketplace_trade_chat_parts.dart';
+import 'package:starbridge_flutter/features/marketplace/marketplace_trade_chat_entry.dart';
 import 'package:starbridge_flutter/features/notifications/notification_inbox_controller.dart';
 import 'package:starbridge_flutter/shared/trade_chat_slot.dart';
 
@@ -180,6 +182,45 @@ Widget _header() =>
     const SizedBox(height: 36, child: Center(child: Text('交易消息')));
 
 void main() {
+  test('transaction identifiers never become an order attachment', () {
+    expect(tradeChatAttachment({
+      'orderId': 88, 'id': 9, 'transactionNumber': 'TX9',
+    }), isNull);
+    expect(tradeChatAttachment({'orderNumber': 'SO88'})?.orderNumber, 'SO88');
+    expect(tradeChatAttachment({'orderNumber': 'SO88\n'}), isNull);
+  });
+
+  testWidgets('bundle card uses order number to open and localizes status', (tester) async {
+    String? opened;
+    await tester.pumpWidget(_app(TradeChatOrderCard({
+      'type': 'order', 'orderNo': 'SO88', 'displayType': 2,
+      'itemName': '补给', 'amount': 12, 'status': '1', 'statusText': '上架中',
+      'qualityData': '{"quality":999}',
+    }, openOrder: (number) => opened = number)));
+    await tester.pumpAndSettle();
+    expect(find.text('清单'), findsOneWidget);
+    expect(find.text('每套'), findsOneWidget);
+    expect(find.textContaining('999'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey<(String, Object?)>(('trade-chat-order', 'SO88'))));
+    await tester.pumpAndSettle();
+    expect(opened, 'SO88');
+  });
+
+  testWidgets('barter without price says view details and empty picker is hidden', (tester) async {
+    final c = MarketplaceChatController(ChatPort());
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_app(Column(children: [
+      TradeChatOrderCard({
+        'type': 'order', 'orderNo': 'SO89', 'displayType': 3,
+        'itemName': '补给', 'amount': 0, 'status': '0',
+      }),
+      TradeChatComposer(c, enabled: true, recentOrders: () => []),
+    ])));
+    await tester.pumpAndSettle();
+    expect(find.text('以物易物'), findsOneWidget);
+    expect(find.text('看详情'), findsOneWidget);
+    expect(find.byKey(const Key('trade-chat-attach')), findsNothing);
+  });
   setUpAll(() async {
     if (const String.fromEnvironment('OUT').isEmpty) return;
     for (final (family, file) in [
@@ -359,7 +400,7 @@ void main() {
     );
   });
 
-  testWidgets('a trade opens its conversation with the order attached', (
+  testWidgets('an order opens its conversation with its order number attached', (
     tester,
   ) async {
     size(tester, const Size(1180, 720));
@@ -368,7 +409,7 @@ void main() {
     addTearDown(c.dispose);
     c.requestOpen(
       'p1',
-      attach: const MarketChatAttachment(88, '科力晶（单个矿块）×2 · #TX2026102100009'),
+      attach: const MarketChatAttachment('SO88', '科力晶（单个矿块）×2 · #SO88'),
     );
     await tester.pumpWidget(
       _app(MarketplaceTradeChatView(c, header: _header())),
@@ -380,7 +421,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('trade-chat-input')), '可以');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(port.calls.where((x) => x.$1 == 'send').single.$2['orderId'], 88);
+    expect(port.calls.where((x) => x.$1 == 'send').single.$2['orderNumber'], 'SO88');
     expect(
       find.byKey(const Key('trade-chat-attachment')),
       findsNothing,
@@ -523,12 +564,12 @@ void main() {
       expect(pushed.single['serial'], 1);
       expect(pushed.single['push']['message']['content'], '到了');
 
-      chat.requestOpen('p2', attach: const MarketChatAttachment(88, '科力晶 ×2'));
+      chat.requestOpen('p2', attach: const MarketChatAttachment('SO88', '科力晶 ×2'));
       await tester.pump();
       expect(view()['tradeRequest'], {
         'serial': 1,
         'ref': 'p2',
-        'orderId': 88,
+        'orderNumber': 'SO88',
         'label': '科力晶 ×2',
       });
       binding.dispose();

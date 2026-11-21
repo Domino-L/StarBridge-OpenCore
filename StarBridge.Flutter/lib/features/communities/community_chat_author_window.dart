@@ -9,17 +9,28 @@ typedef CommunityChatReferenceRecovery = ({
 
 /// Presentation residency only. No timers, persistence, network or receipts.
 final class CommunityChatAuthorWindow {
+  CommunityChatAuthorWindow({Duration Function()? elapsed})
+    : _elapsed = elapsed ?? (() => _clock.elapsed);
+  static final _clock = Stopwatch()..start();
+  final Duration Function() _elapsed;
   DateTime? _identityFloor;
+  Duration? _floorElapsed;
 
   /// Conservative local display time, not a new server observation or lease.
   DateTime identityTime(DateTime raw, {DateTime? reachedDeadline}) {
     var at = raw.toUtc();
-    if (_identityFloor != null && _identityFloor!.isAfter(at)) {
-      at = _identityFloor!;
+    final elapsed = _elapsed();
+    if (_identityFloor != null) {
+      final passed = elapsed - _floorElapsed!;
+      final floor = _identityFloor!.add(
+        passed.isNegative ? Duration.zero : passed,
+      );
+      if (floor.isAfter(at)) at = floor;
     }
     if (reachedDeadline != null && reachedDeadline.isAfter(at)) {
       at = reachedDeadline.toUtc();
     }
+    _floorElapsed = elapsed;
     return _identityFloor = at;
   }
 

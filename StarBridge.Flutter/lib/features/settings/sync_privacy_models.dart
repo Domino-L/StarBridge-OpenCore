@@ -46,7 +46,6 @@ final class FriendVisibilityDefaults {
     serverDetails,
     ship,
     location,
-    lastOnline,
   ].where((value) => value).length;
 
   FriendVisibilityDefaults copyWith({

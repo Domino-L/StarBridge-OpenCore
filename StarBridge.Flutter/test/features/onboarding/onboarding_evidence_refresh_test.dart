@@ -26,8 +26,6 @@ void main() {
       addTearDown(controller.dispose);
       await controller.initialize();
       await controller.next();
-      controller.chooseMode(OnboardingMode.local);
-      await controller.next();
       await controller.next();
       expect(controller.value.step, OnboardingStep.identity);
       expect(

@@ -12,13 +12,13 @@ public sealed partial class FirstUseBridgeDispatcher
         var source = local.Sources.SingleOrDefault(s => s.SourceKey == local.SelectedSourceKey);
         var profile = local.Profiles.SingleOrDefault(p => p.Id == source?.ConfirmedProfileId);
         var evidence = _evidence.Current;
+        if (local.LogDeferred) evidence = new("unselected");
         if (evidence.State != "candidate" && source is { NeedsFreshGameEvidence: false, ConfirmedObservedAt: not null } &&
             profile is not null && local.ActiveProfileId == profile.Id)
             evidence = new("candidate", source.SourceKey, StableKey(source), false, profile.Handle,
                 source.ConfirmedObservedAt, "confirmedLocal", false, true);
         var candidate = evidence.State == "candidate" && evidence.Handle is not null;
         var completed = _completed.Read();
-        var choice = local.Progress?.Mode;
         var completion = await _completion.ReadAsync(token).ConfigureAwait(false);
         var onlineInstalled = _mode.HasInstalledOnlineForCompletion;
         var matched = onlineInstalled || _mode.HasConfirmedOnlineIdentity(mode.Revision);
@@ -27,32 +27,46 @@ public sealed partial class FirstUseBridgeDispatcher
             ["eligibility"] = _startup.Read().Eligibility, ["available"] = !_closed, ["canSave"] = !_closed,
             ["sourceKey"] = source?.SourceKey, ["evidenceKey"] = candidate ? evidence.IdentityConfirmed && source is not null ? StableKey(source) : evidence.EvidenceKey : null,
             ["version"] = source?.Version, ["logReady"] = source is not null,
+            ["logDeferred"] = local.LogDeferred,
+            ["logCandidates"] = _mode.LocalMode().Active && _logCandidateGeneration == generation ? _logCandidates?.Select(c => new { path = c.Path, version = c.Version }).ToArray() : null,
+            ["logSearchBlocked"] = _mode.LocalMode().Active && _logSearchBlocked == generation,
             ["evidence"] = candidate ? "candidate" : evidence.State switch { "missing" => "missing", "conflict" => "conflict", "unselected" => "unavailable", "checking" or "waiting" => "checking", _ => "failed" },
             ["origin"] = candidate ? evidence.Origin : null, ["handle"] = candidate ? evidence.Handle : null,
             ["observedAt"] = candidate ? evidence.ObservedAt : null, ["scopeChecked"] = evidence.ScopeChecked,
             ["requiresFreshEvidence"] = source?.NeedsFreshGameEvidence == true && evidence.Origin != "freshSession",
             ["localIdentityConfirmed"] = candidate && evidence.IdentityConfirmed,
+            ["logSetupPending"] = candidate && evidence.IdentityConfirmed &&
+                (local.LogSetupPending || local.DeferredStatisticsAllowed is not null),
             ["localSettingsReady"] = completion.State is "ready" or "completed",
             ["signedIn"] = signedIn, ["onlineIdentityMatched"] = signedIn && matched,
             ["onlineChoicesReviewed"] = onlineInstalled, ["activeMode"] = mode.ActiveMode,
             ["publicationSuspended"] = mode.PublicationSuspended,
-            ["onlineSetupPending"] = choice == "online" && mode.ActiveMode == "local" && mode.PublicationSuspended
+            ["onlineSetupPending"] = mode.State == "signInRequired" && mode.ActiveMode == "local" && mode.PublicationSuspended
         };
-        Dictionary<string, object?>? receipt = completed is not null && profile?.Id == completed.ProfileId &&
-            source?.SourceKey == completed.SourceKey && (choice is null || choice == completed.Mode)
-            ? Checkpoint("summary", completed.Mode, source.SourceKey, facts["evidenceKey"] as string) : null;
+        // Historical completion survives later mode and local identity changes.
+        Dictionary<string, object?>? receipt = completed is not null
+            ? Checkpoint("summary", completed.Mode, source?.SourceKey, facts["evidenceKey"] as string) : null;
         token.ThrowIfCancellationRequested();
         if (_closed || generation != _mode.ControlGeneration || mode != _mode.Current || local.Revision != _local.Read().Revision)
             throw new LocalFirstUseException("firstUse.context_changed");
-        return new(facts, local, completion, receipt, generation);
+        return new(facts, local, completion, receipt, generation, mode);
     }
 
     private static string StableKey(LocalFirstUseSource source) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(source)));
     private static Dictionary<string, object?> Checkpoint(string step, string? mode, string? source, string? evidence) => new() {
         ["step"] = step, ["mode"] = mode, ["sourceKey"] = source, ["evidenceKey"] = evidence };
-    private static Dictionary<string, object?>? ProgressWire(LocalFirstUseProgress? progress, View view) => progress is null ? null :
-        Checkpoint(progress.SourceKey is not null && progress.SourceKey != view.Facts["sourceKey"] as string ? "log" : progress.Step,
-            progress.Mode, view.Facts["sourceKey"] as string, view.Facts["evidenceKey"] as string);
+    private static Dictionary<string, object?>? ProgressWire(LocalFirstUseProgress? progress, View view)
+    {
+        // Source selection/identity replacement deliberately clears stale UI
+        // progress. The durable pending mode still exists. Resume presentation
+        // from current Host evidence; this issues no identity/install authority.
+        if (progress is null && view.Facts["onlineSetupPending"] is true)
+            return Checkpoint(view.Facts["localIdentityConfirmed"] is true ? "mode" : "log", "online",
+                view.Facts["sourceKey"] as string, view.Facts["evidenceKey"] as string);
+        return progress is null ? null :
+            Checkpoint(progress.SourceKey is not null && progress.SourceKey != view.Facts["sourceKey"] as string ? "log" : progress.Step,
+                progress.Mode, view.Facts["sourceKey"] as string, view.Facts["evidenceKey"] as string);
+    }
 
     private static Dictionary<string, object?> ReadCheckpoint(JsonElement body, View view)
     {

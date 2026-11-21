@@ -183,7 +183,8 @@ final class BridgeMarketplacePort
         session.connectionModeChanging ||
         name != 'marketplace.preferences' &&
             mode?.allowsOnlineTraffic != true) {
-      throw const FormatException('marketplace.unavailable');
+      // Refused before anything is sent: callers may treat it as definite.
+      throw const FormatException('marketplace.offline');
     }
     final generation = this.generation;
     BridgeAccountContext? owner;
@@ -329,8 +330,21 @@ final class BridgeMarketplacePort
       !_disposed && session.hostCapabilities.contains('marketplace.contracts');
 
   @override
-  Future<MarketRow> contracts(String operation, [MarketRow input = const {}]) =>
-      _hall('marketplace.contracts', operation, input);
+  Future<MarketRow> contracts(String operation, [MarketRow input = const {}]) async {
+    try {
+      return await _hall('marketplace.contracts', operation, input);
+    } on BridgeRemoteException catch (error) {
+      // A Host offline response is not the local pre-send refusal.
+      throw MarketplaceTradeError(error.code == 'marketplace.offline'
+          ? 'marketplace.unavailable' : error.code);
+    } on FormatException catch (error) {
+      // _request rejects offline before sending; all other format errors are uncertain.
+      if (error.message == 'marketplace.offline') {
+        throw const MarketplaceTradeError('marketplace.offline');
+      }
+      rethrow;
+    }
+  }
 
   @override
   bool get noticesSupported =>

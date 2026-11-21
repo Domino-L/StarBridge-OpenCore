@@ -14,6 +14,7 @@ class LocalStatisticsPanel extends StatefulWidget {
     required this.copy,
     required this.enabled,
     this.interactionBlocked = false,
+    this.showIdentityDetails = true,
     this.controller,
     this.onChanged,
     super.key,
@@ -21,6 +22,7 @@ class LocalStatisticsPanel extends StatefulWidget {
   final OnboardingCopy copy;
   final bool enabled;
   final bool interactionBlocked;
+  final bool showIdentityDetails;
   final LocalStatisticsController? controller;
   final Future<void> Function()? onChanged;
   @override
@@ -74,7 +76,7 @@ class _LocalStatisticsPanelState extends State<LocalStatisticsPanel> {
           style: Theme.of(context).textTheme.titleLarge,
         ),
         SizedBox(height: t.space.sm),
-        Text(copy.text('statistics.intro')),
+        if (widget.showIdentityDetails) Text(copy.text('statistics.intro')),
         SizedBox(height: t.space.md),
         Semantics(
           liveRegion: true,
@@ -95,10 +97,11 @@ class _LocalStatisticsPanelState extends State<LocalStatisticsPanel> {
             ),
           ),
         ),
-        if (view.snapshot.savedSeconds case final seconds?) ...[
+        if (widget.showIdentityDetails &&
+            view.snapshot.savedSeconds != null) ...[
           SizedBox(height: t.space.sm),
           Text(
-            '${copy.text('statistics.savedTime')} · ${seconds ~/ 60} ${copy.text('statistics.minutes')}',
+            '${copy.text('statistics.savedTime')} · ${view.snapshot.savedSeconds! ~/ 60} ${copy.text('statistics.minutes')}',
           ),
         ],
         SizedBox(height: t.space.md),

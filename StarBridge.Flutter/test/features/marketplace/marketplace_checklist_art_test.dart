@@ -20,9 +20,10 @@ void main() {
       marketThumbnail(marketOwnListingCard({'id': 'O1', 'side': 'sell', 'checklist': true})),
       marketChecklistArt,
     );
+    // MK1 (m99): a barter whose item count is unknown shows the crate too.
     expect(
       marketThumbnail(marketOwnListingCard({'id': 'O2', 'side': 'barter', 'checklist': true})),
-      isNot(marketChecklistArt),
+      marketChecklistArt,
     );
   });
 

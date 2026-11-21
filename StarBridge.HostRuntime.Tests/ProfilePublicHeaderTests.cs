@@ -41,6 +41,7 @@ internal static class ProfilePublicHeaderTests
         ScmWindowProjection();
         await VisitorRoutesDeclareAndCarryTheHeader();
         await ReadResponsesMatchTheSharedSample();
+        await LegacyVisitorFoundMatchesTheHongKongSample();
         await TradeWindowSync();
         Console.WriteLine("PASS profile public header: whitelist parse, bridge shape, visitor routes, trade window sync");
     }
@@ -209,6 +210,42 @@ internal static class ProfilePublicHeaderTests
     private static ScmOAuthSession Session(params string[] scopes) => new("synthetic", "viewer", "Pilot", "synthetic-token",
         DateTimeOffset.UtcNow.AddHours(1), scopes);
 
+    // HK swap 7 (11-16): visitor-legacy forwards an unlinked legacy member to Japan. Hong Kong writes this sample
+    // from its real controller serialization; the client reads it through the real route, so a null required
+    // field (updatedAt, isPublic) can never reach users unnoticed, whatever Hong Kong's Jackson configuration is.
+    private static async Task LegacyVisitorFoundMatchesTheHongKongSample()
+    {
+        foreach (var (name, callsign) in new[] { ("visitor-legacy-found.json", "Old Pilot"), ("visitor-legacy-found-no-callsign.json", "成员") })
+        {
+            using var sample = JsonDocument.Parse(SharedSample(name));
+            var transport = new Transport { LegacyBody = sample.RootElement };
+            var oauth = Client(transport);
+            var legacy = await oauth.LoadLegacyMemberVisitorPersonalProfileAsync(Session("profile.read"), "historical-member", default);
+            Check(legacy.Restricted is null && legacy.Profile is { PublicId: "historical-member", Revision: 0, IsPublic: true, Content: not null } &&
+                legacy.Profile.Identity.Callsign == callsign && legacy.Profile.UpdatedAt == DateTimeOffset.UnixEpoch,
+                name + ": the Hong Kong visitor-legacy found sample is read in full");
+            // Client compat review R1 P1s: what the Host hands Flutter, through the real page builder and the bridge's
+            // serializer (it drops nulls). Flutter needs a non-empty callSign and a presentation that is either absent
+            // null, or has exactly schemaVersion, origins and sourceVersion (personal_profile_presentation.dart).
+            var build = typeof(AccountBridgeDispatcher).GetMethod("ToPersonalProfileResponse",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+            var request = BridgeEnvelope.Request("users.profile", "legacy-visitor-contract", 1, new { schemaVersion = 1 },
+                new BridgeAccountContext("development", "scm-development", "synthetic"));
+            var response = (BridgeEnvelope)build.Invoke(null, [request, legacy.Profile, false, null, null])!;
+            var page = JsonDocument.Parse(JsonSerializer.Serialize(response.Payload, BridgeProtocol.JsonOptions)).RootElement
+                .GetProperty("profile");
+            var bridgeIdentity = page.GetProperty("identity");
+            Check(bridgeIdentity.GetProperty("callSign").GetString() is { Length: > 0 } shown && shown == callsign,
+                name + ": Flutter receives a non-empty callsign");
+            // The page is a dictionary, so a null presentation reaches Flutter as null ("older backend", accepted);
+            // a presentation object loses its null members to the bridge serializer and must still be complete.
+            Check(!page.TryGetProperty("presentation", out var presentation) || presentation.ValueKind == JsonValueKind.Null ||
+                presentation.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal)
+                    .SequenceEqual(["origins", "schemaVersion", "sourceVersion"]),
+                name + ": Flutter receives no presentation or a complete one");
+        }
+    }
+
     // The Java route tests check the same file, so a response the released Host reads cannot drift alone.
     private static async Task ReadResponsesMatchTheSharedSample()
     {
@@ -228,7 +265,7 @@ internal static class ProfilePublicHeaderTests
         transport.VisitorBody = root.GetProperty("visitorDocument");
         var seen = await oauth.LoadVisitorPersonalProfileAsync(Session("profile.read"), "scm-v1:" + new string('a', 64), default);
         Check(seen.Restricted is null && seen.Profile is { PublicId: "synthetic-public-id", FleetAffiliationStatus: "shown", Presentation: null,
-            Identity.GameId: "", Content.Modules.Length: 2 }, "the visitor sample is read in full");
+            Identity.GameId: "", Content.Modules.Length: 2, AchievementCount: 0 }, "the visitor sample is read in full");
         transport.VisitorBody = root.GetProperty("restrictedVisitor");
         var restricted = await oauth.LoadVisitorPersonalProfileAsync(Session("profile.read"), "scm-v1:" + new string('a', 64), default);
         Check(restricted.Restricted is { Visibility: "friendsOnly", Callsign: "Synthetic Pilot", Defaulted: false, NameMasked: false, Facts: null,

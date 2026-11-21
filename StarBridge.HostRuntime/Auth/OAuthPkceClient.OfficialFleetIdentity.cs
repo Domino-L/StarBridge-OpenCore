@@ -8,7 +8,7 @@ public sealed partial class OAuthPkceClient
 {
     internal Task<(IReadOnlyDictionary<long, OfficialFleetMemberIdentity> Result, ScmOAuthSession ActiveSession)>
         ReadOfficialFleetMemberIdentitiesAsync(ScmOAuthSession session, string sourceRef,
-            IReadOnlyCollection<long> memberIds, CancellationToken token)
+            IReadOnlyCollection<long> memberIds, CancellationToken token, Action? current = null)
     {
         if (!session.Capabilities.Contains("profile.read", StringComparer.Ordinal) ||
             !session.Capabilities.Contains("organizations.read", StringComparer.Ordinal) ||
@@ -23,8 +23,10 @@ public sealed partial class OAuthPkceClient
             {
                 Content = JsonContent.Create(new { schemaVersion = 1, sourceRef, memberIds })
             };
+            current?.Invoke();
             using var response = await scmHttpClient.SendAsync(request, active.AccessToken, budget.Token,
                 completionOption: HttpCompletionOption.ResponseHeadersRead);
+            current?.Invoke();
             await ScmHttpClient.EnsureSuccessAsync(response, "读取舰队成员可见资料", budget.Token);
             using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, budget.Token, 512 * 1024);
             return OfficialFleetMemberIdentity.Parse(json.RootElement, sourceRef, memberIds);

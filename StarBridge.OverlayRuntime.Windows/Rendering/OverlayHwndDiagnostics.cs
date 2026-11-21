@@ -32,6 +32,11 @@ internal static class OverlayHwndDiagnostics
 
     public static bool IsVerboseDiagnosticsEnabled => ReadOptions().EnableVerboseDiagnostics;
 
+    // 11-15 diagnostics (counts only): topmost checks and the times the window really had to be raised again.
+    private static int _topmostChecks, _topmostRaised;
+    internal static int TopmostChecks => Volatile.Read(ref _topmostChecks);
+    internal static int TopmostRaised => Volatile.Read(ref _topmostRaised);
+
     public static void EnsureTopmost(IntPtr handle, string label, bool force = false)
     {
         if (handle == IntPtr.Zero)
@@ -39,6 +44,7 @@ internal static class OverlayHwndDiagnostics
             return;
         }
 
+        Interlocked.Increment(ref _topmostChecks);
         var before = GetWindowLongPtr(handle, GwlExStyle);
         var alreadyTopmost = (before.ToInt64() & WsExTopmost) != 0;
         if (alreadyTopmost && !force)
@@ -48,6 +54,7 @@ internal static class OverlayHwndDiagnostics
 
         if (!alreadyTopmost)
         {
+            Interlocked.Increment(ref _topmostRaised);
             var target = new IntPtr(before.ToInt64() | WsExTopmost);
             SetWindowLongPtr(handle, GwlExStyle, target);
         }

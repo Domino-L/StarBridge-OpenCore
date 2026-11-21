@@ -37,13 +37,15 @@ internal static partial class AccountSessionRestoreTests
                         "{\"subject\":\"synthetic-owner\",\"displayName\":\"Synthetic\",\"capabilities\":[\"profile.read\"]}")
                     : JsonResponse(HttpStatusCode.BadGateway, "{\"message\":\"Synthetic deploy\"}");
             });
-            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             var rejected = 0;
             oauth.StoredCredentialRejected += (_, _) => rejected++;
             async Task Unavailable()
             {
                 try { await oauth.TryRestoreSessionAsync(default); throw new Exception("Expected a temporarily unavailable identity"); }
                 catch (HttpRequestException) { }
+                clock.Now = clock.Now.AddMinutes(5);
             }
 
             for (var attempt = 0; attempt < 4; attempt++) await Unavailable();
@@ -67,11 +69,16 @@ internal static partial class AccountSessionRestoreTests
             refreshes = 0;
             identityAvailable = false;
             lifetime = 30;
-            var shortLived = new OAuthPkceClient(new ScmHttpClient(handler), shortVault, options);
+            // Jitter factor 1.0: the first backoff window is exactly 5 seconds, so the
+            // retry lands while the 30-second token is still unexpired but inside
+            // the one-minute safety margin (the boundary this case guards).
+            var shortLived = new OAuthPkceClient(new ScmHttpClient(handler), shortVault, options)
+            { SessionClock = clock, RestoreBackoffRandom = () => 0.5 };
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 try { await shortLived.TryRestoreSessionAsync(default); throw new Exception("Expected outage"); }
                 catch (HttpRequestException) { }
+                clock.Now = clock.Now.AddSeconds(6);
             }
             AssertEqual(2, refreshes, "a token about to expire is refreshed again");
 
@@ -81,9 +88,10 @@ internal static partial class AccountSessionRestoreTests
             var replacedVault = new WindowsTokenVault(System.IO.Path.Combine(root, "replaced.json"));
             replacedVault.SaveRefreshToken(key, "synthetic-refresh");
             refreshes = 0;
-            var replaced = new OAuthPkceClient(new ScmHttpClient(handler), replacedVault, options);
+            var replaced = new OAuthPkceClient(new ScmHttpClient(handler), replacedVault, options) { SessionClock = clock };
             try { await replaced.TryRestoreSessionAsync(default); throw new Exception("Expected outage"); }
             catch (HttpRequestException) { }
+            clock.Now = clock.Now.AddMinutes(5);
             replacedVault.SaveRefreshToken(key, "synthetic-new-login");
             try { await replaced.TryRestoreSessionAsync(default); throw new Exception("Expected outage"); }
             catch (HttpRequestException) { }

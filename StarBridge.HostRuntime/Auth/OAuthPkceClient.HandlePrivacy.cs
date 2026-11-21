@@ -27,7 +27,10 @@ public sealed partial class OAuthPkceClient
         using var response = await scmHttpClient.SendAsync(request, writeSession.AccessToken, token);
         var result = await scmHttpClient.ReadJsonAsync<GameIdSettingsSnapshot>(response, "Handle 隐私保存", token);
         ValidateHandlePrivacy(result);
-        if (result.Revision != revision + 1 || result.IdentityStamp != stamp || result.Locations != locations)
+        // Hong Kong answers 0 while the identity cannot be used (it stores the choice, shows nothing):
+        // the same rule the settings mirror uses for "in step".
+        if (result.Revision != revision + 1 || result.IdentityStamp != stamp ||
+            result.Locations != locations && (result.CanConfigure || result.Locations != 0))
             throw new ScmApiProtocolException("Handle 隐私保存结果未得到确认。");
         return result; // Never install the one-time write grant as the normal read session.
     }

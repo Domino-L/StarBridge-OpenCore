@@ -14,6 +14,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'overlay_roster_editor.dart';
 import 'overlay_workspace_editor_state.dart';
 import 'overlay_workspace_controls.dart';
 import 'overlay_workspace_editor_tools.dart';
@@ -28,10 +29,15 @@ class OverlayWorkspaceFullscreenButton extends StatelessWidget {
   const OverlayWorkspaceFullscreenButton({
     required this.module,
     required this.editor,
+    this.roster,
     super.key,
   });
   final OverlayWorkspaceModule module;
   final OverlayWorkspaceEditorState editor;
+
+  /// The settings page's member picker, shown the same way in the
+  /// full-screen tools (11-13, 请你定 3).
+  final OverlayRosterPort? roster;
 
   Future<void> _open(BuildContext context, InteractionSource source) async {
     if (editor.fullscreenOpening) return;
@@ -71,6 +77,7 @@ class OverlayWorkspaceFullscreenButton extends StatelessWidget {
               child: OverlayWorkspaceFullscreenEditor(
                 module: module,
                 editor: editor,
+                roster: roster,
                 initialSource: source,
               ),
             );
@@ -127,10 +134,12 @@ class OverlayWorkspaceFullscreenEditor extends StatefulWidget {
     required this.module,
     required this.editor,
     this.initialSource = InteractionSource.programmatic,
+    this.roster,
     super.key,
   });
   final OverlayWorkspaceModule module;
   final OverlayWorkspaceEditorState editor;
+  final OverlayRosterPort? roster;
   final InteractionSource initialSource;
   @override
   State<OverlayWorkspaceFullscreenEditor> createState() =>
@@ -458,6 +467,8 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
                             sources: projection.sources,
                             sourceScenes: widget.module.sourceScenes,
                             fullScreen: true,
+                            editorContent:
+                                widget.module.createVisorEditorContent,
                             editorActions: _toolbar(context, projection),
                             presetId: projection.snapshot!.activePresetId!,
                             startupExtra: OverlayWorkspaceHotkeyCard(
@@ -474,8 +485,14 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
                             onChanged: (item, coalesce) => widget.module
                                 .updateLayoutItem(item, coalesce: coalesce),
                             onSettingChanged: widget.module.updateSetting,
+                            onMembersResized: widget.module.updateMembersSize,
+                            onSizeStep: widget.module.stepMembersSize,
                             onExperiencePreset:
                                 widget.module.applyExperiencePreset,
+                            groupFooterExtra: (group) =>
+                                group == 'members' && widget.roster != null
+                                ? OverlayRosterButton(port: widget.roster!)
+                                : null,
                             onEventNotificationPlacement:
                                 widget.module.updateEventNotificationPlacement,
                             onEventNotificationGestureStart:
@@ -577,7 +594,9 @@ class _FullscreenEditorState extends State<OverlayWorkspaceFullscreenEditor> {
 void _showError(BuildContext context, InteractionSource source) =>
     showStarBridgeSnackBar(
       context,
-      starBridgeTimedSnackBar(content: Text(_copy(context, 'overlay.editor.windowFailed'))),
+      starBridgeTimedSnackBar(
+        content: Text(_copy(context, 'overlay.editor.windowFailed')),
+      ),
       source: source,
     );
 Widget _commandLabel(StarBridgeIconSemantic icon, String label) => Row(

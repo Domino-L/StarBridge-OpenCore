@@ -231,7 +231,8 @@ void main() {
       Center(
         child: PersonalProfileModuleControls(
           item: item,
-          onSizeSelected: (_) {},
+          onMoveUp: () {},
+          onMoveDown: () {},
           onRemove: () {},
           onEditShips: () {},
         ),
@@ -265,8 +266,10 @@ void main() {
             Center(
               child: PersonalProfileModuleControls(
                 item: item,
-                onSizeSelected: (size) =>
-                    calls.add((size.name, currentStarBridgeActivationSource)),
+                onMoveUp: () =>
+                    calls.add(('up', currentStarBridgeActivationSource)),
+                onMoveDown: () =>
+                    calls.add(('down', currentStarBridgeActivationSource)),
                 onEditShips: () =>
                     calls.add(('ships', currentStarBridgeActivationSource)),
                 onEditPositions: () =>
@@ -277,29 +280,17 @@ void main() {
             ),
             suite,
           );
-          const sizeKey = Key('profile-module-size-favorite-ships');
-          await open(t, sizeKey, source);
-          await t.pumpAndSettle();
-          expect(nativeViewportMenus.value, 1);
-          final entries = t
-              .widget<StarBridgeMenuAnchor>(find.byType(StarBridgeMenuAnchor))
-              .entries;
-          expect(entries.map((e) => e.id), [
-            for (final size in PersonalProfileModuleSize.values)
-              ('profile-module-size-favorite-ships', size),
-          ]);
-          expect(entries.first.onActivate, isNull);
-          await select(
+          // Single column (2026-11-02): order instead of a cell size.
+          expect(
+            find.byKey(const Key('profile-module-size-favorite-ships')),
+            findsNothing,
+          );
+          await icon(t, const Key('profile-module-up-favorite-ships'), source);
+          await icon(
             t,
-            'profile-module-size-favorite-ships',
-            PersonalProfileModuleSize.three,
+            const Key('profile-module-down-favorite-ships'),
             source,
           );
-          await settleCommunityImages(t);
-          expect(calls, [('three', origin(source))]);
-          expect(nativeViewportMenus.value, 0);
-          // This target is controlled: requesting three cells cannot change the one-cell value.
-          expect(find.text('1 格'), findsOneWidget);
           await icon(
             t,
             const Key('profile-module-edit-favorite-ships'),
@@ -312,7 +303,8 @@ void main() {
             source,
           );
           expect(calls, [
-            ('three', origin(source)),
+            ('up', origin(source)),
+            ('down', origin(source)),
             ('ships', origin(source)),
             ('positions', origin(source)),
             ('remove', origin(source)),
@@ -682,10 +674,6 @@ void main() {
       await check(t, Key('profile-favorite-$a'), 'pointer');
       await capture(t, boundary, '${suite.name}-favorites');
       await action(t, const Key('profile-favorites-cancel'), 'pointer');
-      final sizeKey = const Key('profile-module-size-favorite-ships');
-      await open(t, sizeKey, 'pointer');
-      await t.pump(const Duration(milliseconds: 80));
-      await capture(t, boundary, '${suite.name}-size');
       expect(state.calls, isEmpty);
       expect(t.takeException(), isNull);
       await t.sendKeyEvent(LogicalKeyboardKey.escape);

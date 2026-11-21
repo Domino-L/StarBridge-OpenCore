@@ -1,4 +1,6 @@
+import '../../shared/ships/ship_art_ratio.dart';
 import '../../shared/ships/catalog_vehicle_icon.dart';
+import '../../shared/ships/ship_vehicle_icon.dart';
 
 import 'package:flutter/material.dart';
 
@@ -12,9 +14,12 @@ import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
 import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import 'personal_profile_favorite_maker.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_module_surface.dart';
 import 'personal_profile_ship_names.dart';
+import 'personal_profile_showcase_frame.dart';
+import 'personal_profile_visitor_favorites.dart';
 import '../hangar/local_hangar_copy.dart';
 import '../../platform/window/native_viewport_visibility.dart';
 
@@ -24,6 +29,7 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
     required this.span,
     this.hangarAvailable = true,
     this.unresolvedCount = 0,
+    this.showPartialPending = false,
     this.headerTrailing,
     this.onViewShipData,
     super.key,
@@ -33,6 +39,7 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
   final int span;
   final bool hangarAvailable;
   final int unresolvedCount;
+  final bool showPartialPending;
   final Widget? headerTrailing;
 
   /// A stable parent may own the dialog when this view is rebuilt by responsive
@@ -48,6 +55,23 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    if (ProfileShowcaseScope.of(context) && ships.isNotEmpty) {
+      // The single column has no cell size: every chosen ship shows.
+      return PersonalProfileModuleSurface(
+        icon: StarBridgeIconSemantic.hangar,
+        titleKey: 'profile.ships.title',
+        accentRole: DomainColorRole.ship,
+        headerTrailing: headerTrailing,
+        showcasePadding: EdgeInsets.zero,
+        child: _FavoriteShowcase(
+          ships: ships,
+          onViewShipData: onViewShipData,
+          pending: showPartialPending && unresolvedCount > 0
+              ? _pendingText(context)
+              : null,
+        ),
+      );
+    }
     final visibleCount = ships.length < span ? ships.length : span;
     final hiddenCount = ships.length - visibleCount;
     final resolvedTrailing = hiddenCount > 0 || headerTrailing != null
@@ -75,20 +99,7 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
       child: ships.isEmpty
           ? Align(
               alignment: AlignmentDirectional.centerStart,
-              child: Text(
-                AppStrings.of(context)
-                    .text(
-                      unresolvedCount > 0
-                          ? 'profile.ships.pendingDetails'
-                          : hangarAvailable
-                          ? 'profile.ships.empty'
-                          : 'profile.ships.notConnected',
-                    )
-                    .replaceAll('{count}', '$unresolvedCount'),
-                key: const Key('profile-favorites-empty-state'),
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: tokens.colors.textSecondary),
-              ),
+              child: _pendingText(context),
             )
           : LayoutBuilder(
               builder: (context, constraints) {
@@ -120,11 +131,99 @@ class PersonalProfileFavoriteShips extends StatelessWidget {
             ),
     );
   }
+
+  Widget _pendingText(BuildContext context) =>
+      profileFavoritesStateText(context, unresolvedCount, hangarAvailable);
 }
 
-class _ShipCard extends StatefulWidget {
-  const _ShipCard({required this.ship, this.onViewShipData});
+/// Single-column showcase: the first favourite large with its maker mark,
+/// up to 3 more as cards (1 + 3, the 4th from `favoriteShowcaseExtra`).
+class _FavoriteShowcase extends StatefulWidget {
+  const _FavoriteShowcase({
+    required this.ships,
+    this.onViewShipData,
+    this.pending,
+  });
+  final Widget? pending;
 
+  final List<PersonalProfileShipSummary> ships;
+  final Future<void> Function(
+    BuildContext,
+    PersonalProfileShipSummary,
+    InteractionSource,
+  )?
+  onViewShipData;
+
+  @override
+  State<_FavoriteShowcase> createState() => _FavoriteShowcaseState();
+}
+
+class _FavoriteShowcaseState extends State<_FavoriteShowcase> {
+  @override
+  void initState() {
+    super.initState();
+    ProfileFavoriteMaker.load(this, () => setState(() {}));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ships = widget.ships;
+    final onViewShipData = widget.onViewShipData;
+    final gap = context.tokens.space.sm;
+    final rest = ships.skip(1).take(3).toList();
+    return Column(
+      key: const Key('profile-favorite-showcase'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ShipCard(
+          key: ValueKey(ships.first.identity.runtimeId),
+          ship: ships.first,
+          onViewShipData: onViewShipData,
+          style: _ShipCardStyle.hero,
+        ),
+        if (rest.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.all(gap),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var index = 0; index < 3; index++) ...[
+                  if (index > 0) SizedBox(width: gap),
+                  Expanded(
+                    child: index < rest.length
+                        ? _ShipCard(
+                            key: ValueKey(rest[index].identity.runtimeId),
+                            ship: rest[index],
+                            onViewShipData: onViewShipData,
+                            style: _ShipCardStyle.card,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ProfileFavoriteMakerNotice(
+          manufacturer: ships.first.manufacturer,
+          gap: gap,
+        ),
+        ?widget.pending,
+      ],
+    );
+  }
+}
+
+enum _ShipCardStyle { row, hero, card }
+
+class _ShipCard extends StatefulWidget {
+  const _ShipCard({
+    required this.ship,
+    this.onViewShipData,
+    this.style = _ShipCardStyle.row,
+    super.key,
+  });
+
+  final _ShipCardStyle style;
   final PersonalProfileShipSummary ship;
   final Future<void> Function(
     BuildContext,
@@ -207,6 +306,16 @@ class _ShipCardState extends State<_ShipCard> {
       if (ship.sizeKey.isNotEmpty) strings.text(ship.sizeKey),
       if (ship.roleKey.isNotEmpty) strings.text(ship.roleKey),
     ];
+    if (widget.style != _ShipCardStyle.row) {
+      return _buildPicture(
+        context,
+        primaryName,
+        [
+          if (secondaryLabel.isNotEmpty) secondaryLabel,
+          ...metadata.reversed,
+        ].join(' · '),
+      );
+    }
     return Container(
       decoration: BoxDecoration(
         color: tokens.surfaces.status.fill,
@@ -295,7 +404,18 @@ class _ShipCardState extends State<_ShipCard> {
                             ),
                             if (ship.catalogIconKey case final String key) ...[
                               const SizedBox(width: 6),
-                              CatalogVehicleIcon.byKey(iconKey: key, size: 24),
+                              ShipVehicleIcon(
+                                names: [
+                                  ship.identity.catalogId,
+                                  ship.identity.englishName,
+                                  ship.identity.runtimeId,
+                                ],
+                                size: 24,
+                                fallback: CatalogVehicleIcon.byKey(
+                                  iconKey: key,
+                                  size: 24,
+                                ),
+                              ),
                             ],
                           ],
                         ),
@@ -341,6 +461,139 @@ class _ShipCardState extends State<_ShipCard> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+extension on _ShipCardState {
+  Widget _buildPicture(BuildContext context, String name, String detail) {
+    final strings = AppStrings.of(context);
+    final tokens = context.tokens;
+    final hero = widget.style == _ShipCardStyle.hero;
+    final asset = ship.imageAsset.isNotEmpty
+        ? ship.imageAsset
+        : ship.thumbnailAsset ?? '';
+    final picture = AspectRatio(
+      // Every ship card, the leading favourite included, is 2:1 and centre-cropped.
+      aspectRatio: shipArtCardAspectRatio,
+      child: ColoredBox(
+        color: tokens.domainColors.ship.soft,
+        child: asset.isEmpty
+            ? const _ShipImageFallback()
+            : Image.asset(
+                asset,
+                cacheWidth: hero ? 1400 : 480,
+                key: Key(
+                  'profile-favorite-ship-image-${ship.identity.runtimeId}',
+                ),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const _ShipImageFallback(),
+              ),
+      ),
+    );
+    final Widget body;
+    if (hero) {
+      body = Stack(
+        children: [
+          picture,
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  stops: const [0, 0.46],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.86),
+                    Colors.black.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          PositionedDirectional(
+            start: tokens.space.md,
+            end: tokens.space.md,
+            bottom: tokens.space.sm,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 23,
+                          height: 1.2,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white.withValues(alpha: 0.95),
+                        ),
+                      ),
+                      if (detail.isNotEmpty)
+                        Text(
+                          detail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.white.withValues(alpha: 0.8),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                ProfileFavoriteMakerMark(
+                  manufacturer: ship.manufacturer,
+                  runtimeId: ship.identity.runtimeId,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    } else {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          picture,
+          SizedBox(height: tokens.space.xs),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: tokens.colors.textPrimary,
+            ),
+          ),
+          if (detail.isNotEmpty)
+            Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: tokens.colors.textSecondary,
+              ),
+            ),
+        ],
+      );
+    }
+    return Material(
+      type: MaterialType.transparency,
+      child: StarBridgeActionRow(
+        controlKey: Key('profile-favorite-ship-${ship.identity.runtimeId}'),
+        baseRadius: 0,
+        semanticLabel: '${strings.text('profile.shipData.title')} · $name',
+        onActivate: NativeViewportScope.isActive(context) ? _openDetails : null,
+        child: body,
       ),
     );
   }
@@ -447,7 +700,7 @@ class _ShipDataDialog extends StatelessWidget {
                 SizedBox(height: tokens.space.md),
                 AspectRatio(
                   key: const Key('profile-ship-data-hero'),
-                  aspectRatio: 1200 / 420,
+                  aspectRatio: shipArtCardAspectRatio,
                   child: Container(
                     clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(

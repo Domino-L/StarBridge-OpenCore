@@ -64,6 +64,7 @@ Future<void> openFirstUseSetup(
       : OnlineReviewController(
           onlineReview,
           installation: onlineInstallation,
+          autoInstallRetainedAccount: false,
           onInstalled: onOnlineInstalled,
         );
   final check = recognition == null

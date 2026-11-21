@@ -10,6 +10,7 @@ import '../common/organization_hangar_sharing.dart';
 import '../settings/bridge_notification_sources.dart';
 import '../settings/local_privacy_controller.dart';
 import '../settings/organization_personal_settings.dart';
+import '../settings/organization_notification_leave_guard.dart';
 
 FeatureDescriptor createOfficialFleetFeature(
   OfficialFleetModule module, {
@@ -27,6 +28,7 @@ FeatureDescriptor createOfficialFleetFeature(
   navigationRegion: NavigationRegion.primary,
   order: 10,
   attentionCount: module.communication.attentionCount,
+  confirmLeave: (_) => confirmOrganizationNotificationLeave(),
   buildDestination: (_) => _PageShown(
     onShown: () {
       onPageShown?.call();

@@ -29,6 +29,7 @@ public sealed partial class OAuthPkceClient
     // user to sign in again (WindowsTokenVault only; other vaults are fixtures).
     private void MarkSessionExpired()
     {
+        ResetRestoreBackoff();
         if (tokenVault is WindowsTokenVault vault) vault.MarkSessionExpired(options.AuthorityId);
     }
 
@@ -37,6 +38,7 @@ public sealed partial class OAuthPkceClient
 
     private void ClearSessionExpired()
     {
+        ResetRestoreBackoff();
         if (tokenVault is WindowsTokenVault vault) vault.ClearSessionExpired();
     }
 

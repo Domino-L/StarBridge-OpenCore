@@ -10,6 +10,16 @@ final class ProfileReadScope {
     BridgeEnvelope response,
     int activeGeneration,
   ) => _capture(root, response, activeGeneration, 'personalProfile.getSelf');
+  factory ProfileReadScope.fromAccountFactsResponse(
+    BridgeEnvelope root,
+    BridgeEnvelope response,
+    int activeGeneration,
+  ) => _capture(
+    root,
+    response,
+    activeGeneration,
+    'personalProfile.readAccountFacts',
+  );
   factory ProfileReadScope.fromLocalResponse(
     BridgeEnvelope root,
     BridgeEnvelope response,

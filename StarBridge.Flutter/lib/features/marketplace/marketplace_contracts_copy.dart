@@ -24,6 +24,29 @@ String contractText(
 }
 
 const contractCopy = <String, List<String>>{
+  '状态未知': ['状态未知', '狀態未知', 'Unknown status'],
+  '移出参与者': ['移出参与者', '移出參與者', 'Remove participant'],
+  '移出 {name}': ['移出 {name}', '移出 {name}', 'Remove {name}'],
+  '对方会被移出这个合约，名额释放；对方会在 SCM 看到被移除和原因。': [
+    '对方会被移出这个合约，名额释放；对方会在 SCM 看到被移除和原因。',
+    '對方會被移出這個合約，名額釋放；對方會在 SCM 看到被移除和原因。',
+    'They will be removed from this contract and their slot released. They will see the removal and reason in SCM.',
+  ],
+  '可选，例如联系不上或中途退出': ['可选，例如联系不上或中途退出', '可選，例如聯絡不上或中途退出', 'Optional, e.g. unreachable or left midway'],
+  '操作结果不确定，请刷新核对参与者状态，再决定下一步。': [
+    '操作结果不确定，请刷新核对参与者状态，再决定下一步。',
+    '操作結果不確定，請重新整理核對參與者狀態，再決定下一步。',
+    'The outcome is uncertain. Refresh and check participant status before deciding what to do next.',
+  ],
+  '操作未发送，请检查授权或连接后重试。': ['操作未发送，请检查授权或连接后重试。', '操作未傳送，請檢查授權或連線後重試。', 'Nothing was sent. Check permissions or connection before retrying.'],
+  '刷新核对': ['刷新核对', '重新整理核對', 'Refresh and check'],
+  '待我处理 {n}': ['待我处理 {n}', '待我處理 {n}', 'Needs my action {n}'],
+  '本页 {n} 个（共 {total} 个）· {sort}': ['本页 {n} 个（共 {total} 个）· {sort}', '本頁 {n} 個（共 {total} 個）· {sort}', 'This page: {n} ({total} total) · {sort}'],
+  '报酬最高（本页）': ['报酬最高（本页）', '報酬最高（本頁）', 'Highest reward (this page)'],
+  '即将截止（本页）': ['即将截止（本页）', '即將截止（本頁）', 'Ending soon (this page)'],
+  '这一页没有符合条件的合约': ['这一页没有符合条件的合约', '這一頁沒有符合條件的合約', 'No contracts on this page match your filters'],
+  '清除筛选': ['清除筛选', '清除篩選', 'Clear filters'],
+  '查看详情': ['查看详情', '查看詳情', 'View details'],
   '公开合约': ['公开合约', '公開合約', 'Open contracts'],
   '我发布的': ['我发布的', '我發布的', 'Published'],
   '我参与的': ['我参与的', '我參與的', 'Joined'],

@@ -5,9 +5,16 @@ namespace StarBridge.HostRuntime.Support;
 /// <summary>Device-local acknowledgement compatible with WPF. Never reads credentials.</summary>
 public sealed class TestBuildNoticeStore(string dataRoot)
 {
-    public const string TermsVersion = "2026-10-31-v4";
+    public const string TermsVersion = "2026-11-05-v5";
+    // Each terms version keeps its own file. 0.7.2.1 reads LegacyFileName and requires
+    // its own 2026-10-31-v4, so sharing one file made every switch between 0.7.2.1 and
+    // 0.7.3 overwrite the other's record and ask again (11-08). LegacyFileName is never
+    // read, written or deleted here. A future terms bump changes TermsVersion and
+    // FileName together.
+    public const string FileName = "official-binary-license.v5.accepted.json";
+    public const string LegacyFileName = "official-binary-license.accepted.json";
     private readonly string _root = Path.GetFullPath(dataRoot);
-    private string FilePath => Path.Combine(_root, "official-binary-license.accepted.json");
+    private string FilePath => Path.Combine(_root, FileName);
 
     public bool IsAcknowledged()
     {

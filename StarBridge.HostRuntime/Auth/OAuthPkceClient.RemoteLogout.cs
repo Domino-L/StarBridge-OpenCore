@@ -18,6 +18,7 @@ public sealed partial class OAuthPkceClient
                 : tokenVault.LoadActiveAccountKey();
             if (string.IsNullOrWhiteSpace(accountKey)) return;
             tokenVault.DeleteRefreshToken(accountKey);
+            ResetRestoreBackoff();
             _sessionWasInstalled = true;
             if (_currentSession is { } current && $"{current.AuthorityId}:{current.Subject}" == accountKey)
             {

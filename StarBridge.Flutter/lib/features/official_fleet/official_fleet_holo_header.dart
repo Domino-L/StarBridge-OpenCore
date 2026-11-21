@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../design_system/styles/official_fleet_holo_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -51,6 +53,7 @@ class _OfficialFleetHoloHeaderState extends State<OfficialFleetHoloHeader>
     _entry,
     quick: widget.entry == OfficialFleetHoloEntry.quick,
   );
+  final _settledTimeline = OfficialFleetHoloTimeline.settled();
   bool _started = false;
 
   @override
@@ -59,66 +62,83 @@ class _OfficialFleetHoloHeaderState extends State<OfficialFleetHoloHeader>
     if (_started) return;
     _started = true;
     if (widget.entry == OfficialFleetHoloEntry.none ||
-        resolveStarBridgeInteraction(context).reduceMotion) {
+        resolveStarBridgeInteraction(context).reduceMotion ||
+        _light.value) {
       _entry.value = 1;
     } else {
       _entry.forward();
     }
   }
 
+  late final ValueListenable<bool> _light = lightVisuals()
+    ..addListener(_onLight);
+  void _onLight() {
+    if (_light.value) _entry.value = 1;
+  }
+
   @override
   void dispose() {
+    _light.removeListener(_onLight);
+    _settledTimeline.dispose();
     _timeline.dispose();
     _entry.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final width = constraints.maxWidth;
-      final narrow = width < 900;
-      final bannerHeight = math.min(width / 3, widget.maxBannerHeight);
-      final banner = widget.deck.banner;
-      return Column(
-        key: const Key('official-fleet-context-header'),
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            key: const Key('official-fleet-holo-banner'),
-            height: bannerHeight,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ClipPath(
-                  clipper: OfficialFleetUnveilClipper(_timeline.unveil),
-                  child: RepaintBoundary(
-                    child: OfficialFleetHoloBannerImage(banner),
-                  ),
-                ),
-                IgnorePointer(
-                  child: CustomPaint(
-                    painter: OfficialFleetUnveilEdgePainter(
-                      _timeline.unveil,
-                      context.tokens.colors.accent,
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _buildHeader(context, lightOnly),
+  );
+
+  Widget _buildHeader(BuildContext context, bool lightOnly) {
+    final timeline = lightOnly ? _settledTimeline : _timeline;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final narrow = width < 900;
+        final bannerHeight = math.min(width / 3, widget.maxBannerHeight);
+        final banner = widget.deck.banner;
+        return Column(
+          key: const Key('official-fleet-context-header'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              key: const Key('official-fleet-holo-banner'),
+              height: bannerHeight,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipPath(
+                    clipper: OfficialFleetUnveilClipper(timeline.unveil),
+                    child: RepaintBoundary(
+                      child: OfficialFleetHoloBannerImage(banner),
                     ),
                   ),
-                ),
-              ],
+                  IgnorePointer(
+                    child: CustomPaint(
+                      painter: OfficialFleetUnveilEdgePainter(
+                        timeline.unveil,
+                        context.tokens.colors.accent,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          _Deck(
-            deck: widget.deck,
-            banner: banner,
-            bannerHeight: bannerHeight,
-            narrow: narrow,
-            timeline: _timeline,
-          ),
-        ],
-      );
-    },
-  );
+            _Deck(
+              deck: widget.deck,
+              banner: banner,
+              bannerHeight: bannerHeight,
+              narrow: narrow,
+              timeline: timeline,
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _Deck extends StatelessWidget {
@@ -430,29 +450,35 @@ class _Slab extends StatelessWidget {
         child: Stack(
           children: [
             Positioned.fill(
-              child: AnimatedBuilder(
-                animation: appear,
-                builder: (context, _) {
-                  final t = appear.value.clamp(0.0, 1.0);
-                  if (t <= 0) return const SizedBox.shrink();
-                  // The frosted glass stays at rest (user report 2026-10-25:
-                  // a static tint, however dense, shows the banner and its
-                  // mirror sharply). It is the shell's one backdrop blur.
-                  if (t < 1) {
-                    return _slabGlass(
-                      glass,
-                      light,
-                      frost: 1,
-                      sigma: 8 * t,
-                      fade: t,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: lightVisuals(),
+                builder: (context, lightOnly, _) => AnimatedBuilder(
+                  animation: appear,
+                  builder: (context, _) {
+                    final t = appear.value.clamp(0.0, 1.0);
+                    if (t <= 0) return const SizedBox.shrink();
+                    // The frosted glass stays at rest (user report 2026-10-25:
+                    // a static tint, however dense, shows the banner and its
+                    // mirror sharply). It is the shell's one backdrop blur.
+                    // While a game runs it is the dense tint the screen switch
+                    // already uses: a backdrop blur waits behind every game
+                    // frame (in-game test 11-08).
+                    if (t < 1) {
+                      return _slabGlass(
+                        glass,
+                        light,
+                        frost: lightOnly ? 0 : 1,
+                        sigma: lightOnly ? 0 : 8 * t,
+                        fade: t,
+                      );
+                    }
+                    return _SettledGlass(
+                      glass: glass,
+                      light: light,
+                      hold: lightOnly || OfficialFleetHoloGlassHold.of(context),
                     );
-                  }
-                  return _SettledGlass(
-                    glass: glass,
-                    light: light,
-                    hold: OfficialFleetHoloGlassHold.of(context),
-                  );
-                },
+                  },
+                ),
               ),
             ),
             AnimatedBuilder(

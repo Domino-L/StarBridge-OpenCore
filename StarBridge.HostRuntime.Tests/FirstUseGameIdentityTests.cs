@@ -193,7 +193,7 @@ internal static class FirstUseGameIdentityTests
         f.Quiet();
         f.Original.Clock.AllowTimers = true;
         await using var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
-        var installed = await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(TimeSpan.FromSeconds(5));
+        var installed = await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(FirstUseTestWait.Bound);
         Check(installed.State == "online" && f.Original.Mode.HasInstalledOnlineForCompletion, "existing original installation continues");
         Outcome(await f.Send(Verify), "unavailable");
         var account = await native.DispatchAsync(BridgeEnvelope.Request(GameIdentityBridge.RequestCode, Id(), native.Generation,
@@ -304,7 +304,7 @@ internal static class FirstUseGameIdentityTests
     private static async Task Concurrency()
     {
         using var f = new Fixture(); await f.Start(); f.Wire.Hold = true;
-        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(FirstUseTestWait.Bound);
         try
         {
             Check((await f.Send(RequestCode)).Response.Error?.Code == "firstUse.operation_in_progress", "single operation rejects duplicate promptly");
@@ -312,7 +312,7 @@ internal static class FirstUseGameIdentityTests
             Check(await gate.WaitAsync(TimeSpan.Zero, default), "network does not own mutation gate"); gate.Release();
         }
         finally { f.Wire.Release.TrySetResult(); }
-        Outcome(await work.WaitAsync(TimeSpan.FromSeconds(3)), "verified"); f.Quiet();
+        Outcome(await work.WaitAsync(FirstUseTestWait.Bound), "verified"); f.Quiet();
     }
     private static async Task ProfileAndSignIn()
     {
@@ -320,7 +320,7 @@ internal static class FirstUseGameIdentityTests
         var opened = new List<Uri>(); f.Original.ProfileOpened = opened.Add;
         f.Original.Transport.HoldToken = true;
         var login = f.Original.Mode.AuthenticateOnlineCandidateAsync(3, default);
-        await f.Original.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Original.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         try
         {
             Outcome(await f.Send(Verify), "unavailable");
@@ -328,7 +328,7 @@ internal static class FirstUseGameIdentityTests
                 "in-progress sign-in cannot send or open profile");
         }
         finally { f.Original.Transport.ReleaseToken.TrySetResult(); }
-        Check(await login.WaitAsync(TimeSpan.FromSeconds(3)), "original sign-in completes");
+        Check(await login.WaitAsync(FirstUseTestWait.Bound), "original sign-in completes");
         if (f.Original.Callback is { } callback) await callback;
         f.Snapshot(); var requests = f.Original.Transport.Requests;
         var response = await f.Send(OpenProfile);
@@ -341,42 +341,42 @@ internal static class FirstUseGameIdentityTests
     private static async Task CooperativeCancel()
     {
         using var f = new Fixture(); await f.Start(); f.Wire.Hold = true; f.Wire.Cooperative = true;
-        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Check((await f.Original.Cancel().WaitAsync(TimeSpan.FromSeconds(3))).State == "local", "cancel does not deadlock on identity or mutation gate");
-        Check((await work.WaitAsync(TimeSpan.FromSeconds(3))).Response.Error?.Code == "firstUse.context_changed", "cancelled owner cannot return result");
+        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(FirstUseTestWait.Bound);
+        Check((await f.Original.Cancel().WaitAsync(FirstUseTestWait.Bound)).State == "local", "cancel does not deadlock on identity or mutation gate");
+        Check((await work.WaitAsync(FirstUseTestWait.Bound)).Response.Error?.Code == "firstUse.context_changed", "cancelled owner cannot return result");
     }
     private static async Task CancelDrain()
     {
         using var f = new Fixture(); await f.Start(); f.Wire.Hold = true;
-        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(FirstUseTestWait.Bound);
         var cancel = f.Original.Cancel();
         try { Check(!cancel.IsCompleted && f.Wire.Token.IsCancellationRequested, "cancel signals original lease and waits actual exit"); }
         finally { f.Wire.Release.TrySetResult(); }
-        Check((await work.WaitAsync(TimeSpan.FromSeconds(3))).Response.Error?.Code == "firstUse.context_changed" &&
-            (await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local", "late write neither submits identity nor blocks cancel");
+        Check((await work.WaitAsync(FirstUseTestWait.Bound)).Response.Error?.Code == "firstUse.context_changed" &&
+            (await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local", "late write neither submits identity nor blocks cancel");
         f.Original.Mode.RequestOnline(f.Original.Mode.Current.Revision, Id()); await f.Original.Stage(); await f.Original.Login();
         Check(f.Original.Candidate!.Generation > f.OwnerGeneration && f.Original.Clock.Timers == 0, "new candidate keeps its own generation");
     }
     private static async Task RetireRead()
     {
         using var f = new Fixture(); await f.Start(); f.Original.Transport.HoldIdentity = true;
-        var work = f.Send(Verify); await f.Original.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var work = f.Send(Verify); await f.Original.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var retiring = f.Original.Candidate!.RetireFirstUseOnlineCandidateAsync();
         try { Check(!retiring.IsCompleted && f.Original.Transport.IdentityToken.IsCancellationRequested, "readback participates in actual retirement"); }
         finally { f.Original.Transport.ReleaseIdentity.TrySetResult(); }
-        Check((await work.WaitAsync(TimeSpan.FromSeconds(3))).Response.Error?.Code == "firstUse.context_changed" &&
-            await retiring.WaitAsync(TimeSpan.FromSeconds(3)) && f.IdentityChanges == 0, "late read cannot commit or publish");
+        Check((await work.WaitAsync(FirstUseTestWait.Bound)).Response.Error?.Code == "firstUse.context_changed" &&
+            await retiring.WaitAsync(FirstUseTestWait.Bound) && f.IdentityChanges == 0, "late read cannot commit or publish");
     }
     private static async Task ChangedOwner()
     {
         foreach (var wire in new[] { false, true })
         {
             using var f = new Fixture(); await f.Start(); f.Wire.Hold = true;
-            var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var work = f.Send(Verify); await f.Wire.Entered.Task.WaitAsync(FirstUseTestWait.Bound);
             if (wire) f.Generation++;
             else f.Original.Vault.SaveRefreshToken("synthetic-scm:synthetic-subject", "synthetic-replacement");
             var bytes = File.ReadAllBytes(f.Original.VaultPath); f.Wire.Release.TrySetResult();
-            var result = await work.WaitAsync(TimeSpan.FromSeconds(3));
+            var result = await work.WaitAsync(FirstUseTestWait.Bound);
             Check(result.Response.Error?.Code == "firstUse.context_changed" ||
                 result.Response.Payload.TryGetProperty("outcome", out var outcome) && outcome.GetString() == "reauthorizationRequired",
                 "superseded owner never reports success");
@@ -401,7 +401,7 @@ internal static class FirstUseGameIdentityTests
         var first = await f.Review();
         await f.Original.Mode.ConfirmOnlineIdentityAsync(3, first.ConfirmationKey!);
         f.Original.Clock.AllowTimers = true;
-        Check((await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(TimeSpan.FromSeconds(5))).State == "online",
+        Check((await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(FirstUseTestWait.Bound)).State == "online",
             "fixture installs its originally verified account");
         Check((await f.Original.Mode.ApplyOfflineAsync(4, Id(), native.Generation)).State == "offline",
             "original online owner exits before retained re-entry");
@@ -470,7 +470,7 @@ internal static class FirstUseGameIdentityTests
             RetainedState(await RetainedAction(f, "confirm", review.ConfirmationKey),
                 accountOnly ? "accountConfirmedForHandoff" : "confirmedForHandoff", false);
             Check((await native.InstallConfirmedOnlineAsync(f.Original.Mode.Current.Revision, _ => { })
-                .WaitAsync(TimeSpan.FromSeconds(5))).State == "online", "verified retained candidate completes original installation");
+                .WaitAsync(FirstUseTestWait.Bound)).State == "online", "verified retained candidate completes original installation");
             Check(f.Wire.Codes == 1 && f.Wire.Verifies == 1 && f.Original.BrowserOpens == 1,
                 "retained verification uses the existing candidate route without another browser");
         }
@@ -514,7 +514,7 @@ internal static class FirstUseGameIdentityTests
             RetainedState(await RetainedAction(f, "confirm", review.ConfirmationKey),
                 accountReview ? "accountConfirmedForHandoff" : "confirmedForHandoff", false);
             Check((await native.InstallConfirmedOnlineAsync(f.Original.Mode.Current.Revision, _ => { })
-                .WaitAsync(TimeSpan.FromSeconds(5))).State == "online", "verified retained restoration still installs");
+                .WaitAsync(FirstUseTestWait.Bound)).State == "online", "verified retained restoration still installs");
             Check(f.Wire.Codes == 0 && f.Wire.Verifies == 0 && f.Original.BrowserOpens == 1,
                 "verified retained restoration requires no verification write or additional login");
         }
@@ -558,7 +558,7 @@ internal static class FirstUseGameIdentityTests
             RetainedState(await RetainedAction(f, "confirm", review.ConfirmationKey),
                 accountOnly ? "accountConfirmedForHandoff" : "confirmedForHandoff", false);
             Check((await native.InstallConfirmedOnlineAsync(f.Original.Mode.Current.Revision, _ => { })
-                .WaitAsync(TimeSpan.FromSeconds(5))).State == "online", "reauthorized verified retained account installs");
+                .WaitAsync(FirstUseTestWait.Bound)).State == "online", "reauthorized verified retained account installs");
         }
     }
     private static async Task RetainedPermissionStillMissing()
@@ -610,7 +610,7 @@ internal static class FirstUseGameIdentityTests
         Check(review is { State: "accountReviewRequired", ConfirmationKey: not null }, "verified account preserves account review");
         RetainedState(await RetainedAction(f, "confirm", review.ConfirmationKey), "accountConfirmedForHandoff", false);
         Check((await native.InstallConfirmedOnlineAsync(f.Original.Mode.Current.Revision, _ => { })
-            .WaitAsync(TimeSpan.FromSeconds(5))).State == "online", "verified account installs without verification permission");
+            .WaitAsync(FirstUseTestWait.Bound)).State == "online", "verified account installs without verification permission");
     }
     private static async Task RetainedPermissionWrongSubject()
     {
@@ -654,7 +654,7 @@ internal static class FirstUseGameIdentityTests
         var review = await f.Review(); await f.Original.Mode.ConfirmOnlineIdentityAsync(3, review.ConfirmationKey!);
         f.Original.Clock.AllowTimers = true;
         await using var native = new NativeAccountRuntimeBinding(f.Original.Local.Runtime);
-        await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(TimeSpan.FromSeconds(5));
+        await native.InstallConfirmedOnlineAsync(3, _ => { }).WaitAsync(FirstUseTestWait.Bound);
         Check((await f.Original.Mode.ApplyOfflineAsync(4, Id(), native.Generation)).State == "offline", "original installation exits offline");
         f.Original.Transport.IdentityStatus = "REVERIFY_REQUIRED"; f.Original.Transport.IdentityVerified = false;
         f.Original.Mode.RequestResume(6, Id());

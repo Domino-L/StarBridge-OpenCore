@@ -26,7 +26,10 @@ final class BridgeLocalEventHistory implements LocalHistoryPort {
           count = p['filteredCount'],
           rows = p['entries'],
           rev = p['revision'];
-      if (p.length != 9 ||
+      final sources = p.containsKey('unavailableSources')
+          ? parseUnavailableLocalEventSources(p['unavailableSources'])
+          : const <String>[];
+      if (p.length != 9 + (p.containsKey('unavailableSources') ? 1 : 0) ||
           p['schemaVersion'] != 1 ||
           !p.containsKey('revision') ||
           !const {
@@ -84,7 +87,10 @@ final class BridgeLocalEventHistory implements LocalHistoryPort {
           p['hasMore'] != (offset + entries.length < count) ||
           entries.map((e) => e.id).toSet().length != entries.length ||
           category != 'all' && entries.any((e) => e.category != category) ||
-          unavailable && (total != 0 || entries.isNotEmpty || rev != null) ||
+          unavailable && (total != 0 || entries.isNotEmpty) ||
+          p['state'] == 'missing' && (rev != null || sources.isNotEmpty) ||
+          p['state'] == 'unavailable' &&
+              (sources.isEmpty ? rev != null : rev == null) ||
           !unavailable && rev == null ||
           revision != null && revision != rev) {
         throw const FormatException('Inconsistent event history page.');
@@ -98,6 +104,7 @@ final class BridgeLocalEventHistory implements LocalHistoryPort {
         hasMore: p['hasMore'] as bool,
         entries: entries,
         revision: rev as String?,
+        unavailableSources: sources,
       );
     } on BridgeClientException catch (error) {
       throw LocalHistoryException(

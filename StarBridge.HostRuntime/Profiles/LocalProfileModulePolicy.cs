@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using StarBridge.Core.Profiles;
 
 namespace StarBridge.HostRuntime.Profiles;
 
@@ -10,6 +11,8 @@ internal static class LocalProfileModulePolicy
 
     public static void Validate(LocalProfileContent? content)
     {
+        if (!PersonalProfileShowcasePolicy.ValidShowcases(content?.Showcases) ||
+            !PersonalProfileShowcasePolicy.ValidAchievements(content?.AchievementShowcase)) Invalid();
         if (content?.Modules is not { } modules || modules.Count > 64 ||
             modules.Any(m => m is null || m.Id is null ||
                 (!IsFavorite(m.Id) && m.Id is not ("hangar-summary" or "skilled-roles")) ||

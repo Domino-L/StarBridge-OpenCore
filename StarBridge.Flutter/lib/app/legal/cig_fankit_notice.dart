@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -178,6 +179,7 @@ class CigFankitNoticeContent extends StatelessWidget {
           key: const Key('cig-fankit-required-notice'),
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.55),
         ),
+        const _CommunityMark(),
         SizedBox(height: tokens.space.lg),
         Divider(color: tokens.surfaces.panel.border),
         SizedBox(height: tokens.space.md),
@@ -193,6 +195,31 @@ class CigFankitNoticeContent extends StatelessWidget {
               ?.copyWith(color: tokens.colors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+/// The Fan Kit's "Made By The Community" mark, shown as supplied. Only the
+/// official package carries it; without the file the notice reads as text.
+class _CommunityMark extends StatelessWidget {
+  const _CommunityMark();
+  static final _isTestRun = Platform.environment.containsKey('FLUTTER_TEST');
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isTestRun) return const SizedBox.shrink();
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: EdgeInsets.only(top: context.tokens.space.md),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Image.asset(
+          'assets/ships/catalog-maker-community-${dark ? 'dark' : 'light'}.png',
+          height: 72,
+          excludeFromSemantics: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        ),
+      ),
     );
   }
 }

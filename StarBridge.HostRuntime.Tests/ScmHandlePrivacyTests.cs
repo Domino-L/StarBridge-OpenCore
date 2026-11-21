@@ -104,7 +104,9 @@ internal static partial class LegacyPasswordLoginTests
     }
     private static async Task SharingQueueCase(bool initialApply, bool communityRead = false, bool heartbeat = false)
     {
-        using var transport = new ScmHandlePrivacyTransport { HoldRead = true };
+        // 11-15: SCM game ID settings read the Relay first (Hong Kong is only kept in step),
+        // so the held read is the Relay display read.
+        using var transport = new ScmHandlePrivacyTransport();
         var uri = new Uri("http://127.0.0.1:9/");
         var oauth = new OAuthPkceClient(new ScmHttpClient(transport), new ScmVisitorVault(),
             new ScmOAuthOptions("synthetic", uri, uri, uri, "synthetic", "synthetic", "openid profile.read", "/callback"));
@@ -113,12 +115,14 @@ internal static partial class LegacyPasswordLoginTests
                 DateTimeOffset.UtcNow.AddHours(1), ["profile.read"], GameIdentityVerified: true, GameIdentityHandle: "Pilot"),
             profileAuthorization: new ScmVisibilityAuthorization());
         using var wire = new QueueProbeTransport { HoldDirectory = communityRead };
+        wire.Display.HoldRead = !communityRead;
         host.ConfigurePrivacyWriter(new PrivacyRelayWriter(uri, wire));
         var owner = host.CurrentContext!;
         Task read = communityRead ? host.ReadCommunitySharingTargetsAsync(owner, host.Generation, default) :
             host.ReadGameIdAsync(owner, host.Generation, default);
-        await (communityRead ? wire.DirectoryEntered.Task : transport.ReadEntered.Task).WaitAsync(TimeSpan.FromSeconds(2));
+        await (communityRead ? wire.DirectoryEntered.Task : wire.Display.ReadEntered.Task).WaitAsync(TimeSpan.FromSeconds(2));
         wire.HoldDirectory = false;
+        wire.Display.HoldRead = false;
         // Reads already queued behind the active read must also yield. Cancelling
         // just the current request leaves these able to consume the whole deadline.
         var queuedRead = host.ReadGameIdAsync(owner, host.Generation, default);
@@ -142,6 +146,7 @@ internal static partial class LegacyPasswordLoginTests
         {
             transport.ReleaseRead.TrySetResult();
             wire.ReleaseDirectory.TrySetResult();
+            wire.Display.ReleaseRead.TrySetResult();
             foreach (var pending in new Task[] { read, queuedRead, queuedDirectory })
             {
                 try { await pending; }
@@ -153,7 +158,8 @@ internal static partial class LegacyPasswordLoginTests
         transport.HoldRead = false;
         await host.ReadGameIdAsync(owner, host.Generation, default);
         transport.HoldWrite = true;
-        var save = host.SaveGameIdAsync(owner, host.Generation, 0, new string('a', 64), 0, default);
+        // Locations 4 differ from Hong Kong's 0, so the held PATCH is the Hong Kong mirror write.
+        var save = host.SaveGameIdAsync(owner, host.Generation, wire.Display.Revision, wire.Display.Stamp, 4, default);
         await transport.WriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
         using var cancelledPriority = new CancellationTokenSource();
         var cancelledSend = host.PublishPrivacyAsync(input, clear, cancelledPriority.Token);
@@ -177,10 +183,13 @@ internal static partial class LegacyPasswordLoginTests
         internal readonly TaskCompletionSource SettingsEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly TaskCompletionSource ReleaseSettings = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool HoldDirectory;
+        // Queue mechanics only; decision 乙 refusals are covered in ScmSingleCallsignTests.
+        internal readonly ScmDisplayRelayFake Display = new() { EnforceRuleB = false };
         internal readonly TaskCompletionSource DirectoryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly TaskCompletionSource ReleaseDirectory = new(TaskCreationOptions.RunContinuationsAsynchronously);
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
+            if (ScmDisplayRelayFake.Handles(request)) return await Display.SendAsync(request, token);
             if (request.RequestUri!.AbsolutePath == HeldSettingsPath)
             {
                 if (HoldSettingsWrite && request.Method == HttpMethod.Post)
@@ -214,6 +223,8 @@ internal static partial class LegacyPasswordLoginTests
     internal static async Task ScmHandlePrivacy()
     {
         await SharingQueueProbe();
+        // 11-15 decision 甲: the Relay (r49) is the authority for SCM game ID locations;
+        // Hong Kong handle-privacy is kept in step and read back.
         using var transport = new ScmHandlePrivacyTransport();
         var uri = new Uri("http://127.0.0.1:9/");
         var oauth = new OAuthPkceClient(new ScmHttpClient(transport), new ScmVisitorVault(),
@@ -222,52 +233,97 @@ internal static partial class LegacyPasswordLoginTests
         using var host = new ScmAccountBridgeHost(oauth, new ScmProfileCacheStore(), "integration", () => null,
             initialSession: new ScmOAuthSession("synthetic", "owner", "Pilot", "synthetic-read-token",
                 DateTimeOffset.UtcNow.AddHours(1), ["profile.read"]), profileAuthorization: authorization);
+        // Locations/mirror mechanics only; decision 乙 refusals are covered in ScmSingleCallsignTests.
+        var relay = new ScmDisplayRelayFake { EnforceRuleB = false };
+        using var relayWire = new DisplayOnlyTransport(relay);
+        host.ConfigurePrivacyWriter(new PrivacyRelayWriter(uri, relayWire));
         var dispatcher = new GameIdSettingsDispatcher(host, () => (host.GameplayTimeContext, host.Generation));
         var owner = host.CurrentContext!; var generation = host.Generation;
-        Task<BridgeDispatchBatch> Request(bool save, long revision = 0, int mask = 4) => dispatcher.DispatchAsync(
-            BridgeEnvelope.Request(save ? "gameIdVisibility.save" : "gameIdVisibility.read", "handle-privacy", generation,
-                save ? (object)new { schemaVersion = 1, expectedRevision = revision, identityStamp = new string('a', 64), locations = mask }
-                    : new { schemaVersion = 1 }, owner), default);
+        Task<BridgeDispatchBatch> Send(string name, object payload) => dispatcher.DispatchAsync(
+            BridgeEnvelope.Request(name, "handle-privacy", generation, payload, owner), default);
+        Task<BridgeDispatchBatch> Request(bool save, int mask = 4) => save
+            ? Send("gameIdVisibility.save", new { schemaVersion = 1, expectedRevision = relay.Revision, identityStamp = relay.Stamp, locations = mask })
+            : Send("gameIdVisibility.read", new { schemaVersion = 1 });
+        string Mirror(BridgeDispatchBatch batch) => batch.Response.Payload.GetProperty("mirror").GetString()!;
+
         var read = await Request(false);
-        Check(read.Response.Error is null && read.Response.Payload.GetProperty("locations").GetInt32() == 0,
-            "SCM defaults hidden through Java without any legacy adapter");
+        Check(read.Response.Error is null && read.Response.Payload.GetProperty("locations").GetInt32() == 15 &&
+            read.Response.Payload.EnumerateObject().Count() == 7 && Mirror(read) == "synced" && relay.Imports == 0,
+            "decision 乙: an SCM account that never set anything shows everywhere; nothing to import");
         var saved = await Request(true);
-        Check(saved.Response.Error is null && saved.Response.Payload.GetProperty("revision").GetInt64() == 1,
-            "SCM privacy save uses authorized dedicated Java PATCH");
-        await Request(false); // Transport checks that write grant did not replace read credentials.
+        Check(saved.Response.Error is null && relay.Revision == 1 && relay.Locations == 4 &&
+            transport.Locations == 4 && Mirror(saved) == "synced", "save writes the Relay, then mirrors Hong Kong");
+        var patches = transport.Patches;
+        await Request(false);
+        Check(transport.Patches == patches, "a read never writes Hong Kong");
         foreach (var mode in new[] { "denied", "wrong-subject", "missing-scope" })
         {
             authorization.Mode = mode;
-            int before = transport.Calls;
-            Check((await Request(true, 1)).Response.Error is not null && before == transport.Calls,
-                "invalid grant cannot contact privacy endpoint: " + mode);
+            patches = transport.Patches;
+            var partial = await Request(true, mode == "denied" ? 0 : 4 ^ 8);
+            // A grant for another account ends the operation (client review R1): sign in again.
+            Check((mode == "wrong-subject"
+                    ? partial.Response.Error?.Code == "account.reauthorization_required"
+                    : partial.Response.Error is null && Mirror(partial) == "pending") && transport.Patches == patches,
+                "Relay saved, Hong Kong grant refused shows pending (or asks to sign in again) without a PATCH: " + mode);
         }
         authorization.Mode = "granted";
+        // Simplified rule (user 11-16): a retry never makes Hong Kong more public (12 would reveal bit 8
+        // over Hong Kong's 4); only the user's own save does, in that same request.
+        var hkBefore = transport.Locations;
+        var retried = await Send("gameIdVisibility.retrySync", new { schemaVersion = 1 });
+        Check(retried.Response.Error is null && Mirror(retried) == "pending" && transport.Locations == hkBefore,
+            "retry does not reveal on Hong Kong");
+        var savedAgain = await Request(true, relay.Locations);
+        Check(savedAgain.Response.Error is null && Mirror(savedAgain) == "synced" && transport.Locations == relay.Locations,
+            "saving again pushes the Relay value to Hong Kong");
         transport.Mode = "lost";
-        int patches = transport.Patches;
-        saved = await Request(true, 1, 0);
-        Check(saved.Response.Error is null && transport.Patches == patches + 1 &&
-            saved.Response.Payload.GetProperty("locations").GetInt32() == 0, "lost reply confirmed by GET without replay");
+        patches = transport.Patches;
+        var lost = await Request(true, 2);
+        Check(lost.Response.Error is null && transport.Patches == patches + 1 && transport.Locations == 2 && Mirror(lost) == "synced",
+            "lost Hong Kong reply is confirmed by a read, never a second PATCH");
         transport.Mode = "conflict";
-        Check((await Request(true, 2)).Response.Error?.Code == "gameId.conflict", "CAS conflict stays conflict");
-        transport.Mode = "unverified";
-        read = await Request(false);
-        Check(read.Response.Error is null && !read.Response.Payload.GetProperty("canConfigure").GetBoolean() &&
-            read.Response.Payload.GetProperty("locations").GetInt32() == 0, "unverified SCM is hidden, not legacy public");
+        var cas = await Request(true, 4);
+        Check(cas.Response.Error is null && relay.Locations == 4 && Mirror(cas) == "pending",
+            "Hong Kong CAS conflict keeps the Relay save and reports pending");
         transport.Mode = "invalid-public";
-        Check((await Request(false)).Response.Error is not null, "unverified public response rejected");
+        var invalid = await Request(true, 8);
+        Check(invalid.Response.Error is null && Mirror(invalid) == "pending",
+            "an invalid Hong Kong response is never read as in step");
         transport.Mode = "down";
-        var count = transport.Calls;
-        Check((await Request(false)).Response.Error is not null && transport.Calls == count + 1, "outage has no legacy fallback");
+        var down = await Request(true, 1);
+        Check(down.Response.Error is null && relay.Locations == 1 && Mirror(down) == "pending",
+            "Hong Kong outage keeps the Relay save and reports pending");
         transport.Mode = "ok";
+        relay.Mode = "conflict";
+        Check((await Request(true, 2)).Response.Error?.Code == "gameId.conflict", "stale Relay draft stays a conflict");
+        relay.Mode = "ok";
+        transport.Mode = "unverified";
+        var unverified = await Request(true, 8);
+        Check(unverified.Response.Error is null && Mirror(unverified) == "synced",
+            "unverified Hong Kong stays hidden, which is the safe state");
+        transport.Mode = "ok";
+        relay.Mode = "down";
+        Check((await Request(false)).Response.Error is not null, "Relay outage has no Hong Kong fallback");
+        relay.Mode = "ok";
         await host.LogoutAsync(owner, default);
-        count = transport.Calls;
-        Check((await Request(true, 2)).Response.Error is not null && transport.Calls == count, "stale owner cannot write");
+        var calls = transport.Calls + relay.Reads + relay.Writes;
+        Check((await Request(true, 2)).Response.Error is not null && transport.Calls + relay.Reads + relay.Writes == calls,
+            "stale owner cannot write");
+    }
+
+    private sealed class DisplayOnlyTransport(ScmDisplayRelayFake relay) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Check(ScmDisplayRelayFake.Handles(request), "only display settings reach the Relay here");
+            return relay.SendAsync(request, token);
+        }
     }
 
     private sealed class ScmHandlePrivacyTransport : HttpMessageHandler
     {
-        internal int Calls, Patches, Locations;
+        internal int Calls, Patches, Locations = 15;
         internal long Revision;
         internal string Mode = "ok";
         internal bool HoldRead;

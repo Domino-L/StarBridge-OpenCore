@@ -5,8 +5,22 @@ import 'package:flutter/services.dart';
 /// by method, never by route; the runtime host maps each one to navigation.
 /// Unlike the hangar there is no capability flag: these pages always exist.
 final class MenuToolPageRequests {
-  static const _methods = {'openHudSettings'};
+  /// Method → the client route it opens. Fixed; the menu sends no route.
+  static const routes = {
+    'openHudSettings': '/overlay',
+    'openFleetPage': '/fleet',
+    'openCommunitiesPage': '/communities',
+  };
+  static const _methods = {
+    'openHudSettings',
+    'openFleetPage',
+    'openCommunitiesPage',
+  };
   final hudSettings = ValueNotifier<int>(0);
+
+  /// The last page asked for, with a serial so asking twice navigates twice.
+  final requested = ValueNotifier<(String, int)?>(null);
+  int _serial = 0;
 
   bool accepts(String method) => _methods.contains(method);
 
@@ -21,7 +35,8 @@ final class MenuToolPageRequests {
         arguments['opening'] != opening) {
       throw PlatformException(code: 'menuToolPage.session_unavailable');
     }
-    hudSettings.value++;
+    if (call.method == 'openHudSettings') hudSettings.value++;
+    requested.value = (routes[call.method]!, ++_serial);
     return true;
   }
 }

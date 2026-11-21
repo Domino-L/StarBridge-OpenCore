@@ -5,13 +5,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/official_fleet/official_fleet_first_sharing_choice.dart';
 import 'package:starbridge_flutter/features/settings/local_privacy_controller.dart';
 import 'package:starbridge_flutter/features/settings/official_runtime_privacy_port.dart';
+import 'package:starbridge_flutter/features/settings/privacy_publication_port.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_client_session.dart';
 
 import 'local_privacy_page_test.dart' show app, viewport;
 import 'official_runtime_privacy_test.dart' show OfficialPrivacyFixture;
 
-
 void main() {
+  test('unknown Host status cannot initiate automatic first consent', () {
+    expect(
+      const PrivacyPublicationView('inactive')
+          .allowsOrganizationApply(firstDefault: true),
+      isFalse,
+    );
+    expect(
+      const PrivacyPublicationView(
+        'inactive',
+        firstUseRequired: false,
+        errorCode: 'privacy_publication.consent_required',
+      ).allowsOrganizationApply(firstDefault: true),
+      isTrue,
+    );
+  });
   test('publication account change retires official context, network failure keeps verified choice', () async {
     for (final accountChanged in [true, false]) {
       final port = OfficialPrivacyFixture()..choiceRequired = true;
@@ -151,6 +166,8 @@ void main() {
     viewport(tester, const Size(1280, 1100));
     final port = OfficialPrivacyFixture()
       ..choiceRequired = true
+      ..firstUseRequired = true
+      ..publicationStatusError = 'privacy_publication.consent_required'
       ..audienceSupported = true;
     final model = LocalPrivacyController(port);
     addTearDown(model.dispose);
@@ -161,7 +178,146 @@ void main() {
     expect(port.lastAudience?.maximumRankValue, isNull);
     expect(model.officialScope!.choiceRequired, isFalse);
     expect(applied, findsOneWidget);
-    expect(find.textContaining('已按默认'), findsOneWidget);
+    expect(port.applies, 1);
+    expect(port.calls, contains('publication.applyPreservingPause'));
+    expect(port.lastFirstOfficialDefault, isTrue);
+    expect(port.calls, isNot(contains('publication.apply')));
+    expect(find.textContaining('已开始按默认'), findsOneWidget);
+  });
+
+  for (final (name, state, enabled, receipt) in [
+    ('revoked', 'withdrawn', true, null),
+    ('paused', 'withdrawn', true, null),
+    ('disabled', 'inactive', false, null),
+    // Host is authoritative when the inactive client view has not observed a
+    // refusal, durable pause or invisibility yet. A withdrawn receipt is no send.
+    (
+      'unobserved refusal',
+      'inactive',
+      true,
+      const PrivacyPublicationView('withdrawn', revision: 2),
+    ),
+    (
+      'invisible',
+      'inactive',
+      true,
+      const PrivacyPublicationView('withdrawn', revision: 2),
+    ),
+    (
+      'failed publish',
+      'inactive',
+      true,
+      const PrivacyPublicationView('failed', revision: 2),
+    ),
+    (
+      'stale receipt',
+      'inactive',
+      true,
+      const PrivacyPublicationView('applied', revision: 1),
+    ),
+  ]) {
+    testWidgets('first defaults do not announce sharing when $name', (
+      tester,
+    ) async {
+      viewport(tester, const Size(1280, 1100));
+      final port = OfficialPrivacyFixture()
+        ..choiceRequired = true
+        ..firstUseRequired = true
+        ..publicationState = state
+        ..applyReceipt = receipt;
+      port.settings = port.settings.copyWith(publicationEnabled: enabled);
+      final model = LocalPrivacyController(port);
+      addTearDown(model.dispose);
+      await tester.pumpWidget(page(model));
+      await tester.pumpAndSettle();
+      expect(port.savedFields, 15);
+      expect(applied, findsNothing);
+      expect(port.applies, receipt == null ? 0 : 1);
+      expect(port.calls, isNot(contains('publication.apply')));
+    });
+  }
+
+  for (final (name, state, enabled, receipt) in [
+    ('disabled', 'inactive', false, null),
+    ('paused', 'withdrawn', true, null),
+    ('withdrawal pending', 'withdrawalPending', true, null),
+    (
+      'invisible',
+      'inactive',
+      true,
+      const PrivacyPublicationView('withdrawn', revision: 2),
+    ),
+    (
+      'failed publish',
+      'inactive',
+      true,
+      const PrivacyPublicationView('failed', revision: 2),
+    ),
+    (
+      'stale receipt',
+      'inactive',
+      true,
+      const PrivacyPublicationView('applied', revision: 1),
+    ),
+    (
+      'receipt error',
+      'inactive',
+      true,
+      const PrivacyPublicationView(
+        'applied',
+        revision: 2,
+        errorCode: 'privacy_publication.synthetic_failure',
+      ),
+    ),
+  ]) {
+    testWidgets('inherited choice does not announce sharing when $name', (
+      tester,
+    ) async {
+      viewport(tester, const Size(1280, 1100));
+      final port = OfficialPrivacyFixture()
+        ..savedFields = 5
+        ..savedScope = 1
+        ..scopeVersion = 2
+        ..publicationState = state
+        ..applyReceipt = receipt;
+      port.settings = port.settings.copyWith(publicationEnabled: enabled);
+      final model = LocalPrivacyController(port);
+      addTearDown(model.dispose);
+      await tester.pumpWidget(page(model));
+      await tester.pumpAndSettle();
+      expect(port.savedFields, 5);
+      expect(port.savedScope, 2);
+      expect(applied, findsNothing);
+      expect(find.textContaining('已沿用'), findsNothing);
+      expect(port.applies, receipt == null ? 0 : 1);
+      expect(port.lastFirstOfficialDefault, isFalse);
+    });
+  }
+  test('manual first choice cannot grant unasked consent', () async {
+    final port = OfficialPrivacyFixture()
+      ..choiceRequired = true
+      ..firstUseRequired = true;
+    final model = LocalPrivacyController(port);
+    addTearDown(model.dispose);
+    await model.refresh();
+    expect(await model.confirmOfficialFirstChoice(15), isTrue);
+    expect(port.applies, 0);
+  });
+
+  test('inherited fleet choice cannot grant unasked consent', () async {
+    final port = OfficialPrivacyFixture()
+      ..savedFields = 5
+      ..savedScope = 1
+      ..scopeVersion = 2
+      ..firstUseRequired = true;
+    final model = LocalPrivacyController(port);
+    addTearDown(model.dispose);
+    await model.refresh();
+    expect(
+      await model.confirmOfficialFirstChoice(5, automaticDefault: true),
+      isFalse,
+    );
+    expect(port.applies, 0);
   });
 
   testWidgets('a changed main fleet keeps the earlier choice and its stars', (
@@ -183,6 +339,8 @@ void main() {
     expect(port.savedScope, port.scopeVersion);
     expect(model.officialScope!.fleetChanged, isFalse);
     expect(find.textContaining('已沿用'), findsOneWidget);
+    expect(port.lastFirstOfficialDefault, isFalse);
+    expect(port.applies, 1);
     // Once saved, a later entry changes nothing.
     port.calls.clear();
     await tester.pumpWidget(const SizedBox.shrink());

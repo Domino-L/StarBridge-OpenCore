@@ -10,7 +10,7 @@ public sealed record PlayProcessObservation(string State, DateTimeOffset? Starte
 public sealed record ContinuousPlayNotice(TimeSpan Duration, Func<bool> IsCurrent);
 public interface IContinuousPlayReminderSink
 {
-    // Accepted by existing LocalPlayReminder queue; NOT a rendered-frame acknowledgement.
+    // Accepted by the passive desktop card queue; NOT a rendered-frame acknowledgement.
     ValueTask<bool> TryQueueAsync(ContinuousPlayNotice notice, CancellationToken cancellation);
 }
 internal sealed record ContinuousPlayState(int SchemaVersion = 1,

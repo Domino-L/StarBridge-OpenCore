@@ -77,7 +77,9 @@ public enum OverlaySkin
     Verdict = 3,
     // Stable optional-pack identity only. Registration and artwork are external;
     // knowing an ID does not make an appearance installed or usable.
-    HajiCitizen
+    HajiCitizen,
+    // Visor projection: open-core appearance drawn with Direct2D effects; the in-game overlay default from 0.7.3.
+    Visor = 5
 }
 public enum OverlayCrosshairMode
 {
@@ -88,6 +90,14 @@ public enum OverlayCrosshairMode
     // Legacy serialized names retained only for migration.
     Simple = 100,
     Tech = 101
+}
+
+/// <summary>Visor size: medium matches today's overlay text; large is about the first visor prototype.</summary>
+public enum OverlayVisorSize
+{
+    Small,
+    Medium,
+    Large
 }
 
 public enum OverlayEventNotificationSide

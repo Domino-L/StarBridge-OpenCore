@@ -12,6 +12,16 @@ internal sealed partial class ScmAccountBridgeHost
     private async Task<PersonalProfilePublicHeader> WithOwnerOffsetAsync(PersonalProfilePublicHeader header, CancellationToken token)
     {
         if (header.TradeWindow is null && header.Facts?.TimezoneId is null) return header;
+        var zones = await PublicFactZonesAsync(token);
+        return header with
+        {
+            TradeWindow = header.TradeWindow is { } window ? window with { OwnerOffsetMinutes = PublicFactOffset(zones, window.TimezoneId) } : null,
+            Facts = WithFactOffset(header.Facts, zones)
+        };
+    }
+
+    private async Task<IReadOnlyList<ScmTimeZoneDirectoryEntry>> PublicFactZonesAsync(CancellationToken token)
+    {
         IReadOnlyList<ScmTimeZoneDirectoryEntry> zones;
         try
         {
@@ -24,20 +34,21 @@ internal sealed partial class ScmAccountBridgeHost
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception) { return header; }
-        int? Offset(long id)
-        {
-            var zone = zones.FirstOrDefault(z => z.Id == id);
-            if (zone is null) return null;
-            int? offset = zone.OffsetMinutes is >= -14 * 60 and <= 14 * 60 ? zone.OffsetMinutes : null;
-            if (TimeZoneInfo.TryFindSystemTimeZoneById(zone.Value, out var info))
-                offset = (int)info.GetUtcOffset(DateTimeOffset.UtcNow).TotalMinutes;
-            return offset;
-        }
-        return header with
-        {
-            TradeWindow = header.TradeWindow is { } window ? window with { OwnerOffsetMinutes = Offset(window.TimezoneId) } : null,
-            Facts = header.Facts is { TimezoneId: { } id } facts ? facts with { UtcOffsetMinutes = Offset(id) } : header.Facts
-        };
+        catch (Exception) { return []; }
+        return zones;
     }
+
+    private static int? PublicFactOffset(IReadOnlyList<ScmTimeZoneDirectoryEntry> zones, long id)
+    {
+        var zone = zones.FirstOrDefault(z => z.Id == id);
+        if (zone is null) return null;
+        int? offset = zone.OffsetMinutes is >= -14 * 60 and <= 14 * 60 ? zone.OffsetMinutes : null;
+        if (TimeZoneInfo.TryFindSystemTimeZoneById(zone.Value, out var info))
+            offset = (int)info.GetUtcOffset(DateTimeOffset.UtcNow).TotalMinutes;
+        return offset;
+    }
+
+    private static PersonalProfilePublicFacts? WithFactOffset(PersonalProfilePublicFacts? facts,
+        IReadOnlyList<ScmTimeZoneDirectoryEntry> zones) => facts is { TimezoneId: { } id }
+            ? facts with { UtcOffsetMinutes = PublicFactOffset(zones, id) } : facts;
 }

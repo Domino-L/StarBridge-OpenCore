@@ -19,7 +19,8 @@ import 'menu_hotkey_port.dart';
 import 'menu_shortcut_settings.dart';
 import 'menu_shortcut_request.dart';
 import 'menu_browser_resume.dart';
-import 'menu_browser_resume_request.dart';
+import 'menu_bridge_relay.dart';
+import 'menu_window_requests.dart';
 import 'menu_attention.dart';
 import 'menu_notice.dart';
 import 'menu_live_presentation_feeds.dart';
@@ -62,6 +63,7 @@ final class MethodChannelMenuPreviewWindow
     this.browserResumeProvider,
     this.screenshotDirectoryProvider,
     this.execHangarProvider,
+    this.pageRelay,
     // Preserve the existing public constructor argument names for callers.
     // ignore: prefer_initializing_formals
   }) : _browserResume = browserResume,
@@ -80,6 +82,7 @@ final class MethodChannelMenuPreviewWindow
   final MenuBrowserResumePort? Function()? browserResumeProvider;
   final MenuScreenshotDirectoryPort? Function()? screenshotDirectoryProvider;
   final ExecHangarPort? Function()? execHangarProvider;
+  final MenuBridgeRelay? pageRelay;
   late final _screenshotRequests = MenuScreenshotDirectoryRequest(
     null,
     sourceProvider: () => screenshotDirectory,
@@ -203,16 +206,17 @@ final class MethodChannelMenuPreviewWindow
     if (lifetime.toolPages.accepts(call.method)) {
       return lifetime.toolPages.handle(call, generation, current);
     }
-    if (MenuExecHangarRequest.accepts(call.method)) {
-      return MenuExecHangarRequest.handle(
-        method: call.method,
-        arguments: call.arguments,
-        opening: generation,
-        isCurrent: current,
-        port: execHangarProvider?.call(),
-        openTool: () => lifetime.execHangarRequests.value++,
-      );
-    }
+    final routed = routeMenuWindowRequest(
+      call,
+      opening: generation,
+      isCurrent: current,
+      execHangar: execHangarProvider,
+      openExecHangar: () => lifetime.execHangarRequests.value++,
+      browserResume: () => browserResume,
+      // No account reads or actions are authorized before recovery consent.
+      relay: _recoveryPending ? null : pageRelay,
+    );
+    if (routed != null) return routed;
     if (call.method == 'screenshotDirectory' ||
         call.method == 'screenshotDestination') {
       return _screenshotRequests.dispatch(
@@ -220,14 +224,6 @@ final class MethodChannelMenuPreviewWindow
         arguments: call.arguments,
         opening: generation,
         isCurrent: current,
-      );
-    }
-    if (call.method == 'browserResume') {
-      return MenuBrowserResumeRequest.handle(
-        arguments: call.arguments,
-        opening: generation,
-        isCurrent: current,
-        port: browserResume,
       );
     }
     if (call.method == 'recoveryAction') {
@@ -582,6 +578,7 @@ final class MethodChannelMenuPreviewWindow
     _interactionVisible = false;
     interaction?.stop();
     _screenshotRequests.retire();
+    pageRelay?.retire();
     _feeds.stop();
     _generation = null;
     _contextTimer?.cancel();
@@ -700,6 +697,7 @@ final class MethodChannelMenuPreviewWindow
             ...MenuExecHangarRequest.presentation(
               live ? execHangarProvider?.call() : null,
             ),
+            if (live) ...?pageRelay?.presentation,
             'preferences': lifetime.startup
                 .presentation(opening.presentation)
                 .encode(),
@@ -775,6 +773,7 @@ final class MethodChannelMenuPreviewWindow
     if (_disposed) return;
     _disposed = true;
     _prewarm.dispose();
+    pageRelay?.dispose();
     interaction?.stop();
     _screenshotRequests.retire();
     _feeds.stop();

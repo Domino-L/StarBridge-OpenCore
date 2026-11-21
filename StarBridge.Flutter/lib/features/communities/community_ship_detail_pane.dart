@@ -42,6 +42,7 @@ class CommunityShipDetailPane extends StatefulWidget {
     this.reconcile = false,
     this.onClose,
     this.onRefreshLibrary,
+    this.onLibraryStale,
     super.key,
   });
   final CommunityShipsPort port;
@@ -63,6 +64,10 @@ class CommunityShipDetailPane extends StatefulWidget {
   /// filter), so nothing else would notice it being withdrawn.
   final bool reconcile;
   final void Function(InteractionSource source)? onClose, onRefreshLibrary;
+
+  /// The ship had to be found again under a new reference: the list it was
+  /// picked from is out of date.
+  final VoidCallback? onLibraryStale;
   @override
   State<CommunityShipDetailPane> createState() =>
       _CommunityShipDetailPaneState();
@@ -74,12 +79,12 @@ class _CommunityShipDetailPaneState extends State<CommunityShipDetailPane>
     widget.port,
     widget.page,
     widget.shipRef,
+    onRelocated: () => widget.onLibraryStale?.call(),
   );
   String t(String key) => communityShipsText(context, key);
   @override
-  Duration get communityRefreshInterval => widget.inline
-      ? const Duration(seconds: 60)
-      : const Duration(seconds: 15);
+  Duration get communityRefreshInterval =>
+      widget.inline ? const Duration(seconds: 60) : const Duration(seconds: 15);
   final _reportParentRetirements = StreamController<void>.broadcast();
   bool _reportOpen = false;
   Future<void> _openReport() async {
@@ -210,6 +215,7 @@ class _CommunityShipDetailPaneState extends State<CommunityShipDetailPane>
               height: 150,
               color: tokens.surfaces.raised.fill,
               child: CommunityCatalogShipImage(
+                model: ship.code,
                 asset: ship.catalogImageAsset ?? ship.catalogThumbnailAsset,
                 compact: true,
               ),
@@ -421,6 +427,7 @@ class _CommunityShipDetailPaneState extends State<CommunityShipDetailPane>
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: CommunityCatalogShipImage(
+                    model: ship.code,
                     asset: ship.catalogImageAsset,
                   ),
                 ),

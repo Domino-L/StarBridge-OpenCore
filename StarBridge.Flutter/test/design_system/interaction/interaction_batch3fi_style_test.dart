@@ -35,9 +35,9 @@ const styleItem = OverlayWorkspaceLayoutItem(
   decorationOpacity: .5,
 );
 const opacityFields = [
-  ('text', '文字透明度', .15, 17, 'eventNotificationTextOpacity'),
-  ('background', '背景透明度', 0.0, 20, 'eventNotificationBackgroundOpacity'),
-  ('decoration', '外观装饰透明度', 0.0, 20, 'eventNotificationDecorationOpacity'),
+  ('text', '文字不透明度', .15, 17, 'eventNotificationTextOpacity'),
+  ('background', '背景不透明度', 0.0, 20, 'eventNotificationBackgroundOpacity'),
+  ('decoration', '装饰不透明度', 0.0, 20, 'eventNotificationDecorationOpacity'),
 ];
 
 OverlayWorkspaceSettings styleSettings() => settings({
@@ -410,7 +410,21 @@ void main() {
           try {
             await t.pumpWidget(p.app());
             await visibilityFrames(t);
-            expect(find.byType(StarBridgeSwitch), findsNothing);
+            // no layout command (the events have no lock); the switch shown is
+            // the events' own width setting in their look section (11-11)
+            expect(
+              find.byKey(const Key('overlay-module-lock-Events')),
+              findsNothing,
+            );
+            expect(
+              find.byType(StarBridgeSwitch),
+              findsNWidgets(
+                find
+                    .byKey(const Key('overlay-field-visorEventsAutoWidth'))
+                    .evaluate()
+                    .length,
+              ),
+            );
             expect(
               find.byKey(const Key('overlay-module-style-Events')),
               findsOneWidget,
@@ -594,12 +608,20 @@ void main() {
               findsOneWidget,
             );
             expect(find.byKey(Key('overlay-module-lock-$key')), findsOneWidget);
-            // Overview, members and chat also show the shared calm display levels.
+            // the three opacities; calm display moved to the global group
+            // (11-11), overview, members and chat keep one line pointing there
+            for (final kind in ['text', 'background', 'decoration']) {
+              expect(
+                find.byKey(Key('overlay-module-$kind-opacity-$key')),
+                findsOneWidget,
+              );
+            }
+            expect(find.byKey(const Key('overlay-calm-display')), findsNothing);
             expect(
-              find.byType(StarBridgeSlider),
-              findsNWidgets(
-                const {'Squads', 'Members', 'Chat'}.contains(key) ? 5 : 3,
-              ),
+              find.byKey(const Key('overlay-calm-global-link')),
+              const {'Squads', 'Members', 'Chat'}.contains(key)
+                  ? findsOneWidget
+                  : findsNothing,
             );
           }
           expect(p.layoutCalls, isEmpty);

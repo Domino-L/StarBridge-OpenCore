@@ -95,6 +95,23 @@ Future<void> _mount(WidgetTester t, OverlayRosterPort port) async {
 }
 
 void main() {
+  test('sixteen and twenty are selectable; twenty-one is rejected', () {
+    for (final rows in [16, 20]) {
+      expect(OverlayRosterDisplay.rowLimits, contains(rows));
+      expect(
+        OverlayRosterDisplay.tryParse(
+          OverlayRosterDisplay(rowLimit: rows).toWire(),
+        )?.rowLimit,
+        rows,
+      );
+    }
+    expect(
+      OverlayRosterDisplay.tryParse(
+        const OverlayRosterDisplay(rowLimit: 21).toWire(),
+      ),
+      isNull,
+    );
+  });
   testWidgets('member overflow display is chosen in the roster dialog', (
     t,
   ) async {
@@ -157,7 +174,7 @@ void main() {
     );
     for (final invalid in [
       {'overflow': 'scroll', 'rowLimit': 6, 'rotationIntervalSeconds': 20},
-      {'overflow': 'rotate', 'rowLimit': 13, 'rotationIntervalSeconds': 20},
+      {'overflow': 'rotate', 'rowLimit': 21, 'rotationIntervalSeconds': 20},
       {'overflow': 'rotate', 'rowLimit': 6, 'rotationIntervalSeconds': 2},
       {'overflow': 'rotate', 'rowLimit': 6},
     ]) {

@@ -51,7 +51,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                         socialSender = null; socialPreview = null;
                     }
                 }
-                var desktopReason = DesktopSuppressionReason();
+                var desktopReason = SocialSuppressionReason("directMessage");
                 var freshKeys = _direct.FreshKeys.ToArray();
                 publishSocial = () => PublishSocial("direct", freshKeys.Length, settings, request.SessionGeneration,
                     desktopReason.Length == 0, freshKeys, socialSender, socialPreview);
@@ -147,7 +147,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             try {
                 if (!NotificationSourcePolicy.Allows(_policies.Read(request.AccountContext).For("friends"), NotificationEventKind.JoinRequest)) return response;
                 var settings = Read();
-                var desktopReason = DesktopSuppressionReason();
+                var desktopReason = SocialSuppressionReason("friendRequest");
                 PublishSocial("friend", count, settings, request.SessionGeneration, desktopReason.Length == 0);
                 if (!settings.WindowsEnabled || desktop == null || desktopReason.Length != 0) return response;
                 var epoch = _directEpoch;

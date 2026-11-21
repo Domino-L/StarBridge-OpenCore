@@ -7,6 +7,9 @@ import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/standard_interaction.dart';
+
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
 import 'package:starbridge_flutter/features/party_rooms/bridge_party_rooms_adapter.dart';
@@ -699,6 +702,7 @@ Future<AppComposition> pumpRooms(
   addTearDown(tester.view.resetPhysicalSize);
   final composition = AppComposition.forTest(
     windowChrome: InMemoryWindowChrome(),
+    preferences: standardInteraction(),
     partyRoomsPort: port,
   );
   await tester.pumpWidget(

@@ -42,6 +42,7 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
         _store = store;
         _sessionStore = sessionStore;
         _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal async Task<LegacyPasswordLoginAttempt> VerifyAsync(JsonElement payload, CancellationToken token)
@@ -143,7 +144,9 @@ internal sealed partial class LegacyPasswordLoginClient : IDisposable
                 throw new AccountBridgeHostException("profile.visitor_not_visible");
             if (!response.IsSuccessStatusCode) throw PersonalProfileReadFailures.FromStatus(response.StatusCode);
             using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, token, 8 * 1024 * 1024);
-            var profile = json.RootElement.Deserialize<PersonalProfileDocumentContract>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var profile = publicId is null
+                ? json.RootElement.Deserialize<PersonalProfileDocumentContract>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                : OAuthPkceClient.ReadVisitorProfile(json.RootElement);
             token.ThrowIfCancellationRequested();
             if (profile is null || profile.SchemaVersion != PersonalProfileContractPolicy.CurrentSchemaVersion ||
                 profile.PublicId != (publicId ?? credential.AccountId) || profile.Identity is null || profile.Content is null || profile.Revision < 0)

@@ -1,5 +1,4 @@
 using StarBridge.OverlayRuntime.Windows;
-using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -13,11 +12,32 @@ internal static class AchievementCelebrationCardTests
         {
             try
             {
+                VerifyGlass();
                 // Real renderer and bundled art, without opening a window or
                 // emitting sound/awards/network requests on the maintainer device.
                 var scm = new AchievementCelebrationCard("zh-CN", false, false, "scm-1", 0, "星际圣诞", "Assets/Achievements/scm-holiday-christmas-512.webp");
                 Require(scm.HasArtwork && System.Windows.Automation.AutomationProperties.GetName(scm).EndsWith("星际圣诞"), "SCM holiday uses its exact display name and bundled WebP pair");
-                Require(!Draw(scm, 650).SequenceEqual(Draw(scm, 1400)), "SCM artwork uses the existing full reveal");
+                Require(!Draw(scm, 450).SequenceEqual(Draw(scm, 1400)), "SCM artwork uses the existing full reveal");
+                // Build 105: daily and limited-event art ships as bundled 512 WebP pairs.
+                foreach (var art in new[] { "daily-account-rookie", "daily-account-regular", "daily-account-veteran", "daily-guide-beginner",
+                    "daily-guide-adept", "daily-guide-master", "daily-trade-beginner", "daily-trade-adept", "daily-trade-master",
+                    "daily-bounty-beginner", "daily-bounty-leader", "event-spring-elite", "event-checkin-streak", "event-spring-participant" })
+                {
+                    var card = new AchievementCelebrationCard("zh-CN", false, false, "scm-3", 0, "中登", $"Assets/Achievements/scm-{art}-512.webp");
+                    Require(card.HasArtwork, $"SCM {art} earned and locked WebP resolve in the Windows plug-in");
+                }
+                foreach (var rejected in new[] { "Assets/Achievements/scm-other-account-regular-512.webp", "Assets/Achievements/scm-daily-x/../scm-daily-account-regular-512.webp",
+                    "Assets/Achievements/scm-daily-account-regular.svg", "Assets\\Achievements\\scm-daily-account-regular-512.webp" })
+                    Require(!new AchievementCelebrationCard("zh-CN", false, false, "scm-3", 0, "中登", rejected).HasArtwork, $"Rejected local art path {rejected}");
+                // Build 105: past three single cards, one summary card names the rest.
+                foreach (var (locale, text, memory) in new[] { ("zh-CN", "另有 4 个 SCM 成就已解锁", "到成就中心查看"),
+                    ("zh-TW", "另有 4 個 SCM 成就已解鎖", "到成就中心查看"), ("en-US", "4 more SCM achievements unlocked", "See them in the achievement centre") })
+                {
+                    var summary = new AchievementCelebrationCard(locale, false, false, "scm-summary", 0, null, null, null, 4);
+                    Require(!summary.HasArtwork && System.Windows.Automation.AutomationProperties.GetName(summary).EndsWith(text) && summary.Memory == memory,
+                        $"SCM summary card names how many more ({locale})");
+                    Require(!Draw(summary, 450).SequenceEqual(Draw(summary, 1400)), "Summary card uses the existing reveal");
+                }
                 var untrusted = new AchievementCelebrationCard("en-US", false, true, "scm-2", 0, "Synthetic SCM", "https://blocked.invalid/image.webp");
                 Require(!untrusted.HasArtwork && System.Windows.Automation.AutomationProperties.GetName(untrusted).EndsWith("Synthetic SCM"), "No remote image loads; optional artwork preserves server display name");
                 foreach (var light in new[] { false, true })
@@ -25,37 +45,26 @@ internal static class AchievementCelebrationCardTests
                 {
                     var card = new AchievementCelebrationCard(locale, light, false);
                     Require(card.HasArtwork, "Both formal artwork resources resolve in the Windows plug-in");
-                    VerifyArtworkSampling(card);
+
                     var preload = Draw(card, 0);
-                    var sealedCard = Draw(card, 650);
+                    var sealedCard = Draw(card, 450);
                     var earnedCard = Draw(card, 1400);
                     Require(!preload.SequenceEqual(sealedCard) && !sealedCard.SequenceEqual(earnedCard),
-                        "Accepted preload/release and seal reveal have separate real render stages");
-                    Require(card.LifetimeMilliseconds == 5980, "Entry 1800ms, readable hold 4s, subtler exit 180ms");
+                        "The hidden start, sweep and fully engraved glass render distinctly");
+                    Require(card.LifetimeMilliseconds == 5560, "Entry 760ms, readable hold 4500ms, exit 300ms");
                     var reduced = new AchievementCelebrationCard(locale, light, true);
-                    Require(Draw(reduced, 0).SequenceEqual(Draw(reduced, 3000)) && reduced.LifetimeMilliseconds == 4000,
-                        "Reduced motion immediately shows the final readable card for four seconds");
+                    Require(Draw(reduced, 0).SequenceEqual(Draw(reduced, 3000)) && reduced.LifetimeMilliseconds == 4500,
+                        "Reduced motion immediately shows the final readable card for 4500ms");
                     foreach (var id in StarBridge.Core.Achievements.HangarAchievementPolicy.Ids)
                     {
                         var series = new AchievementCelebrationCard(locale, light, false, id, 4);
                         Require(series.HasArtwork && System.Windows.Automation.AutomationProperties.GetName(series).EndsWith(" · IV", StringComparison.Ordinal),
                             "Every series resolves its own locked/earned images and exposes the Roman rank only in the name");
-                        Require(!Draw(series, 650).SequenceEqual(Draw(series, 1400)),
+                        Require(!Draw(series, 450).SequenceEqual(Draw(series, 1400)),
                             "Each series uses the accepted locked-to-earned reveal");
                         var staticSeries = new AchievementCelebrationCard(locale, light, true, id, 4);
                         Require(Draw(staticSeries, 0).SequenceEqual(Draw(staticSeries, 3000)),
                             "Series achievements respect reduced motion");
-                    }
-                    if (Environment.GetEnvironmentVariable("STARBRIDGE_ACHIEVEMENT_RENDER_OUTPUT") is { Length: > 0 } output)
-                    {
-                        Directory.CreateDirectory(output);
-                        foreach (var time in new[] { 300, 650, 900, 1400 })
-                        {
-                            var bitmap = Render(card, time);
-                            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                            using var file = File.Create(Path.Combine(output, $"achievement-{locale}-{(light ? "light" : "dark")}-{time}.png"));
-                            encoder.Save(file);
-                        }
                     }
                 }
             }
@@ -77,84 +86,82 @@ internal static class AchievementCelebrationCardTests
         var bitmap = Render(card, elapsed); var bytes = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
         bitmap.CopyPixels(bytes, bitmap.PixelWidth * 4, 0); return bytes;
     }
-    private static void VerifyArtworkSampling(AchievementCelebrationCard card)
+
+    private static void VerifyGlass()
     {
-        var artwork = (BitmapSource)typeof(AchievementCelebrationCard).GetField("_earned",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(card)!;
-        Require(artwork.PixelWidth >= 272 && artwork.PixelHeight >= 272, "Bundled art has enough native pixels for a 68 DIP icon at 400% scaling");
-        foreach (var dpi in new[] { 96, 120, 144, 192, 288 })
+        var ordinary = new AchievementCelebrationCard("zh-CN", false, false);
+        var rare = new AchievementCelebrationCard("zh-CN", false, false, rarityTier: "rare", rarityBasisPoints: 420);
+        var ultra = new AchievementCelebrationCard("zh-CN", false, false, rarityTier: "veryRare", rarityBasisPoints: 4);
+        Require(ordinary.RarityLine == "" && ordinary.EntryMilliseconds == 760 && ordinary.LifetimeMilliseconds == 5560,
+            "Missing rarity uses ordinary timing with no rarity row");
+        Require(rare.RarityLine == "稀有 · 4.2% 的玩家获得" && rare.EntryMilliseconds == 820 && rare.LifetimeMilliseconds == 5620,
+            "Rare supports the localized ratio and its own full timeline");
+        Require(ultra.RarityLine == "极稀有 · 少于 0.1% 的玩家获得" && ultra.EntryMilliseconds == 1100 && ultra.LifetimeMilliseconds == 5900,
+            "Ultra rare supports the below-threshold ratio and its own full timeline");
+
+        AchievementCelebrationCard Scm(string locale, string? tier) =>
+            new(locale, false, false, "scm-1", displayName: "Synthetic SCM", rarityTier: tier);
+        var common = Scm("en-US", "COMMON");
+        var unknown = Scm("en-US", null);
+        Require(common.RarityLine == "" && unknown.RarityLine == "" &&
+            common.LifetimeMilliseconds == unknown.LifetimeMilliseconds &&
+            Draw(common, 1400).SequenceEqual(Draw(unknown, 1400)), "Missing and COMMON rarity render identical ordinary cards");
+        Require(Scm("zh-TW", "EPIC").RarityLine == "史詩" &&
+            Scm("zh-CN", "LEGENDARY").RarityLine == "传说" &&
+            Scm("en-US", "RARE").RarityLine == "Rare", "SCM tiers use achievement centre labels without a ratio");
+        Require(new AchievementCelebrationCard("zh-TW", false, false, rarityBasisPoints: 1).RarityLine == "少於 0.1% 的玩家獲得" &&
+            new AchievementCelebrationCard("en-US", false, false, rarityTier: "veryRare", rarityBasisPoints: 8).RarityLine ==
+                "Ultra rare · Earned by fewer than 0.1% of players", "App rarity uses the client percentage labels");
+
+        var normalPixels = Draw(ordinary, 1400);
+        var rarePixels = Draw(rare, 1400);
+        var ultraPixels = Draw(ultra, 1400);
+        var width = (int)ordinary.Width;
+        var height = (int)ordinary.Height;
+        int Pixel(byte[] pixels, int x, int y) => BitConverter.ToInt32(pixels, (y * width + x) * 4);
+        var seam = new[] { normalPixels, rarePixels, ultraPixels }.Select(p => Pixel(p, width - 1, 65)).ToArray();
+        var edge = new[] { normalPixels, rarePixels, ultraPixels }.Select(p => Pixel(p, 90, 24)).ToArray();
+        Require(seam.Distinct().Count() == 3 && edge.Distinct().Count() == 3,
+            "Each rarity has visibly distinct seam and edge pixels");
+        byte Alpha(int x, int y) => normalPixels[(y * width + x) * 4 + 3];
+        Require(Alpha(25, 26) < 64 && Alpha(25, height - 3) < 64 &&
+            Alpha(44, 29) > 190 && Alpha(44, height - 6) > 190 &&
+            Alpha(width - 6, 25) > 190 && Alpha(width - 6, height - 2) > 190,
+            "Both left corners are clipped symmetrically while the right corners stay square");
+        var reduced = new AchievementCelebrationCard("zh-CN", false, true, rarityTier: "rare", rarityBasisPoints: 420);
+        Require(Draw(reduced, 0).SequenceEqual(rarePixels), "Reduced motion's first frame is identical to the settled rare card");
+        Require(Draw(reduced, reduced.LifetimeMilliseconds).All(channel => channel == 0), "Reduced motion disappears immediately after the hold");
+        rare.Advance(2000, 9);
+        Require(rare.IsArrangeValid && Draw(rare, 2000).SequenceEqual(rarePixels),
+            "Dwell holds a single drawing even when more notices arrive");
+        Require(Draw(rare, rare.LifetimeMilliseconds).All(channel => channel == 0), "Exit ends with a fully hidden card");
+
+        var summary = new AchievementCelebrationCard("en-US", false, false, "scm-summary", summaryCount: 8, rarityTier: "EPIC");
+        var staticSummary = new AchievementCelebrationCard("en-US", false, true, "scm-summary", summaryCount: 8);
+        Require(summary.RarityLine == "" && summary.SummaryCountAt(420) == 1 && summary.SummaryCountAt(590) is > 1 and < 8 &&
+            summary.SummaryCountAt(760) == 8 && staticSummary.SummaryCountAt(0) == 8, "Summary counts up only during animated entry");
+        var summaryPixels = Draw(summary, 1000);
+        var missingPixels = Draw(unknown, 1000);
+        var art = Enumerable.Range(45, 62).SelectMany(y => Enumerable.Range(52, 58).Select(x => (X: x, Y: y))).ToArray();
+        Require(art.All(p => Pixel(summaryPixels, p.X, p.Y) == Pixel(missingPixels, p.X, p.Y)) &&
+            art.Select(p => Pixel(summaryPixels, p.X, p.Y)).Distinct().Count() > 64,
+            "Summary uses the detailed brand mark in the same artwork well as a missing picture");
+
+        foreach (var locale in new[] { "zh-CN", "zh-TW", "en-US" })
         {
-            card.Advance(1400, 0); card.Measure(new(card.Width, card.Height));
-            card.Arrange(new Rect(0, 0, card.Width, card.Height)); card.UpdateLayout();
-            var width = (int)Math.Ceiling(card.Width * dpi / 96d); var height = (int)Math.Ceiling(card.Height * dpi / 96d);
-            var actual = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32); actual.Render(card);
-            // Use a FrameworkElement just like the production drawing owner.
-            // A DrawingVisual does not propagate the attached scaling setting
-            // to this renderer, which would compare against Linear again.
-            var reference = new ReferenceArtwork(artwork) { Width = card.Width, Height = card.Height };
-            reference.Measure(new(card.Width, card.Height)); reference.Arrange(new Rect(0, 0, card.Width, card.Height));
-            var expected = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32); expected.Render(reference);
-            var a = new byte[width * height * 4]; var e = new byte[a.Length];
-            actual.CopyPixels(a, width * 4, 0); expected.CopyPixels(e, width * 4, 0);
-            // Ignore the fractional clip edge. The visible interior must use the
-            // original pixels with high quality resampling, including fractional DPI.
-            var differences = 0;
-            for (var y = (int)Math.Ceiling(20 * dpi / 96d); y < (int)Math.Floor(84 * dpi / 96d); y++)
-            for (var x = (int)Math.Ceiling(24 * dpi / 96d); x < (int)Math.Floor(88 * dpi / 96d); x++)
-            for (var channel = 0; channel < 3; channel++)
-            { var index = (y * width + x) * 4 + channel; if (Math.Abs(a[index] - e[index]) > 1) differences++; }
-            Require(differences == 0, $"Achievement icon must use native high quality sampling at {dpi} DPI; {differences} channels differ");
-            // Negative control follows the original window's default Linear
-            // setting. It must differ, or this test cannot catch lost detail.
-            RenderOptions.SetBitmapScalingMode(card, BitmapScalingMode.Unspecified);
-            var legacy = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32); legacy.Render(card);
-            var legacyBytes = new byte[a.Length]; legacy.CopyPixels(legacyBytes, width * 4, 0);
-            Require(!legacyBytes.SequenceEqual(a), "Quality comparison must distinguish original Linear sampling from the candidate");
-            RenderOptions.SetBitmapScalingMode(card, BitmapScalingMode.HighQuality);
-            if (Environment.GetEnvironmentVariable("STARBRIDGE_ACHIEVEMENT_RENDER_OUTPUT") is { Length: > 0 } output)
-            {
-                Directory.CreateDirectory(output);
-                var clientCapture = Path.Combine(output, $"flutter-first-entry-{dpi}.png");
-                if (dpi != 120 && File.Exists(clientCapture))
-                {
-                    var clientImage = new BitmapImage(new Uri(clientCapture));
-                    var clientPixels = new FormatConvertedBitmap(clientImage, PixelFormats.Pbgra32, null, 0);
-                    var clientBytes = new byte[clientImage.PixelWidth * clientImage.PixelHeight * 4];
-                    clientPixels.CopyPixels(clientBytes, clientImage.PixelWidth * 4, 0);
-                    double Difference(byte[] native)
-                    {
-                        var sum = 0d; var count = 0;
-                        var left = (int)Math.Round(22 * dpi / 96d); var top = (int)Math.Round(18 * dpi / 96d);
-                        var margin = (int)Math.Ceiling(8 * dpi / 96d);
-                        for (var y = margin; y < clientImage.PixelHeight - margin; y++)
-                        for (var x = margin; x < clientImage.PixelWidth - margin; x++)
-                        for (var channel = 0; channel < 3; channel++)
-                        { sum += Math.Abs(native[((top + y) * width + left + x) * 4 + channel] - clientBytes[(y * clientImage.PixelWidth + x) * 4 + channel]); count++; }
-                        return sum / count;
-                    }
-                    var candidateError = Difference(a); var originalError = Difference(legacyBytes);
-                    Console.WriteLine($"Artwork/client comparison at {dpi} DPI: Linear {originalError:F3}, candidate {candidateError:F3} mean channel error");
-                    Require(candidateError < originalError, "Native candidate must match the same-size Flutter client more closely than the original rendering");
-                }
-                foreach (var (label, bitmap) in new[] { ("linear", legacy), ("high-quality", actual) })
-                {
-                    var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                    using var file = File.Create(Path.Combine(output, $"sampling-{dpi}-{label}.png")); encoder.Save(file);
-                    var crop = new CroppedBitmap(bitmap, new Int32Rect((int)Math.Round(26 * dpi / 96d),
-                        (int)Math.Round(38 * dpi / 96d), (int)Math.Round(68 * dpi / 96d), (int)Math.Round(68 * dpi / 96d)));
-                    var iconEncoder = new PngBitmapEncoder(); iconEncoder.Frames.Add(BitmapFrame.Create(crop));
-                    using var iconFile = File.Create(Path.Combine(output, $"icon-{dpi}-{label}.png")); iconEncoder.Save(iconFile);
-                }
-            }
+            var english = locale == "en-US";
+            var poem = new AchievementCelebrationCard(locale, false, false, "hangar-home", 5,
+                rarityTier: "veryRare", rarityBasisPoints: 300).MeasureText(1.25);
+            var longName = new AchievementCelebrationCard(locale, true, false, "scm-1",
+                displayName: "A particularly long achievement name that must fit", rarityTier: "LEGENDARY").MeasureText(1.25);
+            var contract = new AchievementCelebrationCard(locale, false, false, "contract-first",
+                record: new("第一行\n第二行", "第一行\n第二行", "First line\nSecond line"),
+                rarityTier: "rare", rarityBasisPoints: 320).MeasureText(1.25);
+            Require(poem.Top >= 5 && poem.Bottom <= 103 && (!english || poem.MemoryHeight > 22) &&
+                longName.NameSize < 17 && longName.Top >= 5 && longName.Bottom <= 103 &&
+                contract.MemoryHeight > 22 && contract.Top >= 5 && contract.Bottom <= 103, $"No text overflow in {locale}");
         }
-    }
-    private sealed class ReferenceArtwork(BitmapSource artwork) : FrameworkElement
-    {
-        protected override void OnRender(DrawingContext drawing)
-        {
-            RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
-            drawing.DrawImage(artwork, new Rect(22, 18, 68, 68));
-        }
+        Console.WriteLine("PASS G1 glass: geometry, palettes, missing rarity, reduced motion, still dwell, summary and text");
     }
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 }

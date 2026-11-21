@@ -74,10 +74,10 @@ internal static partial class FirstUseBusinessOwnerTests
         {
             if (exit is not null) Check(!exit.IsCompleted, "Cancellation cannot acknowledge a physically held OAuth exchange");
             f.Original.Transport.ReleaseToken.TrySetResult();
-            var result = await work.WaitAsync(TimeSpan.FromSeconds(5));
+            var result = await work.WaitAsync(FirstUseTestWait.Bound);
             Check(result.Response.Status != "ok" || result.Response.Payload.GetProperty("identity").GetProperty("state").GetString() != "reviewRequired",
                 "A late lost-context reauthorization cannot issue review authority");
-            if (exit is not null) RetainedWire(await exit.WaitAsync(TimeSpan.FromSeconds(5)), "offline", "notStarted");
+            if (exit is not null) RetainedWire(await exit.WaitAsync(FirstUseTestWait.Bound), "offline", "notStarted");
             Check(bytes.SequenceEqual(File.ReadAllBytes(f.Original.VaultPath)) && f.Original.Transport.Revokes == 0 &&
                 f.Original.Mode.LocalMode().Active, "Late authentication preserves original/newer credentials and local mode");
         }

@@ -79,7 +79,7 @@ internal static class LocationArrivalPresentation
         var traditional = language is "zh-Hant" or "zh-TW";
         if (!PlayerSessionStatePresentation.HasRecognizedValue(arrivalTarget) ||
             PlayerSessionStatePresentation.IsSessionStateText(arrivalTarget))
-            return traditional ? "地點待確認" : zh ? PendingLocation : "Location pending";
+            return traditional ? OverlayPlaceholderText.PendingLocationTraditional : zh ? PendingLocation : OverlayPlaceholderText.LocationEn;
         var target = LocationNameLocalizer.DisplayName(arrivalTarget, zh ? "zh" : "en");
         return target + (traditional ? " · 待確認" : zh ? " · 待确认" : " · pending");
     }

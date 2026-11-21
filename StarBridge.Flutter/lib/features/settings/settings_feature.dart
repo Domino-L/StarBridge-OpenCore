@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../../app/feature_registry.dart';
+import '../../app/routing/screen_reading_route.dart';
 import 'settings_models.dart';
 import 'settings_page.dart';
 import 'settings_entry_dialog.dart';
@@ -14,9 +15,12 @@ Iterable<FeatureDescriptor> createSettingsFeatures({
   required SettingsContentBuilder notificationsBuilder,
   SettingsContentBuilder? diagnosticsBuilder,
   SettingsContentBuilder? helpSupportBuilder,
+  SettingsContentBuilder? screenReadingBuilder,
   DestinationLeaveGuard? confirmPrivacyLeave,
   DestinationLeaveGuard? confirmNotificationsLeave,
   Map<String, SettingsEntryOpener> entryOpeners = const {},
+  Widget Function(Widget)? accountScope,
+  VoidCallback? accountDispose,
 }) sync* {
   Future<bool> confirmLeave(BuildContext context) async {
     if (confirmNotificationsLeave != null &&
@@ -47,6 +51,7 @@ Iterable<FeatureDescriptor> createSettingsFeatures({
         syncPrivacyBuilder: syncPrivacyBuilder,
         notificationsBuilder: notificationsBuilder,
         diagnosticsBuilder: diagnosticsBuilder,
+        screenReadingBuilder: screenReadingBuilder,
         confirmPrivacyLeave: confirmPrivacyLeave,
         confirmNotificationsLeave: confirmNotificationsLeave,
       ),
@@ -71,13 +76,44 @@ Iterable<FeatureDescriptor> createSettingsFeatures({
         syncPrivacyBuilder: syncPrivacyBuilder,
         notificationsBuilder: notificationsBuilder,
         diagnosticsBuilder: diagnosticsBuilder,
+        screenReadingBuilder: screenReadingBuilder,
         confirmPrivacyLeave: confirmPrivacyLeave,
         confirmNotificationsLeave: confirmNotificationsLeave,
       ),
     ),
   );
+  if (screenReadingBuilder != null) {
+    yield FeatureDescriptor(
+      id: 'screen-reading-settings',
+      route: screenReadingSettingsRoute,
+      labelKey: 'settings.screenReading',
+      descriptionKey: 'settings.screenReading.description',
+      icon: StarBridgeIconSemantic.statusGame,
+      navigationRegion: NavigationRegion.shortcut,
+      navigationParentId: 'settings',
+      order: 10,
+      confirmLeave: confirmLeave,
+      buildDestination: (_) => SettingsEntryOverrides(
+        openers: entryOpeners,
+        child: SettingsPage(
+          initialSection: SettingsSection.screenReading,
+          helpSupportBuilder: helpSupportBuilder,
+          accountAndIdentityBuilder: accountAndIdentityBuilder,
+          generalDataBuilder: generalDataBuilder,
+          syncPrivacyBuilder: syncPrivacyBuilder,
+          notificationsBuilder: notificationsBuilder,
+          diagnosticsBuilder: diagnosticsBuilder,
+          screenReadingBuilder: screenReadingBuilder,
+          confirmPrivacyLeave: confirmPrivacyLeave,
+          confirmNotificationsLeave: confirmNotificationsLeave,
+        ),
+      ),
+    );
+  }
   yield FeatureDescriptor(
     id: 'account-and-identity',
+    appScopeBuilder: accountScope,
+    onDispose: accountDispose,
     route: '/settings/account',
     labelKey: 'settings.accountIdentity',
     descriptionKey: 'settings.accountIdentity.description',
@@ -96,6 +132,7 @@ Iterable<FeatureDescriptor> createSettingsFeatures({
         syncPrivacyBuilder: syncPrivacyBuilder,
         notificationsBuilder: notificationsBuilder,
         diagnosticsBuilder: diagnosticsBuilder,
+        screenReadingBuilder: screenReadingBuilder,
         confirmPrivacyLeave: confirmPrivacyLeave,
         confirmNotificationsLeave: confirmNotificationsLeave,
       ),

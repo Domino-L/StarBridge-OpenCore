@@ -209,8 +209,8 @@ void main() {
                       description: 'Separate consent',
                       choice: choice,
                       canEdit: true,
-                      onChanged: (next) => setState(() {
-                        choice = next;
+                      onChanged: (apply) => setState(() {
+                        choice = apply(choice);
                         changes++;
                         origins.add(
                           StarBridgeActivationOrigin.sourceOf(context),
@@ -432,9 +432,21 @@ void adjacent(InteractionSuite suite) {
             'event-choices',
             <String?, EventSharingChoice>{},
           );
-          expect(before[null]!.selectedTypes, 47);
+          expect(before, isEmpty);
+          expect(drafts.dirty, isFalse);
           expect(h.writes, isEmpty);
+          final life = find.byKey(
+            const Key('privacy-scope-event-room-field-life'),
+          );
+          expect(t.widget<StarBridgeSwitch>(life).value, isTrue);
           await toggle(t, 'privacy-scope-event-room-field-life', source);
+          expect(t.widget<StarBridgeSwitch>(life).value, isFalse);
+          await toggle(
+            t,
+            'privacy-scope-event-room-audience-events-enabled',
+            source,
+            checkbox: true,
+          );
           await toggle(
             t,
             'privacy-scope-event-room-audience-events-enabled',
@@ -447,8 +459,9 @@ void adjacent(InteractionSuite suite) {
           );
           expect(value[null]!.enabled, isFalse);
           expect(value[null]!.selectedTypes, 15);
-          expect(value['A'], before['A']);
-          expect(value['B'], before['B']);
+          expect(t.widget<StarBridgeSwitch>(life).value, isFalse);
+          expect(value['A'], EventSharingChoice.unconfirmed);
+          expect(value['B'], EventSharingChoice.unconfirmed);
           expect(h.writes, isEmpty);
           await toggle(
             t,
@@ -465,6 +478,10 @@ void adjacent(InteractionSuite suite) {
           await t.pumpAndSettle();
           expect(await save, isTrue);
           expect(h.writes, hasLength(1));
+          expect(
+            (h.writes.single.payload['settings'] as Map)['communities'],
+            isEmpty,
+          );
           expect(
             (h.writes.single.payload['settings'] as Map)['room'],
             value[null]!.toJson(),

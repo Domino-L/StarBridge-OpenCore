@@ -1,5 +1,4 @@
 import '../../shared/guide/guide_empty_state.dart';
-import 'hangar_guide.dart';
 import '../../shared/guide/guide_scope.dart';
 
 import 'dart:async';
@@ -8,28 +7,27 @@ import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart'
     show InteractionSource;
 
-import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/interaction/starbridge_dialog_owner.dart';
 
-import '../../design_system/tokens/starbridge_tokens.dart';
 import 'local_hangar_names.dart';
 import 'local_hangar_personal_data_editor.dart';
+import 'local_hangar_cloud.dart';
 import 'local_hangar_copy.dart';
 import 'local_hangar_port.dart';
 import 'local_hangar_images.dart';
 import 'local_hangar_ship_details.dart';
 import 'local_hangar_image_cache.dart';
-import 'local_hangar_presentation.dart';
-import 'local_hangar_overview.dart';
 import 'local_hangar_inventory_projection.dart';
 import 'local_hangar_inventory_tiles.dart';
 import 'local_hangar_detail.dart';
+import 'local_hangar_page_header.dart';
+import 'local_hangar_stage.dart';
+import 'local_hangar_wall.dart';
+import 'local_hangar_wall_sections.dart';
 import 'ship_specifications_port.dart';
 import 'cached_local_hangar.dart';
-import 'local_hangar_controls.dart';
-import 'local_hangar_read_status.dart';
 import 'hangar_display_session.dart';
 import 'hangar_read_diagnostics.dart';
 import '../../shared/diagnostics/loading_content_probe.dart';
@@ -53,6 +51,7 @@ class LocalHangarPage extends StatefulWidget {
 }
 
 class _LocalHangarPageState extends State<LocalHangarPage> {
+  final _cloudBar = GlobalKey();
   LocalHangarSnapshot? _snapshot;
   bool _loading = true;
   bool _failed = false;
@@ -60,6 +59,9 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
   int _ownerEpoch = 0;
   final _search = TextEditingController();
   final _scroll = ScrollController();
+  final _searchFocus = FocusNode(debugLabel: 'hangar-search');
+  String? _stageShipId;
+  bool _compact = false, _byMaker = false;
   String _query = '';
   bool _former = false;
   bool _grid = true;
@@ -130,6 +132,7 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
       _category = null;
       _status = null;
       _sort = 'saved';
+      _stageShipId = null;
       _arrivals.clear();
       if (_scroll.hasClients) _scroll.jumpTo(0);
       _restore();
@@ -169,7 +172,9 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
       ..status = _status
       ..former = _former
       ..favoritesOnly = _favoritesOnly
-      ..grid = _grid;
+      ..grid = _grid
+      ..compact = _compact
+      ..byMaker = _byMaker;
     if (_scroll.hasClients && !_restoringView) {
       view.scrollOffset = _scroll.offset;
     }
@@ -190,6 +195,9 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
       _former = _view!.former;
       _favoritesOnly = _view!.favoritesOnly;
       _grid = _view!.grid;
+      _compact = _view!.compact;
+      _byMaker = _view!.byMaker;
+      _stageShipId = null;
       ++_ownerEpoch;
       ++_favoriteEpoch;
       _favoriteBusy = false;
@@ -255,6 +263,7 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
     ++_favoriteEpoch;
     _imageCache.clear();
     _search.dispose();
+    _searchFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -574,7 +583,7 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final c = LocalHangarCopy(context), tokens = context.tokens;
+    final c = LocalHangarCopy(context);
     final source =
         (_former ? _snapshot?.formerInstances : _snapshot?.ships) ??
         const <LocalHangarShip>[];
@@ -606,176 +615,143 @@ class _LocalHangarPageState extends State<LocalHangarPage> {
         !_former &&
         widget.onRead != null &&
         GuideEmptyState.active(context);
-    final content = Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: tokens.density.contentMaxWidth),
-        child: CustomScrollView(
-          controller: _scroll,
-          slivers: [
-            SliverPadding(
-              padding: EdgeInsets.all(tokens.space.lg),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    LocalHangarToolbar(
-                      showRead: widget.onRead != null,
-                      onRead: _favoriteBusy ? null : widget.onRead,
-                      onRefresh: _loading || _favoriteBusy
-                          ? null
-                          : () => _refresh(
-                              refreshImages: true,
-                              source: currentStarBridgeActivationSource,
-                            ),
-                      extraAction: widget.extraAction,
-                      showSearch: source.isNotEmpty,
-                      search: LocalHangarSearchField(
-                        controller: _search,
-                        onChanged: (value) =>
-                            setState(() => _query = value.trim().toLowerCase()),
-                        onClear: () => setState(() {
-                          _search.clear();
-                          _query = '';
-                        }),
-                      ),
-                      former: _former,
-                      favoritesOnly: _favoritesOnly,
-                      grid: _grid,
-                      sort: _sort,
-                      onFormer: (value) => setState(() {
-                        _former = value;
-                        _closeDetails();
-                      }),
-                      onFavorites: (value) =>
-                          setState(() => _favoritesOnly = value),
-                      onSort: (value) => setState(() => _sort = value),
-                      onGrid: (value) => setState(() => _grid = value),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_former)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(
-                          _favoritesOnly ? c.formerBookmarksHint : c.formerHint,
-                        ),
-                      ),
-                    if (saved && !_former) ...[
-                      LocalHangarOverview(
-                        ships: _snapshot!.ships
-                            .map(LocalHangarPresentation.fromSaved)
-                            .toList(),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    LocalHangarReadStatus(
-                      snapshot: _snapshot,
-                      saved: saved,
-                      loading: _loading,
-                      favoriteBusy: _favoriteBusy,
-                      favoriteFailed: _favoriteFailed,
-                      failed: _failed,
-                      readSource: _readSource,
-                      readPhase: _readPhase,
-                      inheritReadOpeningSource: _readInheritsOpening,
-                      favoriteSource: _favoriteSource,
-                      favoritePhase: _favoritePhase,
-                      onRetry: () => _refresh(
-                        refreshImages: true,
-                        source: currentStarBridgeActivationSource,
-                      ),
-                    ),
-                    if (guided)
-                      hangarGuideEmpty(_favoriteBusy ? null : widget.onRead)
-                    else if ((!_loading || _snapshot != null) &&
-                        !_failed &&
-                        source.isEmpty) ...[
-                      Text(
-                        _former
-                            ? c.formerEmpty
-                            : saved
-                            ? c.emptySaved
-                            : c.noSaved,
-                      ),
-                      const SizedBox(height: 6),
-                      if (!_former) Text(c.emptyHint),
-                    ],
-                    if (source.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      LocalHangarFilters(
-                        roles: inventory.roles,
-                        sizes: inventory.sizes,
-                        category: _category,
-                        status: _status,
-                        size: _size,
-                        hasFilters:
-                            _query.isNotEmpty ||
-                            _category != null ||
-                            _status != null ||
-                            _size != null ||
-                            _favoritesOnly,
-                        onCategory: (value) =>
-                            setState(() => _category = value),
-                        onStatus: (value) => setState(() => _status = value),
-                        onSize: (value) => setState(() => _size = value),
-                        onClear: _clearFilters,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        c.count(ships.length),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      if (ships.isEmpty) ...[
-                        const SizedBox(height: 20),
-                        Text(c.noMatches),
-                        const SizedBox(height: 6),
-                        Text(c.searchHint),
-                        StarBridgeActionButton(
-                          controlKey: const Key('hangar-clear-filters'),
-                          kind: StarBridgeActionKind.quiet,
-                          onActivate: (_) => _clearFilters(),
-                          child: Text(c.clearFilters),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
+    final sections = LocalHangarWallSections.build(
+      ships,
+      byMaker: _byMaker,
+      copy: c,
+      sort: _sort,
+    );
+    final tiles = LocalHangarInventoryTiles(
+      inventory: inventory,
+      former: _former,
+      byMaker: _byMaker,
+      images:
+          widget.port is LocalHangarImageProvider &&
+              _snapshot?.fromLegacyProfile != true
+          ? widget.port as LocalHangarImageProvider
+          : null,
+      revision: _snapshot?.revision ?? 0,
+      ownerGeneration: _ownerEpoch,
+      imageGeneration: _imageGeneration,
+      imageCache: _imageCache,
+      elapsed: (ship) => _clock.elapsed - (_arrivals[ship.id] ?? Duration.zero),
+      onOpen: (ship) => setState(() => _stageShipId = ship.id),
+      onFavorite: favoritesAvailable && !_loading && !_favoriteBusy
+          ? (ship) => unawaited(_setFavorite(ship))
+          : null,
+    );
+    final header = LocalHangarPageHeader(
+      showRead: widget.onRead != null,
+      onRead: _favoriteBusy ? null : widget.onRead,
+      onRefresh: _loading || _favoriteBusy
+          ? null
+          : () => _refresh(
+              refreshImages: true,
+              source: currentStarBridgeActivationSource,
             ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                tokens.space.lg,
-                0,
-                tokens.space.lg,
-                tokens.space.lg,
-              ),
-              sliver: LocalHangarInventoryTiles(
-                inventory: inventory,
-                grid: _grid,
-                former: _former,
-                images:
-                    widget.port is LocalHangarImageProvider &&
-                        _snapshot?.fromLegacyProfile != true
-                    ? widget.port as LocalHangarImageProvider
-                    : null,
-                revision: _snapshot?.revision ?? 0,
-                ownerGeneration: _ownerEpoch,
-                imageGeneration: _imageGeneration,
-                imageCache: _imageCache,
-                elapsed: (ship) =>
-                    _clock.elapsed -
-                    (_grid
-                        ? (_arrivals[ship.id] ?? Duration.zero)
-                        : _arrivals[ship.id]!),
-                onOpen: _details,
-                onFavorite: favoritesAvailable && !_loading && !_favoriteBusy
-                    ? (ship) => unawaited(_setFavorite(ship))
-                    : null,
-              ),
-            ),
-          ],
-        ),
+      extraAction: widget.extraAction,
+      search: _search,
+      searchFocus: _searchFocus,
+      onQuery: (value) => setState(() => _query = value.trim().toLowerCase()),
+      onClearQuery: () => setState(() {
+        _search.clear();
+        _query = '';
+      }),
+      former: _former,
+      favoritesOnly: _favoritesOnly,
+      grid: _grid,
+      compact: _compact,
+      byMaker: _byMaker,
+      sort: _sort,
+      onFormer: (value) => setState(() {
+        _former = value;
+        _stageShipId = null;
+        _closeDetails();
+      }),
+      onFavorites: (value) => setState(() => _favoritesOnly = value),
+      onSort: (value) => setState(() => _sort = value),
+      onGrid: (value) => setState(() => _grid = value),
+      onCompact: (value) => setState(() => _compact = value),
+      onByMaker: (value) => setState(() => _byMaker = value),
+      snapshot: _snapshot,
+      source: source,
+      inventory: inventory,
+      saved: saved,
+      guided: guided,
+      loading: _loading,
+      failed: _failed,
+      favoriteBusy: _favoriteBusy,
+      favoriteFailed: _favoriteFailed,
+      readSource: _readSource,
+      readPhase: _readPhase,
+      inheritReadOpeningSource: _readInheritsOpening,
+      favoriteSource: _favoriteSource,
+      favoritePhase: _favoritePhase,
+      onRetry: () => _refresh(
+        refreshImages: true,
+        source: currentStarBridgeActivationSource,
       ),
+      category: _category,
+      status: _status,
+      size: _size,
+      onCategory: (value) => setState(() => _category = value),
+      onStatus: (value) => setState(() => _status = value),
+      onSize: (value) => setState(() => _size = value),
+      onClearFilters: _clearFilters,
+      cloud: widget.port is LocalHangarCloudPort
+          ? LocalHangarCloudBar(
+              key: _cloudBar,
+              port: widget.port as LocalHangarCloudPort,
+              revision: _snapshot?.revision ?? 0,
+              onRestored: () => _refresh(
+                refreshImages: false,
+                source: InteractionSource.programmatic,
+              ),
+            )
+          : null,
+    );
+    final stageShip = ships.where((s) => s.id == _stageShipId).firstOrNull;
+    final content = Stack(
+      fit: StackFit.expand,
+      children: [
+        // The wall stays mounted under the stage, keeping its place and images.
+        Offstage(
+          offstage: stageShip != null,
+          child: ExcludeFocus(
+            excluding: stageShip != null,
+            child: LocalHangarWall(
+              controller: _scroll,
+              header: header,
+              sections: sections,
+              grid: _grid,
+              compact: _compact,
+              cardBuilder: tiles.card,
+              rowBuilder: tiles.row,
+              onSearch: () {
+                if (_scroll.hasClients) _scroll.jumpTo(0);
+                _searchFocus.requestFocus();
+              },
+            ),
+          ),
+        ),
+        if (stageShip != null)
+          LocalHangarStage(
+            sections: sections,
+            shipId: stageShip.id,
+            former: _former,
+            peers: _peers,
+            imageFor: tiles.image,
+            imageCache: _imageCache,
+            cacheKey: tiles.cacheKey,
+            onSelect: (id) => setState(() => _stageShipId = id),
+            onBack: () => setState(() => _stageShipId = null),
+            onDetails: _details,
+            onFavorite: tiles.onFavorite,
+            favoritesAvailable: favoritesAvailable,
+            favoriteBusy: _favoriteBusy,
+            favoriteFailed: _favoriteFailed,
+          ),
+      ],
     );
     return LoadingContentProbe(
       route: '/hangar',

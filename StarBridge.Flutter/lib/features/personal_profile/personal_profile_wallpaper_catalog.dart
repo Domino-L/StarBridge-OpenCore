@@ -37,6 +37,10 @@ abstract final class PersonalProfileWallpaperCatalog {
   static const noneId = 'none';
   static const defaultId = noneId;
 
+  /// Shown behind a page whose owner chose no wallpaper (user, 2026-11-02:
+  /// the Steam-style page always has a full-page picture).
+  static const pageDefaultId = 'sc-4k-exterior-3';
+
   static const presets = <PersonalProfileWallpaperPreset>[
     PersonalProfileWallpaperPreset(
       id: noneId,

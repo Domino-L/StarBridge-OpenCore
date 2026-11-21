@@ -48,7 +48,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byType(SwitchListTile), findsNWidgets(6));
+        // The separate last-online switch is gone (follows presence, user 11-14).
+        expect(find.byType(SwitchListTile), findsNWidgets(5));
         expect(tester.takeException(), isNull);
         final control = find.byKey(const Key('friend-sharing-ship'));
         await tester.ensureVisible(control);

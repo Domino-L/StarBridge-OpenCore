@@ -21,7 +21,7 @@ internal static class MarketTraderProfileTests
     internal static async Task<int> Run()
     {
         var previous = HostDataRoot.CurrentRoot;
-        var root = Path.Combine(Directory.GetCurrentDirectory(), ".codex-build", "cx-t38-data", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "StarBridge-MarketTraderProfile-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         HostDataRoot.UsePreparedRoot(root);
         _passed = 0;

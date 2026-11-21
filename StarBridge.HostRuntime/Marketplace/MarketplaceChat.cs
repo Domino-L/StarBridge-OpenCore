@@ -9,6 +9,9 @@ internal static class MarketplaceChat
 {
     internal const int MaxContent = 150;
 
+    internal static bool ValidOrderNumber(string? value) => value is not null &&
+        System.Text.RegularExpressions.Regex.IsMatch(value, @"\A[A-Za-z0-9_-]{1,64}\z");
+
     private static object? Value(JsonElement row, string key, int max = 2000)
     {
         if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty(key, out var v)) return null;
@@ -74,12 +77,20 @@ internal static class MarketplaceChat
             try { snapshot = JsonDocument.Parse(raw).RootElement.Clone(); }
             catch (JsonException) { }
         }
+        // An order quote without a usable snapshot (missing, unparsable, truncated, no valid
+        // order number) is no attachment at all: report none, so the client can say
+        // "订单没有附上" instead of drawing an empty card.
+        if (type == "order" && (snapshot.ValueKind != JsonValueKind.Object ||
+            Value(snapshot, "orderNo", 65) is not string quoted || !ValidOrderNumber(quoted))) return null;
         return type == "order"
             ? (object)new
             {
                 type,
                 orderId = Value(snapshot, "orderId") ?? Value(row, "quoteId", 40),
-                orderNo = Value(snapshot, "orderNo", 60),
+                orderNo = Value(snapshot, "orderNo", 65) is string number && ValidOrderNumber(number) ? number : null,
+                displayType = Value(snapshot, "displayType"),
+                mainImage = Value(snapshot, "mainImage", 2000),
+                qualityData = Value(snapshot, "qualityData", 4000),
                 itemId = Value(snapshot, "itemId", 60),
                 itemName = Value(snapshot, "itemName", 200),
                 itemNameEn = Value(snapshot, "itemNameEn", 200),

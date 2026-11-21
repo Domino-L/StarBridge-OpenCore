@@ -17,6 +17,7 @@ import 'community_workspace_port.dart';
 import 'community_profile_copy.dart';
 import 'community_activity_time.dart';
 import '../../design_system/typography/cjk_line_break.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// A stable overview: identity/presence first, collaboration information second.
 /// Long-form data stays accessible through details, never through a nested fold.
@@ -83,7 +84,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
       value,
       style: text.labelMedium?.copyWith(color: colors.textSecondary),
       maxLines: 1,
-      overflow: TextOverflow.fade,
+      overflow: fadeOverflow(context),
       softWrap: false,
     );
     final identity = Row(
@@ -110,7 +111,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                   workspace.name,
                   style: text.titleLarge,
                   maxLines: 1,
-                  overflow: TextOverflow.fade,
+                  overflow: fadeOverflow(context),
                   softWrap: false,
                 ),
               ),
@@ -190,7 +191,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
                               'community-presence-label-${metric.$1}',
                             ),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: text.labelMedium?.copyWith(
                               fontSize: 12,
@@ -219,7 +220,7 @@ class CommunityWorkspaceHeader extends StatelessWidget {
           child: Text(
             activity.isEmpty ? t('hidden') : activity,
             maxLines: 1,
-            overflow: TextOverflow.fade,
+            overflow: fadeOverflow(context),
             softWrap: false,
             style: text.bodyMedium,
           ),

@@ -51,7 +51,7 @@ internal static class CacheFixtureJunction
         var full = Path.GetFullPath(root);
         var parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
         var name = Path.GetFileName(full);
-        var validName = new[] { "StarBridge-image-cache-safety-", "StarBridge-organization-image-maintenance-" }
+        var validName = new[] { "StarBridge-image-cache-safety-", "StarBridge-organization-image-maintenance-", "StarBridge-owner-alias-junction-" }
             .Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal) && Guid.TryParseExact(name[prefix.Length..], "N", out _));
         if (!string.Equals(Path.GetDirectoryName(full), parent, StringComparison.OrdinalIgnoreCase) ||
             !validName)

@@ -18,7 +18,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
         return new(id, test, invitations, applications, settings.Preview, settings.Position,
             presentation.LocaleOverride ?? System.Globalization.CultureInfo.CurrentUICulture.Name,
             presentation.AppearanceMode, current, presentation.MotionPreference == "reduce",
-            test || activationEvent == null ? null : () => Activate(id, current));
+            test || activationEvent == null ? null : () => Activate(id, current)) { ShowDuringQuiet = SocialShowsDuringQuiet };
     }
 
     private readonly TimeProvider _activationTime = time ?? TimeProvider.System;
@@ -37,8 +37,10 @@ public sealed partial class NotificationSettingsBridgeDispatcher
             catch (OperationCanceledException) { return; } // No intent was created by the retired Native owner.
             _activatedDesktop = id;
             // Routing data stays in this one in-memory intent, never in the click event.
-            var opaqueRef = destination is "trade" or "tradeChat" && reference is { Length: 32 } &&
+            var opaqueRef = destination is "trade" or "tradeChat" or "communityAnnouncements" or "officialFleetAnnouncements" && reference is { Length: 32 } &&
                 reference.All(char.IsAsciiHexDigit) ? reference : null;
+            if (destination == "officialFleetAnnouncements" && reference != null &&
+                System.Text.RegularExpressions.Regex.IsMatch(reference, "^officialFleet:[1-9][0-9]{0,18}$")) opaqueRef = reference;
             _activation = (key, current, _activationTime.GetTimestamp(), sessionGeneration, destination, revalidate, opaqueRef);
             EventReady?.Invoke(envelope);
         }
@@ -79,7 +81,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                     destination = null;
             }
             return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, destination,
-                @ref = destination is "trade" or "tradeChat" ? reference : null }, preserveRequestAccountContext: false), []);
+                @ref = destination is "trade" or "tradeChat" or "communityAnnouncements" or "officialFleetAnnouncements" ? reference : null }, preserveRequestAccountContext: false), []);
         }
         catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
         catch (BridgeProtocolException e) { return new(BridgeEnvelope.ErrorResponse(request, new(e.Code, "Activation rejected.")), []); }
@@ -126,7 +128,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher
                         }
                         else if (Guid.TryParseExact(request.Payload.GetProperty("ticket").GetString(), "N", out var id) &&
                             _desktopTicket is { } ticket && ticket.Id == id && _submittedDesktop != id &&
-                            ticket.IsCurrent() && (canNotifyDesktop?.Invoke() ?? false))
+                            ticket.IsCurrent() && CanNotifySocial())
                         {
                             // Consume before awaiting native output. Uncertain delivery must not retry.
                             _submittedDesktop = id;

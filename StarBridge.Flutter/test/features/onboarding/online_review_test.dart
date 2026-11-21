@@ -364,12 +364,13 @@ void main() {
     addTearDown(c.dispose);
     await c.initialize();
     expect(c.value.modeApplied, true);
-    expect(c.canContinue, false);
+    expect(c.canContinue, true);
     expect(c.canConfirmLocalIdentity, true);
     await c.run(OnboardingAction.confirmHandle);
     expect(p.actions, [OnboardingAction.confirmHandle]);
     p.facts = facts(onlineSetupPending: true, confirmed: true);
     await c.refresh();
+    await c.next();
     await c.next();
     await c.next();
     await c.next();

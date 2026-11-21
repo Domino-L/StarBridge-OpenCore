@@ -1,11 +1,18 @@
 import 'dart:convert';
 
 import '../../features/personal_profile/personal_profile_models.dart';
+import '../../features/personal_profile/personal_profile_favorite_modules.dart';
 
 /// Display-only schema shared by the main broker and auxiliary renderer.
 /// No account context, target refs, grants, URLs, local state or edit capability.
 final class MenuProfileView {
-  const MenuProfileView(this.state, {this.snapshot});
+  const MenuProfileView(
+    this.state, {
+    this.snapshot,
+    this.autoImportPending = false,
+  });
+  static const _maxShips = 64;
+  final bool autoImportPending;
   final String state;
   final PersonalProfileSnapshot? snapshot;
 
@@ -43,9 +50,27 @@ final class MenuProfileView {
       'tw': i.traditionalChineseName,
       'catalog': i.catalogId,
     };
+    final fallbackId = p.local?.showLocalFavoriteShips == true
+        ? ProfileFavoriteModules.firstVisibleId(p.moduleLayout)
+        : null;
+    final explicitIds = {
+      for (final item in p.moduleLayout)
+        if (item.moduleId != fallbackId) ...[
+          if (fallbackId != null) ...?item.favoriteShipIds,
+          ...?item.showcaseExtra,
+        ],
+    };
+    final ships = {
+      for (final ship in p.favoriteShips) ship.identity.runtimeId: ship,
+      for (final ship
+          in p.local?.choices ?? const <PersonalProfileShipSummary>[])
+        if (explicitIds.contains(ship.identity.runtimeId))
+          ship.identity.runtimeId: ship,
+    };
     final h = p.hangarSummary;
     final result = <String, Object?>{
       'state': 'ready',
+      if (p.local?.autoImportPending == true) 'autoImportPending': true,
       'name': p.callSign,
       'handle': p.gameHandle,
       'about': p.about,
@@ -73,7 +98,7 @@ final class MenuProfileView {
       'support': p.supportCapabilities.map(tag).toList(),
       'wishlist': p.shipWishlist.map(tag).toList(),
       'ships': [
-        for (final s in p.favoriteShips)
+        for (final s in ships.values.take(_maxShips))
           {
             'identity': identity(s.identity),
             'manufacturer': s.manufacturer,
@@ -119,7 +144,13 @@ final class MenuProfileView {
             'size': m.size.name,
             'visible': m.isVisible,
             'position': m.position,
-            'favorites': m.favoriteShipIds,
+            'favorites': m.moduleId == fallbackId
+                ? p.favoriteShips
+                      .take(_maxShips)
+                      .map((ship) => ship.identity.runtimeId)
+                      .toList()
+                : m.favoriteShipIds,
+            'extra': m.moduleId == fallbackId ? null : m.showcaseExtra,
           },
       ],
     };
@@ -183,6 +214,7 @@ final class MenuProfileView {
       final h = _map(d['hangar']);
       return MenuProfileView(
         'ready',
+        autoImportPending: d['autoImportPending'] == true,
         snapshot: PersonalProfileSnapshot.available(
           allowEditing: false,
           callSign: _text(d, 'name'),
@@ -225,7 +257,7 @@ final class MenuProfileView {
           supportCapabilities: _list(d, 'support', 64).map(tag).toList(),
           shipWishlist: _list(d, 'wishlist', 64).map(tag).toList(),
           favoriteShips: [
-            for (final s in _list(d, 'ships', 64))
+            for (final s in _list(d, 'ships', _maxShips))
               PersonalProfileShipSummary(
                 identity: identity(s['identity']),
                 manufacturer: _text(s, 'manufacturer'),
@@ -276,6 +308,7 @@ final class MenuProfileView {
                 // Hidden/unplaced modules use -1 in the shared profile model.
                 position: _int(m, 'position', min: -1),
                 favoriteShipIds: _strings(m['favorites']),
+                showcaseExtra: _strings(m['extra']),
               ),
           ],
         ),

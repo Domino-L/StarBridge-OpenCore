@@ -26,6 +26,7 @@ import 'community_workspace_controller.dart';
 import 'community_workspace_image.dart';
 import 'community_workspace_port.dart';
 import 'community_workspace_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// Uses the same current member directory and exit command as the workspace.
 /// Candidate selection is read-only; only the explicit confirmation can write.
@@ -302,7 +303,7 @@ class _CommunityOwnershipExitDialogState
                   title: Text(
                     member.displayName,
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                   ),
                   subtitle: _candidateDetails(member),
@@ -352,7 +353,7 @@ class _CommunityOwnershipExitDialogState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (member.gameName.isNotEmpty && member.gameName != member.displayName)
-          Text(member.gameName, maxLines: 1, overflow: TextOverflow.fade,
+          Text(member.gameName, maxLines: 1, overflow: fadeOverflow(context),
           softWrap: false),
         Wrap(
           spacing: 8,
@@ -361,7 +362,7 @@ class _CommunityOwnershipExitDialogState
               Text(
                 member.roleTitle,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
               ),
             Text(

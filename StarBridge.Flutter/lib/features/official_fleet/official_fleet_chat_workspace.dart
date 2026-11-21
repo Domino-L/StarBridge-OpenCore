@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../common/organization_holo_online.dart';
+import '../common/organization_member_copy.dart';
 import '../common/organization_member_row.dart';
 import 'official_fleet_member_views.dart';
 import 'official_fleet_members_models.dart';
@@ -79,7 +80,7 @@ class OfficialFleetChatWorkspace extends StatelessWidget {
 
 /// "Online now": its own read of the roster filtered to online members, so
 /// it never depends on (or moves) the member list's page, search or filter.
-/// Grouped into in game and online, refreshed on roster and presence changes.
+/// Grouped into in game, online and away, refreshed on presence changes.
 class OfficialFleetOnlinePane extends StatelessWidget {
   const OfficialFleetOnlinePane({
     required this.members,
@@ -143,25 +144,40 @@ class OfficialFleetOnlinePane extends StatelessWidget {
     if (usable) {
       final inGame = <OrganizationHoloOnlineMember>[];
       final online = <OrganizationHoloOnlineMember>[];
+      final away = <OrganizationHoloOnlineMember>[];
       for (final member in projection.members) {
         final playing =
             member.publicPresence == OfficialFleetMemberPresence.inGame;
+        final isAway =
+            member.publicPresence == OfficialFleetMemberPresence.away;
         if (!playing &&
+            !isAway &&
             member.publicPresence != OfficialFleetMemberPresence.online) {
           continue;
         }
-        (playing ? inGame : online).add(
-          _entry(
-            context,
-            member,
-            detail: playing
-                ? member.publicLocation.value ?? t('locationHidden')
-                : t('notInGame'),
-            dot: playing ? tokens.colors.success : tokens.colors.stateAccent,
-          ),
-        );
+        (playing
+                ? inGame
+                : isAway
+                ? away
+                : online)
+            .add(
+              _entry(
+                context,
+                member,
+                detail: playing
+                    ? member.publicLocation.value ?? t('locationHidden')
+                    : isAway
+                    ? memberBoardText(context, 'away')
+                    : t('notInGame'),
+                dot: playing
+                    ? tokens.colors.success
+                    : isAway
+                    ? tokens.colors.warning
+                    : tokens.colors.stateAccent,
+              ),
+            );
       }
-      onlineCount = inGame.length + online.length;
+      onlineCount = inGame.length + online.length + away.length;
       if (inGame.isNotEmpty) {
         groups.add(
           OrganizationHoloOnlineGroup(
@@ -175,6 +191,14 @@ class OfficialFleetOnlinePane extends StatelessWidget {
           OrganizationHoloOnlineGroup(
             t('online').replaceAll('{count}', '${online.length}'),
             online,
+          ),
+        );
+      }
+      if (away.isNotEmpty) {
+        groups.add(
+          OrganizationHoloOnlineGroup(
+            t('away').replaceAll('{count}', '${away.length}'),
+            away,
           ),
         );
       }

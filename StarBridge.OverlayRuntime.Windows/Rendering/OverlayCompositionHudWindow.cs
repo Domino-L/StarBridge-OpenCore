@@ -354,6 +354,8 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
 
     public void Close()
     {
+        // the visor closes with its own animation first, then disposes (TryBeginVisorClose)
+        if (TryBeginVisorClose()) return;
         Dispose();
     }
 
@@ -469,6 +471,11 @@ internal sealed partial class OverlayCompositionHudWindow : IOverlayHost, IDispo
             _isVisible = false;
         }
 
+        // the visor's closing timers live on the owner thread. A window that was never constructed (a test's uninitialized
+        // shell exercising Dispose alone) has no owner dispatcher and no timers (m86b)
+        if (_ownerDispatcher is not { } owner) { }
+        else if (owner.CheckAccess()) StopVisorCloseTimers();
+        else if (!owner.HasShutdownStarted) owner.BeginInvoke(StopVisorCloseTimers);
         _viewModel.PropertyChanged -= OverlayViewModel_PropertyChanged;
         _viewModel.ClearAuthorizedContent();
         _initialRevealTimer?.Stop();

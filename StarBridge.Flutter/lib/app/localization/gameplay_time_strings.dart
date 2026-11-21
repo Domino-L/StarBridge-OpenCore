@@ -1,4 +1,17 @@
+const _deviceContinuityGameplayStrings = <String, String>{
+  'gameplay.consentPendingIdentity': '正在确认游戏身份，确认后按你在引导里的选择开始记录。',
+  'gameplay.deviceStorage': '本机累计只保存在这台电脑上。',
+  'gameplay.accountTotal': '账号累计 {hours} 小时',
+  'gameplay.accountEmpty': '账号还没有云端累计',
+  'gameplay.accountUnavailable': '账号累计暂时读不到',
+};
+
 const gameplayTimeZhCn = <String, String>{
+  'gameplay.connection': '暂时连不上服务器，时长照常记录，账号累计稍后显示。',
+  'gameplay.connectionPaused': '连不上服务器已超过 30 分钟，时长暂停记录，连上后自动继续。已保存的时长不受影响。',
+  'gameplay.updatesLater': '（稍后更新）',
+  ..._deviceContinuityGameplayStrings,
+  'gameplay.accountScmOnly': '这个 SCM 账号还没有关联旧账号，暂时不能累计或重置账号时长，本机时长照常记录。有旧账号的，可以到 设置 › 账号与识别 › {accountCard}。',
   'gameplay.scan.title': '扫描 LIVE 历史日志',
   'gameplay.scan.checking': '正在检查导入资格…',
   'gameplay.scan.discovering': '正在查找已绑定 LIVE 的日志备份…',
@@ -35,8 +48,8 @@ const gameplayTimeZhCn = <String, String>{
   'gameplay.loading': '正在读取或保存…',
   'gameplay.error': '记录已暂停。请关闭其他应用副本后重试，并检查此电脑的可用空间。',
   'gameplay.readError': '暂时无法读取记录状态，请重试。',
-  'gameplay.identityError':
-      '账号身份暂时未确认，时长没有继续记录，已保存的时长不受影响。请重新登录或重启应用；还不行请反馈。',
+  'gameplay.identityError': '游戏身份还没核对上，时长暂停记录。已保存的时长和设置都没有变。请到“账号与识别”核对两件事：游戏身份是否已验证；本机游戏识别里，日志中的 Handle 是否和已验证的 Handle 一致。核对上以后会自动继续记录。',
+  'gameplay.confirmIdentity': '去核对日志 Handle',
   'gameplay.unsaved': '最近一段时长尚未保存，请重试保存。',
   'gameplay.stopError': '停止记录尚未保存，请重试。重启应用后可能恢复原设置。',
   'gameplay.unsupported': '当前版本暂不支持记录，请更新应用。',
@@ -45,7 +58,6 @@ const gameplayTimeZhCn = <String, String>{
   'gameplay.stop': '停止记录',
   'gameplay.retry': '重试',
   'gameplay.recordSwitch': '记录游戏时长',
-  'gameplay.profileSwitch': '在个人主页显示时长',
   'gameplay.localTotal': '本机累计',
   'gameplay.remoteTotal': '账号汇总',
   'gameplay.remoteUnavailable': '尚未返回时长',
@@ -85,6 +97,11 @@ const gameplayTimeZhCn = <String, String>{
   'gameplay.history.confirmUncertain': '暂时无法确认导入结果。重试可查询并完成本次导入。',
 };
 const gameplayTimeZhTw = <String, String>{
+  'gameplay.connection': '暫時連不上伺服器，時長照常記錄，帳號累計稍後顯示。',
+  'gameplay.connectionPaused': '連不上伺服器已超過 30 分鐘，時長暫停記錄，連上後自動繼續。已儲存的時長不受影響。',
+  'gameplay.updatesLater': '（稍後更新）',
+  ..._deviceContinuityGameplayStrings,
+  'gameplay.accountScmOnly': '這個 SCM 帳號還沒有關聯舊帳號，暫時不能累計或重設帳號時長，本機時長照常記錄。有舊帳號的，可以到 設定 › 帳號與識別 › {accountCard}。',
   'gameplay.scan.title': '掃描 LIVE 歷史日誌',
   'gameplay.scan.checking': '正在檢查匯入資格…',
   'gameplay.scan.discovering': '正在尋找已綁定 LIVE 的日誌備份…',
@@ -121,8 +138,8 @@ const gameplayTimeZhTw = <String, String>{
   'gameplay.loading': '正在讀取或儲存…',
   'gameplay.error': '記錄已暫停。請關閉其他應用程式副本後重試，並檢查此電腦的可用空間。',
   'gameplay.readError': '暫時無法讀取記錄狀態，請重試。',
-  'gameplay.identityError':
-      '帳號身分暫時未確認，時長沒有繼續記錄，已儲存的時長不受影響。請重新登入或重新啟動應用；還不行請回饋。',
+  'gameplay.identityError': '遊戲身分還沒核對上，時長暫停記錄。已儲存的時長和設定都沒有變。請到「帳號與識別」核對兩件事：遊戲身分是否已驗證；本機遊戲識別裡，日誌中的 Handle 是否和已驗證的 Handle 一致。核對上以後會自動繼續記錄。',
+  'gameplay.confirmIdentity': '去核對日誌 Handle',
   'gameplay.unsaved': '最近一段時長尚未儲存，請重試儲存。',
   'gameplay.stopError': '停止記錄尚未儲存，請重試。重新啟動後可能恢復原設定。',
   'gameplay.unsupported': '目前版本暫不支援記錄，請更新應用程式。',
@@ -131,7 +148,6 @@ const gameplayTimeZhTw = <String, String>{
   'gameplay.stop': '停止記錄',
   'gameplay.retry': '重試',
   'gameplay.recordSwitch': '記錄遊戲時長',
-  'gameplay.profileSwitch': '在個人主頁顯示時長',
   'gameplay.localTotal': '本機累計',
   'gameplay.remoteTotal': '帳號彙總',
   'gameplay.remoteUnavailable': '尚未傳回時長',
@@ -171,6 +187,11 @@ const gameplayTimeZhTw = <String, String>{
   'gameplay.history.confirmUncertain': '暫時無法確認匯入結果。重試可查詢並完成本次匯入。',
 };
 const gameplayTimeEn = <String, String>{
+  'gameplay.connection': "Can't reach the server right now. Playtime is still being recorded; the account total will show later.",
+  'gameplay.connectionPaused': "Couldn't reach the server for over 30 minutes. Playtime recording is paused and resumes automatically once connected. Saved playtime is not affected.",
+  'gameplay.updatesLater': ' (updates later)',
+  ..._deviceContinuityGameplayStrings,
+  'gameplay.accountScmOnly': "This SCM account isn't linked to an old account yet, so account playtime can't be totalled or reset for now. Playtime on this computer is still recorded. If you have an old account, go to Settings › Account & identity › {accountCard}.",
   'gameplay.scan.title': 'Scan LIVE history',
   'gameplay.scan.checking': 'Checking import eligibility…',
   'gameplay.scan.discovering': 'Finding backups beside your linked LIVE log…',
@@ -209,8 +230,8 @@ const gameplayTimeEn = <String, String>{
   'gameplay.loading': 'Reading or saving…',
   'gameplay.error': 'Recording paused. Close other copies of the app, check free disk space, then retry.',
   'gameplay.readError': 'Recording status is unavailable. Retry to check it.',
-  'gameplay.identityError':
-      'Your account identity is not confirmed, so playtime is not being recorded. Saved time is safe. Sign in again or restart the app; if this continues, send feedback.',
+  'gameplay.identityError': 'Your game identity is not matched yet, so playtime is paused. Saved time and settings are unchanged. In Account & identity, check two things: that your game identity is verified, and that the Handle in your game log matches your verified Handle. Recording continues once they match.',
+  'gameplay.confirmIdentity': 'Check log Handle',
   'gameplay.unsaved':
       'The latest playtime has not been saved. Retry to save it.',
   'gameplay.stopError': 'The stop setting has not been saved. Retry before restarting, or the previous setting may return.',
@@ -221,7 +242,6 @@ const gameplayTimeEn = <String, String>{
   'gameplay.stop': 'Stop recording',
   'gameplay.retry': 'Retry',
   'gameplay.recordSwitch': 'Record game time',
-  'gameplay.profileSwitch': 'Show game time on my profile',
   'gameplay.localTotal': 'Total on this PC',
   'gameplay.remoteTotal': 'Account total',
   'gameplay.remoteUnavailable': 'Playtime not returned',

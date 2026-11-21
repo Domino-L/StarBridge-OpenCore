@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/localization/account_card_title.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/interaction/starbridge_activation_origin.dart';
@@ -273,7 +274,7 @@ class _UnavailablePrivacySetting extends StatelessWidget {
                 ),
                 SizedBox(height: tokens.space.xxs),
                 Text(
-                  strings.text(statusKey),
+                  withAccountCardTitle(context, strings.text(statusKey)),
                   style: Theme.of(context).textTheme.bodySmall
                       ?.copyWith(color: tokens.colors.textDisabled),
                 ),
@@ -317,7 +318,9 @@ class _PrivacySettingStatus extends StatelessWidget {
             color: tokens.colors.warning,
           ),
           SizedBox(width: tokens.space.sm),
-          Expanded(child: Text(strings.text(statusKey))),
+          Expanded(
+            child: Text(withAccountCardTitle(context, strings.text(statusKey))),
+          ),
           if (onRetry != null)
             HelpSupportAction(
               controlKey: const Key('authoritative-privacy-status-retry'),

@@ -20,7 +20,7 @@ internal sealed partial class ScmAccountBridgeHost
         // After activation, pending-review expiry is not an account lifetime.
         // Ordinary same-subject refresh and equivalent storage reconfirmation
         // remain valid, but identity, generation or storage replacement does not.
-        internal bool IsInstalledOwnerCurrent
+        internal bool IsInstalledIdentityCurrent
         {
             get
             {
@@ -28,14 +28,17 @@ internal sealed partial class ScmAccountBridgeHost
                     _owner._reauthorizationRequired || _owner._credentialTemporarilyUnavailable ||
                     _owner._legacySession is not null || _owner._session is not { } session ||
                     _owner.Generation != _identity.Generation || _owner.CurrentContext != _identity.Context) return false;
-                if (_owner._oauth.ReadInstalledFirstUseSessionOrRefresh(_identity.Session, session) is null) return false;
-                // Ownership reads may run inside another lane's refresh. Verify
-                // its exact lineage without replacing that lane's Host snapshot.
-                // Session adoption belongs to the mutation owner, not a getter.
-                if (_owner._compatibilityReader is null) return StorageOwner == _identity.Context;
-                var binding = Volatile.Read(ref _owner._localOwnerBinding);
-                return binding is not null && binding.Authentication == _identity.Context &&
-                    binding.Generation == _identity.Generation && binding.Storage == StorageOwner;
+                // Read only the exact installed lineage; this grants no local
+                // storage or publication authority while its binding is absent.
+                return _owner._oauth.ReadInstalledFirstUseSessionOrRefresh(_identity.Session, session) is not null;
+            }
+        }
+        internal bool IsInstalledOwnerCurrent
+        {
+            get
+            {
+                if (!IsInstalledIdentityCurrent) return false;
+                return IsResolvedOwnerCurrent;
             }
         }
         internal FirstUseBusinessAdmission? StageAdmission(Func<bool> current) =>
@@ -45,12 +48,19 @@ internal sealed partial class ScmAccountBridgeHost
             get
             {
                 if (!_owner.IsFirstUseIdentityCurrent(_identity)) return false;
-                if (_owner._compatibilityReader is null)
-                    return _binding is null && StorageOwner == _identity.Context;
-                var binding = Volatile.Read(ref _owner._localOwnerBinding);
-                return ReferenceEquals(binding, _binding) && binding is not null &&
-                    binding.Authentication == _identity.Context && binding.Generation == _identity.Generation &&
-                    binding.Storage == StorageOwner && _owner.LocalOwnerFresh(binding, TimeSpan.FromMinutes(3));
+                return ReferenceEquals(Volatile.Read(ref _owner._localOwnerBinding), _binding) && IsResolvedOwnerCurrent;
+            }
+        }
+
+        // Share the storage gate's three-minute/transport-failure/explicit-answer
+        // rules, including the existing local alias semantics. Identity-only
+        // renewal deliberately stays separate so a paused admission can recover.
+        private bool IsResolvedOwnerCurrent
+        {
+            get
+            {
+                try { return _owner.ResolveLocalDataOwner(_identity.Context) == StorageOwner; }
+                catch (Privacy.LocalPrivacyException) { return false; }
             }
         }
 

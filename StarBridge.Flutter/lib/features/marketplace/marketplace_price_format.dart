@@ -8,6 +8,7 @@ import 'marketplace_copy.dart';
 import 'marketplace_diagonal.dart' show MarketHeadingMark;
 import 'marketplace_port.dart' show marketNumber;
 import 'marketplace_surfaces.dart' show marketLine;
+import 'marketplace_dialog_scope.dart';
 import 'marketplace_widgets.dart';
 
 /// The SCM site's 价格显示格式, plus "auto": 中文 UI → 万/亿, English → K/M/B.
@@ -73,6 +74,7 @@ Future<void> showMarketDisplaySettings(
   MarketplaceController c,
 ) => showDialog<void>(
   context: context,
+  useRootNavigator: MarketplaceDialogScope.useRootNavigator(context),
   builder: (_) => ListenableBuilder(
     listenable: c,
     builder: (context, _) => _DisplaySettings(c),

@@ -1,4 +1,5 @@
 #include "friends_window_bridge.h"
+#include "frame_pressure_channel.h"
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
@@ -141,7 +142,7 @@ class FriendsWindowBridge::Impl {
       SetWindowLongPtrW(child, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(child_proc_));
       RemovePropW(child, kChildOwner);
     }
-    secondary_.reset(); controller_.reset();
+    secondary_.reset(); frame_pressure_.reset(); controller_.reset();
     if (window_) {
       SetWindowLongPtrW(window_, GWLP_USERDATA, 0); DestroyWindow(window_);
     }
@@ -156,7 +157,7 @@ class FriendsWindowBridge::Impl {
     RegisterClassExW(&cls);
     // Unowned and not topmost: minimizing the main window or changing focus
     // must not hide friends. WM_CLOSE hides; primary shutdown destroys.
-    const wchar_t* title = kind_ == "messages" ? L"聊天 · 星海舰桥" : kind_ == "notifications" ? L"通知 · 星海舰桥" : L"好友 · 星海舰桥";
+    const wchar_t* title = kind_ == "messages" ? L"聊天 · SCM 星海舰桥" : kind_ == "notifications" ? L"通知 · SCM 星海舰桥" : L"好友 · SCM 星海舰桥";
     const int width = kind_ == "messages" ? 920 : kind_ == "notifications" ? 560 : 408;
     window_ = CreateWindowExW(WS_EX_APPWINDOW, kClass, title,
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_DISABLED,
@@ -185,6 +186,8 @@ class FriendsWindowBridge::Impl {
     // Preparing a hidden auxiliary engine must not activate its parent. Only
     // Reveal, after an explicit show and a rendered snapshot, may take focus.
     Resize(); ShowWindow(child, SW_SHOWNOACTIVATE);
+    frame_pressure_ = std::make_unique<frame_pressure::Channel>(
+        controller_->engine()->messenger());
     secondary_ = std::make_unique<Channel>(controller_->engine()->messenger(),
         "starbridge/" + kind_ + "-surface", &flutter::StandardMethodCodec::GetInstance());
     secondary_->SetMethodCallHandler([this](const auto& call, auto result) {
@@ -418,6 +421,7 @@ class FriendsWindowBridge::Impl {
   Channel primary_;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<Channel> secondary_;
+  std::unique_ptr<frame_pressure::Channel> frame_pressure_;
   WNDPROC child_proc_ = nullptr;
 };
 

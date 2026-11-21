@@ -11,7 +11,7 @@ internal sealed class MenuPreferencesStore(string dataRoot) : IMenuHotkeyPrefere
     private string? _startupToken;
     private bool? _startupSafe;
     private readonly string _path = Path.Combine(Path.GetFullPath(dataRoot), "menu-preferences.v1.json");
-    private static readonly HashSet<string> Panels = ["friends", "comms", "organizations", "rooms", "hud", "screenshot", "image", "browser", "settings", "execHangar"];
+    private static readonly HashSet<string> Panels = ["friends", "comms", "organizations", "rooms", "hud", "screenshot", "image", "browser", "settings", "execHangar", "marketplace", "officialFleet"];
     // Random UI-process receipt only, never an account or Windows process id.
     internal sealed record StartupReceipt(string Token, bool Safe);
     internal sealed record Snapshot(long Revision, JsonElement Layout, JsonElement Settings, MenuHotkeyOptions? Hotkey = null, StartupReceipt? Startup = null);
@@ -156,12 +156,13 @@ internal sealed class MenuPreferencesStore(string dataRoot) : IMenuHotkeyPrefere
                 toolbarKeys.Add("showUnreadBadges");
             }
             Keys(toolbar, toolbarKeys.ToArray());
-            string[] tools = ["hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "browser", "execHangar"];
+            string[] tools = ["hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "browser", "execHangar", "marketplace", "officialFleet"];
             var order = toolbar.GetProperty("order");
             var hidden = toolbar.GetProperty("hidden");
-            var legacyOrder = order.ValueKind == JsonValueKind.Array && order.GetArrayLength() == tools.Length - 1;
-            ValidateTools(order, legacyOrder ? tools.Where(id => id != "execHangar").ToArray() : tools,
-                legacyOrder ? tools.Length - 1 : tools.Length, true);
+            // Orders saved before a tool existed stay valid; it joins at the end.
+            var missing = order.ValueKind == JsonValueKind.Array ? tools.Length - order.GetArrayLength() : 0;
+            var known = missing is >= 1 and <= 3 ? tools[..^missing] : tools;
+            ValidateTools(order, known, known.Length, true);
             ValidateTools(hidden, tools.Where(id => id != "hud").ToArray(), tools.Length - 1, false);
             if (toolbar.GetProperty("density").GetString() is not ("compact" or "standard" or "comfortable") ||
                 toolbar.GetProperty("labels").GetString() is not ("auto" or "iconsOnly")) throw new ArgumentException("Invalid toolbar presentation");

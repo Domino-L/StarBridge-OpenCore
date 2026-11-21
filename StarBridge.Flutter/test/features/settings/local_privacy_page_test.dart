@@ -141,10 +141,35 @@ void main() {
       await tester.tap(find.byKey(const Key('privacy-save')));
       await tester.pumpAndSettle();
       expect(
+        host.requests.where((r) => r.name == 'privacy.localSave'),
+        isEmpty,
+        reason: 'Unchanged local suggestions are not a saved privacy choice',
+      );
+      final controller = tester
+          .widget<LocalPrivacyPage>(find.byType(LocalPrivacyPage))
+          .controller;
+      expect(controller.hasSaved, isFalse);
+      expect(controller.dirty, isFalse);
+      final roomShip = find.byKey(const Key('privacy-scope-room-field-ship'));
+      await tester.ensureVisible(roomShip);
+      await tester.tap(roomShip);
+      await tester.pumpAndSettle();
+      expect(controller.dirty, isTrue);
+      final edited = controller.draft!.toJson();
+      await tester.tap(find.byKey(const Key('privacy-save')));
+      await tester.pumpAndSettle();
+      expect(
         host.requests.where((r) => r.name == 'privacy.localSave').length,
         1,
       );
-      expect(find.text('所有更改已保存'), findsOneWidget);
+      final saved = host.requests.singleWhere(
+        (r) => r.name == 'privacy.localSave',
+      );
+      expect(saved.accountContext?.subject, 'privacy-fixture');
+      expect(saved.payload['settings'], edited);
+      expect(controller.hasSaved, isTrue);
+      expect(controller.dirty, isFalse);
+      expect(find.text('没有未保存的更改'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       disposeComposition();
@@ -391,7 +416,8 @@ void main() {
         app(
           Builder(
             builder: (context) => TextButton(
-              onPressed: () => result = confirmLocalPrivacyLeave(context, c),
+              onPressed: () =>
+                  result = confirmLocalPrivacyLeave(context, c, save: c.save),
               child: const Text('leave'),
             ),
           ),
@@ -567,6 +593,7 @@ class PublishingPrivacy extends MemoryPrivacy
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     actions.add(action);
     return PrivacyPublicationView(switch (action) {

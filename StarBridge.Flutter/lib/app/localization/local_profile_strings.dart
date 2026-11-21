@@ -2,6 +2,7 @@ import 'profile_collaboration_strings.dart';
 import 'profile_module_strings.dart';
 
 const simplifiedLocalProfileStrings = <String, String>{
+  'profile.local.autoImportPending': '有些内容还没同步到服务器，别人暂时看不到',
   'profile.visitor.notVisible': '对方尚未公开个人页面，或当前可见范围不包含你。',
   'profile.visitor.identityUnavailable': '暂时无法确认此成员对应的个人主页。请返回成员列表，刷新后重试。',
   'profile.visitor.refreshMembers': '成员资料已更新。请返回并刷新列表后重试。',
@@ -50,6 +51,7 @@ const simplifiedLocalProfileStrings = <String, String>{
   'profile.local.backgroundPending': '修改已保存到本机，但背景同步尚未确认。请刷新页面后重试保存。',
   'profile.callsign.localPending': '呼号已同步到账号，但本机展示资料未确认保存。请刷新后检查并重试。',
   'profile.callsign.hint': 'StarBridge 展示呼号需联网授权后同步，不改变 SCM 用户名或 RSI Handle。',
+  'profile.callsign.tooLong': '呼号最多 10 个字符，中文算 2 个。',
   'profile.local.accountDescription': '呼号保存时同步到账号，本页其他展示设置保存在本机。头像上传单独保存。',
   'profile.callsign.unconfirmed': '呼号同步尚未确认。请刷新页面检查当前呼号后再保存。',
   'profile.callsign.unavailable': '暂时无法同步呼号，本次修改未保存。请稍后重试。',
@@ -74,6 +76,7 @@ const simplifiedLocalProfileStrings = <String, String>{
   'profile.local.unknown': '待确认',
 };
 const traditionalLocalProfileStrings = <String, String>{
+  'profile.local.autoImportPending': '有些內容還沒同步到伺服器，別人暫時看不到',
   'profile.visitor.notVisible': '對方尚未公開個人頁面，或目前可見範圍不包含你。',
   'profile.visitor.identityUnavailable': '暫時無法確認此成員對應的個人主頁。請返回成員清單，重新整理後再試。',
   'profile.visitor.refreshMembers': '成員資料已更新。請返回並重新整理清單後重試。',
@@ -122,6 +125,7 @@ const traditionalLocalProfileStrings = <String, String>{
   'profile.local.backgroundPending': '修改已儲存至本機，但背景同步尚未確認。請重新整理頁面後重試儲存。',
   'profile.callsign.localPending': '呼號已同步至帳號，但本機展示資料尚未確認儲存。請重新整理後檢查並重試。',
   'profile.callsign.hint': 'StarBridge 展示呼號需連線授權後同步，不改變 SCM 使用者名稱或 RSI Handle。',
+  'profile.callsign.tooLong': '呼號最多 10 個字元，中文算 2 個。',
   'profile.local.accountDescription': '儲存呼號時同步至帳號，本頁其他展示設定儲存在本機。頭像上傳另行儲存。',
   'profile.callsign.unconfirmed': '呼號同步尚未確認。請重新整理頁面檢查目前呼號後再儲存。',
   'profile.callsign.unavailable': '暫時無法同步呼號，本次修改未儲存。請稍後重試。',
@@ -146,6 +150,8 @@ const traditionalLocalProfileStrings = <String, String>{
   'profile.local.unknown': '待確認',
 };
 const englishLocalProfileStrings = <String, String>{
+  'profile.local.autoImportPending':
+      'Some content hasn’t synced to the server yet. Others can’t see it.',
   'profile.visitor.notVisible':
       'This profile is not published or is not shared with you.',
   'profile.visitor.identityUnavailable':
@@ -197,6 +203,7 @@ const englishLocalProfileStrings = <String, String>{
   'profile.local.backgroundPending': 'Changes were saved on this device, but background sync is unconfirmed. Refresh the page, then try saving again.',
   'profile.callsign.localPending': 'Your callsign was synced to your account, but local presentation changes are unconfirmed. Refresh, check and retry.',
   'profile.callsign.hint': 'Syncing your StarBridge callsign requires online authorization. Your SCM username and RSI Handle stay unchanged.',
+  'profile.callsign.tooLong': 'A call sign can be up to 10 characters; each Chinese character counts as 2.',
   'profile.local.accountDescription': 'Saving syncs your callsign to your account. Other presentation settings stay on this device. Avatar uploads are saved separately.',
   'profile.callsign.unconfirmed': 'Callsign sync is unconfirmed. Refresh and check the current callsign before saving again.',
   'profile.callsign.unavailable': 'Callsign sync is unavailable. These changes were not saved. Try again later.',

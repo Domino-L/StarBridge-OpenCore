@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../localization/help_support_strings.dart';
 import '../runtime/test_build_notice_copy.dart';
 import 'cig_fankit_notice.dart';
 
@@ -12,6 +13,7 @@ class UsageTermsSections extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final locale = Localizations.localeOf(context);
+    final notice = rsiToolNoticeCopy(locale);
     String t(String cn, String tw, String en) => locale.languageCode == 'en'
         ? en
         : locale.scriptCode == 'Hant' ||
@@ -33,12 +35,23 @@ class UsageTermsSections extends StatelessWidget {
       children: [
         heading('使用风险与非官方声明', '使用風險與非官方聲明', 'Risks and unofficial status'),
         Text(testBuildNoticeBody(locale)),
+        heading(notice.title, notice.title, notice.title),
+        SelectableText(notice.body, key: const Key('usage-terms-rsi-notice')),
         heading('数据与可选功能', '資料與可選功能', 'Data and optional features'),
         Text(
           t(
             '登录、消息及其他联网功能需要连接相应服务。同意本页条款不会自动开启游玩时长统计、地点代码贡献或在线共享；这些选择仍在对应设置中单独确认。',
             '登入、訊息及其他連線功能需要連接相應服務。同意本頁條款不會自動開啟遊玩時長統計、地點代碼貢獻或線上分享；這些選擇仍在對應設定中單獨確認。',
             'Sign-in, messaging and other online features connect to their services. Accepting these terms does not enable play-time recording, location-code contributions or online sharing. Those choices remain separate.',
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          key: const Key('usage-terms-hangar-account'),
+          t(
+            '机库（从 RSI 读到的舰船，以及你的备注和收藏）会保存到你的账号；舰队和组织能看到什么，按你的共享设置。',
+            '機庫（從 RSI 讀到的艦船，以及你的備註和收藏）會儲存到你的帳號；艦隊和組織能看到什麼，依你的分享設定。',
+            'Your hangar (the ships read from RSI, with your notes and bookmarks) is saved to your account; what fleets and organizations can see follows your sharing settings.',
           ),
         ),
         heading('游戏素材权利声明', '遊戲素材權利聲明', 'Game content rights'),

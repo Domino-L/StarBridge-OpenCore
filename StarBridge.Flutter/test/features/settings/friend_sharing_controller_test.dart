@@ -19,23 +19,24 @@ void main() {
       await h.readStarted.future;
       expect(h.controller.canEdit, isTrue);
       await h.controller.change(1, true);
-      expect(h.controller.fields, 1);
+      // A manual presence toggle also writes last online (bit 32), user 11-14.
+      expect(h.controller.fields, 33);
       h.readGate!.complete();
       await refresh;
-      expect(h.controller.fields, 1);
+      expect(h.controller.fields, 33);
       expect(h.writes, hasLength(1));
     },
   );
-  test('new account starts off and each bit saves independently', () async {
+  test('new account starts off; presence carries last online, other bits save independently', () async {
     final h = Harness();
     addTearDown(h.close);
     await h.ready();
     expect(h.controller.fields, 0);
-    for (final bit in [1, 2, 4, 8, 16, 32]) {
+    for (final bit in [1, 2, 4, 8, 16]) {
       await h.controller.change(bit, true);
     }
     expect(h.controller.fields, 63);
-    expect(h.writes.length, 6);
+    expect(h.writes.length, 5);
     await h.controller.change(8, false);
     expect(h.controller.fields, 55);
     expect(
@@ -120,7 +121,10 @@ class Harness {
     'appliedAt': null,
     'fields': null,
   };
-  Future<void> reply(BridgeEnvelope request) async {
+  Future<void> reply(
+    BridgeEnvelope request, {
+    BridgeConnection? responseConnection,
+  }) async {
     final readSnapshot = Map<String, Object?>.of(snapshot);
     if (request.name == 'friendSharing.read' && readGate != null) {
       if (!readStarted.isCompleted) readStarted.complete();
@@ -139,7 +143,7 @@ class Harness {
       }
     }
     final failed = (fail || loseWriteReceipt) && request.name == 'friendSharing.save';
-    await connection.send(
+    await (responseConnection ?? connection).send(
       BridgeEnvelope(
         protocolVersion: 1,
         messageType: 'response',

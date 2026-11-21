@@ -11,8 +11,27 @@ String localHistoryText(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
+  'allSourcesUnavailable': (
+    '合约记录和其他记录暂时读不出来。',
+    '合約記錄和其他記錄暫時讀不出來。',
+    "Contract and other records can't be read right now.",
+  ),
+  'contractUnavailable': (
+    '合约记录暂时读不出来，其他记录照常显示。',
+    '合約記錄暫時讀不出來，其他記錄照常顯示。',
+    "Contract records can't be read right now. Other records are shown as usual.",
+  ),
+  'eventsUnavailable': (
+    '部分记录暂时读不出来，合约记录照常显示。',
+    '部分記錄暫時讀不出來，合約記錄照常顯示。',
+    "Some records can't be read right now. Contract records are shown as usual.",
+  ),
   'newEvents': ('有新记录，点击刷新', '有新記錄，點擊重新整理', 'New records — refresh to view'),
-  'stale': ('刷新未完成，保留上次读取的记录。请重试。', '重新整理未完成，保留上次讀取的記錄。請重試。', 'Refresh failed. Previous records are still shown. Try again.'),
+  'stale': (
+    '刷新未完成，保留上次读取的记录。请重试。',
+    '重新整理未完成，保留上次讀取的記錄。請重試。',
+    'Refresh failed. Previous records are still shown. Try again.',
+  ),
   'title': ('本地事件日志', '本機事件記錄', 'Local event history'),
   'scope': ('本机已保存的历史记录', '本機已儲存的歷史記錄', 'History saved on this computer'),
   'category': ('类别', '類別', 'Category'),
@@ -23,6 +42,7 @@ const _copy = <String, (String, String, String)>{
   'ship': ('舰船', '艦船', 'Ship'),
   'location': ('地点', '地點', 'Location'),
   'life': ('生命状态', '生命狀態', 'Life status'),
+  'contract': ('合约', '合約', 'Contracts'),
   'other': ('其他', '其他', 'Other'),
   'refresh': ('刷新', '重新整理', 'Refresh'),
   'previous': ('上一页', '上一頁', 'Previous'),
@@ -35,6 +55,11 @@ const _copy = <String, (String, String, String)>{
     'Could not load history. Try again.',
   ),
   'empty': ('没有已保存的记录', '沒有已儲存的記錄', 'No saved records'),
+  'unavailableEmpty': (
+    '暂时没有可显示的记录。',
+    '暫時沒有可顯示的記錄。',
+    'No records can be shown right now.',
+  ),
   'filteredEmpty': ('此类别没有记录', '此類別沒有記錄', 'No records in this category'),
   'recovered': (
     '正在显示备份中的记录，原文件未改动。',

@@ -21,6 +21,7 @@ abstract class CommunityBridgeTransport
     this.session, {
     this.ownAvatar,
     this.connectionMode,
+    this.scmOnly,
   }) {
     _activity = CommunityActivity(
       session,
@@ -41,6 +42,11 @@ abstract class CommunityBridgeTransport
   }
   final BridgeClientSession session;
   final ConnectionModeControl? connectionMode;
+
+  /// True for a SCM account without a linked legacy account. The relay cannot
+  /// disband for it or deliver invitations to private chats and rooms, so those
+  /// entries are not offered. Invite codes and links are unaffected.
+  final bool Function()? scmOnly;
   (Object, int?, ConnectionModeState, bool, bool)? _modeKey;
   void _modeChanged() {
     final mode = connectionMode;
@@ -178,6 +184,7 @@ abstract class CommunityBridgeTransport
         : _officialGovernanceManagementCommands.contains(name)
         ? name
         : switch (name) {
+            'account.refreshRsiData' => name,
             'officialFleet.readAnnouncementEditor' ||
             'officialFleet.manageAnnouncements' ||
             'officialFleet.readAnnouncementOutcome' => name,
@@ -273,11 +280,16 @@ abstract class CommunityBridgeTransport
         (officialAnnouncement ||
                 _officialGovernanceManagementCommands.contains(name) ||
                 name.startsWith('officialFleet.governance.') ||
+                name == 'account.refreshRsiData' ||
                 name == 'officialFleet.readGovernanceContext'
             ? account.payload['state'] != 'signedIn'
             : !hasRelayAccount(account)) ||
         account.accountContext == null) {
-      throw const CommunityFailure('identityUnavailable');
+      throw CommunityFailure(
+        accountTemporarilyUnavailable(account)
+            ? 'unavailable'
+            : 'identityUnavailable',
+      );
     }
     // Only the three official announcement commands have this local fence.
     // This synchronous checkpoint is after the one account read and before

@@ -45,7 +45,7 @@ internal sealed partial class CommunityClient
         {
             var old = retained.GetValueOrDefault(id); var next = fresh.GetValueOrDefault(id);
             // A later IO may only narrow the first observation, never renew its TTL.
-            retained[id] = old?.Current(_targetClock.GetUtcNow()) == true && next?.Current(_targetClock.GetUtcNow()) == true && old.IdentityVersion == next.IdentityVersion
+            retained[id] = old?.Current(_identityClock.GetUtcNow()) == true && next?.Current(_identityClock.GetUtcNow()) == true && old.IdentityVersion == next.IdentityVersion
                 ? old with { Until = old.Until < next.Until ? old.Until : next.Until }
                 : new(next?.State == "hidden" ? "hidden" : "unavailable");
         }

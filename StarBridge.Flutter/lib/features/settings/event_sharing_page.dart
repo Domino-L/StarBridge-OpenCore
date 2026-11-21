@@ -1,132 +1,109 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../app/localization/account_card_title.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import 'event_scope_editor.dart';
 import 'event_sharing_controller.dart';
 import 'privacy_page_drafts.dart';
+import 'privacy_sharing_suggestion.dart';
 import 'sharing_settings_waiting.dart';
 import '../communities/community_logo.dart';
 
 class EventSharingPage extends StatefulWidget {
-  const EventSharingPage({required this.session, super.key});
+  const EventSharingPage({
+    required this.session,
+    this.scmOnly,
+    this.onSuggestionVisibilityChanged,
+    super.key,
+  });
+
   final BridgeClientSession session;
+  final ValueListenable<bool>? scmOnly;
+  final PrivacySuggestionVisibilityChanged? onSuggestionVisibilityChanged;
   @override
   State<EventSharingPage> createState() => _EventSharingPageState();
 }
 
+typedef _EventDraftBasis = ({
+  String? owner,
+  Map<String, String> memberships,
+  int? revision,
+  bool? publicationEnabled,
+  Map<String?, EventSharingChoice> choices,
+});
+
 class _EventSharingPageState extends State<EventSharingPage> {
-  PrivacyPageDrafts? _drafts;
-  String? _preparedOwner;
-  late final EventSharingController controller = EventSharingController(
+  static const _draftKey = 'event-choices';
+  late final controller = EventSharingController(
     widget.session,
+    scmOnly: widget.scmOnly,
   );
+  PrivacyPageDrafts? _drafts;
+
   @override
   void initState() {
     super.initState();
-    controller.addListener(_prepareInitialDraft);
+    controller.addListener(_reconcileReadback);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _drafts = PrivacyDraftScope.of(context);
-    _prepareInitialDraft();
   }
 
-  bool _confirmsChoices(
-    String? owner,
-    String memberships,
-    Map<String?, EventSharingChoice> choices,
-  ) {
-    final c = controller;
-    return owner != null &&
-        owner == c.accountKey &&
-        c.canEdit &&
-        c.snapshot?['revision'] != 0 &&
-        c.state != 'unconfirmed' &&
-        [for (final t in c.targets!.communities) '${t.code}:${t.joinedAt}']
-                .join('|') ==
-            memberships &&
-        c.snapshot?['publicationEnabled'] ==
-            choices.values.any((choice) => choice.effectiveTypes != 0) &&
-        choices.length == c.targets!.communities.length + 1 &&
-        choices[null] == c.choice(null) &&
-        c.targets!.communities.every(
-          (target) => choices[target.code] == c.choice(target.code),
-        );
-  }
-
-  void _prepareInitialDraft() {
-    final c = controller;
+  void _reconcileReadback() {
     final drafts = _drafts;
-    if (drafts == null ||
-        c.accountKey == null ||
-        _preparedOwner == c.accountKey ||
-        !c.canEdit ||
-        c.snapshot?['revision'] != 0 ||
-        c.targets == null ||
-        c.error != null) {
-      return;
+    final basis = drafts?.basis<_EventDraftBasis>(_draftKey);
+    if (controller.canEdit &&
+        basis != null &&
+        basis.owner != controller.accountKey) {
+      drafts!.reconcileConflict(_draftKey);
     }
-    final owner = c.accountKey;
-    _preparedOwner = owner;
-    final epoch = drafts.epoch;
-    final memberships = [
-      for (final t in c.targets!.communities) '${t.code}:${t.joinedAt}',
-    ].join('|');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          !identical(_drafts, drafts) ||
-          drafts.epoch != epoch ||
-          owner != c.accountKey ||
-          c.snapshot?['revision'] != 0 ||
-          c.targets == null ||
-          [for (final t in c.targets!.communities) '${t.code}:${t.joinedAt}']
-                  .join('|') !=
-              memberships) {
-        return;
-      }
-      if (!c.canEdit) {
-        // A same-lease refresh may temporarily occupy the owner before this
-        // frame. Let its existing completion notification prepare again;
-        // explicit discard or a changed lease has already retired above.
-        _preparedOwner = null;
-        return;
-      }
-      const all = EventSharingChoice(
-        enabled: true,
-        selectedTypes: EventSharingChoice.allTypes,
-      );
-      final choices = <String?, EventSharingChoice>{
-        null: all,
-        for (final t in c.targets!.communities) t.code: all,
-      };
-      drafts.edit('event-choices', <String?, EventSharingChoice>{}, choices, (
-        next,
-      ) async {
-        if (owner != c.accountKey ||
-            !c.canEdit ||
-            [for (final t in c.targets!.communities) '${t.code}:${t.joinedAt}']
-                    .join('|') !=
-                memberships) {
-          return false;
-        }
-        // A lost receipt is not success. A later authoritative, same-owner
-        // read may confirm the exact choices without repeating the mutation.
-        if (c.snapshot?['revision'] != 0) {
-          return _confirmsChoices(owner, memberships, next);
-        }
-        await c.saveChoices(next);
-        return _confirmsChoices(owner, memberships, next);
-      });
-    });
   }
+
+  _EventDraftBasis _readBasis() {
+    final c = controller;
+    final communities = c.targets?.communities ?? [];
+    return (
+      owner: c.accountKey,
+      memberships: {
+        for (final target in communities) target.code: target.joinedAt,
+      },
+      revision: c.snapshot?['revision'] as int?,
+      publicationEnabled: c.snapshot?['publicationEnabled'] as bool?,
+      choices: {
+        null: c.choice(null),
+        for (final target in communities) target.code: c.choice(target.code),
+      },
+    );
+  }
+
+  bool _sameSavedSettings(_EventDraftBasis before, _EventDraftBasis now) =>
+      before.revision == now.revision &&
+      before.publicationEnabled == now.publicationEnabled &&
+      before.choices[null] == now.choices[null] &&
+      now.memberships.entries.every(
+        (entry) =>
+            before.memberships[entry.key] != entry.value ||
+            before.choices[entry.key] == now.choices[entry.key],
+      );
+
+  bool _matchesChoices(
+    _EventDraftBasis current,
+    Map<String?, EventSharingChoice> choices,
+  ) =>
+      current.revision != null &&
+      current.revision != 0 &&
+      current.publicationEnabled ==
+          choices.values.any((choice) => choice.effectiveTypes != 0) &&
+      mapEquals(current.choices, choices);
 
   @override
   void dispose() {
-    controller.removeListener(_prepareInitialDraft);
     controller.dispose();
     super.dispose();
   }
@@ -138,55 +115,172 @@ class _EventSharingPageState extends State<EventSharingPage> {
       final c = controller;
       final strings = AppStrings.of(context);
       final tokens = context.tokens;
-      final drafts = PrivacyDraftScope.of(context);
+      final drafts = _drafts;
       const initial = EventSharingChoice(
         enabled: true,
         selectedTypes: EventSharingChoice.allTypes,
       );
-      final saved = <String?, EventSharingChoice>{
-        null: c.choice(null),
-        for (final target in c.targets?.communities ?? [])
-          target.code: c.choice(target.code),
-      };
-      final defaults = {
-        for (final entry in saved.entries)
-          entry.key: c.snapshot?['settings'] == null ? initial : entry.value,
-      };
-      final choices = drafts?.value('event-choices', defaults) ?? saved;
-      final revision = c.snapshot?['revision'];
-      final owner = c.accountKey;
-      final memberships = [
-        for (final t in c.targets?.communities ?? []) '${t.code}:${t.joinedAt}',
-      ].join('|');
-      void change(String? code, EventSharingChoice next) {
+      final current = _readBasis();
+      final saved = current.choices;
+      final owner = current.owner;
+      final memberships = current.memberships;
+      final firstUse =
+          drafts != null &&
+          current.revision == 0 &&
+          owner != null &&
+          c.targets != null;
+      final draft = drafts?.value<Map<String?, EventSharingChoice>?>(
+        _draftKey,
+        null,
+      );
+      final basis = drafts?.basis<_EventDraftBasis>(_draftKey);
+      final conflict = drafts?.conflict(_draftKey);
+      final sameOwner = basis == null || basis.owner == owner;
+      final sameMemberships =
+          basis == null || mapEquals(basis.memberships, memberships);
+      final targets = c.targets?.communities ?? [];
+
+      Map<String?, EventSharingChoice> choicesWithDraft(
+        Map<String?, EventSharingChoice>? pending,
+        _EventDraftBasis? pendingBasis,
+      ) {
+        if (pending == null ||
+            pendingBasis == null ||
+            pendingBasis.owner != owner ||
+            (pendingBasis.revision == 0 &&
+                !mapEquals(pendingBasis.memberships, memberships))) {
+          return saved;
+        }
+        return {
+          null: pending[null] ?? saved[null]!,
+          for (final entry in memberships.entries)
+            entry.key: pendingBasis.memberships[entry.key] == entry.value
+                ? pending[entry.key] ?? saved[entry.key]!
+                : saved[entry.key]!,
+        };
+      }
+
+      final choices = choicesWithDraft(draft, basis);
+      final sameSaved = basis == null || _sameSavedSettings(basis, current);
+      final matchesSavedDraft =
+          basis != null &&
+          sameMemberships &&
+          draft != null &&
+          _matchesChoices(current, draft);
+      final canEdit =
+          c.canEdit &&
+          !(drafts?.saving ?? false) &&
+          sameOwner &&
+          (basis?.revision != 0 || sameMemberships) &&
+          (sameSaved || matchesSavedDraft);
+
+      bool canApplyEdit(_EventDraftBasis base) {
+        if (!canEdit || !c.canEdit || base.owner != c.accountKey) return false;
+        final latest = _readBasis();
+        return mapEquals(latest.memberships, base.memberships) &&
+            _sameSavedSettings(base, latest);
+      }
+
+      void edit(Map<String?, EventSharingChoice> next, _EventDraftBasis base) {
+        if (!canApplyEdit(base)) return;
+
+        bool confirmsChoices(_EventDraftBasis live, {bool accepted = false}) =>
+            c.canEdit &&
+            base.owner == live.owner &&
+            (accepted || c.state != 'unconfirmed') &&
+            mapEquals(live.memberships, base.memberships) &&
+            _matchesChoices(live, next);
+
+        drafts!.edit(
+          _draftKey,
+          // An absent preference differs from explicitly saving all scopes off.
+          base.revision == 0
+              ? const <String?, EventSharingChoice>{}
+              : base.choices,
+          next,
+          (value) async {
+            if (!c.canEdit || base.owner != c.accountKey) return false;
+            final latest = _readBasis();
+            if (!mapEquals(latest.memberships, base.memberships)) return false;
+            if (confirmsChoices(latest)) return true;
+            if (!_sameSavedSettings(base, latest)) return false;
+            final accepted = await c.saveChoices(
+              value,
+              omitUnconfirmedCommunities: base.revision == 0,
+            );
+            return confirmsChoices(_readBasis(), accepted: accepted);
+          },
+          basis: base,
+          checkConflict: (value) {
+            if (!c.canEdit) return null;
+            if (c.accountKey != base.owner) {
+              return PrivacyDraftConflict.savedElsewhere;
+            }
+            final latest = _readBasis();
+            if (!mapEquals(latest.memberships, base.memberships)) {
+              return PrivacyDraftConflict.membershipsChanged;
+            }
+            // Readback verifies settings even while the stream is unconfirmed.
+            if (!_sameSavedSettings(base, latest) &&
+                !_matchesChoices(latest, value)) {
+              return PrivacyDraftConflict.savedElsewhere;
+            }
+            return null;
+          },
+        );
+      }
+
+      void change(String? code, EventSharingChoiceEdit apply) {
         if (drafts == null) {
-          c.change(code, next);
+          if (canApplyEdit(current)) c.change(code, apply(c.choice(code)));
           return;
         }
-        drafts.edit('event-choices', saved, {...choices, code: next}, (
-          value,
-        ) async {
-          if (owner != c.accountKey ||
-              !c.canEdit ||
-              [
-                    for (final t in c.targets?.communities ?? [])
-                      '${t.code}:${t.joinedAt}',
-                  ].join('|') !=
-                  memberships) {
-            return false;
-          }
-          // Match saveChoices' current-scope projection using facts captured
-          // by this edit: fill a new scope conservatively and omit removed
-          // ones, without modifying the held draft or granting new access.
-          final expected = <String?, EventSharingChoice>{
-            for (final scope in saved.keys)
-              scope: value[scope] ?? saved[scope]!,
-          };
-          if (_confirmsChoices(owner, memberships, expected)) return true;
-          if (c.snapshot?['revision'] != revision) return false;
-          await c.saveChoices(value);
-          return _confirmsChoices(owner, memberships, expected);
-        });
+        final latestChoices = choicesWithDraft(
+          drafts.value(_draftKey, null),
+          drafts.basis(_draftKey),
+        );
+        edit({...latestChoices, code: apply(latestChoices[code]!)}, current);
+      }
+
+      Future<void> adopt() async {
+        final epoch = drafts!.epoch;
+        final confirmed = await confirmPrivacySharingSuggestion(context, [
+          strings.text('settings.privacy.events.room'),
+          for (final target in targets) target.name,
+          strings.text('settings.privacy.suggestion.allEventTypes'),
+        ]);
+        if (!confirmed || !mounted) return;
+        if (c.busy) await c.refresh();
+        if (!context.mounted ||
+            !identical(PrivacyDraftScope.of(context), drafts) ||
+            drafts.epoch != epoch ||
+            !identical(
+              drafts.value<Map<String?, EventSharingChoice>?>(_draftKey, null),
+              draft,
+            ) ||
+            drafts.saving ||
+            !c.canEdit ||
+            c.accountKey != owner) {
+          return;
+        }
+        final latest = _readBasis();
+        if (memberships.entries.any(
+          (entry) => latest.memberships[entry.key] != entry.value,
+        )) {
+          drafts.rejectEdit(_draftKey, PrivacyDraftConflict.membershipsChanged);
+          return;
+        }
+        if (!_sameSavedSettings(current, latest)) {
+          drafts.rejectEdit(_draftKey, PrivacyDraftConflict.savedElsewhere);
+          return;
+        }
+        // Newly joined communities keep their actual choice. Only the
+        // identities shown in the dialog can acquire an enabled choice.
+        edit({
+          ...latest.choices,
+          null: initial,
+          for (final code in memberships.keys) code: initial,
+        }, latest);
       }
 
       return Column(
@@ -209,7 +303,18 @@ class _EventSharingPageState extends State<EventSharingPage> {
                       ),
                       SizedBox(height: tokens.space.sm),
                       Text(strings.text('settings.privacy.events.scopeHelp')),
-                      SizedBox(height: tokens.space.md),
+                      if (conflict != null)
+                        Semantics(
+                          liveRegion: true,
+                          child: Text(strings.text(conflict.messageKey)),
+                        ),
+                      if (firstUse)
+                        PrivacySharingSuggestion(
+                          adoptKey: const Key('event-sharing-adopt-suggestion'),
+                          onAdopt: canEdit ? adopt : null,
+                          onVisibilityChanged:
+                              widget.onSuggestionVisibilityChanged,
+                        ),
                       SizedBox(height: tokens.space.md),
                       if (c.snapshot != null && c.targets != null) ...[
                         EventScopeEditor(
@@ -219,7 +324,8 @@ class _EventSharingPageState extends State<EventSharingPage> {
                             'settings.privacy.events.roomHelp',
                           ),
                           choice: choices[null]!,
-                          canEdit: c.canEdit && !(drafts?.saving ?? false),
+                          canEdit: canEdit,
+                          canEditInactiveTypes: current.revision == 0,
                           onChanged: (value) => change(null, value),
                         ),
                         for (final target in c.targets!.communities) ...[
@@ -236,7 +342,8 @@ class _EventSharingPageState extends State<EventSharingPage> {
                               'settings.privacy.events.organizationHelp',
                             ),
                             choice: choices[target.code] ?? saved[target.code]!,
-                            canEdit: c.canEdit && !(drafts?.saving ?? false),
+                            canEdit: canEdit,
+                            canEditInactiveTypes: current.revision == 0,
                             onChanged: (value) => change(target.code, value),
                           ),
                         ],
@@ -259,16 +366,25 @@ class _EventSharingPageState extends State<EventSharingPage> {
                   labelKey: 'settings.privacy.events.pending',
                 ),
                 Text(
-                  strings.text(
-                    c.error != null
-                        ? 'settings.privacy.events.unavailable'
-                        : c.snapshot == null
-                        ? 'settings.privacy.loading'
-                        : c.snapshot!['publicationEnabled'] == false
-                        ? 'settings.privacy.events.off'
-                        : c.state == 'active'
-                        ? 'settings.privacy.events.active'
-                        : 'settings.privacy.events.savedPaused',
+                  withAccountCardTitle(
+                    context,
+                    strings.text(
+                      c.scmOnlyUnavailable
+                          ? 'settings.privacy.events.scmOnly'
+                          : c.error != null
+                          ? 'settings.privacy.events.unavailable'
+                          : c.snapshot == null
+                          ? 'settings.privacy.loading'
+                          : !firstUse && c.state == 'unconfirmed'
+                          ? 'settings.privacy.events.publicationUnconfirmed'
+                          : c.snapshot!['publicationEnabled'] == false
+                          ? (firstUse
+                                ? 'settings.privacy.events.firstUseOff'
+                                : 'settings.privacy.events.off')
+                          : c.state == 'active'
+                          ? 'settings.privacy.events.active'
+                          : 'settings.privacy.events.savedPaused',
+                    ),
                   ),
                 ),
               ],

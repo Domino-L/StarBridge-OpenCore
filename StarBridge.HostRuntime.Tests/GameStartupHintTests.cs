@@ -10,10 +10,11 @@ internal static class GameStartupHintTests
         void Check(bool value, string reason) { checks++; if (!value) throw new Exception(reason); }
         var now = DateTimeOffset.UtcNow;
         var session = new GameStartupSession("notRunning");
+        var reads = 0;
         var ready = false;
         var binding = "Alt+M";
         var sink = new Sink();
-        using var hint = new GameStartupHintRuntime(() => session,
+        using var hint = new GameStartupHintRuntime(() => { reads++; return session; },
             () => ready ? new(binding, () => ready) : null, sink, () => ("zh-CN", "dark", true), () => now);
         await hint.TickAsync(); Check(sink.Calls == 0, "No hint outside the game");
         session = new("unknown"); await hint.TickAsync(); Check(sink.Calls == 0, "Unknown process state cannot become a launch");
@@ -28,9 +29,29 @@ internal static class GameStartupHintTests
         Check(sink.Calls == shown, "Transient unknown state does not repeat the same launch hint");
         session = new("notRunning"); await hint.TickAsync(); session = new("running", 42); await hint.TickAsync();
         Check(sink.Calls == shown + 1, "Observed game exit permits a new launch including reused PID");
-        session = new("running", 43); ready = false; await hint.TickAsync(); now = now.AddMinutes(6); ready = true; await hint.TickAsync();
+        session = new("running", 43, now); ready = false; await hint.TickAsync(); now = now.AddMinutes(6); ready = true; await hint.TickAsync();
         Check(sink.Calls == shown + 1, "Do not replay an old startup hint after a long unavailable registration");
-        session = new("running", 44); await hint.TickAsync(); old = sink.Notice!; hint.Dispose(); Check(!old.IsCurrent(), "Disposal revokes pending and visible grants");
+        var before = reads; ready = false; await hint.TickAsync(); await hint.TickAsync();
+        Check(reads == before, "Without a usable shortcut the process list is not read"); ready = true;
+        session = new("running", 45, now.AddMinutes(-1)); await hint.TickAsync();
+        Check(sink.Notice?.GameStartupHint is { ProcessId: 45 } && sink.Calls == shown + 2, "A launch one minute ago still gets its hint");
+        session = new("running", 45); await hint.TickAsync();
+        Check(sink.Calls == shown + 2, "An unknown start time does not split one launch into two");
+        session = new("running", 45, now); await hint.TickAsync();
+        Check(sink.Calls == shown + 3, "A reused PID with a new start time is a new launch even without an observed exit");
+        session = new("running", 46, now.AddMinutes(-6)); ready = false; await hint.TickAsync(); ready = true; await hint.TickAsync();
+        Check(sink.Calls == shown + 3, "A launch older than five minutes, first seen once the shortcut works, is not advertised");
+        session = new("running", 47, now.AddMinutes(1)); await hint.TickAsync();
+        Check(sink.Calls == shown + 4, "A start time ahead of this clock is timed from now");
+        session = new("running", 60); await hint.TickAsync(); var count = sink.Calls;
+        session = new("running", 60, now.AddMinutes(-1)); await hint.TickAsync();
+        Check(sink.Calls == count, "A start time read late does not repeat the hint");
+        session = new("running", 60, now); await hint.TickAsync();
+        Check(sink.Calls == count + 1, "Once learned, the start time tells a reused PID apart");
+        sink.Allowed = false; session = new("running", 61); await hint.TickAsync(); count = sink.Calls;
+        sink.Allowed = true; session = new("running", 61, now.AddMinutes(-10)); await hint.TickAsync();
+        Check(sink.Calls == count, "A launch found to be ten minutes old is no longer advertised");
+        session = new("running", 44, now); await hint.TickAsync(); old = sink.Notice!; hint.Dispose(); Check(!old.IsCurrent(), "Disposal revokes pending and visible grants");
 
         (string? OwnerKey, long Generation) scope = ("fixture", 2);
         var native = new Runtime();

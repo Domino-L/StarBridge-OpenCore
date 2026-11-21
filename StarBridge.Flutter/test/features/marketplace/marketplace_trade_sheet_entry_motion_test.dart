@@ -25,7 +25,7 @@ void main() {
       (tester) async {
         size(tester, const Size(1280, 900));
         final semantics = tester.ensureSemantics();
-        final port = TradesPort()..row['canReport'] = true;
+        final port = TradesPort()..row['createTime'] = DateTime.now().toUtc().toIso8601String();
         final controller = MarketplaceController(port);
         try {
           await controller.trades.refresh();
@@ -69,7 +69,7 @@ void main() {
       '${suite.name}: pointer main and report retain feedback and native proportions',
       (tester) async {
         size(tester, const Size(1280, 900));
-        final port = TradesPort()..row['canReport'] = true;
+        final port = TradesPort()..row['createTime'] = DateTime.now().toUtc().toIso8601String();
         final controller = MarketplaceController(port);
         try {
           await controller.trades.refresh();
@@ -248,7 +248,7 @@ void main() {
       '${suite.name}: keyboard report entry preserves original invalid-submit feedback',
       (tester) async {
         size(tester, const Size(1280, 900));
-        final port = TradesPort()..row['canReport'] = true;
+        final port = TradesPort()..row['createTime'] = DateTime.now().toUtc().toIso8601String();
         final controller = MarketplaceController(port);
         try {
           await controller.trades.refresh();

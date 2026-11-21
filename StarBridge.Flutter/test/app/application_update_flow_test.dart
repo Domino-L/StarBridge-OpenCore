@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +15,95 @@ import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 import 'package:starbridge_flutter/platform/bridge/in_memory_bridge_connection.dart';
 
 void main() {
+  final png = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  );
+  final heroNotes =
+      '# 新版本\n- 【一】a\n- 【二】b\n- 【三】c\n'
+      '主图校验 sha256=${sha256.convert(png)} bytes=${png.length}';
+  Map<String, dynamic> heroChunk(int offset, int end) => {
+    'schemaVersion': 1,
+    'version': '0.7.4',
+    'mediaType': 'image/png',
+    'sha256': sha256.convert(png).toString(),
+    'length': png.length,
+    'offset': offset,
+    'nextOffset': end,
+    'chunk': base64Encode(png.sublist(offset, end)),
+    'done': end == png.length,
+  };
+
+  testWidgets(
+    'manual check carries manual provenance through every hero chunk',
+    (tester) async {
+      final h = Harness()
+        ..version = '0.7.4'
+        ..notes = heroNotes
+        ..heroEnabled = true;
+      await h.mount(tester, automatic: false);
+      expect(h.automaticFlags, [null]);
+      expect(h.pendingHero!.payload['automatic'], isFalse);
+      h.reply(h.pendingHero!, heroChunk(0, 32));
+      await tester.pump();
+      expect(h.pendingHero!.payload['offset'], 32);
+      expect(h.pendingHero!.payload['automatic'], isFalse);
+      h.reply(h.pendingHero!, heroChunk(32, png.length));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('update-hero-image')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('update-download')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('update-install')), findsOneWidget);
+      await h.close(tester);
+    },
+  );
+  testWidgets('slow mirrored hero survives the old 30 second bridge limit', (
+    tester,
+  ) async {
+    final h = Harness()
+      ..version = '0.7.4'
+      ..notes = heroNotes
+      ..heroEnabled = true;
+    await h.mount(tester);
+    expect(h.pendingHero, isNotNull);
+    expect(h.pendingHero!.payload['automatic'], isTrue);
+    await tester.pump(const Duration(seconds: 31));
+    h.reply(h.pendingHero!, heroChunk(0, png.length));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('update-hero-image')), findsOneWidget);
+    expect(find.byKey(const Key('update-download')), findsOneWidget);
+    await h.close(tester);
+  });
+
+  testWidgets(
+    'hero total timeout includes chunks and never delays preparation',
+    (tester) async {
+      final h = Harness()
+        ..version = '0.7.4'
+        ..notes = heroNotes
+        ..heroEnabled = true;
+      await h.mount(tester);
+      await tester.pump(const Duration(seconds: 20));
+      h.reply(h.pendingHero!, heroChunk(0, 32));
+      await tester.pump();
+      final second = h.pendingHero!;
+      expect(second.payload['offset'], 32);
+      expect(second.payload['automatic'], isTrue);
+      await tester.tap(find.byKey(const Key('update-download')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('update-install')), findsOneWidget);
+      // The second chunk gets only the remainder of the overall 35 seconds.
+      await tester.pump(const Duration(seconds: 16));
+      expect(h.cancelled, contains(second.correlationId));
+      h.reply(second, heroChunk(32, png.length));
+      await tester.pump();
+      expect(find.byKey(const Key('update-hero-image')), findsNothing);
+      expect(find.byKey(const Key('update-install')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await h.close(tester);
+    },
+  );
+
   testWidgets(
     'entry silently checks once then opens the installable secondary announcement',
     (tester) async {
@@ -23,8 +114,9 @@ void main() {
       h.flow.wake();
       await tester.pumpAndSettle();
       expect(h.requests, ['applicationUpdates.check']);
+      expect(h.automaticFlags, [true]);
       expect(find.text('发现新版本'), findsOneWidget);
-      expect(find.text('下载更新'), findsOneWidget);
+      expect(find.text('更新并重启'), findsOneWidget);
       expect(find.text('优化'), findsOneWidget);
       expect(find.textContaining('##'), findsNothing);
       expect(find.text('稍后'), findsOneWidget);
@@ -144,12 +236,17 @@ class Harness {
   final queue = StartupPromptQueue(quietPeriod: Duration.zero);
   final shown = <String>{};
   final requests = <String>[];
+  final automaticFlags = <Object?>[];
+  final cancelled = <String>[];
+  bool heroEnabled = false;
+  String notes = '## 优化\n- 桌面图标与共享设置';
   bool ready = true, present = true, hold = false;
   String state = 'available', version = '0.7.0.2';
   BridgeEnvelope? pending;
+  BridgeEnvelope? pendingHero;
   late ApplicationUpdateFlow flow;
   late StreamSubscription<BridgeEnvelope> subscription;
-  void respond(BridgeEnvelope request) {
+  void reply(BridgeEnvelope request, Map<String, dynamic> payload) {
     unawaited(
       pair.host.send(
         BridgeEnvelope(
@@ -159,17 +256,19 @@ class Harness {
           correlationId: request.correlationId,
           sessionGeneration: 1,
           status: 'ok',
-          payload: {
-            'schemaVersion': 1,
-            'state': state,
-            'currentVersion': '0.7.0.1',
-            'availableVersion': state == 'available' ? version : null,
-            'notes': state == 'available' ? '## 优化\n- 桌面图标与共享设置' : null,
-          },
+          payload: payload,
         ),
       ),
     );
   }
+
+  void respond(BridgeEnvelope request) => reply(request, {
+    'schemaVersion': 1,
+    'state': state,
+    'currentVersion': '0.7.0.1',
+    'availableVersion': state == 'available' ? version : null,
+    'notes': state == 'available' ? notes : null,
+  });
 
   void createFlow() => flow = ApplicationUpdateFlow(
     session: session,
@@ -184,15 +283,35 @@ class Harness {
     flow.wake();
   }
 
-  Future<void> mount(WidgetTester tester) async {
+  Future<void> mount(WidgetTester tester, {bool automatic = true}) async {
     session.acceptHostCapabilities([
       'applicationUpdates.check',
       'applicationUpdates.prepare',
       'applicationUpdates.handoff',
+      if (heroEnabled) 'applicationUpdates.heroRead',
     ]);
     subscription = pair.host.incoming.listen((request) {
       if (request.messageType != 'request') return;
+      if (request.name == 'bridge.cancel') {
+        cancelled.add(request.payload['targetCorrelationId'] as String);
+        return;
+      }
       requests.add(request.name);
+      if (request.name == 'applicationUpdates.check') {
+        automaticFlags.add(request.payload['automatic']);
+      }
+      if (request.name == 'applicationUpdates.heroRead') {
+        pendingHero = request;
+        return;
+      }
+      if (request.name == 'applicationUpdates.prepare') {
+        reply(request, {
+          'schemaVersion': 1,
+          'version': version,
+          'ticket': 'a' * 32,
+        });
+        return;
+      }
       pending = request;
       if (!hold) respond(request);
     });
@@ -214,11 +333,23 @@ class Harness {
             GlobalCupertinoLocalizations.delegate,
           ],
           navigatorObservers: [queue],
-          home: const Scaffold(body: Text('home')),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showApplicationUpdateDialog(context, session),
+                child: const Text('manual-update'),
+              ),
+            ),
+          ),
         ),
       ),
     );
-    flow.wake();
+    if (automatic) {
+      flow.wake();
+    } else {
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('manual-update'));
+    }
     await tester.pumpAndSettle();
   }
 

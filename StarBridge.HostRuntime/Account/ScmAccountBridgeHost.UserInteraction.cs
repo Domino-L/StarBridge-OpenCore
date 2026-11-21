@@ -1,5 +1,6 @@
 using System.Text.Json;
 using StarBridge.Core.Profiles;
+using StarBridge.HostRuntime.Auth;
 using StarBridge.HostRuntime.Friends;
 using StarBridge.NativeBridge;
 
@@ -11,10 +12,11 @@ internal sealed partial class ScmAccountBridgeHost
 
     // A non-null affiliation on an authorized visitor document is the server's
     // visibility projection. Never recover hidden affiliations from other sources.
+    // The owner's own page gets the same mark (user 11-11: one rail for everyone).
     // The SCM document leaves Kind empty for the main fleet; only communities
     // are marked, matching how the client reads it. The logo is decoration:
     // wait briefly, then show the page without it (the cache fills for next time).
-    private async Task<PersonalProfileDocumentContract> WithVisitorLogoAsync(
+    private async Task<PersonalProfileDocumentContract> WithFleetLogoAsync(
         PersonalProfileDocumentContract profile, CancellationToken token)
     {
         if (profile.FleetAffiliation is not { } affiliation ||
@@ -22,11 +24,42 @@ internal sealed partial class ScmAccountBridgeHost
             !string.IsNullOrWhiteSpace(affiliation.LogoImageData)) return profile;
         var pending = _publicOrganizationLogos.ReadAsync(affiliation.FleetCode);
         var finished = await Task.WhenAny(pending, Task.Delay(VisitorLogoWait, token)).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
         var logo = finished == pending ? await pending.ConfigureAwait(false) : null;
         return logo is null ? profile : profile with { FleetAffiliation = affiliation with { LogoUrl = logo.Image } };
     }
 
+    // The owner's read and save wait for the mark too, so the same session and
+    // generation checks run again after that wait (CX-PROFILE-HEADER-073-R).
+    private async Task<PersonalProfileDocumentContract> OwnPageWithFleetLogoAsync(
+        PersonalProfileDocumentContract profile, ScmOAuthSession session, BridgeAccountContext context,
+        long generation, CancellationToken token)
+    {
+        var decorated = await WithFleetLogoAsync(profile, token);
+        token.ThrowIfCancellationRequested();
+        if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
+        RequireSameSession(session, RequireSession(context));
+        return decorated;
+    }
+
     private static readonly TimeSpan VisitorLogoWait = TimeSpan.FromSeconds(2);
+
+    private async Task<PersonalProfileTradeWindow?> FullPageTradeWindowAsync(
+        System.Text.Json.JsonElement? raw, CancellationToken token)
+    {
+        PersonalProfileTradeWindow? window;
+        try { window = raw is { } value ? PersonalProfileTradeWindow.Parse(value) : null; }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { return null; }
+        if (window is null) return null;
+        // An optional decoration on a page already read: a slow zone directory only
+        // leaves the owner's offset out (the client then shows the owner's own setting).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        budget.CancelAfter(VisitorAccountFactsBudget);
+        IReadOnlyList<ScmTimeZoneDirectoryEntry> zones;
+        try { zones = await PublicFactZonesAsync(budget.Token); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { zones = []; }
+        return window with { OwnerOffsetMinutes = PublicFactOffset(zones, window.TimezoneId) };
+    }
 
     private sealed record AvatarTarget(string Source, string Reference, string? Context, string Query);
     private static AvatarTarget ParseAvatarTarget(JsonElement payload)
@@ -90,7 +123,7 @@ internal sealed partial class ScmAccountBridgeHost
             .ResolveAvatarTarget(target.Source, target.Reference, session.AccessToken, scope);
     }
 
-    public async Task<PersonalProfileDocumentContract> ReadUserProfileAsync(BridgeAccountContext context,
+    public async Task<VisitorPersonalProfileResult> ReadUserProfileAsync(BridgeAccountContext context,
         JsonElement payload, CancellationToken token)
     {
         using var observation = StarBridge.HostRuntime.Auth.VisitorReadDiagnostics.Begin();
@@ -114,12 +147,14 @@ internal sealed partial class ScmAccountBridgeHost
         }
     }
 
-    private async Task<PersonalProfileDocumentContract> ReadUserProfileCoreAsync(BridgeAccountContext context,
+    private async Task<VisitorPersonalProfileResult> ReadUserProfileCoreAsync(BridgeAccountContext context,
         JsonElement payload, CancellationToken token)
     {
         var target = ParseAvatarTarget(payload);
         var session = RequireRelaySession(context); var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException("profile.visitor_unavailable");
         var id = await ResolveAvatarAsync(target, session, FriendScope(context, generation), context, generation, token, profileRead: true);
         if (session.Scm is { } scm)
@@ -142,11 +177,32 @@ internal sealed partial class ScmAccountBridgeHost
                 // Finish all decoration waits before the final session and target
                 // rechecks. A restricted public header is still an authorized read.
                 var decorated = profile.Restricted is null
-                    ? await WithVisitorLogoAsync(profile.Profile, token)
+                    ? await WithFleetLogoAsync(profile.Profile, token)
+                    : null;
+                // HK swap 5: the always-public trade window of a full page. A missing, older or
+                // malformed one only leaves the window out; it never fails the page.
+                var tradeWindow = decorated is not null
+                    ? await FullPageTradeWindowAsync(decorated.TradeWindow, token)
+                    : null;
+                // The facts endpoint does not enforce page visibility. Only a
+                // successful full visitor read authorizes this optional request.
+                var accountFacts = profile.Restricted is null && !historicalMember
+                    ? await ReadVisitorAccountFactsAsync(profile.ActiveSession, id, target.Source == "market", token)
                     : null;
                 var restrictedHeader = profile.Restricted is { } header
                     ? await WithOwnerOffsetAsync(header, token)
                     : null;
+                // User 11-05: last online follows the online-status privacy, shown only on the
+                // server's explicit yes. A never-saved page's header facts carry no such flag, so
+                // its day comes from account-facts (already public for this page, decided 11-08);
+                // any other header, a legacy member or a failed read shows none.
+                if (restrictedHeader is { Facts: { LastOnlineDay: not null } headerFacts })
+                {
+                    var lastOnline = restrictedHeader.Defaulted && !historicalMember
+                        ? (await ReadVisitorAccountFactsAsync(profile.ActiveSession, id, target.Source == "market", token))?.LastOnlineDay
+                        : null;
+                    restrictedHeader = restrictedHeader with { Facts = headerFacts with { LastOnlineDay = lastOnline } };
+                }
                 // Only a member reached by id from the hall can be matched against this viewer's own trades.
                 if (restrictedHeader is { NameMasked: true } && target.Source == "market")
                     restrictedHeader = await WithTradedHandleAsync(restrictedHeader, profile.ActiveSession,
@@ -169,7 +225,7 @@ internal sealed partial class ScmAccountBridgeHost
                 // Only after every session and target recheck above: the public header is still a read.
                 if (restrictedHeader is not null)
                     throw new PersonalProfileRestrictedException(restrictedHeader);
-                return decorated!;
+                return new(decorated!, accountFacts, tradeWindow);
             }
             catch (System.Net.Http.HttpRequestException e) when (e.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
             { throw new AccountBridgeHostException("profile.visitor_not_visible"); }
@@ -186,7 +242,7 @@ internal sealed partial class ScmAccountBridgeHost
             (active, ct) => _legacyPasswordLogin.ReadVisitorProfileAsync(active.Legacy!, id, ct), token);
         if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
         RequireSameRelaySession(session, RequireRelaySession(context));
-        var decoratedLegacy = await WithVisitorLogoAsync(result.Result, token);
+        var decoratedLegacy = await WithFleetLogoAsync(result.Result, token);
         token.ThrowIfCancellationRequested();
         if (_disposed || generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
         RequireSameRelaySession(session, RequireRelaySession(context));
@@ -200,7 +256,7 @@ internal sealed partial class ScmAccountBridgeHost
             if (!string.Equals(id, currentId, StringComparison.Ordinal))
                 throw new AccountBridgeHostException("profile.visitor_unavailable");
         }
-        return decoratedLegacy;
+        return new(decoratedLegacy);
     }
 
     public async Task<FriendsView> ReadUserSocialAsync(BridgeAccountContext context,
@@ -209,7 +265,9 @@ internal sealed partial class ScmAccountBridgeHost
         var target = ParseAvatarTarget(payload);
         if (target.Source is "officialFleet" or "market") throw new AccountBridgeHostException("users.social_unavailable");
         var session = RequireRelaySession(context); var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var scope = FriendScope(context, generation);
         var id = await ResolveAvatarAsync(target, session, scope, context, generation, token);

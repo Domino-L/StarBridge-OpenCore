@@ -73,7 +73,8 @@ internal static class OverlayModuleProjectionTests
                 OverlayModuleSourceLabels.Prefix("Device event", eventPrefix, true) == "Device event" &&
                 labels.RowPrefix(OverlayModuleFlags.Chat, labels.Chat) is null,
                 "Rows repeat only an own source and never misattribute device-local events to a remote source.");
-            Check(model.SquadsTitle == "ORGANIZATION OVERVIEW" && model.MembersTitle == "PARTY MEMBERS" && model.Members.Any(m => m.DisplayName.Contains("Room")) &&
+            Check(model.ChatTitle == "ORGANIZATION CHAT", "organization chat never shows the organization's own name (11-13)");
+            Check(model.SquadsTitle == "ORGANIZATION OVERVIEW" && model.MembersTitle == "ROOM: Room fixture" && model.Members.Any(m => m.DisplayName.Contains("Room")) &&
                 !model.Members.Any(m => m.DisplayName.Contains("Organization")), "Real native ViewModel no longer shares a single roster across modules.");
             Check(model.ChatMessages.Any(m => m.Detail.Contains("Organization message")) && model.FleetNotice == "Approved notice",
                 "Real native chat and announcement use the organization, not room context.");
@@ -204,6 +205,18 @@ internal static class OverlayModuleProjectionTests
         {
             Refresh();
             Check(model.ChatMessages.Count == 0, "Multi-source barrage establishes separate silent history baselines.");
+            Check(model.ChatTitle == "CHAT", "chat from a room and an organization together keeps the plain title (11-13)");
+            var roomOnly = InformationOverlayModuleFrame.Capture(new OverlayPresetSources(new(OverlaySourceMode.Community, "org", owner),
+                chatSources: [new(OverlaySourceMode.Room)]), context, Read, () => true, _ => true);
+            var roomOnlyModel = new OverlayViewModel(new([]), settings, OverlayRosterSelectionSettings.Default, "zh", false,
+                initial.Notice.Command, PlayerPresenceKind.AppOnline, "");
+            try
+            {
+                roomOnlyModel.RefreshModules(NativeInformationOverlayRuntime.ProjectModules(roomOnly, "zh", now), settings,
+                    OverlayRosterSelectionSettings.Default, "zh", PlayerPresenceKind.AppOnline, "");
+                Check(roomOnlyModel.ChatTitle == "房间聊天", "chat picked from rooms only reads room chat (11-13 请你定 1)");
+            }
+            finally { roomOnlyModel.ClearAuthorizedContent(); }
             roomSequence = 2;
             Refresh();
             Check(model.ChatMessages.Any(m => m.Detail.Contains("room-2")), "A lower room sequence is not swallowed by the organization's high watermark.");

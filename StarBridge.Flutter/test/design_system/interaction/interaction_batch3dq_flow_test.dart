@@ -45,6 +45,7 @@ class _Port extends original.PrivacyFixture {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     calls.add(action);
     if (action == 'apply' && (pendingApply != null || applyResult != null)) {

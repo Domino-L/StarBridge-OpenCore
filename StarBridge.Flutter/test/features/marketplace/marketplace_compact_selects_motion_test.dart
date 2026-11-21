@@ -83,22 +83,23 @@ void main() {
   ) async {
     var c = await _confirm(tester, InteractionSuite.standard);
     try {
+      // m99 C/D: one quantity row in the confirm dialog moves these +13.
       expect(
         tester.getRect(_delivery),
-        const Rect.fromLTRB(786.5, 468.5, 839, 500.5),
+        const Rect.fromLTRB(786.5, 510.5, 839, 542.5),
       );
       expect(
         tester.getRect(
           find.descendant(of: _delivery, matching: find.text('面交')).first,
         ),
-        const Rect.fromLTRB(786.5, 474.5, 815, 494.5),
+        const Rect.fromLTRB(786.5, 516.5, 815, 536.5),
       );
       expect(_style(tester, _delivery, '面交').fontSize, 14);
       expect(
         tester.getRect(
           find.descendant(of: _delivery, matching: find.byType(Icon)),
         ),
-        const Rect.fromLTRB(815, 472.5, 839, 496.5),
+        const Rect.fromLTRB(815, 514.5, 839, 538.5),
       );
       await tester.pumpWidget(const SizedBox.shrink());
       c.dispose();

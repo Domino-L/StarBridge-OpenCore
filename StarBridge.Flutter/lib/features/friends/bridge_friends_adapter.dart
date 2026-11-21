@@ -173,6 +173,13 @@ final class BridgeFriendsAdapter
             );
           }
         }
+        if (accountTemporarilyUnavailable(account)) {
+          return const FriendsReadResult(
+            FriendsReadState.unavailable,
+            failure: 'unavailable',
+            transientFailure: true,
+          );
+        }
         return const FriendsReadResult(
           FriendsReadState.unavailable,
           failure: 'identityUnavailable',
@@ -214,7 +221,8 @@ final class BridgeFriendsAdapter
         transientFailure:
             error is BridgeDisconnectedException ||
             error.code == 'bridge.timeout' ||
-            error.code == 'friends.read_transient' && error.retryable,
+            error.code == 'friends.read_transient' && error.retryable ||
+            isCredentialTemporarilyUnavailable(error),
         failure: switch (error.code) {
           'friends.identity_unavailable' ||
           'account.reauthorization_required' => 'identityUnavailable',

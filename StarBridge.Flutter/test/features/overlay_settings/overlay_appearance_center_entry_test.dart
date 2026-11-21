@@ -15,6 +15,7 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_m
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_appearance_center.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_appearance_preview_page.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_rules.dart';
 import 'package:starbridge_flutter/features/overlay_settings/bridge_overlay_workspace_adapter.dart';
 
 import 'bridge_overlay_appearance_live_port_test.dart' show Harness;
@@ -136,117 +137,120 @@ void main() {
     'FutureFreestyle',
   ]) {
     for (final save in [false, true]) {
-      testWidgets('$id center opens common page; explicit save=$save', (
-        tester,
-      ) async {
-        size(tester, const Size(1600, 1100));
-        final port = EntryPort(
-          configurations: configurations,
-          extraAppearances: id.startsWith('Future')
-              ? [
-                  appearance(
-                    id,
-                    locksTheme: id == 'FutureCompanion',
-                    supportsBloom: true,
+      testWidgets(
+        '$id center opens common page; explicit save=$save',
+        (tester) async {
+          size(tester, const Size(1600, 1100));
+          final port = EntryPort(
+            configurations: configurations,
+            extraAppearances: id.startsWith('Future')
+                ? [
+                    appearance(
+                      id,
+                      locksTheme: id == 'FutureCompanion',
+                      supportsBloom: true,
+                    ),
+                  ]
+                : const [],
+          );
+          final window = Window();
+          final module = OverlayWorkspaceModule(port, editorWindow: window);
+          await module.initialize();
+          final initialRuntimeActions = List.of(port.storage.runtimeActions);
+          module.updateSetting('theme', 'Drake');
+          final before = module.projection.value;
+          expect(before.dirty, isTrue);
+          await tester.pumpWidget(
+            app(
+              TickerMode(
+                enabled: false,
+                child: Scaffold(
+                  body: ValueListenableBuilder(
+                    valueListenable: module.projection,
+                    builder: (_, projection, _) =>
+                        OverlayWorkspaceAppearanceCenter(
+                          projection: projection,
+                          module: module,
+                          onBack: () {},
+                        ),
                   ),
-                ]
-              : const [],
-        );
-        final window = Window();
-        final module = OverlayWorkspaceModule(port, editorWindow: window);
-        await module.initialize();
-        final initialRuntimeActions = List.of(port.storage.runtimeActions);
-        module.updateSetting('theme', 'Drake');
-        final before = module.projection.value;
-        expect(before.dirty, isTrue);
-        await tester.pumpWidget(
-          app(
-            TickerMode(
-              enabled: false,
-              child: Scaffold(
-                body: ValueListenableBuilder(
-                  valueListenable: module.projection,
-                  builder: (_, projection, _) =>
-                      OverlayWorkspaceAppearanceCenter(
-                        projection: projection,
-                        module: module,
-                        onBack: () {},
-                      ),
                 ),
               ),
             ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        final card = find.byKey(Key('overlay-appearance-card-$id'));
-        await tester.ensureVisible(card);
-        await tester.tap(card);
-        await tester.pumpAndSettle();
-        final entry = find.byKey(Key('overlay-appearance-live-preview-$id'));
-        expect(entry, findsOneWidget);
-        await tester.ensureVisible(entry);
-        await tester.tap(entry);
-        await tester.pumpAndSettle();
-        expect(find.byType(OverlayAppearancePreviewPage), findsOneWidget);
-        expect(find.byType(AlertDialog), findsNothing);
-        expect(window.enters, 1);
-        expect(port.oldCarrierOpens, 0);
-        expect(port.live.opens.single.appearanceId, id);
-        expect(
-          port.live.opens.single.settings.toMap(),
-          before.settings!.toMap(),
-        );
-        expect(
-          port.live.opens.single.layout.map((e) => e.toMap()),
-          before.layout.map((e) => e.toMap()),
-        );
-        // The theme edit saved on its own before the preview opened.
-        expect(port.storage.mutations.single.settings!['theme'], 'Drake');
-        expect(port.storage.runtimeActions, initialRuntimeActions);
-        expect(module.projection.value.settings!['skin'], 'Default');
-        if (id.startsWith('Future')) {
-          final group = tester
-              .widgetList<OverlayWorkspaceSettingsGroup>(
-                find.byType(OverlayWorkspaceSettingsGroup),
-              )
-              .singleWhere((g) => g.group == 'appearance');
-          expect(group.settings['skin'], 'Default');
-          expect(group.appearanceRule!.locksTheme, id == 'FutureCompanion');
-          expect(group.appearanceRule!.supportsBloom, isTrue);
-          expect(
-            find.byKey(const Key('overlay-field-nightShadowBloom')),
-            findsOneWidget,
           );
-          expect(
-            group.fields.any((f) => f.field == 'theme'),
-            id == 'FutureFreestyle',
-          );
-        }
-        if (save) {
-          await tester.tap(find.byKey(const Key('appearance-preview-save')));
           await tester.pumpAndSettle();
-          // Nothing was pending, so Save writes nothing new.
-          expect(port.storage.mutations, hasLength(1));
-          expect(port.storage.mutations.single.settings!['skin'], 'Default');
-          expect(port.storage.mutations.single.settings!['theme'], 'Drake');
+          final card = find.byKey(Key('overlay-appearance-card-$id'));
+          await tester.ensureVisible(card);
+          await tester.tap(card);
+          await tester.pumpAndSettle();
+          final entry = find.byKey(Key('overlay-appearance-live-preview-$id'));
+          expect(entry, findsOneWidget);
+          await tester.ensureVisible(entry);
+          await tester.tap(entry);
+          await tester.pumpAndSettle();
+          expect(find.byType(OverlayAppearancePreviewPage), findsOneWidget);
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(window.enters, 1);
+          expect(port.oldCarrierOpens, 0);
+          expect(port.live.opens.single.appearanceId, id);
           expect(
-            port.storage.mutations.single.layout!.map((e) => e.toMap()),
+            port.live.opens.single.settings.toMap(),
+            before.settings!.toMap(),
+          );
+          expect(
+            port.live.opens.single.layout.map((e) => e.toMap()),
             before.layout.map((e) => e.toMap()),
           );
-          expect(port.live.opens, hasLength(1));
-          expect(port.oldCarrierOpens, 0);
-          // Save never Opens/Closes/Applies the browsed appearance merely
-          // because preview is active.
+          // The theme edit saved on its own before the preview opened.
+          expect(port.storage.mutations.single.settings!['theme'], 'Drake');
           expect(port.storage.runtimeActions, initialRuntimeActions);
-        }
-        await tester.tap(find.byKey(const Key('appearance-preview-exit')));
-        await tester.pumpAndSettle();
-        expect(window.exits, 1);
-        expect(port.live.closes, 1);
-        expect(module.projection.value.dirty, isFalse);
-        await tester.pumpWidget(const SizedBox());
-        module.dispose();
-      });
+          expect(module.projection.value.settings!['skin'], 'Default');
+          if (id.startsWith('Future')) {
+            final group = tester
+                .widgetList<OverlayWorkspaceSettingsGroup>(
+                  find.byType(OverlayWorkspaceSettingsGroup),
+                )
+                .singleWhere((g) => g.group == 'appearance');
+            expect(group.settings['skin'], 'Default');
+            expect(group.appearanceRule!.locksTheme, id == 'FutureCompanion');
+            expect(group.appearanceRule!.supportsBloom, isTrue);
+            expect(
+              find.byKey(const Key('overlay-field-nightShadowBloom')),
+              findsOneWidget,
+            );
+            expect(
+              group.fields.any((f) => f.field == 'theme'),
+              id == 'FutureFreestyle',
+            );
+          }
+          if (save) {
+            await tester.tap(find.byKey(const Key('appearance-preview-save')));
+            await tester.pumpAndSettle();
+            // Nothing was pending, so Save writes nothing new.
+            expect(port.storage.mutations, hasLength(1));
+            expect(port.storage.mutations.single.settings!['skin'], 'Default');
+            expect(port.storage.mutations.single.settings!['theme'], 'Drake');
+            expect(
+              port.storage.mutations.single.layout!.map((e) => e.toMap()),
+              before.layout.map((e) => e.toMap()),
+            );
+            expect(port.live.opens, hasLength(1));
+            expect(port.oldCarrierOpens, 0);
+            // Save never Opens/Closes/Applies the browsed appearance merely
+            // because preview is active.
+            expect(port.storage.runtimeActions, initialRuntimeActions);
+          }
+          await tester.tap(find.byKey(const Key('appearance-preview-exit')));
+          await tester.pumpAndSettle();
+          expect(window.exits, 1);
+          expect(port.live.closes, 1);
+          expect(module.projection.value.dirty, isFalse);
+          await tester.pumpWidget(const SizedBox());
+          module.dispose();
+        },
+        // 0.7.3 overlay v2: these appearances are put away until v2 (only the visor is offered).
+        skip: overlayAppearancesHiddenUntilV2.contains(id),
+      );
     }
   }
   testWidgets('unsupported new capability never falls back to carrier', (

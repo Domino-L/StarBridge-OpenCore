@@ -33,6 +33,11 @@ void main() {
       );
       await tester.drag(scroll, const Offset(0, -1600));
       await tester.pumpAndSettle();
+      final termsScroll = tester.widget<SingleChildScrollView>(scroll);
+      termsScroll.controller!.jumpTo(
+        termsScroll.controller!.position.maxScrollExtent,
+      );
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const Key('usage-terms-license')).hitTestable(),
         findsOneWidget,
@@ -159,7 +164,7 @@ void main() {
       expect(find.byKey(const Key('test-build-notice')), findsOneWidget);
       expect(h.acknowledged, isFalse);
       expect(find.textContaining('请重试'), findsOneWidget);
-      expect(find.textContaining('数据目录'), findsNothing);
+      expect(find.text('暂时无法继续，请重试。确认未保存前不会放行。'), findsOneWidget);
       await tester.tap(find.text('不同意并退出'));
       await tester.pumpAndSettle();
       expect(h.exits, 1);
@@ -310,7 +315,7 @@ class Harness {
                 ? const {'schemaVersion': 1}
                 : {
                     'schemaVersion': 1,
-                    'termsVersion': '2026-10-31-v4',
+                    'termsVersion': '2026-11-05-v5',
                     'acknowledged': acknowledged,
                   },
           ),

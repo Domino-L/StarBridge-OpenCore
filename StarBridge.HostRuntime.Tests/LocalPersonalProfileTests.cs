@@ -102,7 +102,7 @@ internal static class LocalPersonalProfileTests
         File.WriteAllBytes(path, original);
         var store = new LocalPersonalProfileStore(fixture.Root);
         var read = store.Read(Owner);
-        Require(read.Revision == 4 && read.Content!.PlayStyle is null && read.Content.Schedule is null,
+        Require(read.Revision == 4 && read.Content!.PlayStyle is null && read.Content.Schedule is null && read.Content.Showcases is null && read.Content.AchievementShowcase is null,
             "Old integrity validates without pretending absent collaboration was cleared.");
         Require(original.SequenceEqual(File.ReadAllBytes(path)), "Read does not rewrite old data.");
         store.Save(Owner, 4, Guid.NewGuid().ToString("N"), read.Content! with { Introduction = "新简介" }, () => true);
@@ -141,6 +141,23 @@ internal static class LocalPersonalProfileTests
         Require(dispatcher.Dispatch(Request("personalProfile.localSave", new { schemaVersion = 1, expectedRevision = 2, operationId = Guid.NewGuid().ToString("N"), content = selected with { Introduction = "kept reference" } })).Response.Error is null, "Removed references survive unrelated edits.");
         Require(dispatcher.Dispatch(Request("personalProfile.localSave", new { schemaVersion = 1, expectedRevision = 3, operationId = Guid.NewGuid().ToString("N"), content = Content })).Response.Error is null, "Former favorite can be deselected.");
         Require(dispatcher.Dispatch(Request("personalProfile.localSave", new { schemaVersion = 1, expectedRevision = 4, operationId = Guid.NewGuid().ToString("N"), content = selected })).Response.Error is null, "Former ship can be selected again.");
+        var sparseOwner = Owner with { Subject = "sparse-profile" };
+        current = (sparseOwner, 4);
+        var sparse = Request("personalProfile.localSave", new
+        {
+            schemaVersion = 1, expectedRevision = 0, operationId = Guid.NewGuid().ToString("N"),
+            content = new { callSign = Content.CallSign, introduction = "", fieldStates = new { introduction = true } }
+        }, sparseOwner);
+        Require(dispatcher.Dispatch(sparse).Response.Error is null, "Sparse save accepted.");
+        Require(dispatcher.Dispatch(sparse).Response.Error is null && store.Read(sparseOwner).Revision == 1,
+            "Sparse save retry is idempotent.");
+        var reopened = new LocalPersonalProfileDispatcher(new LocalPersonalProfileStore(fixture.Root), hangar, () => current);
+        var sparseRead = reopened.Dispatch(Request(read.Name, new { schemaVersion = 1 }, sparseOwner)).Response;
+        var fields = sparseRead.Payload.GetProperty("content").GetProperty("fieldStates");
+        Require(fields.GetProperty("introduction").GetBoolean() && fields.EnumerateObject().Count() == 1 &&
+            sparseRead.Payload.GetProperty("content").GetProperty("avatarStyle").GetInt32() == 0 &&
+            sparseRead.Payload.GetProperty("content").GetProperty("wallpaperId").GetString() == "none",
+            "Reopen distinguishes the explicit introduction clear from omitted fields.");
         current = (null, 5);
         Require(dispatcher.Dispatch(read).Response.Error?.Code == "profile_local.account_changed", "Logout rejects old requests.");
         Expect("profile_local.invalid_request", () => store.Save(Owner, 3, Guid.NewGuid().ToString("N"), Content with { CallSign = new string('x', 33) }, () => true));

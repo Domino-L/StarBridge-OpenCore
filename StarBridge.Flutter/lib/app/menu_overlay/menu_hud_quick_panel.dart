@@ -4,6 +4,7 @@ import '../../design_system/interaction/starbridge_switch.dart';
 import '../localization/app_strings.dart';
 import 'menu_bridge_style.dart';
 import 'menu_feature_view.dart';
+import 'menu_hud_quick_global.dart';
 import 'menu_hud_quick_view.dart';
 import 'menu_tool_page.dart';
 import 'menu_workspace_controller.dart';
@@ -123,6 +124,23 @@ class _MenuHudQuickPanelState extends State<MenuHudQuickPanel> {
               _t('menu.hudQuick.presetsHelp'),
             ),
             _presets(ink, quick),
+            if (quick.global case final global?) ...[
+              _section(
+                _t('menu.hudQuick.global'),
+                _t('menu.hudQuick.globalHelp', {'preset': quick.presetName}),
+              ),
+              MenuHudQuickGlobalControls(
+                global: global,
+                enabled: quick.editable && on,
+                text: _t,
+                onAction: widget.onAction,
+                more: _clientLink(
+                  ink,
+                  'menu-hud-quick-global-more',
+                  'menu.hudQuick.globalMore',
+                ),
+              ),
+            ],
             _section(
               _t('menu.hudQuick.modules'),
               _t('menu.hudQuick.modulesHelp', {'preset': quick.presetName}),

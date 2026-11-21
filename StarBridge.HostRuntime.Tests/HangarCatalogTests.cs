@@ -108,7 +108,8 @@ internal static class HangarCatalogTests
                 if (ship.GetProperty("catalogId").GetString() != "catalog-carrack" ||
                     ship.GetProperty("sizeClass").GetString() != "large" ||
                     ship.GetProperty("priceUsd").GetDecimal() != 600 ||
-                    ship.GetProperty("category").GetString() != "exploration")
+                    ship.GetProperty("category").GetString() != "exploration" ||
+                    ship.GetProperty("manufacturer").GetString() != "Anvil Aerospace")
                     throw new Exception("Saved inventory did not join the existing catalog");
             } else if (ship.TryGetProperty("priceUsd", out var price) && price.ValueKind != JsonValueKind.Null)
                 throw new Exception("Media-free catalog inferred a price");

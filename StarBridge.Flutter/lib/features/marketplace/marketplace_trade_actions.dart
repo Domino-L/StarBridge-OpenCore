@@ -264,7 +264,7 @@ class _TradeDialogState extends State<_TradeDialog> {
                         ),
                         onChanged: (_) => setState(() {}),
                       ),
-                    if (submitted && t.writeError != null)
+                    if (t.writeUncertain || submitted && t.writeError != null)
                       Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: TradeFailure(
@@ -272,6 +272,9 @@ class _TradeDialogState extends State<_TradeDialog> {
                           writing: true,
                           retry: () async {
                             if (!t.writeUncertain) return;
+                            // A confirmed readback retires the dialog; the
+                            // trade sheet then shows the real state, so a
+                            // write that did land is never offered again.
                             final source = StarBridgeActivationOrigin.sourceOf(context);
                             final route = ModalRoute.of(context);
                             if (await t.inspectUncertainWrite(

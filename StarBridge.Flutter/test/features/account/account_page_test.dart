@@ -12,6 +12,9 @@ import 'package:starbridge_flutter/features/account/account_compatibility_card.d
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/standard_interaction.dart';
+
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
@@ -1031,6 +1034,62 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  // 0.7.3 default is scan: key account entries work there too. Buttons are
+  // found by key or label and checked through semantics, not widget type.
+  group('scan interaction smoke', () {
+    testWidgets('SCM login starts and cancels', (tester) async {
+      final adapter = InMemoryAccountAdapter.forReview(
+        AccountReviewState.signedOut,
+      );
+      await _pumpAccount(tester, adapter, interaction: InteractionStyle.scan);
+      final login = find.byKey(const Key('account-login'));
+      expectScanSuite(tester, login);
+      expectButtonState(tester, login, enabled: true);
+      await tester.tap(login);
+      await tester.pumpAndSettle();
+      expect(adapter.commands.whereType<BeginAccountLogin>(), hasLength(1));
+      expect(find.byKey(const Key('account-login-dialog')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('account-cancel-login')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('account-login-dialog')), findsNothing);
+      expect(adapter.commands.whereType<LogoutAccount>(), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('old-account sign-in submits and disables when rate-limited', (
+      tester,
+    ) async {
+      final port = _LegacyLoginPort()
+        ..result = const LegacyPasswordLoginResult(
+          'throttled',
+          retryAfterSeconds: 90,
+        );
+      await _pumpAccount(tester, port, interaction: InteractionStyle.scan);
+      final entry = find.byKey(const Key('account-legacy-login'));
+      expectScanSuite(tester, entry);
+      expectButtonState(tester, entry, enabled: true);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('legacy-login-email')),
+        'old@example.invalid',
+      );
+      await tester.enterText(
+        find.byKey(const Key('legacy-login-password')),
+        'short',
+      );
+      final submit = find.byKey(const Key('legacy-login-submit'));
+      expectButtonState(tester, submit, enabled: true);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(port.calls, 1);
+      expectButtonState(tester, submit, enabled: false);
+      await tester.tap(find.byKey(const Key('legacy-login-close')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  });
 }
 
 AccountHostSnapshot _storedCredentialSnapshot() {
@@ -1079,6 +1138,7 @@ Future<void> _pumpAccount(
   AccountPort adapter, {
   InMemoryAppPreferences? preferences,
   Size size = const Size(1280, 720),
+  InteractionStyle interaction = InteractionStyle.standard,
 }) async {
   if (const bool.fromEnvironment('SB_ACCOUNT_QA')) {
     await tester.runAsync(() async {
@@ -1102,7 +1162,7 @@ Future<void> _pumpAccount(
   final composition = AppComposition.forTest(
     windowChrome: InMemoryWindowChrome(),
     accountPort: adapter,
-    preferences: preferences,
+    preferences: await pinInteraction(preferences, interaction),
   );
   await tester.pumpWidget(
     RepaintBoundary(

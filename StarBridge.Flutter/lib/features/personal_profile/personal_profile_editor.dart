@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
 import '../common/user_avatar_menu.dart';
 
 import '../../design_system/interaction/starbridge_select_form_field.dart';
@@ -25,6 +26,7 @@ import 'personal_profile_draft.dart';
 import 'personal_profile_playstyle_editor.dart';
 import 'personal_profile_schedule_editor.dart';
 import 'personal_profile_wallpaper_catalog.dart';
+import '../common/callsign_rules.dart';
 
 class PersonalProfileEditorPanel extends StatefulWidget {
   const PersonalProfileEditorPanel({
@@ -36,6 +38,7 @@ class PersonalProfileEditorPanel extends StatefulWidget {
     required this.onWallpaperChanged,
     this.initialDraft,
     this.ownerRequiresReload,
+    this.achievementShowcase,
     super.key,
   });
 
@@ -48,6 +51,7 @@ class PersonalProfileEditorPanel extends StatefulWidget {
   final ValueChanged<String> onWallpaperChanged;
   final PersonalProfileEditorDraft? initialDraft;
   final bool? ownerRequiresReload;
+  final List<String>? achievementShowcase; // The page's picks draft.
 
   @override
   State<PersonalProfileEditorPanel> createState() =>
@@ -67,8 +71,18 @@ class PersonalProfileEditorPanelState
   }
 
   late final TextEditingController _callSignController;
+
+  // An account callsign is the one SCM callsign (11-15): legacy rules, at most 10.
+  // Only a changed name must follow them; an existing longer name may stay.
+  bool get _callSignTooLong =>
+      widget.projection.local?.accountCallSign == true &&
+      _callSignController.text.trim() != widget.projection.callSign.trim() &&
+      !CallsignRules.valid(_callSignController.text);
   late final TextEditingController _aboutController;
   late int _avatarStyle;
+  // The current editor retains avatar styles from restored drafts.
+  void restoreAvatarStyle(int style) => setState(() => _avatarStyle = style);
+
   late String _wallpaperId;
   late PersonalProfileVisibility _visibility;
   bool _sending = false;
@@ -96,7 +110,7 @@ class PersonalProfileEditorPanelState
       final edit = draft.edit;
       _callSignController.text = edit.callSign;
       _aboutController.text = edit.about;
-      _avatarStyle = edit.avatarStyle;
+      restoreAvatarStyle(edit.avatarStyle);
       _wallpaperId = edit.wallpaperId;
       _visibility = edit.visibility;
       _playStyle = edit.playStyle;
@@ -116,6 +130,7 @@ class PersonalProfileEditorPanelState
       moduleLayout: List.unmodifiable(widget.moduleLayout),
       playStyle: _playStyle,
       schedule: _schedule,
+      achievementShowcase: widget.achievementShowcase,
     ),
     requiresReload: _requiresReload || _saving,
     validationError: _validationError,
@@ -137,56 +152,69 @@ class PersonalProfileEditorPanelState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            strings.text('profile.edit.avatar'),
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          SizedBox(height: tokens.space.sm),
-          Row(
+          // Plan A (11-05): avatar and background share one line, and their
+          // notes are one sentence. Every control is still shown.
+          Wrap(
+            spacing: tokens.space.xl,
+            runSpacing: tokens.space.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              UserAvatarMenu(
-                name: widget.projection.callSign,
-                isSelf: true,
-                child: PersonalProfileAvatar(
-                  key: const Key('profile-current-avatar'),
-                  callSign: widget.projection.callSign,
-                  styleIndex: _avatarStyle,
-                  imageData: widget.projection.avatarImageData,
-                  size: tokens.density.controlHeight * 1.5,
-                ),
+              Wrap(
+                spacing: tokens.space.sm,
+                runSpacing: tokens.space.xs,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    strings.text('profile.edit.avatar'),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  UserAvatarMenu(
+                    name: widget.projection.callSign,
+                    isSelf: true,
+                    child: PersonalProfileAvatar(
+                      key: const Key('profile-current-avatar'),
+                      callSign: widget.projection.callSign,
+                      styleIndex: _avatarStyle,
+                      imageData: widget.projection.avatarImageData,
+                      size: tokens.density.controlHeight,
+                    ),
+                  ),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 240),
+                    child: const AccountAvatarEditor(),
+                  ),
+                ],
               ),
-              SizedBox(width: tokens.space.md),
-              Expanded(child: const AccountAvatarEditor()),
+              Wrap(
+                spacing: tokens.space.sm,
+                runSpacing: tokens.space.xs,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    strings.text('profile.edit.wallpaper'),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  _CurrentBackgroundSelection(
+                    preset: PersonalProfileWallpaperCatalog.resolve(
+                      _wallpaperId,
+                    ),
+                    onChoose: _saving ? null : _chooseBackground,
+                  ),
+                  const CigFankitNoticeButton(
+                    key: Key('profile-editor-cig-fankit-notice'),
+                  ),
+                ],
+              ),
             ],
           ),
-          SizedBox(height: tokens.space.lg),
+          SizedBox(height: tokens.space.xs),
           Text(
-            strings.text('profile.edit.wallpaper'),
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          SizedBox(height: tokens.space.xxs),
-          Text(
-            strings.text('profile.edit.wallpaperDescription'),
+            [
+              strings.text('profile.edit.wallpaperDescription'),
+              strings.text('profile.edit.wallpaperFankitNotice'),
+            ].join(strings.locale.languageCode == 'en' ? ' ' : ''),
             style: Theme.of(context).textTheme.bodySmall
                 ?.copyWith(color: tokens.colors.textSecondary),
-          ),
-          SizedBox(height: tokens.space.sm),
-          _CurrentBackgroundSelection(
-            preset: PersonalProfileWallpaperCatalog.resolve(_wallpaperId),
-            onChoose: _saving ? null : _chooseBackground,
-          ),
-          SizedBox(height: tokens.space.xs),
-          Text(
-            strings.text('profile.edit.wallpaperFankitNotice'),
-            style: Theme.of(context).textTheme.labelSmall
-                ?.copyWith(color: tokens.colors.textSecondary),
-          ),
-          SizedBox(height: tokens.space.xs),
-          const Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: CigFankitNoticeButton(
-              key: Key('profile-editor-cig-fankit-notice'),
-            ),
           ),
           SizedBox(height: tokens.space.lg),
           if (widget.projection.local == null)
@@ -261,10 +289,22 @@ class PersonalProfileEditorPanelState
               maxLength: 32,
               decoration: InputDecoration(
                 labelText: strings.text('profile.edit.callSign'),
-                helperText: widget.projection.local?.accountCallSign == true
-                    ? strings.text('profile.callsign.hint')
-                    : null,
+                // The game ID line joins the call sign note (plan A).
+                helperText: [
+                  if (widget.projection.local?.accountCallSign == true)
+                    strings.text('profile.callsign.hint'),
+                  '${strings.text('profile.edit.gameHandle')} '
+                      '@${widget.projection.gameHandle}',
+                ].join(' · '),
                 helperMaxLines: 3,
+                errorText: _callSignTooLong
+                    ? strings.text('profile.callsign.tooLong')
+                    : null,
+                // Account callsigns count with the legacy rule (CJK counts 2).
+                counterText: widget.projection.local?.accountCallSign == true
+                    ? '${CallsignRules.weight(_callSignController.text.trim())}'
+                          '/${CallsignRules.maxWeight}'
+                    : null,
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -276,20 +316,13 @@ class PersonalProfileEditorPanelState
               key: const Key('profile-about-field'),
               focusNode: focus,
               controller: _aboutController,
-              minLines: 4,
+              minLines: 2,
               maxLines: 7,
               maxLength: 500,
               decoration: InputDecoration(
                 labelText: strings.text('profile.edit.about'),
               ),
             ),
-          ),
-          SizedBox(height: tokens.space.xs),
-          Text(
-            '${strings.text('profile.edit.gameHandle')} '
-            '@${widget.projection.gameHandle}',
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: tokens.colors.textSecondary),
           ),
           if (widget.projection.local case final local?) ...[
             SizedBox(height: tokens.space.lg),
@@ -332,7 +365,8 @@ class PersonalProfileEditorPanelState
           onActivate:
               _saving ||
                   (widget.ownerRequiresReload ?? _requiresReload) ||
-                  _callSignController.text.trim().isEmpty
+                  _callSignController.text.trim().isEmpty ||
+                  _callSignTooLong
               ? null
               : (_) => _save(),
           child: Text(
@@ -356,17 +390,21 @@ class PersonalProfileEditorPanelState
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final title = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // Plan A: the note sits on the title line.
+              final title = Wrap(
+                spacing: tokens.space.md,
+                runSpacing: tokens.space.xxs,
+                crossAxisAlignment: WrapCrossAlignment.end,
                 children: [
                   Text(
                     strings.text('profile.edit.title'),
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
-                  SizedBox(height: tokens.space.xxs),
                   Text(
                     strings.text(
-                      widget.projection.local != null
+                      widget.projection.local?.localOnlyEdits == true
+                          ? 'profile.local.onlySaved'
+                          : widget.projection.local != null
                           ? widget.projection.local!.accountCallSign
                                 ? 'profile.local.accountDescription'
                                 : 'profile.local.description'
@@ -454,6 +492,7 @@ class PersonalProfileEditorPanelState
         moduleLayout: widget.moduleLayout,
         playStyle: _playStyle,
         schedule: _schedule,
+        achievementShowcase: widget.achievementShowcase,
       ),
     );
     if (!mounted) {
@@ -507,68 +546,30 @@ class _CurrentBackgroundSelection extends StatelessWidget {
   final PersonalProfileWallpaperPreset preset;
   final ValueChanged<InteractionSource>? onChoose;
 
+  /// A small thumbnail, the background's name and the button (plan A).
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final tokens = context.tokens;
-    return Container(
-      padding: EdgeInsets.all(tokens.space.sm),
-      decoration: BoxDecoration(
-        color: tokens.surfaces.status.fill,
-        borderRadius: tokens.shape.small,
-        border: Border.all(
-          color: tokens.surfaces.status.border,
-          width: tokens.stroke.hairline,
+    return Wrap(
+      spacing: tokens.space.sm,
+      runSpacing: tokens.space.xs,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(width: 72, child: _BackgroundPreview(preset: preset)),
+        Text(
+          preset.hasImage
+              ? preset.displayNumber
+              : strings.text(preset.labelKey),
+          key: const Key('profile-background-current-name'),
+          style: Theme.of(context).textTheme.titleSmall,
         ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final preview = SizedBox(
-            width: constraints.maxWidth < 500 ? constraints.maxWidth : 192,
-            child: _BackgroundPreview(preset: preset),
-          );
-          final details = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                strings.text('profile.edit.backgroundCurrent'),
-                style: Theme.of(context).textTheme.labelSmall
-                    ?.copyWith(color: tokens.colors.textSecondary),
-              ),
-              SizedBox(height: tokens.space.xxs),
-              Text(
-                preset.hasImage
-                    ? preset.displayNumber
-                    : strings.text(preset.labelKey),
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              SizedBox(height: tokens.space.sm),
-              StarBridgeActionButton(
-                controlKey: const Key('profile-background-picker-open'),
-                onActivate: onChoose,
-                child: Text(strings.text('profile.edit.backgroundChoose')),
-              ),
-            ],
-          );
-          if (constraints.maxWidth < 500) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                preview,
-                SizedBox(height: tokens.space.sm),
-                details,
-              ],
-            );
-          }
-          return Row(
-            children: [
-              preview,
-              SizedBox(width: tokens.space.md),
-              Expanded(child: details),
-            ],
-          );
-        },
-      ),
+        StarBridgeActionButton(
+          controlKey: const Key('profile-background-picker-open'),
+          onActivate: onChoose,
+          child: Text(strings.text('profile.edit.backgroundChoose')),
+        ),
+      ],
     );
   }
 }

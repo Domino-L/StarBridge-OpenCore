@@ -17,6 +17,104 @@ import 'package:starbridge_flutter/platform/bridge/bridge_connection.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 
 void main() {
+  for (final source in ['contract', 'events']) {
+    test('bridge parses partial export receipt: $source', () async {
+      final connection = _Connection();
+      connection.payload['partial'] = true;
+      connection.payload['unavailableSources'] = [source];
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 2,
+      );
+      addTearDown(session.close);
+      final result = await BridgeLocalEventExport(session).export('en');
+      expect(result.code, 'saved');
+      expect(result.partial, isTrue);
+      expect(result.unavailableSources, [source]);
+    });
+    for (final recovered in [false, true]) {
+      for (final (locale, success, backupSuccess, contractText, eventsText) in [
+        (
+          const Locale('zh', 'CN'),
+          '已导出 125 条记录。',
+          '已从备份导出 125 条记录。',
+          '合约记录读不出来，这次没有导出。',
+          '部分记录读不出来，这次没有导出。',
+        ),
+        (
+          const Locale('zh', 'TW'),
+          '已匯出 125 筆記錄。',
+          '已從備份匯出 125 筆記錄。',
+          '合約記錄讀不出來，這次沒有匯出。',
+          '部分記錄讀不出來，這次沒有匯出。',
+        ),
+        (
+          const Locale('en'),
+          'Exported 125 records.',
+          'Exported 125 records from backup.',
+          "Contract records couldn't be read and weren't exported this time.",
+          "Some records couldn't be read and weren't exported this time.",
+        ),
+      ]) {
+        testWidgets(
+          'partial export success explains omission: $locale $source $recovered',
+          (tester) async {
+            final export = _Export()
+              ..result = LocalEventExportResult(
+                'saved',
+                count: 125,
+                recovered: recovered,
+                unavailableSources: [source],
+              );
+            await tester.pumpWidget(
+              _app(
+                LocalEventExportAction(port: export, enabled: true),
+                locale: locale,
+              ),
+            );
+            await tester.pumpAndSettle();
+            await tester.tap(find.byKey(const Key('history-export')));
+            await tester.pumpAndSettle();
+            expect(
+              find.text(
+                '${recovered ? backupSuccess : success} ${source == 'contract' ? contractText : eventsText}',
+              ),
+              findsOneWidget,
+            );
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
+    }
+  }
+  for (final extra in [
+    {'partial': true},
+    {
+      'unavailableSources': ['contract'],
+    },
+    {
+      'partial': false,
+      'unavailableSources': ['events'],
+    },
+    {
+      'partial': true,
+      'unavailableSources': ['other'],
+    },
+    {'partial': null},
+  ]) {
+    test('bridge rejects inconsistent partial receipt: $extra', () async {
+      final connection = _Connection()..payload.addAll(extra);
+      final session = BridgeClientSession(
+        connection: connection,
+        sessionGeneration: 2,
+      );
+      addTearDown(session.close);
+      expect(
+        (await BridgeLocalEventExport(session).export('en')).code,
+        'unknown',
+      );
+    });
+  }
   for (final available in [false, true]) {
     testWidgets('ordinary history opener gates export capability: $available', (
       tester,
@@ -74,6 +172,8 @@ void main() {
       final result = await BridgeLocalEventExport(session).export('zh-CN');
       expect(result.code, 'saved');
       expect(result.count, 125);
+      expect(result.partial, isFalse);
+      expect(result.unavailableSources, isEmpty);
       expect(connection.sent.single.name, 'diagnostics.exportLocalEvents');
       expect(connection.sent.single.accountContext, isNull);
       expect(connection.sent.single.payload, {

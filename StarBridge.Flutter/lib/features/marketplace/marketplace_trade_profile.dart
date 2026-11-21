@@ -22,21 +22,49 @@ Future<MarketRow?> editTradeProfile(
   MarketplaceController market, {
   String? missing,
 }) async {
+  if (market.profileEditedInClient) {
+    await tradeMotionDialog<void>(
+      context,
+      (dialog) => AlertDialog(
+        content: Text(tradeProfileText(dialog, 'editInClient')),
+        actions: [
+          TextButton(
+            onPressed: () => dismissStarBridgeDialog<void>(dialog),
+            child: Text(tradeProfileText(dialog, 'close')),
+          ),
+        ],
+      ),
+    );
+    return null;
+  }
   final port = market.port;
   if (port is! MarketplaceTradeProfilePort) return null;
   final revision = market.contextRevision;
-  return tradeMotionDialog<MarketRow>(
+  final result = await tradeMotionDialog<MarketRow>(
     context,
     (_) => TradeProfileForm(
       read: () => (port as MarketplaceTradeProfilePort).tradeProfile(),
-      write: (changes) =>
-          (port as MarketplaceTradeProfilePort).tradeProfile(changes),
-      zones: () async => (await port.read('timezones')).rows,
+      write: (changes) async {
+        final result = await (port as MarketplaceTradeProfilePort).tradeProfile(changes);
+        final profile = result['profile'];
+        if (result['confirmed'] == true && profile is Map &&
+            market.contextRevision == revision) {
+          market.applyTradeProfile(Map<String, Object?>.from(profile));
+        }
+        return result;
+      },
+      zones: () async {
+        await market.load('timezones', 'timezones');
+        if (market.failures.contains('timezones')) throw StateError('timezones unavailable');
+        return market.blocks['timezones']?.rows ?? [];
+      },
       current: () => market.contextRevision == revision,
       login: market.login == null ? null : () => market.login!(context),
       missing: missing,
     ),
   );
+  if (result != null && market.contextRevision == revision) market.applyTradeProfile(result);
+  return result;
 }
 
 class TradeProfileForm extends StatefulWidget {

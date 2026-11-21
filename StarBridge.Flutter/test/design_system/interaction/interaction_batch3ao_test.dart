@@ -372,12 +372,12 @@ void main() {
             final originalQuery = owner.query;
             await action(t, firstDetail, source);
             routeOrigin(t, find.byType(CommunityShipDetailDialog), source);
+            // The first page's details read without the old revision, so a
+            // moved revision answers instead of refusing (2026-11-15).
             final selected = port.reads.lastWhere(
-              (r) =>
-                  r.revision != null &&
-                  r.query.text == 'retained query' &&
-                  r.offset == 0,
+              (r) => r.query.text == 'retained query' && r.offset == 0,
             );
+            expect(selected.revision, isNull);
             expect(selected.query, originalQuery);
             expect(selected.target, target);
             expect(

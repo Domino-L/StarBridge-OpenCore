@@ -10,9 +10,11 @@ import 'marketplace_contract_publish.dart';
 import 'marketplace_contracts_controller.dart';
 import 'marketplace_contracts_copy.dart';
 import 'marketplace_controller.dart';
+import 'marketplace_refresh.dart';
 import 'marketplace_diagonal.dart';
 import 'marketplace_port.dart';
 import 'marketplace_records_controller.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_surfaces.dart';
 import 'marketplace_trade_style.dart';
 import 'marketplace_unified.dart';
@@ -68,7 +70,13 @@ class _ContractsState extends State<MarketplaceContractsPage> {
     if (contracts == null) {
       return MarketNotice(contractText(context, '合约需要 SCM 授权更新后才能使用。'));
     }
-    return ListenableBuilder(
+    return MarketRefreshBinding(
+      market: widget.market, tab: 2, source: contracts,
+      refresh: () => view == 0 ? contracts.loadPublic()
+          : contracts.loadMine(view == 1 ? 'created' : 'participated'),
+      busy: () => (view == 0 ? contracts.public
+          : view == 1 ? contracts.created : contracts.participated).loading,
+      child: ListenableBuilder(
       listenable: contracts,
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -92,6 +100,10 @@ class _ContractsState extends State<MarketplaceContractsPage> {
             ]),
           ),
           const SizedBox(height: 12),
+          Text(contractText(context, '待我处理 {n}', {
+            'n': '${contracts.attention}${contracts.attentionIncomplete ? '+' : ''}',
+          })),
+          const SizedBox(height: 8),
           Expanded(
             child: view == 0
                 ? _public(context, contracts)
@@ -99,7 +111,7 @@ class _ContractsState extends State<MarketplaceContractsPage> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _public(
@@ -139,11 +151,12 @@ class _ContractsState extends State<MarketplaceContractsPage> {
                   // Takes all the free width, so the buttons reach the right edge.
                   Expanded(
                     child: Text(
-                      contractText(context, '共 {n} 个 · {sort}', {
-                        'n': '${contracts.public.total}',
+                      contractText(context, '本页 {n} 个（共 {total} 个）· {sort}', {
+                        'n': '${sorted.length}',
+                        'total': '${contracts.public.total}',
                         'sort': contractText(
                           context,
-                          const {'reward': '报酬最高', 'deadline': '即将截止'}[sort] ??
+                          const {'reward': '报酬最高（本页）', 'deadline': '即将截止（本页）'}[sort] ??
                               '最新发布',
                         ),
                       }),
@@ -154,6 +167,8 @@ class _ContractsState extends State<MarketplaceContractsPage> {
                       ),
                     ),
                   ),
+                  // OT6: the summary line says "本页…（本页）"; buttons stay short
+                  // so the English row fits beside the publish button.
                   for (final (key, label) in [
                     ('new', '最新发布'),
                     ('reward', '报酬最高'),
@@ -185,7 +200,21 @@ class _ContractsState extends State<MarketplaceContractsPage> {
                 context,
                 contracts.public,
                 retry: contracts.loadPublic,
-                child: GridView(
+                child: sorted.isEmpty ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(contractText(context, '这一页没有符合条件的合约')),
+                    TextButton(
+                      key: const Key('market-contracts-clear'),
+                      onPressed: () => setState(() { reward = 'all'; eligibleOnly = false; sort = 'new'; }),
+                      child: Text(contractText(context, '清除筛选'))),
+                    TextButton(
+                      key: const Key('market-contracts-more'),
+                      onPressed: contracts.public.more && !contracts.public.loading
+                          ? () => contracts.loadPublic(more: true) : null,
+                      child: Text(contractText(context, '加载更多'))),
+                  ],
+                ) : GridView(
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 380,
                     mainAxisExtent: 210,
@@ -364,6 +393,9 @@ class _ContractsState extends State<MarketplaceContractsPage> {
     required VoidCallback more,
     required Widget child,
   }) {
+    if (list.failed && marketplaceNeedsLogin(list.error)) {
+      return MarketplaceAuthNotice(list.error, login: widget.market.login);
+    }
     if (list.rows.isEmpty) {
       if (list.loading) {
         return const Align(
@@ -456,7 +488,7 @@ class ContractReward extends StatelessWidget {
       : Text(
           '${row['rewardNote'] ?? contractText(context, '物品')}',
           maxLines: 1,
-          overflow: TextOverflow.fade,
+          overflow: fadeOverflow(context),
           softWrap: false,
           style: TextStyle(
             fontSize: size - 3,
@@ -533,7 +565,7 @@ class ContractCard extends StatelessWidget {
               Text(
                 facts,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: TextStyle(fontSize: 11.5, color: t.colors.textSecondary),
               ),
@@ -552,10 +584,10 @@ class ContractCard extends StatelessWidget {
                     MarketSlantTag(
                       contractText(
                         context,
-                        row['applied'] == true ? '已报名' : '报名',
+                        '查看详情',
                       ),
                       color: t.colors.accent,
-                      solid: row['applied'] != true,
+                      solid: false,
                     ),
                 ],
               ),
@@ -635,8 +667,7 @@ class ContractRow extends StatelessWidget {
     final t = context.tokens;
     final kind = contractTypeColor(context, row['type']);
     final status = (row['status'] as num?)?.toInt();
-    final applicants = (row['applications'] as num?)?.toInt() ?? 0;
-    final waitingOnMe = mine && (status == 2 || status == 1 && applicants > 0);
+    final waitingOnMe = row['attention'] == true;
     return StarBridgeActionRow(
       controlKey: ValueKey(('market-contract-row', '${row['id']}')),
       inheritContentStyle: true,
@@ -667,7 +698,7 @@ class ContractRow extends StatelessWidget {
                         child: Text(
                           '${row['title'] ?? ''}',
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                           style: const TextStyle(
                             fontSize: 13,

@@ -11,8 +11,8 @@ internal static partial class FirstUseBusinessOwnerTests
     private static void Check(bool condition, string message)
     { if (!condition) throw new InvalidOperationException(message); }
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private static async Task<T> Finish<T>(Task<T> task) => await task.WaitAsync(TimeSpan.FromSeconds(5));
-    private static async Task Finish(Task task) => await task.WaitAsync(TimeSpan.FromSeconds(5));
+    private static async Task<T> Finish<T>(Task<T> task) => await task.WaitAsync(FirstUseTestWait.Bound);
+    private static async Task Finish(Task task) => await task.WaitAsync(FirstUseTestWait.Bound);
     internal static async Task Run()
     {
         await Case("full candidate graph borrows the device journal without starting or disposing it", DeferredJournalGraph);
@@ -60,6 +60,7 @@ internal static partial class FirstUseBusinessOwnerTests
         await RunOnlineCommit();
         await RunOffline();
         await RunRetainedOnline();
+        await RunColdCompletion();
         await RunOnlineInstallationFlow();
         await RunNativeComposition();
         await RunOnlineInstallationBridge();
@@ -124,9 +125,11 @@ internal static partial class FirstUseBusinessOwnerTests
         internal readonly Coordinator Coordinator = new();
         internal readonly Relay Relay = new();
         internal readonly NoCredentials Credentials = new();
-        internal readonly FirstUseOnlineReturnTests.Fixture Original = new();
-        internal Fixture()
+        internal readonly FirstUseOnlineReturnTests.Fixture Original;
+        internal Fixture() : this(new FirstUseOnlineReturnTests.Fixture()) { }
+        internal Fixture(FirstUseOnlineReturnTests.Fixture original)
         {
+            Original = original;
             Original.Compatibility = new(Coordinator, Relay);
             Original.Legacy = new(new Uri("https://synthetic-relay.example.invalid/"), Credentials);
         }
@@ -378,18 +381,18 @@ internal static partial class FirstUseBusinessOwnerTests
         var worker = new Thread(() =>
         {
             ready.Set();
-            if (!inspect.Wait(TimeSpan.FromSeconds(5))) return;
+            if (!inspect.Wait(FirstUseTestWait.Bound)) return;
             readResult = binding.Read(_ => true, false);
             inspected.Set();
         }) { IsBackground = true };
         worker.Start();
-        Check(ready.Wait(TimeSpan.FromSeconds(3)), "The independent callback consumer is ready before cancellation.");
+        Check(ready.Wait(FirstUseTestWait.Bound), "The independent callback consumer is ready before cancellation.");
         var read = binding.ReadAsync(async (_, token) =>
         {
             using var registration = token.Register(() =>
             {
                 inspect.Set();
-                callbackCouldInspect = inspected.Wait(TimeSpan.FromSeconds(3));
+                callbackCouldInspect = inspected.Wait(FirstUseTestWait.Bound);
             });
             await release.Task; // Cancellation must not be mistaken for actual exit.
             return true;
@@ -409,7 +412,7 @@ internal static partial class FirstUseBusinessOwnerTests
         finally
         {
             release.TrySetResult(); inspect.Set();
-            worker.Join(TimeSpan.FromSeconds(5));
+            worker.Join(FirstUseTestWait.Bound);
             try { await Finish(read); } catch (OperationCanceledException) { }
             await binding.DisposeAsync();
         }

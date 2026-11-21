@@ -79,8 +79,13 @@ public sealed partial class OAuthPkceClient
             if (op == "update")
             {
                 var order = await Send(HttpMethod.Get, "sc/orders/get?orderNumber=" + escaped + "&language=CN");
+                // The side decides how quality is written (a buy order's is qualityMin), so it must be a
+                // known one: anything but an integer 0 (buy) or 1 (sell) refuses the edit before any write.
+                var side = order.ValueKind == JsonValueKind.Object && order.TryGetProperty("creatorType", out var creator) &&
+                    creator.ValueKind == JsonValueKind.Number && creator.TryGetInt32(out var parsed) && parsed is 0 or 1
+                    ? parsed : throw MarketplaceListingRequest.Invalid();
                 result = await Send(HttpMethod.Put, "sc/orders/update", MarketplaceListingRequest.Update(input,
-                    MarketplaceTradePolicy.Number(order, "displayType") == 3));
+                    MarketplaceTradePolicy.Number(order, "displayType") == 3, buy: side == 0));
             }
             else result = await Send(op == "delete" ? HttpMethod.Delete : HttpMethod.Put,
                 "sc/orders/" + (op == "delete" ? "delete" : op == "quantityAdd" ? "quantity-add" : "orderStatus") +

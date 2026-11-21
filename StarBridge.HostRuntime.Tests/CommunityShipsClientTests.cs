@@ -234,6 +234,18 @@ internal static class CommunityShipsClientTests
             "same model has distinct instance references");
         var again = await Read(a);
         Check(again.GetProperty("ships")[0].GetProperty("shipRef").GetString() == ship.GetProperty("shipRef").GetString(), "stable within the same scope");
+        // User report 2026-11-15: a page held past the five-minute authorization still names the same ships.
+        // Review R3 P3: renew the organization and the second page only, so the first page's ship
+        // lease is the one that lapses.
+        clock.Advance(4);
+        await Read(a, 20, revision);
+        clock.Advance(2);
+        await Error(() => Image(a), "communities.refreshRequired");
+        var later = await Read(a);
+        Check(later.GetProperty("ships")[0].GetProperty("shipRef").GetString() == ship.GetProperty("shipRef").GetString(),
+            "a ship keeps its reference after its authorization lapses and is read again");
+        Check((await Image(a)).GetProperty("shipRef").GetString() == ship.GetProperty("shipRef").GetString(),
+            "reading the list again authorizes the same reference");
         var second = await Read(a, 20, revision);
         Check(second.GetProperty("ships").GetArrayLength() == 1 && second.GetProperty("next").ValueKind == JsonValueKind.Null, "last page");
         var other = await Read(b);

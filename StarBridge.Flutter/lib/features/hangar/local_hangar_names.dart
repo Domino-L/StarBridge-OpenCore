@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import '../ships/ship_display_names.dart';
+import 'local_hangar_manufacturers.dart';
 import 'local_hangar_port.dart';
 
 abstract final class LocalHangarNames {
@@ -22,5 +23,6 @@ abstract final class LocalHangarNames {
     ship.cn,
     ship.tw,
     ship.liner,
+    ...LocalHangarManufacturers.searchNames(ship),
   ].whereType<String>().any((value) => value.toLowerCase().contains(query));
 }

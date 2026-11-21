@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../design_system/brand/brand_lockup.dart';
+import '../../design_system/brand/brand_lockup_spec.dart';
+
 /// Dedicated secondary surface: version masthead, scrollable announcement,
 /// pinned actions. Uses the client's theme, never a separate blue palette.
 class ApplicationUpdatePanel extends StatefulWidget {
@@ -10,12 +13,16 @@ class ApplicationUpdatePanel extends StatefulWidget {
     required this.version,
     required this.body,
     required this.actions,
+    this.banner = false,
     super.key,
   });
   final String title, currentLabel;
   final String? current, version;
   final Widget body;
   final List<Widget> actions;
+
+  /// 有新版本但没有海报内容时用：顶上一条默认横幅，版本号收在横幅里。
+  final bool banner;
   @override
   State<ApplicationUpdatePanel> createState() => _ApplicationUpdatePanelState();
 }
@@ -46,7 +53,10 @@ class _ApplicationUpdatePanelState extends State<ApplicationUpdatePanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(height: 3, color: colors.primary),
+            if (widget.banner)
+              _UpdateBanner(version: widget.version)
+            else
+              Container(height: 3, color: colors.primary),
             Flexible(
               child: Scrollbar(
                 controller: _scroll,
@@ -66,7 +76,7 @@ class _ApplicationUpdatePanelState extends State<ApplicationUpdatePanel> {
                           ),
                         ),
                       ),
-                      if (widget.version != null) ...[
+                      if (widget.version != null && !widget.banner) ...[
                         const SizedBox(height: 12),
                         Text(
                           widget.version!,
@@ -111,6 +121,62 @@ class _ApplicationUpdatePanelState extends State<ApplicationUpdatePanel> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner({required this.version});
+
+  final String? version;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return SizedBox(
+      height: 96,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/brand/default_banner_${dark ? 'dark' : 'light'}.png',
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            excludeFromSemantics: true,
+            errorBuilder: (_, _, _) =>
+                ColoredBox(color: theme.colorScheme.surfaceContainerHighest),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 24, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Expanded(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: BrandLockup(
+                      scale: BrandLockupScale.navigationExpanded,
+                    ),
+                  ),
+                ),
+                if (version case final value?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      value,
+                      key: const Key('update-announcement-version'),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

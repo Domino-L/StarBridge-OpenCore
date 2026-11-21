@@ -148,6 +148,14 @@ internal static class SelectedProfileImportRecoveryTests
             catch (System.Security.Cryptography.CryptographicException) { }
             Check(File.ReadAllBytes(profileFile).SequenceEqual(beforeCorruption), "Corrupt journal never rewrites profile");
             await RuntimeRecovery(Path.Combine(root, "runtime"), preview, completed);
+            foreach (var recovery in Enum.GetValues<ShowcaseRecovery>())
+                await RuntimeShowcaseRecovery(Path.Combine(root, recovery.ToString()), preview, completed, recovery);
+            await RuntimeMainRoleImport(root, "CallSignOnlyKeepsLocalRolesAndMainRole", "gunner", null,
+                ["pilot", "gunner"], "gunner");
+            await RuntimeMainRoleImport(root, "SelectedRolesClearMissingMainRole", "gunner", ["pilot"],
+                ["pilot"], null);
+            await RuntimeMainRoleImport(root, "SelectedRolesKeepMatchingMainRole", "pilot", ["pilot", "medic"],
+                ["pilot", "medic"], "pilot");
             await RuntimeFirstConfirmation(Path.Combine(root, "first-confirmation"), preview, completed);
             Console.WriteLine("PASS encrypted selected import restart, explicit recovery, conflict and owner isolation");
         }
@@ -164,7 +172,8 @@ internal static class SelectedProfileImportRecoveryTests
         using var host = new ScmAccountBridgeHost(oauth, new ScmProfileCacheStore(root), "test", () => null, session);
         var owner = host.CurrentContext!;
         var store = new LocalPersonalProfileStore(root);
-        store.Save(owner, 0, Guid.NewGuid().ToString("N"), new("Before", "Keep", 0, "none", [], []), () => true);
+        store.Save(owner, 0, Guid.NewGuid().ToString("N"), new("Before", "", 0, "none", [], [],
+            FieldStates: new Dictionary<string, bool> { ["introduction"] = true }), () => true);
         var protectedFiles = SeedProtectedAccountData(root, owner);
         await new SelectedProfileImportCoordinator(store).RunAsync(owner, () => true, local =>
         { local.Stage(preview); local.BeforeConfirm(preview.PreviewId!); return Task.FromResult(0); });
@@ -180,18 +189,160 @@ internal static class SelectedProfileImportRecoveryTests
         Check(revoked.Response.Payload.GetProperty("migration").GetProperty("state").GetString() == "linkRequired" &&
             store.Read(owner).Revision == 1 && revoked.Events.Count == 0,
             "Current link revocation prevents local recovery, remote writes and success invalidation");
+        var directory = Path.Combine(root, "personal-profile-local-v1");
+        var main = Directory.GetFiles(directory, "*.json").Single();
+        var fields = Path.ChangeExtension(main, ".field-states");
+        var oldFields = File.ReadAllBytes(fields);
+        await Expect("profile_local.account_changed", () => new SelectedProfileImportCoordinator(store).RunAsync(owner,
+            () => store.Read(owner).Revision == 1, local => Task.FromResult(local.Apply(completed))));
+        var reopened = new LocalPersonalProfileStore(root);
+        var interrupted = reopened.Read(owner);
+        Check(interrupted.Revision == 2 && interrupted.Content is { Introduction: "", FieldStates: null } &&
+            oldFields.SequenceEqual(File.ReadAllBytes(fields)), "Interrupted migration committed only main");
+        var committedMain = File.ReadAllBytes(main);
         handler.Revoked = false;
         var applied = await runtime.DispatchAsync(confirm);
         Check(applied.Response.Error is null && applied.Response.Payload.GetProperty("migration").GetProperty("state").GetString() == "completed",
             "Real Host completes explicit local recovery");
-        Check(store.Read(owner).Revision == 2 && store.Read(owner).Content!.CallSign == "Synthetic imported" && applied.Events.Count == 1,
-            "Real runtime saves local name and invalidates displayed profile only after completion");
+        var saved = reopened.Read(owner);
+        Check(saved.Revision == 2 && saved.OperationId == interrupted.OperationId &&
+            saved.Content is { CallSign: "Synthetic imported", Introduction: "", FieldStates: null } &&
+            committedMain.SequenceEqual(File.ReadAllBytes(main)) && !oldFields.SequenceEqual(File.ReadAllBytes(fields)) &&
+            applied.Events.Count == 1, "Real runtime repairs the same operation without rewriting main or marking a migrated default");
         await runtime.DispatchAsync(confirm);
         Check(store.Read(owner).Revision == 2 && handler.Reads == 4, "Recovery performs reads only and is idempotent");
         var stale = await runtime.DispatchAsync(confirm with { AccountContext = owner with { Subject = "other" } });
         Check(stale.Response.Error is not null && handler.Reads == 4, "Foreign account rejected before HTTP");
         AssertProtectedAccountData(root, protectedFiles);
     }
+
+    private enum ShowcaseRecovery { MissingCopies, DamagedCopies, JournalCopy, LocalCopy, CommittedShowcases }
+
+    private static async Task RuntimeShowcaseRecovery(string root, LegacyProfileMigrationView preview,
+        LegacyProfileMigrationView completed, ShowcaseRecovery recovery)
+    {
+        var endpoint = new Uri("http://127.0.0.1:9/");
+        using var handler = new CompletedHandler(completed);
+        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), new NoVault(),
+            new ScmOAuthOptions("synthetic", endpoint, endpoint, endpoint, "synthetic", "synthetic", "openid profile.read", "/callback"));
+        var session = new ScmOAuthSession("https://authority.invalid", "synthetic-owner", "Synthetic",
+            "synthetic-token", DateTimeOffset.UtcNow.AddHours(1), ["profile.read"]);
+        using var host = new ScmAccountBridgeHost(oauth, new ScmProfileCacheStore(root), "test", () => null, session);
+        var owner = host.CurrentContext!;
+        var store = new LocalPersonalProfileStore(root);
+        store.Save(owner, 0, Guid.NewGuid().ToString("N"), new("Before", "Keep", 0, "none", [], [],
+            PlayStyle: new(["pilot", "gunner"]), MainRole: "gunner",
+            Showcases: [new("achievements", true)], AchievementShowcase: ["first-flight"]), () => true);
+        var coordinator = new SelectedProfileImportCoordinator(store);
+        await coordinator.RunAsync(owner, () => true, local =>
+        { local.Stage(preview); local.BeforeConfirm(preview.PreviewId!); return Task.FromResult(0); });
+
+        var main = Directory.GetFiles(Path.Combine(root, "personal-profile-local-v1"), "*.json").Single();
+        var side = Path.ChangeExtension(main, ".showcases");
+        var fields = Path.ChangeExtension(main, ".field-states");
+        var journalSide = Directory.GetFiles(store.ImportJournalDirectory, "*.dat.showcases").Single();
+        var oldSide = File.ReadAllBytes(side);
+        var oldFields = File.ReadAllBytes(fields);
+        var stopAfterShowcases = recovery == ShowcaseRecovery.CommittedShowcases;
+        await Expect("profile_local.account_changed", () => coordinator.RunAsync(owner,
+            () => stopAfterShowcases ? oldSide.SequenceEqual(File.ReadAllBytes(side)) : store.Read(owner).Revision == 1,
+            local => Task.FromResult(local.Apply(completed))));
+        var interrupted = store.Read(owner);
+        var committedMain = File.ReadAllBytes(main);
+        var interruptedSide = File.ReadAllBytes(side);
+        Check(interrupted.Revision == 2 && interrupted.Content is { CallSign: "Synthetic imported", MainRole: "gunner" } &&
+            oldFields.SequenceEqual(File.ReadAllBytes(fields)) &&
+            oldSide.SequenceEqual(interruptedSide) == !stopAfterShowcases, $"{recovery}: interrupted at the intended write");
+
+        byte[] damaged = [0xff, 0x01, 0x02];
+        if (recovery is ShowcaseRecovery.MissingCopies or ShowcaseRecovery.JournalCopy) File.Delete(side);
+        if (recovery is ShowcaseRecovery.MissingCopies or ShowcaseRecovery.LocalCopy) File.Delete(journalSide);
+        if (recovery == ShowcaseRecovery.DamagedCopies)
+        {
+            File.WriteAllBytes(side, damaged);
+            File.WriteAllBytes(journalSide, damaged);
+        }
+
+        var reopened = new LocalPersonalProfileStore(root);
+        using var runtime = new AccountBridgeRuntime(host, localProfile: reopened);
+        var confirm = BridgeEnvelope.Request("personalProfile.migrationConfirm", Guid.NewGuid().ToString("N"),
+            host.Generation, new { schemaVersion = 1, previewId = preview.PreviewId, replaceExisting = false }, owner);
+        var applied = await runtime.DispatchAsync(confirm);
+        Check(applied.Response.Error is null && applied.Response.Payload.GetProperty("migration").GetProperty("state").GetString() == "completed" &&
+            applied.Events.Count == 1 && handler.Reads == 1, $"{recovery}: dispatcher completes the pending operation");
+        var saved = reopened.Read(owner);
+        Check(saved.Revision == 2 && saved.OperationId == interrupted.OperationId &&
+            saved.Content is { CallSign: "Synthetic imported", Introduction: "Keep" } &&
+            committedMain.SequenceEqual(File.ReadAllBytes(main)) && !oldFields.SequenceEqual(File.ReadAllBytes(fields)),
+            $"{recovery}: main stays committed and field states are repaired");
+
+        if (recovery == ShowcaseRecovery.MissingCopies)
+            Check(!File.Exists(side), "Missing copies: local showcase sidefile stays missing");
+        else if (recovery == ShowcaseRecovery.DamagedCopies)
+            Check(damaged.SequenceEqual(File.ReadAllBytes(side)), "Damaged copies: local showcase bytes stay intact");
+        else
+        {
+            Check(saved.Content!.Showcases is [{ Id: "achievements", IsVisible: true }] &&
+                saved.Content.AchievementShowcase is ["first-flight"], $"{recovery}: readable showcase copy is recovered");
+            if (recovery is ShowcaseRecovery.LocalCopy or ShowcaseRecovery.CommittedShowcases)
+                Check(saved.Content.MainRole == "gunner", $"{recovery}: existing main role is preserved");
+            if (stopAfterShowcases)
+                Check(interruptedSide.SequenceEqual(File.ReadAllBytes(side)), "Committed showcase bytes are reused");
+        }
+        Console.WriteLine("PASS selected profile showcase recovery: " + recovery);
+    }
+
+    private static async Task RuntimeMainRoleImport(string root, string name, string initialMainRole,
+        string[]? legacyRoles, string[] expectedRoles, string? expectedMainRole)
+    {
+        root = Path.Combine(root, name);
+        string[] initialRoles = ["pilot", "gunner"];
+        var callSignOnly = legacyRoles is null;
+        string[] modules = callSignOnly ? [] : ["skilled-roles"];
+        var source = new LegacyProfileMigrationSummary("Imported", "", 0, 0, null);
+        var target = new LegacyProfileMigrationSummary("Before", "", 0, 0, null);
+        var preview = new LegacyProfileMigrationView("previewed", "main-role-ticket",
+            ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(15), Source: source, Target: target,
+            Choices: new(1, modules, modules, callSignOnly, []),
+            SelectedContent: callSignOnly ? new("Imported", [], null, null, null)
+                : new(null, [new("skilled-roles", 2)], legacyRoles, [], []));
+        var completed = preview with { State = "completed", ExpiresAt = null, CompletedRevision = 1 };
+        var endpoint = new Uri("http://127.0.0.1:9/");
+        using var handler = new FirstConfirmationHandler(preview, completed, loseConfirmation: false);
+        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), new NoVault(),
+            new ScmOAuthOptions("synthetic", endpoint, endpoint, endpoint, "synthetic", "synthetic", "openid profile.read", "/callback"));
+        var session = new ScmOAuthSession("https://authority.invalid", "synthetic-owner", "Synthetic",
+            "synthetic-token", DateTimeOffset.UtcNow.AddHours(1), ["profile.read"]);
+        using var host = new ScmAccountBridgeHost(oauth, new ScmProfileCacheStore(root), "test", () => null,
+            session, profileAuthorization: new ImportAuthorization());
+        var owner = host.CurrentContext!;
+        var store = new LocalPersonalProfileStore(root);
+        store.Save(owner, 0, Guid.NewGuid().ToString("N"), new("Before", "Keep", 0, "none",
+            [new("skilled-roles", 1, true, 0)], [], PlayStyle: new(initialRoles), MainRole: initialMainRole), () => true);
+        using var runtime = new AccountBridgeRuntime(host, localProfile: store);
+        BridgeEnvelope Request(string command, object payload) =>
+            BridgeEnvelope.Request(command, Guid.NewGuid().ToString("N"), host.Generation, payload, owner);
+
+        var staged = await runtime.DispatchAsync(Request("personalProfile.migrationPreview", new {
+            schemaVersion = 1, selection = new { modules, replaceModules = modules,
+                useLegacyCallSign = callSignOnly, useLegacyAvatar = false } }));
+        Check(staged.Response.Error is null &&
+            staged.Response.Payload.GetProperty("migration").GetProperty("state").GetString() == "previewed" &&
+            store.Read(owner).Revision == 1 && handler.Writes == 0, $"{name}: preview stages without saving");
+
+        var applied = await runtime.DispatchAsync(Request("personalProfile.migrationConfirm", new {
+            schemaVersion = 1, previewId = preview.PreviewId, replaceExisting = false }));
+        Check(applied.Response.Error is null &&
+            applied.Response.Payload.GetProperty("migration").GetProperty("state").GetString() == "completed" &&
+            applied.Events.Count == 1 && handler.Writes == 1, $"{name}: dispatcher confirms selection");
+        var saved = new LocalPersonalProfileStore(root).Read(owner);
+        Check(saved.Revision == 2 && saved.Content is { } content &&
+            content.CallSign == (callSignOnly ? "Imported" : "Before") &&
+            content.PlayStyle?.Roles?.SequenceEqual(expectedRoles) == true && content.MainRole == expectedMainRole,
+            $"{name}: persisted call sign, roles and main role match the selection");
+        Console.WriteLine("PASS selected profile import: " + name);
+    }
+
     private static async Task RuntimeFirstConfirmation(string root, LegacyProfileMigrationView preview,
         LegacyProfileMigrationView completed)
     {
@@ -305,7 +456,7 @@ internal static class SelectedProfileImportRecoveryTests
         }
     }
     private sealed class FirstConfirmationHandler(LegacyProfileMigrationView preview,
-        LegacyProfileMigrationView completed) : HttpMessageHandler
+        LegacyProfileMigrationView completed, bool loseConfirmation = true) : HttpMessageHandler
     {
         internal int Writes;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
@@ -315,7 +466,9 @@ internal static class SelectedProfileImportRecoveryTests
             {
                 Check(request.Headers.Authorization?.Parameter == "write-token", "Confirmation uses temporary grant");
                 Writes++;
-                return Task.FromException<HttpResponseMessage>(new HttpRequestException("Synthetic response lost after commit"));
+                return loseConfirmation
+                    ? Task.FromException<HttpResponseMessage>(new HttpRequestException("Synthetic response lost after commit"))
+                    : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(completed) });
             }
             Check(request.Headers.Authorization?.Parameter == "synthetic-token", "Read and preview keep ordinary session");
             Check((request.Method == HttpMethod.Get && path.EndsWith("/legacy-profile-migration", StringComparison.Ordinal)) ||

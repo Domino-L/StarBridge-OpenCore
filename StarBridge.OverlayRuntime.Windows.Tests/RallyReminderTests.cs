@@ -28,6 +28,10 @@ internal static class RallyReminderTests
             var zh = language.StartsWith("zh");
             Check(slot.Id == reminder.Id && slot.ExpiresAt == reminder.Rally!.ExpiresAt && slot.Title == title &&
                 slot.Hint == hint && slot.ActiveLabel == label && slot.Body == (zh ? "「集合」" : "“集合”"), language);
+            // m102 (11-18): the visor drew 「「集合」」; the body is quoted once, as drawn
+            var drawn = OverlayVisorDraw.TopBody(slot.Body);
+            Check(drawn == (zh ? "「集合」" : "“集合”") && drawn.Count(c => c is '「' or '“') == 1 &&
+                drawn.Count(c => c is '」' or '”') == 1, language + " drawn rally body has one pair of quotes");
             Check(NativeInformationOverlayRuntime.RallySlotFor(Reminder(preview: "hiddenDetails"), language).Body == hidden, language + " hidden details");
             foreach (var text in new[] { "", " \t\r\n" })
                 Check(NativeInformationOverlayRuntime.RallySlotFor(Reminder(text), language).Body == hidden, language + " empty body");

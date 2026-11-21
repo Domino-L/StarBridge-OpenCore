@@ -1,11 +1,14 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import 'marketplace_category_roots.dart';
 import 'marketplace_details.dart' show marketMyOrders;
 import 'marketplace_port.dart';
+import 'marketplace_numbers.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_quality.dart';
+import 'marketplace_order_full.dart';
 
 /// Listing UI contract; SCM request translation belongs to the Host.
 abstract interface class MarketplaceListingsPort {
@@ -32,9 +35,12 @@ class ListingDraft {
     this.quality = '',
     this.wanted = '',
     this.wantedQuantity = '1',
+    this.offeredQuantity = '1',
+    this.wantedItem = const {},
     this.manifestId,
   });
-  MarketRow item;
+  MarketRow item, wantedItem;
+  String offeredQuantity;
   String side, price, quantity, location, quality, wanted, wantedQuantity;
   int days;
   bool visible;
@@ -55,7 +61,7 @@ class ListingDraft {
     final count = int.tryParse(quantity);
     if (count == null || count < 1 || count > 999999) return '数量须为 1～999999';
     final amount = this.amount;
-    if (side != 'barter' || price.isNotEmpty) {
+    if (manifestId == null && side != 'barter') {
       if (amount == null ||
           !amount.isFinite ||
           amount <= 0 ||
@@ -64,9 +70,14 @@ class ListingDraft {
       }
     }
     if (side == 'barter' &&
-        ((int.tryParse(wanted) ?? 0) <= 0 || wanted == '${item['id']}' ||
-         (int.tryParse(wantedQuantity) ?? 0) < 1 || (int.tryParse(wantedQuantity) ?? 0) > 999999)) {
+        ((int.tryParse(wanted) ?? 0) <= 0 || wanted == '${item['id']}')) {
       return '请选择想要的物品';
+    }
+    if (side == 'barter' && ((int.tryParse(offeredQuantity) ?? 0) < 1 ||
+        (int.tryParse(offeredQuantity) ?? 0) > 999 ||
+        (int.tryParse(wantedQuantity) ?? 0) < 1 ||
+        (int.tryParse(wantedQuantity) ?? 0) > 999)) {
+      return '每次数量须为 1～999';
     }
     if (quality.isNotEmpty && (int.tryParse(quality) == null || int.parse(quality) < 0 || int.parse(quality) > 1000)) {
       return '品质须为 0～1000';
@@ -80,11 +91,12 @@ class ListingDraft {
     'itemId': item['id'],
     'side': side,
     'quantity': int.parse(quantity),
-    if (price.isNotEmpty) 'price': amount,
+    if (manifestId == null && side != 'barter' && price.isNotEmpty) 'price': amount,
     'expiryDays': days,
     'visible': visible,
     'location': location,
     if (quality.isNotEmpty) 'quality': quality,
+    if (side == 'barter') 'offeredQuantity': int.parse(offeredQuantity),
     if (side == 'barter') 'wanted': [{'itemId': int.parse(wanted), 'quantity': int.parse(wantedQuantity)}],
     if (manifestId != null) 'manifestId': manifestId,
   };
@@ -93,6 +105,37 @@ class ListingDraft {
 class MarketplaceListingsController extends ChangeNotifier {
   MarketplaceListingsController(this.port);
   final MarketplaceListingsPort port;
+  MarketOrderFull? fullOrders;
+  Future<void> Function(BuildContext, MarketRow)? openOrder;
+  Future<void> Function(BuildContext)? login;
+  Future<void> Function()? onChanged;
+  num? Function(int, int)? bestPrice;
+  Future<void> Function(Iterable<(int, int)>)? ensureBestPrices;
+  int? get activeSingleListingCount => marketListingCount(rows, total);
+  bool get capacityFull => marketListingFull(rows, total, limit);
+
+  num? listingBestPrice(MarketRow row) {
+    if (!marketSingleListing(row)) return null;
+    // The hall's live best price; a row that carries its own `best` (the
+    // Host does not send one today) is used only when the hall is absent.
+    final read = bestPrice;
+    if (read == null) return marketNumber(row['best']);
+    final id = marketNumber(row['itemId'])?.toInt();
+    return id == null ? null : read(id, row['side'] == 'buy' ? 0 : 1);
+  }
+
+  Future<void> ensureListingPrices(List<MarketRow> listings) async {
+    final read = ensureBestPrices;
+    if (read == null) return;
+    final wanted = [for (final row in listings)
+      if (marketSingleListing(row) && marketNumber(row['itemId']) != null)
+        (marketNumber(row['itemId'])!.toInt(), row['side'] == 'buy' ? 0 : 1)];
+    for (var i = 0; i < wanted.length; i += 10) {
+      await read(wanted.skip(i).take(10));
+      if (_disposed) return;
+    }
+    if (!_disposed) notifyListeners();
+  }
 
   /// The hall's live tier reads, so a quality listing is priced against its
   /// own tier (set by the publish entry; absent elsewhere).
@@ -120,7 +163,9 @@ class MarketplaceListingsController extends ChangeNotifier {
   int? limit;
   int? total;
   int _page = 1, _searchVersion = 0;
-  bool loadingMore = false;
+  bool loadingMore = false, _draining = false;
+  int _readRevision = 0;
+  bool get allListingsLoaded => total != null && rows.length >= total!;
   String? tradeWindow, error;
   MarketRow? tradeProfile;
   void applyTradeProfile(MarketRow profile, String window) {
@@ -133,6 +178,11 @@ class MarketplaceListingsController extends ChangeNotifier {
   String? errorCode;
   bool _disposed = false;
   bool _uncertainReadBack = false;
+  Future<void> inspectUncertainWrite() async {
+    if (loading || pending || _disposed) return;
+    await refresh();
+    confirmReadBack();
+  }
   void confirmReadBack() {
     if (!_uncertainReadBack || loading || pending || _disposed) return;
     writeUncertain = false;
@@ -144,6 +194,8 @@ class MarketplaceListingsController extends ChangeNotifier {
   Future<void> refresh() async {
     if (loading || _disposed) return;
     loading = true;
+    _readRevision++;
+    _uncertainReadBack = false;
     error = null;
     notifyListeners();
     try {
@@ -153,6 +205,7 @@ class MarketplaceListingsController extends ChangeNotifier {
       marketMyOrders.addAll(rows.map((r) => '${r['id']}'));
       total = result['total'] as int?;
       _page = 1;
+      unawaited(ensureListingPrices(rows));
       // Once the user has searched or browsed a category, that answer owns
       // the item list; a base read finishing later must not replace it.
       if (_searchVersion == 0) {
@@ -179,6 +232,24 @@ class MarketplaceListingsController extends ChangeNotifier {
         loading = false;
         notifyListeners();
       }
+    }
+    if (!_disposed && error == null) await loadRemaining();
+  }
+
+  /// Read at most ten pages, even if a filter leaves no scrollable rows.
+  Future<void> loadRemaining() async {
+    if (_draining || loading || _disposed) return;
+    _draining = true;
+    try {
+      while (!_disposed && !loading && !loadingMore && _page < 10 &&
+          total != null && rows.length < total!) {
+        final page = _page;
+        await loadMore();
+        if (_page == page) break;
+      }
+    } finally {
+      _draining = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -247,20 +318,31 @@ class MarketplaceListingsController extends ChangeNotifier {
   Future<void> loadMore() async {
     final source = port;
     if (source is! MarketplaceListingLookup || loading || loadingMore || _disposed ||
-        total == null || rows.length >= total!) {
+        _page >= 10 || total == null || rows.length >= total!) {
       return;
     }
     loadingMore = true;
+    final revision = _readRevision;
+    notifyListeners();
     try {
       final next = await (source as MarketplaceListingLookup).nextPage(_page + 1);
-      if (_disposed) return;
+      if (_disposed || revision != _readRevision) return;
       rows = {for (final row in [...rows, ...marketRows(next['rows'])]) row['id']: row}.values.toList();
       marketMyOrders.addAll(rows.map((r) => '${r['id']}'));
       total = next['total'] as int?;
       _page++;
+      unawaited(ensureListingPrices(rows));
       notifyListeners();
-    } on Object { if (!_disposed) error = '暂时读不到挂单，请重试'; }
-    finally { loadingMore = false; }
+    } on Object { if (!_disposed && revision == _readRevision) error = '暂时读不到挂单，请重试'; }
+    finally {
+      loadingMore = false;
+      if (!_disposed) {
+        notifyListeners();
+        if (revision != _readRevision) {
+          unawaited(Future<void>(() => loadRemaining()));
+        }
+      }
+    }
   }
 
   Future<bool> write(String operation, MarketRow input) async {
@@ -272,10 +354,11 @@ class MarketplaceListingsController extends ChangeNotifier {
       await port.write(operation, input);
       if (_disposed) return false;
       await refresh();
+      if (!_disposed) await onChanged?.call();
       return true;
     } on Object catch (e) {
       if (!_disposed) {
-        errorCode = e is MarketplaceTradeError ? e.code : 'marketplace.unknown';
+        errorCode = marketplaceFailureCode(e);
         writeUncertain = !listingDefiniteRejection(errorCode!);
         error = '操作未确认，请刷新挂单后核对';
       }
@@ -296,26 +379,39 @@ class MarketplaceListingsController extends ChangeNotifier {
     pending = true;
     notifyListeners();
     final results = <MarketRow>[];
+    String? failureCode;
     // SCM visibility-batch affects a whole side, never use it for arbitrary selection.
     try {
       for (final row in selected) {
         if (_disposed) break;
         try {
           await port.write('visibility', {'id': row['id'], 'visible': visible});
-          results.add({'name': row['name'], 'success': true});
+          results.add({'name': row['name'], 'success': true, 'state': 'ok'});
         } on Object catch (e) {
-          results.add({'name': row['name'], 'success': false});
-          if (e is! MarketplaceTradeError || !listingDefiniteRejection(e.code)) {
+          errorCode = marketplaceFailureCode(e);
+          failureCode = errorCode;
+          final definite = listingDefiniteRejection(errorCode!);
+          // Each row says what happened to it: refused, unconfirmed, or never
+          // sent after an unconfirmed one (CX-HALL-FIX2-REVIEW P2).
+          results.add({'name': row['name'], 'success': false,
+              'state': definite ? 'rejected' : 'uncertain', 'code': errorCode});
+          if (!definite) {
             writeUncertain = true;
             error = '操作未确认，请刷新挂单后核对';
             for (final unattempted in selected.skip(results.length)) {
-              results.add({'name': unattempted['name'], 'success': false});
+              results.add({'name': unattempted['name'], 'success': false,
+                  'state': 'skipped'});
             }
             break;
           }
         }
       }
       if (!_disposed) await refresh();
+      if (!_disposed && results.any((r) => r['success'] == true)) await onChanged?.call();
+      if (!_disposed && failureCode != null) {
+        errorCode = failureCode;
+        error = '操作未确认，请刷新挂单后核对';
+      }
     } finally {
       if (!_disposed) {
         pending = false;
@@ -333,6 +429,7 @@ class MarketplaceListingsController extends ChangeNotifier {
 }
 
 bool listingDefiniteRejection(String code) => const {
+  ...marketplacePreflightFailures,
   'marketplace.sign_in_required', 'marketplace.forbidden', 'marketplace.busy',
   'marketplace.account_unbound', 'marketplace.trade_time_required',
   'marketplace.contact_required', 'marketplace.account_abnormal', 'marketplace.account_banned',

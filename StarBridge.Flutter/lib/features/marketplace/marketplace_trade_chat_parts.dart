@@ -121,7 +121,7 @@ class TradeChatConversationRow extends StatelessWidget {
                   Text(
                     '${row['name'] ?? ''}',
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: const TextStyle(
                       fontSize: 13,
@@ -131,7 +131,7 @@ class TradeChatConversationRow extends StatelessWidget {
                   Text(
                     '${row['lastMessage'] ?? ''}',
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: TextStyle(
                       fontSize: 11.5,
@@ -196,8 +196,9 @@ class TradeChatCount extends StatelessWidget {
 /// A message: SCM's order card when quoted, the risky-link warning, the time
 /// and (for mine) read state.
 class TradeChatBubble extends StatelessWidget {
-  const TradeChatBubble(this.message, {super.key});
+  const TradeChatBubble(this.message, {this.openOrder, super.key});
   final MarketRow message;
+  final ValueChanged<String>? openOrder;
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -241,11 +242,14 @@ class TradeChatBubble extends StatelessWidget {
                     ),
                   if (quote is Map) ...[
                     const SizedBox(height: 6),
-                    TradeChatOrderCard(quote.cast<String, Object?>()),
+                    TradeChatOrderCard(quote.cast<String, Object?>(), openOrder: openOrder),
                   ],
                 ],
               ),
             ),
+            if (message['attachmentMissing'] == true)
+              Text(chatText(context, '订单没有附上'),
+                  style: TextStyle(fontSize: 11, color: t.colors.danger)),
             if (message['risky'] == true)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
@@ -272,10 +276,11 @@ class TradeChatBubble extends StatelessWidget {
   }
 }
 
-/// SCM's order snapshot as a card (read only).
+/// SCM's order snapshot; only an explicit click requests the current detail.
 class TradeChatOrderCard extends StatelessWidget {
-  const TradeChatOrderCard(this.quote, {super.key});
+  const TradeChatOrderCard(this.quote, {this.openOrder, super.key});
   final MarketRow quote;
+  final ValueChanged<String>? openOrder;
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -288,7 +293,11 @@ class TradeChatOrderCard extends StatelessWidget {
     final en = marketLocale(context) == 'en';
     final name =
         '${(en ? quote['itemNameEn'] : null) ?? quote['itemName'] ?? chatText(context, '订单')}';
-    return Container(
+    final kind = quote['displayType'];
+    final number = quote['orderNo'];
+    final validNumber = number is String && number.length <= 64 &&
+        RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(number) && !number.endsWith('\n');
+    final card = Container(
       constraints: const BoxConstraints(minWidth: 260),
       padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
       decoration: BoxDecoration(
@@ -313,12 +322,19 @@ class TradeChatOrderCard extends StatelessWidget {
             spacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (quote['amount'] != null)
+              if (kind == 2 || kind == 3)
+                Text(chatText(context, kind == 2 ? '清单' : '以物易物')),
+              if (kind == 3 && (num.tryParse('${quote['amount']}') ?? 0) <= 0)
+                Text(chatText(context, '看详情'))
+              else if (quote['amount'] != null)
                 MarketPrice(quote['amount'], size: 13),
+              if (kind == 2) Text(chatText(context, '每套')),
               Text(
                 [
                   if (quote['orderNo'] != null) '#${quote['orderNo']}',
-                  if (quote['statusText'] != null) '${quote['statusText']}',
+                  chatText(context, switch ('${quote['status']}') {
+                    '1' => '上架中', '0' => '已下架', _ => '状态未知',
+                  }),
                 ].join(' · '),
                 style: TextStyle(fontSize: 11, color: t.colors.textSecondary),
               ),
@@ -326,6 +342,13 @@ class TradeChatOrderCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+    return StarBridgeActionButton(
+      controlKey: ValueKey<(String, Object?)>(('trade-chat-order', number)),
+      kind: StarBridgeActionKind.quiet,
+      padding: EdgeInsets.zero,
+      onActivate: validNumber && openOrder != null ? (_) => openOrder!(number) : null,
+      child: card,
     );
   }
 }
@@ -470,7 +493,7 @@ class _ComposerState extends State<TradeChatComposer> {
       items: [
         PopupMenuItem<MarketChatAttachment>(
           enabled: false,
-          child: Text(chatText(context, '最近的交易单')),
+          child: Text(chatText(context, '最近打开的订单')),
         ),
         for (final order in orders.take(8))
           PopupMenuItem(
@@ -478,7 +501,7 @@ class _ComposerState extends State<TradeChatComposer> {
             child: Text(
               order.label,
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
             ),
           ),
@@ -585,7 +608,7 @@ class _ComposerState extends State<TradeChatComposer> {
               Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (widget.recentOrders != null)
+                  if (widget.recentOrders?.call().isNotEmpty == true)
                     StarBridgeActionButton(
                       controlKey: const Key('trade-chat-attach'),
                       onActivate: widget.enabled ? (_) => _pickOrder() : null,

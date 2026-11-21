@@ -196,7 +196,6 @@ class _Overrides extends StatelessWidget {
 
   static const _groups = {
     OverlaySourceModule.notice: 'notice',
-    OverlaySourceModule.overview: 'fleetOverview',
     OverlaySourceModule.members: 'members',
     OverlaySourceModule.chat: 'chat',
     OverlaySourceModule.events: 'events',
@@ -210,7 +209,10 @@ class _Overrides extends StatelessWidget {
     final rows = <String>[
       if (sources != null)
         for (final module in OverlaySourceModule.values)
-          if (module == OverlaySourceModule.chat &&
+          // the overview follows the members (D6; 11-13 请你定 7)
+          if (module == OverlaySourceModule.overview)
+            ...const <String>[]
+          else if (module == OverlaySourceModule.chat &&
               sources.chatSources.isNotEmpty)
             '${strings.text('overlay.workspace.group.chat')} → ${strings.text('overlay.source.chatMultiple')}'
           else if (sources.forModule(module).mode != OverlaySourceMode.none)

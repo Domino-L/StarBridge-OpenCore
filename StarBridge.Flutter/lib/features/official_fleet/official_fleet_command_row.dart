@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
+import '../common/organization_member_copy.dart';
 import '../common/organization_member_row.dart';
 import 'official_fleet_member_views.dart';
 import 'official_fleet_members_models.dart';
@@ -42,6 +43,7 @@ class OfficialFleetCommandRow extends StatelessWidget {
   static bool _online(OfficialFleetMember member) => const {
     OfficialFleetMemberPresence.online,
     OfficialFleetMemberPresence.inGame,
+    OfficialFleetMemberPresence.away,
   }.contains(member.publicPresence);
 
   /// The most shared location among in-game members who share it. Names are
@@ -126,9 +128,17 @@ class OfficialFleetCommandRow extends StatelessWidget {
               Padding(
                 padding: EdgeInsets.only(left: index == 0 ? 0 : 4),
                 child: Tooltip(
-                  message: member.callsign,
-                  child: SizedBox.square(
-                    dimension: 28,
+                  message:
+                      member.publicPresence == OfficialFleetMemberPresence.away
+                      ? '${member.callsign} · ${memberBoardText(context, 'away')}'
+                      : member.callsign,
+                  child: SizedBox(
+                    width:
+                        member.publicPresence ==
+                            OfficialFleetMemberPresence.away
+                        ? 36
+                        : 28,
+                    height: 28,
                     child: _avatar(
                       context,
                       member,
@@ -194,7 +204,21 @@ Widget _avatar(
     sourceRef: sourceRef,
     allowProfile: allowProfile,
   ).identity;
-  return identity is OrganizationMemberIdentity
+  final avatar = identity is OrganizationMemberIdentity
       ? identity.avatar
       : const SizedBox.shrink();
+  if (member.publicPresence != OfficialFleetMemberPresence.away) return avatar;
+  return Row(
+    children: [
+      SizedBox.square(dimension: 28, child: avatar),
+      const SizedBox(width: 2),
+      SizedBox.square(
+        dimension: 6,
+        child: ColoredBox(
+          key: ValueKey('official-fleet-command-away-${member.memberRef}'),
+          color: context.tokens.colors.warning,
+        ),
+      ),
+    ],
+  );
 }

@@ -9,7 +9,7 @@ import '../friends/social_layout_test.dart' show app, size;
 import 'overlay_settings_ux_a_test.dart' show settings;
 
 void main() {
-  group('levels follow the overlay opacity until the user picks their own', () {
+  group('unset levels take the defaults until the user picks their own', () {
     test('full opacity rests at 35% and lights to 100%', () {
       final levels = OverlayCalmLevels.of(
         settings({'opacity': 1.0, 'calmDisplay': 'On'}),
@@ -20,10 +20,12 @@ void main() {
       expect(levels.idleSet || levels.litSet, isFalse);
     });
 
-    test('a low opacity never rests darker and lights to a readable 85%', () {
+    // the overall opacity is retired (11-12): an old saved value no longer
+    // counts, so it never makes calm display fainter
+    test('an old low overall opacity no longer changes the levels', () {
       final levels = OverlayCalmLevels.of(settings({'opacity': 0.25}));
-      expect(levels.idle, 0.25);
-      expect(levels.lit, 0.85);
+      expect(levels.idle, 0.35);
+      expect(levels.lit, 1.0);
       expect(levels.enabled, isFalse, reason: 'Unset (an older file) is off');
     });
 
@@ -103,7 +105,7 @@ void main() {
     expect(current['calmDisplay'], 'On');
     expect(slider('overlay-calm-idle').value, 0.35);
     expect(slider('overlay-calm-lit').value, 1.0);
-    expect(find.text('跟随浮层不透明度自动设定'), findsNWidgets(2));
+    expect(find.text('自动设定'), findsNWidgets(2));
 
     slider('overlay-calm-lit').onChanged!(0.5);
     await tester.pumpAndSettle();

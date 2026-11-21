@@ -144,6 +144,7 @@ final class MenuCommsSession
       conversationKey: target.stableKey,
       gameId: target.gameId ?? '',
       presence: target.presence,
+      lastOnlineDays: target.lastOnlineDays,
     );
     _selectedKey = existing?.key ?? 'c${++_serial}';
     _targets[_selectedKey!] = _selected!;
@@ -373,8 +374,7 @@ final class MenuCommsSession
     }
     if (action == 'read') {
       final through = _receipts[key];
-      // A visible receipt has priority over optional directory supplementation.
-      // Cancel first: the bridge adapter must never run concurrent operations.
+      // A visible receipt beats directory supplementation; cancel first (no concurrent bridge operations).
       if (through != null && _supplementing) _cancel();
       if (through != null &&
           !_reading &&

@@ -17,6 +17,7 @@ import 'package:starbridge_flutter/features/achievements/achievement_catalog.dar
 import 'package:starbridge_flutter/features/achievements/achievement_collection_port.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_entry.dart';
 import 'package:starbridge_flutter/features/achievements/achievements_page.dart';
+import 'package:starbridge_flutter/features/achievements/journey_station_markers.dart';
 import 'package:starbridge_flutter/features/onboarding/connection_mode_port.dart';
 
 import 'achievement_collection_controller_test.dart'
@@ -72,7 +73,7 @@ class _ScmRecords implements AchievementCollectionPort {
 
 // 原有的版面测试按最早的四个成就写死了数量和布局，继续用那四个当夹具；四城抵达的条目另有测试。
 final _legacyCatalog = achievementCatalog
-    .where((d) => !d.id.startsWith('journey-'))
+    .where((d) => d.id == 'first-entry' || d.groupId == 'hangar')
     .toList();
 
 Widget _app({
@@ -592,7 +593,8 @@ void main() {
   );
 
   for (final (count, groupCount, directory) in [
-    (24, 3, false),
+    // Journey, Contracts and Hangar now expose the directory at three groups.
+    (24, 3, true),
     (25, 3, true),
     (4, 4, true),
   ]) {
@@ -681,7 +683,10 @@ void main() {
       await tester.pumpWidget(
         _app(
           account: account,
-          catalog: [achievementCatalog[1], hidden],
+          catalog: [
+            achievementCatalog.firstWhere((d) => d.id == 'hangar-home'),
+            hidden,
+          ],
           port: _Records({}, {'hangar-home': 20}),
         ),
       );
@@ -697,7 +702,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pumpAndSettle();
       expect(find.text('条件已满足，等待授奖确认'), findsOneWidget);
-      expect(find.text('星海有归舟 · I'), findsWidgets);
+      expect(find.text('舰队成军 · I'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
@@ -831,8 +836,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await _loadPreviewMaterial(tester);
-      expect(find.text('星海有归舟 · II'), findsOneWidget);
-      expect(find.text('舷影成诗 · I'), findsOneWidget);
+      expect(find.text('舰队成军 · II'), findsOneWidget);
+      expect(find.text('型号收藏家 · I'), findsOneWidget);
       final entry = find.byKey(const Key('achievement-entry-hangar-home'));
       final before = tester.getRect(entry);
       await tester.tap(entry);
@@ -890,9 +895,23 @@ void main() {
               findsOneWidget,
             );
           }
+          // Hangar not read yet: never an invented 0, no bar (scheduler 11-11).
           expect(
             find.byKey(const Key('achievement-progress-hangar-paths-1')),
             findsNothing,
+          );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('achievement-detail')),
+              matching: find.byType(LinearProgressIndicator),
+            ),
+            findsNothing,
+          );
+          expect(
+            find.textContaining(
+              AppStrings.resolve(locale).text('achievements.hangarPending'),
+            ),
+            findsWidgets,
           );
           expect(tester.takeException(), isNull);
         },
@@ -974,11 +993,7 @@ void main() {
         for (var i = 0; i < 8; i++) 'synthetic-$i': DateTime.utc(2026, 10, 9),
       };
       await tester.pumpWidget(
-        _app(
-          account: account,
-          catalog: catalog,
-          port: _Records(awards),
-        ),
+        _app(account: account, catalog: catalog, port: _Records(awards)),
       );
       await tester.pumpAndSettle();
       for (final id in ['synthetic-4', 'synthetic-12']) {
@@ -1072,9 +1087,15 @@ void main() {
       (d) => d.id == 'journey-lorville',
     );
     await tester.ensureVisible(
-      find.byKey(Key('achievement-group-${journey.source.name}:${journey.groupId}')),
+      find.byKey(
+        Key('achievement-group-${journey.source.name}:${journey.groupId}'),
+      ),
     );
-    await tester.tap(find.byKey(Key('achievement-group-${journey.source.name}:${journey.groupId}')));
+    await tester.tap(
+      find.byKey(
+        Key('achievement-group-${journey.source.name}:${journey.groupId}'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('待确认'), findsNothing);
     expect(find.text('你的星海收藏，从这里开始。'), findsNothing);
@@ -1102,6 +1123,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('achievement-group-bridge:journey')));
+    await tester.pumpAndSettle();
     final ids = tester
         .widgetList<AchievementEntry>(find.byType(AchievementEntry))
         .map((e) => e.definition.id)
@@ -1114,6 +1137,10 @@ void main() {
         'journey-orison',
         'journey-new-babbage',
         'journey-stanton',
+        'journey-levski',
+        'journey-pyro-majors',
+        'journey-pyro-all',
+        'journey-grimhex',
       ]),
     );
     expect(find.text('罗威尔黄昏'), findsOneWidget);
@@ -1121,7 +1148,130 @@ void main() {
     expect(find.text('云上奥里森'), findsOneWidget);
     expect(find.text('雪落新巴贝奇'), findsOneWidget);
     expect(find.text('巡礼斯坦顿'), findsOneWidget);
+    expect(find.text('法外六角湾'), findsOneWidget);
     expect(find.textContaining('2 / 4'), findsWidgets, reason: '总成就显示已抵达 2 座');
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final allStations in [false, true]) {
+    testWidgets(
+      'Pyro marker progress stays hidden and server-owned ($allStations)',
+      (tester) async {
+        _size(tester, const Size(1200, 820));
+        final account = ValueNotifier(achievementTestAccount(1));
+        addTearDown(account.dispose);
+        final markers = allStations
+            ? pyroStationMarkers
+            : pyroMajorStationMarkers.take(2);
+        await tester.pumpWidget(
+          _app(
+            account: account,
+            catalog: achievementCatalog,
+            port: _Records({
+              for (final id in markers) id: DateTime.utc(2026, 10, 30),
+            }),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const Key('achievement-group-bridge:journey')),
+        );
+        await tester.pumpAndSettle();
+        List<String> visibleIds() => tester
+            .widgetList<AchievementEntry>(find.byType(AchievementEntry))
+            .map((e) => e.definition.id)
+            .toList();
+        void expectNoMarkers() {
+          expect(
+            visibleIds().where((id) => id.startsWith('journey-station-')),
+            isEmpty,
+          );
+          for (final id in markers) {
+            expect(find.textContaining(id), findsNothing);
+          }
+        }
+
+        expectNoMarkers();
+        expect(
+          visibleIds()
+              .where((id) => id == 'first-entry' || id.startsWith('journey-'))
+              .toList(),
+          [
+            'first-entry',
+            'journey-lorville',
+            'journey-area18',
+            'journey-orison',
+            'journey-new-babbage',
+            'journey-stanton',
+            'journey-levski',
+            'journey-pyro-majors',
+            'journey-pyro-all',
+            'journey-grimhex',
+          ],
+        );
+        for (final (id, text) in [
+          ('journey-pyro-majors', allStations ? '3 / 3' : '2 / 3'),
+          ('journey-pyro-all', allStations ? '23 / 23' : '2 / 23'),
+        ]) {
+          final entry = find.byKey(Key('achievement-entry-$id'));
+          expect(
+            find.descendant(of: entry, matching: find.text(text)),
+            findsOneWidget,
+          );
+          final art = tester.widget<AchievementArt>(
+            find.descendant(of: entry, matching: find.byType(AchievementArt)),
+          );
+          expect(art.earned, isFalse);
+        }
+        // Markers alone never unlock anything shown on the page.
+        expect(
+          tester
+              .widgetList<AchievementArt>(find.byType(AchievementArt))
+              .where((art) => art.earned),
+          isEmpty,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('station markers stay out of search and collected counts', (
+    tester,
+  ) async {
+    _size(tester, const Size(1200, 950));
+    final account = ValueNotifier(achievementTestAccount(1));
+    addTearDown(account.dispose);
+    await tester.pumpWidget(
+      _app(
+        account: account,
+        catalog: achievementCatalog,
+        port: _Records({
+          'journey-levski': DateTime.utc(2026, 10, 30),
+          for (final id in pyroStationMarkers) id: DateTime.utc(2026, 10, 30),
+        }),
+        scmPort: const _ScmRecords(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final journey = achievementCatalog.where((d) => d.groupId == 'journey');
+    final group = find.byKey(const Key('achievement-group-bridge:journey'));
+    expect(
+      find.descendant(of: group, matching: find.text('1 / ${journey.length}')),
+      findsOneWidget,
+      reason: 'only Levski is collected; 23 markers add nothing',
+    );
+    for (final query in ['station', 'rr-p2', '死局']) {
+      await tester.enterText(
+        find.byKey(const Key('achievement-search')),
+        query,
+      );
+      await tester.pumpAndSettle();
+      final ids = tester
+          .widgetList<AchievementEntry>(find.byType(AchievementEntry))
+          .map((e) => e.definition.id);
+      expect(ids.where((id) => id.startsWith('journey-station-')), isEmpty);
+      if (query == '死局') expect(ids, contains('journey-pyro-majors'));
+    }
     expect(tester.takeException(), isNull);
   });
 

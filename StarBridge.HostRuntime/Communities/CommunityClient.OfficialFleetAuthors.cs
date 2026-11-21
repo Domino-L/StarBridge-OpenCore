@@ -14,7 +14,8 @@ internal sealed partial class CommunityClient
         string? IdentityVersion = null, DateTimeOffset? Observed = null, DateTimeOffset? Until = null, string? Avatar = null)
     {
         internal bool Current(DateTimeOffset now) => State == "visible" && Observed is { } observed && Until is { } until &&
-            observed <= now.AddSeconds(1) && until > observed && until <= observed.AddSeconds(5) && now < until;
+            !OfficialFleetServerClock.IsFuture(observed, now) && until > observed && until <= observed.AddSeconds(5) &&
+            !OfficialFleetServerClock.IsExpired(until, now);
     }
     private sealed record OfficialObservedChat(string Reference, ChatTarget Address, bool Found);
     private sealed record OfficialAuthorRead(JsonElement Page, IReadOnlyDictionary<string, OfficialAuthorObservation> Identities, OfficialObservedChat[]? ChatUpdates = null, bool RefreshRequired = false);
@@ -48,7 +49,8 @@ internal sealed partial class CommunityClient
         if (value.ValueKind != JsonValueKind.Object) return false;
         var names = value.EnumerateObject().Select(p => p.Name).ToArray();
         return names.Length == names.Distinct(StringComparer.Ordinal).Count() && required.All(names.Contains) &&
-            names.All(name => required.Contains(name) || (optional?.Contains(name) ?? false));
+            names.All(name => required.Contains(name) || (optional?.Contains(name) ?? false) ||
+                name == "serverTime" && required.Contains("sourceRef"));
     }
     private static DateTimeOffset AuthorUtc(JsonElement row, string name) => OfficialFleetMemberIdentityObservation.Utc(row.GetProperty(name));
     private static string AuthorHash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
@@ -81,7 +83,7 @@ internal sealed partial class CommunityClient
                 var avatar = detail ? Optional(row, "avatarImageData", 4096) : null;
                 if (detail && (hasAvatar != (avatar is not null) || avatar is not null && (RoomAvatarProjection.Normalize(avatar, 3 * 1024) != avatar || AuthorHash(avatar) != avatarVersion))) throw Invalid();
                 var observation = new OfficialAuthorObservation(state, callsign, avatarVersion, identityVersion, observed, until, avatar);
-                var now = _targetClock.GetUtcNow(); var current = observation.Current(now);
+                var now = _identityClock.GetUtcNow(); var current = observation.Current(now);
                 result[id] = current || preserveLapsedVisible ? observation : new("unavailable");
                 diagnostic?.Visible(observed, until, now, current);
             }
@@ -92,7 +94,7 @@ internal sealed partial class CommunityClient
     private void ApplyChatAuthor(JsonObject item, OfficialAuthorObservation? author, bool preserveLapsedVisible = false)
     {
         // Display observation only. Current remains the sole validity decision for proof consumers.
-        var visible = author?.Current(_targetClock.GetUtcNow()) == true || preserveLapsedVisible && author?.State == "visible";
+        var visible = author?.Current(_identityClock.GetUtcNow()) == true || preserveLapsedVisible && author?.State == "visible";
         item["senderCallsign"] = visible ? author!.Callsign : ""; item["senderGameId"] = ""; item["senderRoleTitle"] = ""; item["senderRoleColor"] = "#9DAAB3";
         item["hasAvatar"] = visible && author!.AvatarVersion is not null; item["avatarVersion"] = visible ? author!.AvatarVersion : null;
         item["authorIdentityState"] = visible ? "visible" : author?.State == "hidden" ? "hidden" : "unavailable";

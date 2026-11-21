@@ -35,6 +35,9 @@ enum AccountCompatibilityIdentityState {
 
 enum AccountCompatibilityRelayState {
   unavailable,
+
+  /// The relay retired the old account into this SCM account (plan item 9).
+  migrated,
   notApplicable,
   notEstablished,
   ready,
@@ -182,6 +185,19 @@ final class AccountCompatibilityProjection {
   final bool storedLegacyCredentialAvailable;
   final bool legacyFeaturesAvailable;
   final List<AccountCompatibilityAction> availableActions;
+
+  /// A SCM account confirmed to have no linked legacy account. Unknown and
+  /// unread states are not treated as SCM-only.
+  bool get scmOnly =>
+      identityState == AccountCompatibilityIdentityState.unlinked;
+
+  /// The single switch for the relay features a SCM-only account cannot use
+  /// yet: account playtime, account safety, Recent Players privacy and event
+  /// sharing. Those pages explain this instead of failing. The account
+  /// migration is planned to serve them for SCM-only accounts too; change only
+  /// this getter then. Community entries (disband, invitations to private
+  /// chats and rooms) follow [scmOnly] on their own.
+  bool get relayAccountFeaturesUnavailable => scmOnly;
 }
 
 @immutable

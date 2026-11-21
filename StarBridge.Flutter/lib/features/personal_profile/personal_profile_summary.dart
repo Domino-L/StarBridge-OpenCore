@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../shared/time_zone_label.dart';
 
 import '../../app/localization/app_strings.dart';
+import '../../app/localization/account_card_title.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/surfaces/starbridge_surface.dart';
@@ -12,6 +13,7 @@ import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../gameplay_time/gameplay_time_controller.dart';
+import '../gameplay_time/gameplay_account_total.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_collaboration.dart';
 
@@ -23,11 +25,15 @@ class PersonalProfileSectionHeading extends StatelessWidget {
     required this.onEdit,
     required this.onRefresh,
     this.onVisibility,
+    this.showTitle = true,
     super.key,
   });
 
   final PersonalProfileProjection projection;
   final bool showOwnerActions;
+
+  /// False in the page header, where the name already heads the page.
+  final bool showTitle;
   final VoidCallback onPreview;
   final VoidCallback onEdit;
   final VoidCallback onRefresh;
@@ -109,6 +115,7 @@ class PersonalProfileSectionHeading extends StatelessWidget {
         ),
       ],
     );
+    if (!showTitle) return actions;
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 780) {
@@ -348,7 +355,11 @@ class PersonalProfileSummaryStrip extends StatelessWidget {
                   if (gameplay!.historicalSeconds > 0)
                     '${strings.text('gameplay.importedTotal')}: '
                         '${_formatPlaytime(context, gameplay.historicalSeconds ~/ 60)}',
-                  '${strings.text('gameplay.remoteTotal')}: $accountTime',
+                  strings.text('gameplay.deviceStorage'),
+                  withAccountCardTitle(
+                    context,
+                    gameplayAccountTotal(strings, gameplay),
+                  ),
                 ].join('\n'),
         ),
       _SummaryMetric(

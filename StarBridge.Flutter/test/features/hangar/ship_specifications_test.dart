@@ -1,3 +1,5 @@
+import '../../_support/hangar_test_actions.dart';
+
 import '../../_support/development_fixture_path.dart';
 
 import 'dart:async';
@@ -145,7 +147,11 @@ void main() {
         find.byKey(const ValueKey('local-hangar-ship-fixture')),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('local-hangar-ship-fixture')));
+      await openHangarDetails(
+        tester,
+        find.byKey(const ValueKey('local-hangar-ship-fixture')),
+        onStage: () => expect(port.requests, isEmpty),
+      );
       await tester.pumpAndSettle();
       expect(port.requests, hasLength(1));
       expect(find.text('Loading specifications…'), findsOneWidget);
@@ -410,7 +416,10 @@ void main() {
     final port = Port();
     await tester.pumpWidget(app(LocalHangarPage(port: port, onRead: () {})));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('local-hangar-ship-fixture')));
+    await openHangarDetails(
+      tester,
+      find.byKey(const ValueKey('local-hangar-ship-fixture')),
+    );
     await tester.pumpAndSettle();
     port.requests.single.complete(specs);
     await tester.pumpAndSettle();
@@ -422,10 +431,12 @@ void main() {
       final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
       expect(bytes.lengthInBytes, greaterThan(1000));
       final file = File(
-        developmentFixturePath(const String.fromEnvironment(
-          'SHIP_SPEC_REVIEW_PATH',
-          defaultValue: 'Star-Bridge/.artifacts/scm-ship-details-20261015/detail-review.png',
-        )),
+        developmentFixturePath(
+          const String.fromEnvironment(
+            'SHIP_SPEC_REVIEW_PATH',
+            defaultValue: 'Star-Bridge/.artifacts/scm-ship-details-20261015/detail-review.png',
+          ),
+        ),
       );
       await file.parent.create(recursive: true);
       await file.writeAsBytes(bytes.buffer.asUint8List());
@@ -440,8 +451,9 @@ void main() {
         'SHIP_SPEC_REVIEW_PATH',
         defaultValue: 'Star-Bridge/.artifacts/scm-ship-details-20261015/detail-review.png',
       );
-      await File(developmentFixturePath(path).replaceFirst('.png', '-expanded.png'))
-          .writeAsBytes(bytes.buffer.asUint8List());
+      await File(
+        developmentFixturePath(path).replaceFirst('.png', '-expanded.png'),
+      ).writeAsBytes(bytes.buffer.asUint8List());
       image.dispose();
     });
   });

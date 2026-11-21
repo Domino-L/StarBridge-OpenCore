@@ -4,8 +4,12 @@ using StarBridge.NativeBridge;
 
 namespace StarBridge.HostRuntime.Account;
 
-internal sealed partial class ScmAccountBridgeHost : IGameplayTimeResetRemote, IGameplayHistoryRemote
+internal sealed partial class ScmAccountBridgeHost : IGameplayTimeResetRemote, IGameplayHistoryRemote, IGameplayAccountTotalRemote
 {
+    public Task<GameplayAccountTotal> ReadAccountTotalAsync(BridgeAccountContext context, CancellationToken token) =>
+        WithGameplayRelaySession(context,
+            (bearer, ct) => _legacyPasswordLogin!.ReadGameplayAccountTotalAsync(bearer, ct), token);
+
     public Task<GameplayTimeResetState> ReadAsync(BridgeAccountContext context, CancellationToken token) =>
         WithGameplayRelaySession(context, (bearer, ct) => _legacyPasswordLogin!.ReadGameplayResetAsync(bearer, ct), token);
 

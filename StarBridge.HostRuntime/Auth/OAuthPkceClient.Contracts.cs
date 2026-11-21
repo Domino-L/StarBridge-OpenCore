@@ -8,6 +8,11 @@ namespace StarBridge.HostRuntime.Auth;
 
 public sealed partial class OAuthPkceClient
 {
+    private readonly MarketplaceContractReferences _contractRefs = new();
+    private readonly SemaphoreSlim _contractProfileGate = new(1, 1);
+    // Reputation changes over time: re-read the profile after five minutes (C review P2).
+    private (string Owner, long? Reputation, DateTimeOffset At)? _contractProfile;
+
     /// <summary>One SCM app-api call for the trading hall: 401 requires sign-in; only explicit scope denial requires reauthorization.
     /// Specific business refusals retain their stable codes. Writes go once; callers reconcile by reading again.</summary>
     private async Task<JsonElement> HallSendAsync(ScmOAuthSession active, string area, string op, HttpMethod method, string path,
@@ -47,12 +52,12 @@ public sealed partial class OAuthPkceClient
         ScmOAuthSession session, JsonElement input, Func<bool> current, CancellationToken token)
     {
         string[] allowed = ["schemaVersion", "operation", "id", "page", "type", "status", "keyword", "scope", "message",
-            "reason", "evidence", "participantId", "rating", "comment", "contract"];
+            "reason", "evidence", "participantRef", "rating", "comment", "contract"];
         if (input.ValueKind != JsonValueKind.Object || input.GetRawText().Length > 8192 ||
             input.EnumerateObject().Any(p => !allowed.Contains(p.Name)))
             throw new AccountBridgeHostException("marketplace.invalid_request");
         var op = MarketplaceTradePolicy.Text(input, "operation") ?? "";
-        var write = op is "create" or "apply" or "quit" or "start" or "complete" or "cancel" or "review" or "dispute";
+        var write = op is "create" or "apply" or "quit" or "start" or "complete" or "cancel" or "review" or "dispute" or "remove";
         if (!write && op is not ("list" or "mine" or "detail")) throw new AccountBridgeHostException("marketplace.invalid_request");
         var page = MarketplaceTradePolicy.Number(input, "page") ?? 1;
         if (page is < 1 or > 10000) throw new AccountBridgeHostException("marketplace.invalid_request");
@@ -64,6 +69,7 @@ public sealed partial class OAuthPkceClient
         if (!active.Capabilities.Contains(write ? "trade.write" : "trade.read", StringComparer.Ordinal))
             throw new AccountBridgeHostException("marketplace.reauthorize_required");
         var owner = active.AuthorityId + "\n" + active.Subject;
+        _contractRefs.Touch(owner);
         string? Chat(long member) => ChatPeerReference(owner, member);
         Task<JsonElement> Send(HttpMethod method, string path, object? body = null) =>
             HallSendAsync(active, "marketplace-contracts", op, method, path, body, current, token);
@@ -97,10 +103,40 @@ public sealed partial class OAuthPkceClient
             return query;
         }
 
+        var self = GetSelfMemberId(owner);
+        long? reputation = null;
+        if (!write)
+        {
+            await _contractProfileGate.WaitAsync(token);
+            try
+            {
+                self = GetSelfMemberId(owner);
+                if (self == 0 || _contractProfile is not { } known || known.Owner != owner ||
+                    DateTimeOffset.UtcNow - known.At > TimeSpan.FromMinutes(5))
+                {
+                    var profile = await Send(HttpMethod.Get, "member/user/get");
+                    self = CacheSelfMemberId(owner, profile);
+                    reputation = profile.TryGetProperty("reputation", out var rep) && rep.ValueKind == JsonValueKind.Number
+                        && rep.TryGetInt64(out var value) ? value : null;
+                    _contractProfile = (owner, reputation, DateTimeOffset.UtcNow);
+                }
+                else reputation = _contractProfile.Value.Reputation;
+            }
+            finally { _contractProfileGate.Release(); }
+        }
+        Dictionary<string, object?> Project(JsonElement row) => MarketplaceContracts.Contract(row, Chat, self, reputation);
+        object Person(JsonElement row, long contractId) => MarketplaceContracts.Participant(row, Chat,
+            pid => _contractRefs.Reference(owner, contractId, pid));
+        static JsonElement Viewer(JsonElement people) => people.ValueKind == JsonValueKind.Object &&
+            people.TryGetProperty("extra", out var extra) && extra.ValueKind == JsonValueKind.Object &&
+            extra.TryGetProperty("viewerParticipant", out var me) && me.ValueKind == JsonValueKind.Object ? me : default;
+        static JsonElement[] People(JsonElement people) => people.ValueKind == JsonValueKind.Object &&
+            people.TryGetProperty("list", out var list) && list.ValueKind == JsonValueKind.Array ? list.EnumerateArray().Take(50).ToArray() : [];
+
         switch (op)
         {
             case "list":
-                return (Page(await Send(HttpMethod.Get, "trade/contract/page?" + Filters()), row => MarketplaceContracts.Contract(row, Chat)), active);
+                return (Page(await Send(HttpMethod.Get, "trade/contract/page?" + Filters()), row => Project(row)), active);
             case "mine":
             {
                 var scope = Text("scope", 20) switch
@@ -109,7 +145,20 @@ public sealed partial class OAuthPkceClient
                     "participated" => "&mineScope=PARTICIPATED",
                     _ => throw new AccountBridgeHostException("marketplace.invalid_request"),
                 };
-                return (Page(await Send(HttpMethod.Get, "trade/contract/my-page?" + Filters() + scope), row => MarketplaceContracts.Contract(row, Chat)), active);
+                var data = await Send(HttpMethod.Get, "trade/contract/my-page?" + Filters() + scope);
+                var rows = new List<object>();
+                foreach (var row in People(data))
+                {
+                    var projected = Project(row);
+                    var mine = projected["mine"] is true;
+                    var status = MarketplaceTradePolicy.Number(row, "status");
+                    projected["attention"] = mine && (status == 1 || status == 2 && MarketplaceTradePolicy.Number(row, "currentParticipants") > 0);
+                    projected["attentionComplete"] = true;
+                    // No per-row participant reads here (one SCM request per completed contract on every
+                    // list load). "待我评价" is shown on the contract's own detail, which reads participants once.
+                    rows.Add(projected);
+                }
+                return (new { rows, total = MarketplaceTradePolicy.Number(data, "total") ?? 0 }, active);
             }
             case "detail":
             {
@@ -119,16 +168,17 @@ public sealed partial class OAuthPkceClient
                 var participants = Send(HttpMethod.Get, $"trade/contract/participants/page?contractId={id}&pageNo=1&pageSize=50");
                 await Task.WhenAll(contract, milestones, participants);
                 var people = participants.Result;
-                var viewer = people.ValueKind == JsonValueKind.Object && people.TryGetProperty("extra", out var extra) &&
-                             extra.ValueKind == JsonValueKind.Object && extra.TryGetProperty("viewerParticipant", out var me) &&
-                             me.ValueKind == JsonValueKind.Object ? MarketplaceContracts.Participant(me, Chat) : null;
+                var viewer = Viewer(people);
+                var projected = Project(contract.Result);
+                projected["applied"] = viewer.ValueKind == JsonValueKind.Object && MarketplaceTradePolicy.Number(viewer, "status") is 1 or 3 or 4 or 5;
+                projected["myStatus"] = viewer.ValueKind == JsonValueKind.Object ? MarketplaceTradePolicy.Number(viewer, "status") : null;
                 return (new
                 {
-                    contract = MarketplaceContracts.Contract(contract.Result, Chat),
+                    contract = projected,
                     milestones = milestones.Result.ValueKind == JsonValueKind.Array
                         ? milestones.Result.EnumerateArray().Take(50).Select(MarketplaceContracts.Milestone).ToArray() : [],
-                    participants = Page(people, row => MarketplaceContracts.Participant(row, Chat)),
-                    me = viewer,
+                    participants = Page(people, row => Person(row, id)),
+                    me = viewer.ValueKind == JsonValueKind.Object ? Person(viewer, id) : null,
                 }, active);
             }
             case "create":
@@ -141,7 +191,7 @@ public sealed partial class OAuthPkceClient
             {
                 var data = await Send(HttpMethod.Post, "trade/contract/apply",
                     new { contractId = Id(), applyMessage = Text("message", 1000), applyShips = Array.Empty<long>() });
-                return (new { confirmed = true, participantId = Created(data) }, active);
+                return (new { confirmed = true }, active);
             }
             case "quit" or "start" or "complete":
                 await Send(HttpMethod.Post, $"trade/contract/{op}?contractId={Id()}");
@@ -155,10 +205,16 @@ public sealed partial class OAuthPkceClient
                 var data = await Send(HttpMethod.Post, $"trade/contract/dispute/create?contractId={Id()}&reason={Q(Text("reason", 1000, true))}{evidence}");
                 return (new { confirmed = true, disputeId = Created(data) }, active);
             }
+            case "remove":
+            {
+                var participant = _contractRefs.Resolve(owner, Id(), Text("participantRef", 32, true)!);
+                var removed = await Send(HttpMethod.Post, $"trade/contract/participant/remove?participantId={participant}&reason={Q(Text("reason", 200))}");
+                if (removed.ValueKind != JsonValueKind.True) throw new AccountBridgeHostException("marketplace.unavailable");
+                return (new { confirmed = true }, active);
+            }
             default:
             {
-                var participant = input.TryGetProperty("participantId", out var p) && p.TryGetInt64(out var pid) && pid > 0 ? pid
-                    : throw new AccountBridgeHostException("marketplace.invalid_request");
+                var participant = _contractRefs.Resolve(owner, Id(), Text("participantRef", 32, true)!);
                 var rating = MarketplaceTradePolicy.Number(input, "rating") is { } r and >= 1 and <= 5 ? r
                     : throw new AccountBridgeHostException("marketplace.invalid_request");
                 var data = await Send(HttpMethod.Post, "trade/contract/review",

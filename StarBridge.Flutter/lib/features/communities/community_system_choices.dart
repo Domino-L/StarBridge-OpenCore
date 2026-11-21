@@ -6,6 +6,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/interaction/starbridge_action_row.dart';
 import 'community_workspace_image.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// Public bundled system artwork, independent of organization/account media.
 class CommunitySystemChoices extends StatelessWidget {
@@ -103,7 +104,7 @@ class CommunitySystemChoices extends StatelessWidget {
                                     child: Text(
                                       label,
                                       maxLines: 1,
-                                      overflow: TextOverflow.fade,
+                                      overflow: fadeOverflow(context),
                                       softWrap: false,
                                     ),
                                   ),

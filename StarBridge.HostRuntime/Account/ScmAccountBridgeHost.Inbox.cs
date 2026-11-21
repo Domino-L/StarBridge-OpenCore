@@ -18,7 +18,9 @@ internal sealed partial class ScmAccountBridgeHost
     public async Task<object> ReadNotificationInboxAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
     {
         var allowScmCache = AccountSafetyRequest.InboxRead(payload);
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var session = RequireRelaySession(context);
         var generation = Generation;
@@ -65,7 +67,9 @@ internal sealed partial class ScmAccountBridgeHost
         var session = await ReadDirectRelaySessionAsync(context, token).ConfigureAwait(false);
         void Current() {
             token.ThrowIfCancellationRequested();
-            if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+            if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+                throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
                 throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
             if (_disposed || lease is null || lease.Owner != context || lease.Generation != Generation ||
                 lease.Expires <= DateTimeOffset.UtcNow || !ReferenceEquals(lease, _inboxLease))

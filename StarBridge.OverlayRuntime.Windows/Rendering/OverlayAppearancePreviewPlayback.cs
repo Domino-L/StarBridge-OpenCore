@@ -60,8 +60,8 @@ internal sealed partial class OverlayAppearancePreviewSurface
                 if (_notice is { } old) _hud.ClearLiveCommunicationEvent(old);
                 var id = Guid.NewGuid();
                 var zh = _frame.Language.StartsWith("zh", StringComparison.Ordinal);
-                if (!_hud.TryShowLiveCommunicationEvent(id, zh ? "公告 · 预览示例" : "Notice · preview example",
-                    zh ? "这是一条示例公告，不是实际舰队消息。" : "Example announcement, not a real fleet message.")) return false;
+                if (!_hud.TryShowLiveCommunicationEvent(id, zh ? "召集与提醒 · 预览示例" : "Rally & reminder · preview example",
+                    zh ? "这是一条示例提醒，不是实际舰队消息。" : "Example reminder, not a real fleet message.")) return false;
                 _notice = id;
                 return true;
             case OverlayAppearancePreviewPlayback.NoticeHide:

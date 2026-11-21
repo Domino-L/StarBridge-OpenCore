@@ -7,9 +7,9 @@ const guideEmptyWords = <String, (String, String, String)>{
     'Open the RSI hangar, sign in and expand your account by clicking the avatar, then start reading. You check the ships before anything is saved.',
   ),
   'empty.hangar.note': (
-    '登录状态只留在这台电脑上。只是读取，不会买、送或回收任何东西。',
-    '登入狀態只留在這台電腦上。只是讀取，不會買、送或回收任何東西。',
-    'Sign-in stays on this computer. Reading never buys, gifts or melts anything.',
+    '要不要在这台电脑上记住 RSI 登录，可以在读取页上选。只是读取，不会买、送或回收任何东西。',
+    '要不要在這台電腦上記住 RSI 登入，可以在讀取頁上選。只是讀取，不會買、送或回收任何東西。',
+    'Choose on the reader page whether to remember your RSI sign-in on this computer. Reading never buys, gifts or melts anything.',
   ),
   'empty.hangar.primary': ('读取机库', '讀取機庫', 'Read hangar'),
   'empty.fleet.title': ('还没有主舰队', '還沒有主艦隊', 'No main fleet yet'),

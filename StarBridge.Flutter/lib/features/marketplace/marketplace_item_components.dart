@@ -5,6 +5,7 @@ import 'marketplace_surfaces.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'marketplace_display_copy.dart';
 import '../../shared/remote_image.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart'
     show InteractionSource;
@@ -47,7 +48,7 @@ Widget itemKv(
         child: Text(
           value,
           maxLines: 1,
-          overflow: TextOverflow.fade,
+          overflow: fadeOverflow(context),
           softWrap: false,
           textAlign: TextAlign.right,
           style: TextStyle(
@@ -68,11 +69,16 @@ class ItemOfferColumns extends StatelessWidget {
     required this.cells,
     required this.quality,
     required this.action,
+    this.buy = false,
   });
 
   /// avatar, trader, location, hours, quality, quantity, price, action.
   final List<Widget> cells;
   final bool quality, action;
+
+  /// Buy offers show the fused "需要｜≥tier" tag, which needs a wider
+  /// quality column than the sell tab's plain grade (user choice 11-12).
+  final bool buy;
   @override
   Widget build(BuildContext context) => Row(
     children: [
@@ -87,7 +93,7 @@ class ItemOfferColumns extends StatelessWidget {
       Expanded(flex: 2, child: cells[3]),
       if (quality)
         SizedBox(
-          width: 64,
+          width: buy ? 112 : 64,
           child: Align(alignment: Alignment.centerLeft, child: cells[4]),
         ),
       SizedBox(width: 44, child: cells[5]),
@@ -215,7 +221,7 @@ class ItemRelatedRow extends StatelessWidget {
               child: Text(
                 label,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
                 style: const TextStyle(fontSize: 13),
               ),
@@ -233,7 +239,7 @@ class ItemRelatedRow extends StatelessWidget {
 }
 
 /// Offer filter row: presence, minimum quality, location and price direction.
-/// Every choice is sent to SCM; nothing is filtered on the loaded page alone.
+/// Buy quality requirements are filtered on the loaded rows.
 class ItemOfferFilters extends StatelessWidget {
   const ItemOfferFilters(this.c, {super.key});
   final MarketplaceController c;
@@ -294,6 +300,15 @@ class ItemOfferFilters extends StatelessWidget {
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          // 单件 / 清单: single-item offers, or checklists containing this item.
+          for (final checklist in [false, true])
+            ItemFilterChip(
+              key: ValueKey(('market-offer-kind', checklist)),
+              label: marketText(context, checklist ? 'checklist' : 'single'),
+              active: c.offerChecklist == checklist,
+              onTap: () => c.setOfferChecklist(checklist),
+            ),
+          const SizedBox(width: 8),
           for (final (value, key) in [
             ('', 'allTraders'),
             ('1', 'online'),
@@ -308,14 +323,19 @@ class ItemOfferFilters extends StatelessWidget {
                 value.isEmpty || (status ?? '') == value ? null : value,
               ),
             ),
+          if (!c.offerChecklist)
           menu(
-            quality == null
+            c.itemTab == 1
+                ? quality == null ? marketDisplayText(context, 'myQuality')
+                    : marketDisplayText(context, 'buyCeiling', n: quality)
+                : quality == null
                 ? marketText(context, 'qualityAtLeast')
                 : '${marketText(context, 'qualityAtLeast')} $quality',
             active: quality != null,
             items: [
               ('', marketText(context, 'anyQuality')),
-              for (final q in ['200', '400', '600', '800']) (q, '≥ $q'),
+              for (final q in ['200', '400', '600', '800'])
+                (q, c.itemTab == 1 ? marketDisplayText(context, 'buyCeiling', n: q) : '≥ $q'),
             ],
             onSelected: (v) =>
                 c.setOfferFilter('minQuality', v.isEmpty ? null : v),
@@ -341,7 +361,7 @@ class ItemOfferFilters extends StatelessWidget {
               );
             },
           ),
-          if (c.offerFilters.isNotEmpty || c.offerSortField != 'price')
+          if (c.offerFilters.keys.any((key) => key != 'displayType') || c.offerSortField != 'price')
             marketButtonAction(
               key: const Key('market-offer-clear-filters'),
               TextButton(
@@ -530,7 +550,7 @@ class ItemRelatedChip extends StatelessWidget {
                 child: Text(
                   label,
                   maxLines: 1,
-                  overflow: TextOverflow.fade,
+                  overflow: fadeOverflow(context),
                   softWrap: false,
                   style: const TextStyle(fontSize: 12.5),
                 ),

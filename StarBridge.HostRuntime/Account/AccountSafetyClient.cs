@@ -28,6 +28,7 @@ internal sealed partial class AccountSafetyClient : IDisposable
             throw new ArgumentException("A trusted Relay origin is required.", nameof(origin));
         _origin = origin;
         _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal async Task<AccountSafetyView> ReadAsync(string bearer, CancellationToken token)

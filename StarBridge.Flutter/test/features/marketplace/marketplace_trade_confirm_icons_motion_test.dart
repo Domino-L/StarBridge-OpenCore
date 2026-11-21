@@ -67,17 +67,20 @@ void main() {
             findsNWidgets(3),
             reason: 'Trade confirmation icons must participate in the selected interaction suite.',
           );
+          final locationShift = Offset(0, -tester.getSize(find.byKey(const Key('market-confirm-location-row'))).height / 2);
           expect(
             tester.getRect(target('quantity-add')),
-            const Rect.fromLTRB(619, 271.5, 659, 309.5),
+            const Rect.fromLTRB(619, 271.5, 659, 309.5).shift(locationShift),
           );
           expect(
             tester.getRect(target('quantity-remove')),
-            const Rect.fromLTRB(543, 271.5, 583, 309.5),
+            const Rect.fromLTRB(543, 271.5, 583, 309.5).shift(locationShift),
           );
+          // m99 C/D: the quantity row adds one line to the centred dialog, so
+          // the header moves up 12.5; the quantity stepper column does not.
           expect(
             tester.getRect(target('close')),
-            const Rect.fromLTRB(612, 204.5, 660, 252.5),
+            const Rect.fromLTRB(612, 204.5, 660, 252.5).shift(locationShift).shift(const Offset(0, -12.5)),
           );
           expect(
             tester
@@ -95,10 +98,10 @@ void main() {
           );
           await tester.tap(target('quantity-add'));
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           await tester.tap(target('quantity-add'));
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '3');
+          expect(tester.widget<Text>(quantityText()).data, '3 件');
           expect(
             tester
                 .getSemantics(target('quantity-add'))
@@ -108,7 +111,7 @@ void main() {
           );
           await tester.tap(target('quantity-add'), warnIfMissed: false);
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '3');
+          expect(tester.widget<Text>(quantityText()).data, '3 件');
           tester
               .widget<IconButton>(nativeIcon('quantity-remove'))
               .focusNode!
@@ -116,7 +119,7 @@ void main() {
           await tester.pump();
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           final node = tester.getSemantics(target('quantity-remove'));
           expect(
             node.getSemanticsData().hasAction(SemanticsAction.tap),
@@ -125,7 +128,7 @@ void main() {
           tester.binding.renderViews.single.owner!.semanticsOwner!
               .performAction(node.id, SemanticsAction.tap);
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '1');
+          expect(tester.widget<Text>(quantityText()).data, '1 件');
           await tester.pumpWidget(
             surface(controller, suite, trigger, reduce: true),
           );
@@ -137,7 +140,7 @@ void main() {
           );
           await tester.tap(target('quantity-add'));
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           expect(port.writes, 0);
           expect(port.reads, 0);
           await tester.tap(target('close'));
@@ -172,7 +175,7 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(target('quantity-add'));
           await tester.pump();
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           pending = controller.trades.submit('create', {
             'orderNumber': 'SYNTHETIC',
             'number': 2,
@@ -188,13 +191,13 @@ void main() {
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pump();
           expect(find.byType(Dialog), findsOneWidget);
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           expect(port.writes, 1);
           gate.complete({'transactionNumber': 'T1', 'confirmed': true});
           expect(await pending, 'T1');
           await tester.pumpAndSettle();
           expect(controller.trades.pending, isFalse);
-          expect(tester.widget<Text>(quantityText()).data, '2');
+          expect(tester.widget<Text>(quantityText()).data, '2 件');
           expect(
             tester
                 .getSemantics(target('quantity-add'))

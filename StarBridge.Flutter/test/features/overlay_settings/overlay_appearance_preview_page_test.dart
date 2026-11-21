@@ -17,6 +17,7 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_m
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
 
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_port.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_rules.dart';
 import 'package:starbridge_flutter/platform/window/overlay_editor_window_port.dart';
 
 import 'package:starbridge_flutter/features/overlay_settings/overlay_appearance_live_session.dart';
@@ -418,6 +419,8 @@ void main() {
         await tester.pumpAndSettle();
         module.dispose();
       },
+      // 0.7.3 overlay v2: a hidden appearance is no longer previewed (only the visor is offered) until v2.
+      skip: overlayAppearancesHiddenUntilV2.contains(id),
     );
   }
   testWidgets(
@@ -669,7 +672,11 @@ void main() {
       final color = find.byKey(
         const Key('appearance-preview-color-crosshairColor'),
       );
-      await tester.tap(find.byKey(const Key('appearance-preview-crosshair')));
+      // the visor settings above it (11-07: 立体程度, 聊天底框) push the section below a 900-high window
+      final crosshair = find.byKey(const Key('appearance-preview-crosshair'));
+      await tester.ensureVisible(crosshair);
+      await tester.pumpAndSettle();
+      await tester.tap(crosshair);
       await tester.pumpAndSettle();
       await tester.ensureVisible(color);
       await tester.pumpAndSettle();

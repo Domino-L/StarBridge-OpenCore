@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../platform/bridge/bridge_client_session.dart';
 import 'online_installation_port.dart';
 
@@ -6,6 +8,7 @@ final class BridgeOnlineInstallationAdapter implements OnlineInstallationPort {
   static const capability = 'onboarding.onlineInstallation.v1';
   final BridgeClientSession session;
   bool _disposed = false;
+  String? _reportedFailure;
   @override
   bool get supported =>
       !_disposed && session.hostCapabilities.contains(capability);
@@ -46,6 +49,18 @@ final class BridgeOnlineInstallationAdapter implements OnlineInstallationPort {
     if (observed.controlGeneration > generation) {
       session.advanceGeneration(observed.controlGeneration);
     }
+    // Reuse the client diagnostic output. Only validated finite stage/kind
+    // labels reach it; no exception body, identity or path is recorded.
+    final failure = observed.failure;
+    final key = failure == null
+        ? null
+        : '${observed.controlGeneration}/${observed.revision}/${failure.stage}/${failure.kind}';
+    if (key != null && key != _reportedFailure) {
+      debugPrint(
+        'onboarding.onlineInstallation stage=${failure!.stage} kind=${failure.kind}',
+      );
+    }
+    _reportedFailure = key;
     return observed;
   }
 

@@ -37,7 +37,11 @@ Future<OnboardingController> pumpSetup(
   NativeOverlayCheckController? nativeOverlay,
   OnlineReviewController? onlineReview,
 }) async {
-  final fake = port ?? FakeOnboardingPort(observation ?? facts());
+  final fake =
+      port ??
+      FakeOnboardingPort(
+        observation ?? facts(confirmed: step == OnboardingStep.mode),
+      );
   if (mode == OnboardingMode.online && !fake.facts.onlineSetupPending) {
     await fake.execute(
       OnboardingAction.applyMode,
@@ -156,14 +160,14 @@ void main() {
   }
 
   testWidgets('local selection never triggers a login request', (tester) async {
-    final port = FakeOnboardingPort(facts(signedIn: false));
+    final port = FakeOnboardingPort(facts(signedIn: false, confirmed: true));
     final c = await pumpSetup(tester, step: OnboardingStep.mode, port: port);
     await tester.tap(find.byKey(const Key('onboarding-mode-local')));
     await tester.pump();
     expect(c.value.mode, OnboardingMode.local);
     await tester.tap(find.byKey(const Key('onboarding-next')));
     await tester.pump();
-    expect(c.value.step, OnboardingStep.log);
+    expect(c.value.step, OnboardingStep.local);
     expect(port.actions, isEmpty);
   });
 
@@ -264,7 +268,7 @@ void main() {
   });
 
   testWidgets('keyboard can select local mode and continue', (tester) async {
-    final port = FakeOnboardingPort(facts(signedIn: false));
+    final port = FakeOnboardingPort(facts(signedIn: false, confirmed: true));
     final c = await pumpSetup(tester, step: OnboardingStep.mode, port: port);
     // Follow the actual native tab order: close action, then the radio group.
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
@@ -302,7 +306,7 @@ void main() {
 
   for (final capture
       in <String, (OnboardingStep, OnboardingMode?, OnboardingFacts)>{
-        'mode-dark': (OnboardingStep.mode, null, facts()),
+        'mode-dark': (OnboardingStep.mode, null, facts(confirmed: true)),
         'identity-dark': (
           OnboardingStep.identity,
           OnboardingMode.local,
@@ -334,6 +338,20 @@ void main() {
             : AppearanceMode.dark,
       );
       if (!const bool.fromEnvironment('STARBRIDGE_PUBLIC_SOURCE')) {
+        if (capture.key == 'mode-dark') {
+          // This isolated update is the first page to decode brand assets.
+          // pumpAndSettle can finish before asynchronous image decoding.
+          await tester.runAsync(() async {
+            final capture = find.byKey(const Key('onboarding-capture'));
+            final context = tester.element(capture);
+            for (final image in tester.widgetList<Image>(
+              find.descendant(of: capture, matching: find.byType(Image)),
+            )) {
+              await precacheImage(image.image, context);
+            }
+          });
+          await tester.pumpAndSettle();
+        }
         await expectLater(
           find.byKey(const Key('onboarding-capture')),
           matchesGoldenFile('goldens/${capture.key}.png'),

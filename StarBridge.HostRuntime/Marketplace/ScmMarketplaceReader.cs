@@ -33,6 +33,17 @@ internal sealed partial class ScmMarketplaceReader : IDisposable
         object value;
         switch (operation)
         {
+            case "order":
+                if (!Regex.IsMatch(keyword, @"\A[A-Za-z0-9-]{1,64}\z"))
+                    throw new ArgumentException("Invalid order number.");
+                var order = await Get("sc/orders/get?orderNumber=" + Uri.EscapeDataString(keyword) + "&language=" + language, ct);
+                // SCM looks the number up with LIKE '%…%': only an exact match is this order.
+                if (order.ValueKind != JsonValueKind.Object || Text(order, "orderNumber") != keyword)
+                    throw new JsonException("Invalid public order.");
+                var fullOrder = (Dictionary<string, object?>)Quote(order, traderReference);
+                fullOrder["itemsComplete"] = true;
+                value = fullOrder;
+                break;
             case "marketItems":
             case "marketOrders":
                 value = await Browse(operation, keyword, category, page, language, options, ct, traderReference);
@@ -134,12 +145,15 @@ internal sealed partial class ScmMarketplaceReader : IDisposable
         return new { schemaVersion = 1, readAt = DateTimeOffset.UtcNow, data = value };
     }
 
-    /// <summary>Per-item offer page. Only presence, location, minimum quality and price direction may vary; everything else is fixed.</summary>
+    /// <summary>Per-item offer page. Only presence, location, minimum quality, price direction and single-or-checklist
+    /// may vary; everything else is fixed. Barter (displayType 3) never joins a priced offer list.</summary>
     internal static string OfferQuery(long id, int side, int page, string language, JsonElement options)
     {
         var values = BrowseOptions(options);
-        if (values.Keys.Any(k => k is not ("creatorStatus" or "locationId" or "minQuality" or "maxQuality" or "sortOrder")))
+        if (values.Keys.Any(k => k is not ("creatorStatus" or "locationId" or "minQuality" or "maxQuality" or "sortOrder" or "displayType")))
             throw new ArgumentException("Filter is not available for offers.");
+        if (values.TryGetValue("displayType", out var type) && type is not ("1" or "2"))
+            throw new ArgumentException("Offers are single-item or checklist orders.");
         if (values.TryGetValue("minQuality", out var min) && values.TryGetValue("maxQuality", out var max) &&
             int.Parse(min) > int.Parse(max)) throw new ArgumentException("Invalid quality interval.");
         var fields = new Dictionary<string, string>

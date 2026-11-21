@@ -91,7 +91,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         final title = AppStrings.resolve(locale).text('profile.ships.title');
-        for (var count = 1; count <= 4; count++) {
+        // Two hidden modules come back, then one new module reaches the cap of 3.
+        for (var count = 1; count <= 3; count++) {
           await tester.tap(find.byType(PersonalProfileAddModuleButton));
           await tester.pumpAndSettle();
           final entries = tester

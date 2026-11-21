@@ -67,6 +67,7 @@ class _StatusPort extends _Port implements PrivacyPublicationPort {
   Future<PrivacyPublicationView> publication(
     String action, {
     int? revision,
+    bool firstOfficialDefault = false,
   }) async {
     requests.add(action);
     if (failRead) throw StateError('synthetic status unavailable');

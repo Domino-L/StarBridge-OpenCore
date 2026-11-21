@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'privacy_read_retry.dart';
+
 enum RecentlyPlayedPrivacyAvailability {
   loading,
   available,
@@ -13,6 +15,7 @@ enum RecentlyPlayedPrivacyOperation { none, saving }
 
 enum RecentlyPlayedPrivacyFailure {
   hostUnavailable,
+  capabilityMissing,
   identityUnavailable,
   readFailed,
   writeFailed,
@@ -114,6 +117,7 @@ final class RecentlyPlayedPrivacyModule {
     _subscription = _port.invalidations.listen((_) {
       if (_disposed) return;
       // Identity invalidation must never retain another account's settings.
+      _readRetry.reset();
       _epoch++;
       _reading = false;
       _busy = false;
@@ -126,6 +130,7 @@ final class RecentlyPlayedPrivacyModule {
   }
 
   final RecentlyPlayedPrivacyPort _port;
+  final _readRetry = PrivacyReadRetry();
   final ValueNotifier<RecentlyPlayedPrivacyProjection> projection =
       ValueNotifier(
         const RecentlyPlayedPrivacyProjection(
@@ -146,6 +151,14 @@ final class RecentlyPlayedPrivacyModule {
     await refresh();
   }
 
+  Future<void> refreshIfUnavailable() async {
+    if (!_disposed && _canRetry(projection.value.snapshot)) await refresh();
+  }
+
+  bool _canRetry(RecentlyPlayedPrivacySnapshot snapshot) =>
+      snapshot.availability == RecentlyPlayedPrivacyAvailability.unavailable &&
+      snapshot.failure != RecentlyPlayedPrivacyFailure.capabilityMissing;
+
   Future<void> refresh() async {
     if (_disposed) return;
     if (_busy) {
@@ -153,11 +166,13 @@ final class RecentlyPlayedPrivacyModule {
       return;
     }
     if (_reading) return;
+    _readRetry.cancelPending();
     _reading = true;
     final epoch = _epoch;
     final snapshot = await _port.read();
     if (_disposed || epoch != _epoch) return;
     _reading = false;
+    _readRetry.afterRead(shouldRetry: _canRetry(snapshot), refresh: refresh);
     projection.value = RecentlyPlayedPrivacyProjection(
       snapshot: snapshot,
       failure: snapshot.failure,
@@ -206,6 +221,7 @@ final class RecentlyPlayedPrivacyModule {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _readRetry.reset();
     unawaited(_subscription.cancel());
     projection.dispose();
     unawaited(_port.close());

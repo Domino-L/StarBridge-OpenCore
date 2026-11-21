@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/runtime/frame_governor.dart';
+
 /// QualityPass ⑥ (user 2026-10-29): a single line cut by the end fade shows its
 /// full text when the pointer rests on it.
 ///
 /// One instance sits at the root of a window instead of wrapping each label:
 /// when the mouse rests, it hit-tests the pointer position and looks for a
-/// paragraph set to [TextOverflow.fade] that really is cut. Text that fits and
+/// paragraph set to [fadeOverflow(context)] that really is cut. Text that fits and
 /// multi-line ellipsis body text show nothing. Screen readers already get the
 /// full string from the paragraph, so the tip is excluded from semantics, and
 /// it appears without animation.
@@ -76,7 +78,15 @@ class _FadedNameTipState extends State<FadedNameTip> {
     for (final entry in result.path) {
       final target = entry.target;
       if (target is! RenderParagraph) continue;
-      if (target.overflow != TextOverflow.fade || target.softWrap) return;
+      // Fading names; while a game runs the fleet and trading hall cut them
+      // with an ellipsis instead (light visuals), and those keep their tip.
+      // The tip lives above the pages, so it cannot see their scope: during a
+      // game any one-line ellipsis text gets the tip (review
+      // CX-C-FULL-073-REVIEW2).
+      final cut =
+          target.overflow == TextOverflow.fade ||
+          (target.overflow == TextOverflow.ellipsis && lightVisuals().value);
+      if (!cut || target.softWrap) return;
       if (!target.attached || !target.hasSize) return;
       if (target.getMaxIntrinsicWidth(double.infinity) <=
           target.size.width + 0.5) {
@@ -113,8 +123,12 @@ class _FadedNameTipState extends State<FadedNameTip> {
   Widget build(BuildContext context) {
     final message = _message;
     final anchor = _anchor;
+    // Not `opaque: false`: such a region reports itself as missed, so every
+    // ancestor (the app's TapRegionSurface among them) drops out of the hit
+    // path and no tap anywhere in the window reached "tap outside" — text
+    // fields kept focus and popups stayed open (user report 2026-11-07).
+    // At the window root nothing lies behind it to shadow.
     return MouseRegion(
-      opaque: false,
       onExit: (_) => _hide(),
       child: Listener(
         behavior: HitTestBehavior.translucent,
@@ -184,7 +198,10 @@ class _TipLayout extends SingleChildLayoutDelegate {
   @override
   Offset getPositionForChild(Size size, Size childSize) {
     final maxLeft = size.width - childSize.width - _margin;
-    final left = anchor.left.clamp(_margin, maxLeft < _margin ? _margin : maxLeft);
+    final left = anchor.left.clamp(
+      _margin,
+      maxLeft < _margin ? _margin : maxLeft,
+    );
     final below = anchor.bottom + _gap;
     final top = below + childSize.height + _margin <= size.height
         ? below

@@ -116,7 +116,8 @@ void main() {
     );
     expect(image.compact, isTrue);
     // The preview card (user 2026-10-29): name over the art, three tags, the
-    // owner, the price and the details action; no labelled cells, no glyph.
+    // owner, the price and the details action; no labelled cells. The
+    // silhouette has its own footer slot, never the list's vehicle glyph.
     final card = find.byKey(ValueKey('community-ship-card-${ref(0)}'));
     expect(card, findsOneWidget);
     expect(

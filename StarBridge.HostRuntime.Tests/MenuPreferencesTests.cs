@@ -410,6 +410,41 @@ internal static class MenuPreferencesTests
                 open = new[] { "execHangar" } });
             var saved = store.Save(0, hangarLayout, JsonSerializer.SerializeToElement(settings));
             var restored = new MenuPreferencesStore(root).Read();
+            var hallSettings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(restored.Settings.GetRawText())!;
+            hallSettings["toolbar"] = JsonSerializer.SerializeToElement(new {
+                order = new[] { "marketplace", "browser", "hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "execHangar" },
+                hidden = new[] { "marketplace" }, density = "compact", labels = "iconsOnly" });
+            var hallLayout = JsonSerializer.SerializeToElement(new { version = 1,
+                panels = new[] { new { id = "marketplace", bounds = new[] { 100d, 120, 1180, 760 } } },
+                open = new[] { "marketplace" } });
+            var hallStore = new MenuPreferencesStore(Path.Combine(root, "hall"));
+            hallStore.Save(0, hallLayout, JsonSerializer.SerializeToElement(hallSettings));
+            var hall = new MenuPreferencesStore(Path.Combine(root, "hall")).Read();
+            Require(hall.Layout.GetProperty("open")[0].GetString() == "marketplace" &&
+                hall.Layout.GetProperty("panels")[0].GetProperty("id").GetString() == "marketplace" &&
+                hall.Settings.GetProperty("toolbar").GetProperty("order")[0].GetString() == "marketplace",
+                "trading hall panel and toolbar tool survive restart");
+            var fleetSettings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(restored.Settings.GetRawText())!;
+            fleetSettings["toolbar"] = JsonSerializer.SerializeToElement(new {
+                order = new[] { "officialFleet", "marketplace", "browser", "hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "execHangar" },
+                hidden = new[] { "officialFleet" }, density = "compact", labels = "iconsOnly" });
+            var fleetLayout = JsonSerializer.SerializeToElement(new { version = 1,
+                panels = new[] { new { id = "officialFleet", bounds = new[] { 100d, 120, 1180, 760 } } },
+                open = new[] { "officialFleet" } });
+            var fleetStore = new MenuPreferencesStore(Path.Combine(root, "fleet"));
+            fleetStore.Save(0, fleetLayout, JsonSerializer.SerializeToElement(fleetSettings));
+            var fleet = new MenuPreferencesStore(Path.Combine(root, "fleet")).Read();
+            Require(fleet.Layout.GetProperty("open")[0].GetString() == "officialFleet" &&
+                fleet.Settings.GetProperty("toolbar").GetProperty("order")[0].GetString() == "officialFleet",
+                "main fleet panel and toolbar tool survive restart");
+            var unknownSettings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(restored.Settings.GetRawText())!;
+            unknownSettings["toolbar"] = JsonSerializer.SerializeToElement(new {
+                order = new[] { "browser", "hud", "organizations", "friends", "comms", "rooms", "screenshot", "image", "execHangar", "officialFleet" },
+                hidden = Array.Empty<string>(), density = "compact", labels = "iconsOnly" });
+            var refused = false;
+            try { new MenuPreferencesStore(Path.Combine(root, "gap")).Save(0, fleetLayout, JsonSerializer.SerializeToElement(unknownSettings)); }
+            catch (ArgumentException) { refused = true; }
+            Require(refused, "a saved order cannot skip an older tool while holding a newer one");
             Require(restored.Layout.GetProperty("open")[0].GetString() == "execHangar" &&
                 restored.Layout.GetProperty("panels")[0].GetProperty("id").GetString() == "execHangar",
                 "hangar menu window geometry and opening survive restart without business state");

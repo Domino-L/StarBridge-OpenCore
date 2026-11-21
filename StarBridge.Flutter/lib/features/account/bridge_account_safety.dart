@@ -6,7 +6,7 @@ import '../../platform/bridge/bridge_envelope.dart';
 import 'account_safety.dart';
 
 final class BridgeAccountSafety implements AccountSafetyPort {
-  BridgeAccountSafety(this._session) {
+  BridgeAccountSafety(this._session, {this.scmOnly}) {
     _subscription = _session?.events.listen((event) {
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
@@ -17,6 +17,9 @@ final class BridgeAccountSafety implements AccountSafetyPort {
     });
   }
   final BridgeClientSession? _session;
+
+  /// True for a SCM account without a linked legacy account.
+  final bool Function()? scmOnly;
   StreamSubscription<BridgeEnvelope>? _subscription;
   BridgeRequestOperation? _pending;
   final _invalidations = StreamController<void>.broadcast();
@@ -122,6 +125,8 @@ final class BridgeAccountSafety implements AccountSafetyPort {
       return AccountSafetySnapshot.parse(response.payload);
     } on BridgeClientException catch (error) {
       throw AccountSafetyException(switch (error.code) {
+        'accountSafety.identity_unavailable' when scmOnly?.call() == true =>
+          AccountSafetyFailure.scmOnly,
         'accountSafety.identity_unavailable' ||
         'account.reauthorization_required' => AccountSafetyFailure.signedOut,
         'accountSafety.forbidden' => AccountSafetyFailure.forbidden,

@@ -10,7 +10,9 @@ internal enum OverlaySkinRenderKind
     Default,
     NightShadow,
     Verdict = 3,
-    Installed
+    Installed,
+    // The visor projection appearance (open core, default for the in-game overlay).
+    Visor
 }
 
 internal static class OverlayStartupTransitionPolicy

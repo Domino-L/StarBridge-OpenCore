@@ -128,6 +128,10 @@ public sealed partial class OAuthPkceClient
                 if (result.SelectedContent is { } content && (result.Choices is null || !content.Matches(result.Choices)) ||
                     result.State == "previewed" && selection is { ReplaceAllDisplayContent: false } && result.SelectedContent is null)
                     throw new ScmApiProtocolException("Invalid selected profile content.");
+                // Legacy presentation never invents the new showcase selections.
+                if (result.Presentation?.Content is { } legacyContent)
+                    result = result with { Presentation = result.Presentation with
+                    { Content = legacyContent with { Showcases = null, AchievementShowcase = null, FavoriteShowcaseExtra = null, MainRole = null, FavoriteShowcaseExtras = null } } };
                 return result;
             }
         // The short-lived write grant has no refresh token. Do not refresh it with the ordinary

@@ -17,5 +17,11 @@ public enum FleetEventType
     CombatStateChanged,
     NetworkStateChanged,
     PlayerDowned,
-    PlayerRevived
+    PlayerRevived,
+    ContractAccepted,
+    ContractShared,
+    ContractDefined,
+    ContractObjective,
+    ContractEnded,
+    ContractPlayerJoined
 }

@@ -88,13 +88,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.starbridge" "\0"
-            VALUE "FileDescription", "StarBridge" "\0"
+            VALUE "CompanyName", "SCM StarBridge" "\0"
+            VALUE "FileDescription", "SCM StarBridge" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "starbridge_flutter" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.starbridge. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 SCM StarBridge. All rights reserved." "\0"
             VALUE "OriginalFilename", "starbridge_flutter.exe" "\0"
-            VALUE "ProductName", "StarBridge" "\0"
+            VALUE "ProductName", "SCM StarBridge" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

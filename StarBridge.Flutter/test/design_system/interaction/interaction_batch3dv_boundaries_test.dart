@@ -265,6 +265,13 @@ Future<void> _tap(WidgetTester t, String key) async {
   await t.pump();
 }
 
+Future<void> _adoptSuggestion(WidgetTester t) async {
+  await _tap(t, 'event-sharing-adopt-suggestion');
+  await _frames(t);
+  await _tap(t, 'privacy-sharing-suggestion-confirm');
+  await _frames(t);
+}
+
 void main() {
   setUpAll(fixture.loadFonts);
   for (final suite in InteractionSuite.values) {
@@ -357,7 +364,7 @@ void main() {
 
     for (final discardWhileBusy in [false, true]) {
       testWidgets(
-        '$suite adjacent event review first-use temporary busy discard=$discardWhileBusy retains the correct staging lease',
+        '$suite temporary event refresh leaves first-use settings off, discard=$discardWhileBusy',
         (t) async {
           final host = _Host()..readGate = Completer<void>();
           final drafts = PrivacyPageDrafts();
@@ -371,9 +378,8 @@ void main() {
             expect(page.controller.snapshot?['revision'], 0);
             expect(drafts.dirty, isFalse);
 
-            // The first default callback is queued, but no frame has run.
-            // An ordinary same-owner refresh now makes the owner temporarily
-            // busy while preserving revision, directory and editor identity.
+            // A same-owner refresh makes the editor temporarily busy without
+            // losing its revision or preview.
             host.readGate = Completer<void>();
             final refresh = page.controller.refresh();
             await _microtasks();
@@ -397,21 +403,18 @@ void main() {
             expect(host.reads, hasLength(2));
             expect(host.directories, hasLength(2));
             expect(host.writes, isEmpty);
-            expect(drafts.dirty, !discardWhileBusy);
-            if (!discardWhileBusy) {
-              for (final scope in ['event-room', 'event-A', 'event-B']) {
-                expect(
-                  _scope(t, scope).choice,
-                  const EventSharingChoice(enabled: true, selectedTypes: 47),
-                );
-              }
-              final save = drafts.save();
-              await _frames(t);
-              expect(await save, isTrue);
-              expect(host.writes, hasLength(1));
-              expect(host.writes.single.payload['expectedRevision'], 0);
-              expect(drafts.dirty, isFalse);
+            expect(drafts.dirty, isFalse);
+            for (final scope in ['event-room', 'event-A', 'event-B']) {
+              expect(_scope(t, scope).choice, EventSharingChoice.unconfirmed);
             }
+            await _adoptSuggestion(t);
+            expect(drafts.dirty, isTrue);
+            final save = drafts.save();
+            await _frames(t);
+            expect(await save, isTrue);
+            expect(host.writes, hasLength(1));
+            expect(host.writes.single.payload['expectedRevision'], 0);
+            expect(drafts.dirty, isFalse);
             expect(t.takeException(), isNull);
           } finally {
             await page.close(t);
@@ -430,6 +433,9 @@ void main() {
           final page = _Mounted(host, suite, drafts);
           try {
             await page.mount(t);
+            if (absent) {
+              await _tap(t, 'privacy-scope-event-room-audience-events-enabled');
+            }
             await _tap(t, 'privacy-scope-event-room-field-ship');
             expect(_scope(t, 'event-room').choice.selectedTypes, 43);
             host.loseReceipt = true;
@@ -476,13 +482,13 @@ void main() {
           expect(page.controller.accountKey, isNot(originalOwner));
           expect(page.controller.snapshot?['revision'], 1);
           expect(page.controller.canEdit, isTrue);
-          expect(drafts.dirty, isTrue);
+          // FIX5 (R4 P2): reading back a different account drops the old draft at once.
+          expect(drafts.dirty, isFalse);
           final save = drafts.save();
           await _frames(t);
-          expect(await save, isFalse);
+          await save;
           expect(host.writes, isEmpty);
-          expect(drafts.dirty, isTrue);
-          expect(drafts.failed, isTrue);
+          expect(drafts.dirty, isFalse);
           expect(page.controller.choice(null).enabled, isFalse);
           expect(t.takeException(), isNull);
         } finally {
@@ -515,8 +521,8 @@ void main() {
           host.finishWrite();
           await _frames(t);
           expect(await save, isFalse);
-          expect(drafts.dirty, isTrue);
-          expect(drafts.failed, isTrue);
+          // FIX5 (R4 P2): the new account's readback dropped the old draft; the old receipt is not a success.
+          expect(drafts.dirty, isFalse);
           expect(host.writes, hasLength(1));
           expect(
             host.writes.single.accountContext?.subject,
@@ -533,7 +539,7 @@ void main() {
     );
 
     testWidgets(
-      '$suite absent event settings stage all types and save all scopes exactly once',
+      '$suite editing absent event settings saves only the room once',
       (t) async {
         final host = _Host();
         final drafts = PrivacyPageDrafts();
@@ -543,14 +549,12 @@ void main() {
           expect(host.reads, hasLength(1));
           expect(host.directories, hasLength(1));
           expect(host.writes, isEmpty);
-          expect(drafts.dirty, isTrue);
+          expect(drafts.dirty, isFalse);
           for (final code in ['event-room', 'event-A', 'event-B']) {
-            expect(
-              _scope(t, code).choice,
-              const EventSharingChoice(enabled: true, selectedTypes: 47),
-            );
+            expect(_scope(t, code).choice, EventSharingChoice.unconfirmed);
           }
-          await _tap(t, 'privacy-scope-event-room-field-ship');
+          await _tap(t, 'privacy-scope-event-room-audience-events-enabled');
+          expect(drafts.dirty, isTrue);
           expect(host.writes, isEmpty);
           final save = drafts.save();
           await _frames(t);
@@ -558,11 +562,8 @@ void main() {
           expect(host.writes, hasLength(1));
           expect(host.writes.single.payload['expectedRevision'], 0);
           final settings = host.writes.single.payload['settings'] as Map;
-          expect(settings['room'], {'enabled': true, 'selectedTypes': 43});
-          for (final row in settings['communities'] as List) {
-            expect(row['choice'], {'enabled': true, 'selectedTypes': 47});
-            expect(row['joinedAt'], _joined);
-          }
+          expect(settings['room'], {'enabled': true, 'selectedTypes': 47});
+          expect(settings['communities'], isEmpty);
           expect(drafts.dirty, isFalse);
           expect(t.takeException(), isNull);
         } finally {
@@ -571,6 +572,108 @@ void main() {
       },
       timeout: _timeout,
     );
+
+    testWidgets(
+      '$suite event confirmation omits memberships that arrive while the dialog is open',
+      (t) async {
+        final host = _Host();
+        final drafts = PrivacyPageDrafts();
+        final page = _Mounted(host, suite, drafts);
+        try {
+          await page.mount(t);
+          await _tap(t, 'event-sharing-adopt-suggestion');
+          await _frames(t);
+          final dialog = find.byKey(
+            const Key('privacy-sharing-suggestion-dialog'),
+          );
+          Finder item(String label) =>
+              find.descendant(of: dialog, matching: find.text(label));
+          expect(item('房间事件共享'), findsOneWidget);
+          expect(item('Organization A'), findsOneWidget);
+          expect(item('Organization B'), findsOneWidget);
+          expect(item('全部事件类型'), findsOneWidget);
+          expect(drafts.dirty, isFalse);
+          host.codes.add('C');
+          await page.controller.refresh();
+          await _frames(t);
+          expect(item('Organization C'), findsNothing);
+          expect(drafts.dirty, isFalse);
+          expect(host.writes, isEmpty);
+          await _tap(t, 'privacy-sharing-suggestion-confirm');
+          await _frames(t);
+          expect(_scope(t, 'event-C').choice, EventSharingChoice.unconfirmed);
+          final save = drafts.save();
+          await _frames(t);
+          expect(await save, isTrue);
+          final payload = host.writes.single.payload;
+          expect(payload['expectedRevision'], 0);
+          expect(payload['publicationEnabled'], isTrue);
+          final settings = payload['settings'] as Map;
+          expect(settings['room'], {'enabled': true, 'selectedTypes': 47});
+          final rows = (settings['communities'] as List).cast<Map>();
+          expect(rows.map((row) => row['code']), ['A', 'B']);
+          expect(rows.map((row) => row['joinedAt']), [_joined, _joined]);
+          expect(rows.map((row) => row['choice']), [
+            {'enabled': true, 'selectedTypes': 47},
+            {'enabled': true, 'selectedTypes': 47},
+          ]);
+          expect(page.controller.choice('C'), EventSharingChoice.unconfirmed);
+        } finally {
+          await page.close(t);
+        }
+      },
+      timeout: _timeout,
+    );
+
+    for (final change in [
+      'membership rejoined',
+      'account changed',
+      'draft discarded',
+    ]) {
+      testWidgets('$suite open event confirmation cannot cross $change', (
+        t,
+      ) async {
+        final host = _Host();
+        final drafts = PrivacyPageDrafts();
+        final page = _Mounted(host, suite, drafts);
+        try {
+          await page.mount(t);
+          await _tap(t, 'event-sharing-adopt-suggestion');
+          await _frames(t);
+          expect(
+            find.byKey(const Key('privacy-sharing-suggestion-dialog')),
+            findsOneWidget,
+          );
+          switch (change) {
+            case 'membership rejoined':
+              host.joinedAt = _rejoined;
+              await page.controller.refresh();
+            case 'account changed':
+              host.subject = 'new-owner-while-confirming';
+              await host.accountChanged();
+            case 'draft discarded':
+              drafts.discard();
+          }
+          await _frames(t);
+          await _tap(t, 'privacy-sharing-suggestion-confirm');
+          await _frames(t);
+          expect(drafts.dirty, isFalse);
+          expect(
+            _scope(t, 'event-room').choice,
+            EventSharingChoice.unconfirmed,
+          );
+          expect(_scope(t, 'event-room').canEdit, isTrue);
+          expect(await drafts.save(), isTrue);
+          expect(host.writes, isEmpty);
+          if (change == 'membership rejoined') {
+            expect(find.textContaining('社区成员关系已变化'), findsOneWidget);
+          }
+          expect(t.takeException(), isNull);
+        } finally {
+          await page.close(t);
+        }
+      }, timeout: _timeout);
+    }
 
     testWidgets(
       '$suite explicitly saved event OFF is not absent and never stages default ON',
@@ -636,7 +739,7 @@ void main() {
       timeout: _timeout,
     );
 
-    for (final barrier in ['revision', 'membership stamp']) {
+    for (final barrier in ['revision', 'settings', 'membership stamp']) {
       testWidgets(
         '$suite event draft commit rejects changed $barrier without issuing a mutation',
         (t) async {
@@ -648,6 +751,8 @@ void main() {
             await _tap(t, 'privacy-scope-event-room-field-ship');
             if (barrier == 'revision') {
               host.snapshot = _saved(revision: 2);
+            } else if (barrier == 'settings') {
+              host.snapshot = _saved(off: true);
             } else {
               host.joinedAt = _rejoined;
             }
@@ -655,14 +760,16 @@ void main() {
             await _frames(t);
             expect(
               page.controller.targets!.communities.first.joinedAt,
-              barrier == 'revision' ? _joined : _rejoined,
+              barrier == 'membership stamp' ? _rejoined : _joined,
             );
             final save = drafts.save();
             await _frames(t);
             expect(await save, isFalse);
             expect(host.writes, isEmpty);
-            expect(drafts.dirty, isTrue);
-            expect(drafts.failed, isTrue);
+            expect(drafts.dirty, isFalse);
+            expect(drafts.failed, isFalse);
+            expect(drafts.saveConflicted, isTrue);
+            expect(_scope(t, 'event-room').canEdit, isTrue);
             expect(t.takeException(), isNull);
           } finally {
             await page.close(t);
@@ -791,7 +898,7 @@ void main() {
 
     for (final barrier in ['draft epoch discard', 'saved OFF revision']) {
       testWidgets(
-        '$suite baseline first-use late callback respects $barrier',
+        '$suite first event preview stays clean after $barrier',
         (t) async {
           final host = _Host()..readGate = Completer<void>();
           final drafts = PrivacyPageDrafts();
@@ -813,11 +920,8 @@ void main() {
             }
             await t.pump();
             await _frames(t, count: 2);
-            expect(
-              drafts.dirty,
-              isFalse,
-              reason: 'A queued default must not override an explicit discard or a newer saved OFF.',
-            );
+            expect(drafts.dirty, isFalse);
+            expect(_scope(t, 'event-room').choice.enabled, isFalse);
             expect(host.writes, isEmpty);
             expect(t.takeException(), isNull);
           } finally {
@@ -837,6 +941,7 @@ void main() {
         final page = _Mounted(host, suite, drafts);
         try {
           await page.mount(t);
+          await _adoptSuggestion(t);
           final first = drafts.save();
           await _frames(t);
           expect(await first, isFalse);
@@ -866,23 +971,24 @@ void main() {
       tags: [_baselineTag],
     );
 
-    for (final mismatch in [
-      'room settings',
-      'organization settings',
-      'exact membership timestamp',
-      'read remains unconfirmed',
-      'different account',
-      'publication status unconfirmed',
-      'publication enabled contradiction',
-    ]) {
+    for (final MapEntry(key: mismatch, value: conflict) in const {
+      'room settings': true,
+      'organization settings': true,
+      'exact membership timestamp': true,
+      'read remains unconfirmed': false,
+      'different account': false,
+      'publication status unconfirmed': false,
+      'publication enabled contradiction': true,
+    }.entries) {
       testWidgets(
-        '$suite first-use readback guard rejects $mismatch without clearing draft or replay',
+        '$suite first-use readback rejects $mismatch without replay (conflict=$conflict)',
         (t) async {
           final host = _Host()..loseReceipt = true;
           final drafts = PrivacyPageDrafts();
           final page = _Mounted(host, suite, drafts);
           try {
             await page.mount(t);
+            await _adoptSuggestion(t);
             final first = drafts.save();
             await _frames(t);
             expect(await first, isFalse);
@@ -935,12 +1041,48 @@ void main() {
               expect(page.controller.error, isNull);
               expect(page.controller.snapshot?['revision'], 1);
             }
+            final ownerChanged = mismatch == 'different account';
+            if (ownerChanged) {
+              expect(drafts.dirty, isFalse);
+              expect(
+                drafts.conflict('event-choices'),
+                PrivacyDraftConflict.savedElsewhere,
+              );
+              expect(_scope(t, 'event-room').canEdit, isTrue);
+            }
             final retry = drafts.save();
             await _frames(t);
-            expect(await retry, isFalse);
-            expect(drafts.dirty, isTrue);
-            expect(drafts.failed, isTrue);
+            expect(await retry, ownerChanged);
+            expect(drafts.dirty, !conflict && !ownerChanged);
+            expect(drafts.failed, !conflict && !ownerChanged);
+            expect(drafts.saveConflicted, conflict);
             expect(host.writes, hasLength(1));
+            if (mismatch == 'publication status unconfirmed') {
+              expect(_scope(t, 'event-room').canEdit, isTrue);
+              expect(find.textContaining('事件共享的发布状态尚未确认。'), findsOneWidget);
+              final previous = host.writes.single.payload;
+              await _tap(t, 'privacy-scope-event-room-field-ship');
+              final pending = drafts.value<Map<String?, EventSharingChoice>>(
+                'event-choices',
+                const {},
+              );
+              expect(pending[null]!.selectedTypes, 43);
+              expect(host.writes, hasLength(1));
+              final save = drafts.save();
+              await _frames(t);
+              expect(await save, isTrue);
+              expect(host.writes, hasLength(2));
+              final fresh = host.writes.last.payload;
+              expect(fresh['expectedRevision'], 1);
+              expect(fresh['operationId'], isNot(previous['operationId']));
+              expect((fresh['settings'] as Map)['room'], {
+                'enabled': true,
+                'selectedTypes': 43,
+              });
+              expect(drafts.dirty, isFalse);
+              expect(drafts.failed, isFalse);
+              expect(find.textContaining('事件共享的发布状态尚未确认。'), findsOneWidget);
+            }
             expect(t.takeException(), isNull);
           } finally {
             await page.close(t);
@@ -952,7 +1094,7 @@ void main() {
     }
 
     testWidgets(
-      '$suite baseline dirty event draft tolerates newly joined target while guarding stale save',
+      '$suite saved event draft reports a changed directory and can be edited and saved again',
       (t) async {
         final host = _Host()..snapshot = _saved();
         final drafts = PrivacyPageDrafts();
@@ -960,6 +1102,11 @@ void main() {
         try {
           await page.mount(t);
           await _tap(t, 'privacy-scope-event-room-field-ship');
+          var otherWrites = 0;
+          drafts.edit('other-card', 0, 1, (value) async {
+            otherWrites++;
+            return true;
+          });
           host.codes.add('C');
           await page.controller.refresh();
           await t.pump();
@@ -980,7 +1127,38 @@ void main() {
           await _frames(t);
           expect(await save, isFalse);
           expect(host.writes, isEmpty);
+          expect(
+            drafts.value<Map<String?, EventSharingChoice>?>(
+              'event-choices',
+              null,
+            ),
+            isNull,
+          );
           expect(drafts.dirty, isTrue);
+          expect(drafts.value('other-card', 0), 1);
+          expect(otherWrites, 0);
+          expect(drafts.saveConflicted, isTrue);
+          expect(drafts.failed, isFalse);
+          expect(find.textContaining('社区成员关系已变化'), findsOneWidget);
+          expect(_scope(t, 'event-room').canEdit, isTrue);
+          expect(_scope(t, 'event-room').choice.selectedTypes, 47);
+          expect(
+            find.byKey(const Key('event-sharing-adopt-suggestion')),
+            findsNothing,
+          );
+          await _tap(t, 'privacy-scope-event-room-field-ship');
+          final fresh = drafts.save();
+          await _frames(t);
+          expect(await fresh, isTrue);
+          final payload = host.writes.single.payload;
+          expect(payload['expectedRevision'], 1);
+          final settings = payload['settings'] as Map;
+          expect(settings['room'], {'enabled': true, 'selectedTypes': 43});
+          final rows = (settings['communities'] as List).cast<Map>();
+          expect(rows.map((row) => row['code']), ['A', 'B', 'C']);
+          expect(rows.last['choice'], EventSharingChoice.unconfirmed.toJson());
+          expect(drafts.dirty, isFalse);
+          expect(otherWrites, 1);
         } finally {
           await page.close(t);
         }
@@ -990,18 +1168,19 @@ void main() {
     );
 
     testWidgets(
-      '$suite first-use postframe membership replacement retires queued old defaults',
+      '$suite changed membership drops the adopted event draft and allows a fresh edit',
       (t) async {
-        final host = _Host()..readGate = Completer<void>();
+        final host = _Host();
         final drafts = PrivacyPageDrafts();
         final page = _Mounted(host, suite, drafts);
         try {
-          await page.mount(t, settle: false);
-          host.finishRead();
-          await _microtasks();
-          expect(page.controller.canEdit, isTrue);
-          expect(drafts.dirty, isFalse);
+          await page.mount(t);
+          await _adoptSuggestion(t);
+          expect(drafts.dirty, isTrue);
           host.joinedAt = _rejoined;
+          host.codes
+            ..remove('B')
+            ..add('C');
           await page.controller.refresh();
           expect(
             page.controller.targets!.communities.first.joinedAt,
@@ -1009,8 +1188,29 @@ void main() {
           );
           await t.pump();
           await _frames(t, count: 2);
-          expect(drafts.dirty, isFalse);
+          expect(_scope(t, 'event-A').choice, EventSharingChoice.unconfirmed);
+          expect(_scope(t, 'event-room').canEdit, isFalse);
+          expect(await drafts.save(), isFalse);
           expect(host.writes, isEmpty);
+          await _frames(t);
+          expect(drafts.dirty, isFalse);
+          expect(_scope(t, 'event-room').canEdit, isTrue);
+          expect(_scope(t, 'event-A').choice, EventSharingChoice.unconfirmed);
+          expect(_scope(t, 'event-C').choice, EventSharingChoice.unconfirmed);
+          expect(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is EventScopeEditor && widget.scopeKey == 'event-B',
+            ),
+            findsNothing,
+          );
+          await _tap(t, 'privacy-scope-event-room-audience-events-enabled');
+          final save = drafts.save();
+          await _frames(t);
+          expect(await save, isTrue);
+          final settings = host.writes.single.payload['settings'] as Map;
+          expect(settings['room'], {'enabled': true, 'selectedTypes': 47});
+          expect(settings['communities'], isEmpty);
           expect(t.takeException(), isNull);
         } finally {
           await page.close(t);
@@ -1020,7 +1220,7 @@ void main() {
     );
 
     testWidgets(
-      '$suite first-use postframe draft scope replacement never writes the retired notifier',
+      '$suite replacing the draft scope leaves both first-use previews clean',
       (t) async {
         final host = _Host()..readGate = Completer<void>();
         final drafts = PrivacyPageDrafts();

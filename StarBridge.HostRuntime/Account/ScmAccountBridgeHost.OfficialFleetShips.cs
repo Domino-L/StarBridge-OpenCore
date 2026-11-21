@@ -20,6 +20,7 @@ internal sealed partial class ScmAccountBridgeHost
         if (descriptor is null || descriptor.Owner != context || descriptor.Generation != generation || descriptor.SourceRef != sourceRef)
         {
             RecordOfficialDiagnostic("official-ships-host", "ships-descriptor", null, 0);
+            ClearOfficialFleetProfileTargets();
             throw new AccountBridgeHostException("communities.identityUnavailable");
         }
         // Where a failed read stopped, as a fixed name. Nothing from the response is recorded.
@@ -38,9 +39,9 @@ internal sealed partial class ScmAccountBridgeHost
             if (descriptor != Volatile.Read(ref _fleetPublicSource)) throw new AccountBridgeHostException("communities.identityUnavailable");
             client.RequireOfficialFleetTarget(payload, sourceRef!, scope);
             var now = _oauth.OfficialFleetIdentityObservationClock.GetUtcNow();
-            if (projectionValidUntilUtc is { } deadline && now >= deadline)
-                throw new AccountBridgeHostException("communities.identityUnavailable");
-            OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, now);
+            if (projectionValidUntilUtc is { } deadline && OfficialFleetServerClock.IsExpired(deadline, now))
+                throw OfficialFleetServerClock.ErrorFor(_oauth.OfficialFleetIdentityObservationClock);
+            OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, _oauth.OfficialFleetIdentityObservationClock);
         }
         async Task<IReadOnlyDictionary<string, CommunityClient.OfficialShipOwner>> Authorize(JsonElement page, CancellationToken ct)
         {
@@ -124,7 +125,8 @@ internal sealed partial class ScmAccountBridgeHost
             RecordOfficialDiagnostic("official-ships-host", step, null, 0);
             RecordOfficialDiagnostic("official-ships-host", "ships-timeout", null, 0);
             ClearOfficialFleetProfileTargets();
-            throw new AccountBridgeHostException("communities.identityUnavailable");
+            Current();
+            throw new AccountBridgeHostException("communities.readUnavailable");
         }
         catch (Exception error)
         {

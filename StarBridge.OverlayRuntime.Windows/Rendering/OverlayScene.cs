@@ -31,6 +31,9 @@ public sealed record OverlaySceneContext(
     // The viewer's own place from the local game log, for the "you are here" line on
     // their own screen. Never counted into the organization's numbers or sent anywhere.
     internal string? LocalOwnPlace { get; init; }
+    // The source's realtime went stale: every member it sent is unknown. Decided from the source rows, before the local
+    // self row is filled in from the game log, which would otherwise hide it (review CX-VISOR-UNKNOWN-073-R1).
+    internal bool RealtimeUnknown { get; init; }
 
     public static OverlaySceneContext Fleet(OverlayScenePreference preference, bool isFallback = false) =>
         new(preference, OverlaySceneKind.Fleet, "舰队", isFallback);
@@ -57,7 +60,7 @@ public sealed record OverlaySceneSnapshot(
             return commandState;
         }
 
-        var title = zh ? "房间接入" : "PARTY LINK";
+        var title = zh ? "房间接入" : "ROOM LINK";
         var room = string.IsNullOrWhiteSpace(Context.RoomTitle)
             ? zh ? "当前房间" : "Current party"
             : Context.RoomTitle!;

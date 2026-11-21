@@ -30,6 +30,7 @@ import 'overlay_appearance_preview_playback_controls.dart';
 import 'overlay_appearance_preview_guide_card.dart';
 import 'overlay_appearance_try_on_selector.dart';
 import 'overlay_appearance_preview_copy.dart';
+import 'overlay_workspace_global_group.dart';
 import '../../design_system/icons/standard_icon.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -418,8 +419,13 @@ class _PreviewPageState extends State<OverlayAppearancePreviewPage>
     final snapshot = p.snapshot!;
     // Trial selection is not a value in the normal saved settings schema.
     final settings = p.settings!;
+    // 0.7.3 overlay v2: hidden appearances are not offered to try on.
     final appearances = snapshot.appearances
-        .where((a) => a.isPreviewAvailable)
+        .where(
+          (a) =>
+              a.isPreviewAvailable &&
+              !overlayAppearancesHiddenUntilV2.contains(a.id),
+        )
         .toList();
     final selected = appearances.where((a) => a.id == _skin).firstOrNull;
     final profile = OverlayWorkspaceAppearanceRule(
@@ -431,7 +437,8 @@ class _PreviewPageState extends State<OverlayAppearancePreviewPage>
     final fields = overlayWorkspaceFieldSpecs
         .where(
           (f) =>
-              (f.group == 'appearance' || f.group == 'crosshair') &&
+              // tried on as before the 11-11 regrouping
+              (overlayWorkspaceTriedOn(f) || f.group == 'crosshair') &&
               f.field != 'skin' &&
               (!(selected?.locksTheme ?? false) ||
                   !const {'theme', 'autoThemeByShip'}.contains(f.field)) &&
@@ -496,7 +503,7 @@ class _PreviewPageState extends State<OverlayAppearancePreviewPage>
                 fields: fields
                     .where(
                       (f) =>
-                          f.group == 'appearance' &&
+                          overlayWorkspaceTriedOn(f) &&
                           f.kind != OverlayWorkspaceFieldKind.color,
                     )
                     .toList(),

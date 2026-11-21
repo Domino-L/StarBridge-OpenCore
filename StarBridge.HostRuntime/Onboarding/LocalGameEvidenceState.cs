@@ -89,7 +89,9 @@ internal static class LocalGameEvidenceValidation
         if (value.Sources.Count != 0)
         {
             var selected = value.Sources.SingleOrDefault(s => s.SourceKey == value.SelectedSourceKey);
-            if (selected is null || value.ActiveProfileId is not null && value.ActiveProfileId != selected.ConfirmedProfileId ||
+            if (selected is null ? !value.LogDeferred || value.SelectedSourceKey is not null ||
+                value.ActiveProfileId is not null || value.Progress?.SourceKey is not null :
+                value.ActiveProfileId is not null && value.ActiveProfileId != selected.ConfirmedProfileId ||
                 value.Progress?.SourceKey is { } progressSource && progressSource != selected.SourceKey)
                 throw new LocalFirstUseException("firstUse.invalid_state");
         }

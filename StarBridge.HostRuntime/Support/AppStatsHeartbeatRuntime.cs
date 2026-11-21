@@ -49,6 +49,7 @@ public sealed class AppStatsHeartbeatRuntime : IDisposable
         _diagnostic = diagnostic ?? (message => Trace.WriteLine(message));
         _client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
         { Timeout = TimeSpan.FromSeconds(10) };
+        RelayClientVersion.Apply(_client);
         _stopToken = _stop.Token;
         // Busy ticks are skipped; the meter is drained by the next admitted tick.
         _timer = _time.CreateTimer(state => { _ = Task.Run(HeartbeatAsync); }, null, Interval, Interval);

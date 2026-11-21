@@ -22,6 +22,9 @@ AchievementCollection combineAchievementSources(
     progress: bridge.progress == null && scm.progress == null
         ? null
         : {...?bridge.progress, ...?scm.progress},
+    percentages: bridge.percentages,
+    tiers: bridge.tiers,
+    contractRecords: bridge.contractRecords,
     cachedAtUtc: bridge.cachedAtUtc ?? scm.cachedAtUtc,
     synchronizedAtUtc: bridge.synchronizedAtUtc ?? scm.synchronizedAtUtc,
     isRefreshing: bridge.isRefreshing || scm.isRefreshing,

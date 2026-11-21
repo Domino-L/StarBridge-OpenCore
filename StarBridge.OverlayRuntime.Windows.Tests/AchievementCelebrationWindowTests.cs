@@ -60,7 +60,8 @@ internal static class AchievementCelebrationWindowTests
                         var rasterScale = System.Windows.Interop.HwndSource.FromHwnd(hwnd).CompositionTarget.TransformToDevice.M11;
                         Require(Math.Abs(rasterScale - dpi / 96d) < .001,
                             $"WPF raster scale must match the native window DPI, not stretch a low-resolution surface: native {dpi}, WPF {rasterScale}");
-                        var expected = AchievementCelebrationPlacement.ForWorkArea(screen.WorkingArea, dpi).Bounds;
+                        var placement = AchievementCelebrationPlacement.ForWorkArea(screen.WorkingArea, dpi);
+                        var expected = placement.Bounds;
                         var actual = System.Drawing.Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
                         Require(actual == expected, "Production HWND uses the target screen DPI and actual work-area edge");
                         Require(actual.Right == screen.WorkingArea.Right && actual.Bottom == screen.WorkingArea.Bottom,
@@ -76,8 +77,9 @@ internal static class AchievementCelebrationWindowTests
                             "Hover preserves passive click-through native styles");
                         surface.Advance(card.LifetimeMilliseconds - 90, 0);
                         surface.ApplyPointerPosition(new(actual.Left, actual.Top));
-                        Require(surface.PointerOpacity == .5 && Math.Abs(card.Opacity - .5) < .001,
-                            "Hover and animated exit opacity compose independently");
+                        Require(surface.PointerOpacity == 1, "Transparent bleed is outside the hover area during exit");
+                        surface.ApplyPointerPosition(new(placement.CardBounds.Right - 1, placement.CardBounds.Bottom - 1));
+                        Require(surface.PointerOpacity == .5 && card.Opacity == 1, "The card's square right corner still dims the window");
                         surface.ApplyPointerPosition(new(actual.Right, actual.Bottom - 1));
                         Require(surface.PointerOpacity == 1, "Leaving through the right boundary restores full opacity");
                         surface.ApplyPointerPosition(null);

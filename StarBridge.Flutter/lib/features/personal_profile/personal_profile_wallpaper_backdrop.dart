@@ -9,10 +9,15 @@ import 'personal_profile_wallpaper_catalog.dart';
 class PersonalProfileWallpaperBackdrop extends StatefulWidget {
   const PersonalProfileWallpaperBackdrop({
     required this.wallpaperId,
+    this.quietFailure = false,
     super.key,
   });
 
   final String wallpaperId;
+
+  /// The page default rather than the owner's choice: if its picture is not
+  /// installed (public build), fall back without a failure notice.
+  final bool quietFailure;
 
   @override
   State<PersonalProfileWallpaperBackdrop> createState() => _WallpaperState();
@@ -73,7 +78,10 @@ class _WallpaperState extends State<PersonalProfileWallpaperBackdrop> {
           );
 
     return SizedBox.expand(
-      key: Key('profile-wallpaper-${preset.id}'),
+      // The key names the owner's choice; the page default stands for none.
+      key: Key(
+        'profile-wallpaper-${widget.quietFailure ? PersonalProfileWallpaperCatalog.noneId : preset.id}',
+      ),
       child: preset.assetPath == null
           ? DecoratedBox(
               decoration: BoxDecoration(
@@ -101,7 +109,7 @@ class _WallpaperState extends State<PersonalProfileWallpaperBackdrop> {
                       _scheduleRetry(image);
                       return ColoredBox(
                         color: tokens.surfaces.ground.fill,
-                        child: _attempts < 2
+                        child: _attempts < 2 || widget.quietFailure
                             ? null
                             : Align(
                                 alignment: AlignmentDirectional.bottomEnd,

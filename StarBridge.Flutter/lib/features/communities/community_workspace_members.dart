@@ -342,6 +342,7 @@ final class CommunityWorkspaceMembers {
         : null;
     return OrganizationMemberEntry(
       reference: member.memberRef,
+      lastOnlineDays: member.lastOnlineDays,
       identity: identity,
       roleColor: roleColor,
       role: member.roleTitle.isNotEmpty

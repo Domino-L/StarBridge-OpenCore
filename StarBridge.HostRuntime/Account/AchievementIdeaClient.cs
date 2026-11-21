@@ -14,6 +14,7 @@ internal sealed class AchievementIdeaClient : IDisposable
             origin.Scheme != "https" && !(origin.Scheme == "http" && origin.IsLoopback)) throw new ArgumentException("Trusted Relay origin required.");
         _endpoint = new(origin, "/api/achievements/ideas");
         _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(45) };
+        Support.RelayClientVersion.Apply(_http);
     }
     internal async Task<object> Send(string bearer, JsonElement payload, CancellationToken token)
     {

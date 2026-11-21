@@ -193,7 +193,8 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.Key,
                 row.Group,
                 row.CueStartedAtUtc,
-                row.Presence))
+                row.Presence,
+                row.IsSelf))
             .ToArray();
     }
 
@@ -215,7 +216,7 @@ internal sealed partial class OverlayCompositionHudWindow
                 row.BarrageLane,
                 row.IsBarrageActive,
                 FromBrush(row.AccentBrush, HudColor.FromRgb(83, 190, 255)))
-            { AppearanceActivity = row.AppearanceActivity })
+            { AppearanceActivity = row.AppearanceActivity, Source = row, EventType = row.EventType, Negative = row.Negative })
             .ToArray();
     }
 

@@ -66,8 +66,11 @@ internal static class WpfProducerParityTests
             else if (boundary == "identity") Line("nickname=\"FixtureOther\" playerGEID=67890");
             else Line("<Channel Disconnection> gamerules=\"SC_Default\" reason=\"Player requested disconnect\"");
             Line(arrival);
-            var actual = ((FleetState)Fleet.GetValue(host)!).Players.Single(p => p.Name == "LocalPlayer");
-            if (actual.ArrivalTargetCode is not null || actual.NavigationOriginLocation is not null)
+            // Since the 0.7.3 own-ship rule, an arrival whose ship proof was cleared at the
+            // boundary is dropped outright, so no local row is published at all; that is
+            // the strongest form of "no leak". A published row must still carry no old route.
+            var actual = ((FleetState)Fleet.GetValue(host)!).Players.SingleOrDefault(p => p.Name == "LocalPlayer");
+            if (actual is not null && (actual.ArrivalTargetCode is not null || actual.NavigationOriginLocation is not null))
                 throw new Exception("Old route leaked across authority boundary: " + boundary);
         }
         Console.WriteLine("PASS actual Host quantum context reset/server/identity/disconnect guards");

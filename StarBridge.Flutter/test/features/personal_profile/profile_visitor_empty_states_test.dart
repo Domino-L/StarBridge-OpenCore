@@ -5,7 +5,6 @@ import 'package:starbridge_flutter/features/personal_profile/personal_profile_id
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_module_grid.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_presentation.dart';
-import 'package:starbridge_flutter/features/personal_profile/personal_profile_summary.dart';
 
 import '../../app/menu_overlay/menu_profiles_session_test.dart'
     show fixtureProfile;
@@ -58,10 +57,7 @@ void main() {
                   projection: profile,
                   isSelf: false,
                 ),
-                PersonalProfileSummaryStrip(
-                  projection: profile,
-                  includeLocalTime: false,
-                ),
+                // User 11-11: playtime lives in the side rail, not the column.
                 PersonalProfileModuleGrid(
                   projection: profile,
                   visitorView: true,
@@ -77,7 +73,7 @@ void main() {
         expect(find.text('Chosen public callsign'), findsOneWidget);
         expect(find.text('当前页面未提供个人简介。'), findsOneWidget);
         expect(find.text('当前页面未提供组织资料。'), findsOneWidget);
-        expect(find.text('当前页面未提供时长'), findsOneWidget);
+        expect(find.text('当前页面未提供时长'), findsNothing);
         expect(find.text('当前页面没有可显示的公开模块。'), findsOneWidget);
         expect(find.textContaining('还没有填写'), findsNothing);
         expect(find.textContaining('编辑主页后'), findsNothing);
@@ -110,16 +106,44 @@ void main() {
     });
   }
 
+  // CX-PROFILE-HEADER-073-R: offline, the owner's achievements showcase has no
+  // local scope and renders nothing, so the column must still say it is empty.
+  testWidgets('owner page without achievements scope keeps the guidance', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      support.app(
+        PersonalProfileModuleGrid(
+          projection: profile,
+          visitorView: false,
+          editing: false,
+          layout: const [
+            PersonalProfileModuleLayoutItem(
+              moduleId: 'achievements',
+              size: PersonalProfileModuleSize.one,
+              isVisible: true,
+              position: 0,
+            ),
+          ],
+          onLayoutChanged: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('编辑主页后'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('owner empty page keeps its editing guidance', (tester) async {
     await tester.pumpWidget(
       support.app(
         Column(
           children: [
             PersonalProfileIdentityHeader(projection: profile),
-            PersonalProfileSummaryStrip(projection: profile),
             PersonalProfileModuleGrid(
               projection: profile,
               visitorView: false,
+              includeLocalTime: true,
               editing: false,
               layout: const [],
               onLayoutChanged: (_) {},
@@ -130,7 +154,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('这个人还没有填写个人简介。'), findsOneWidget);
-    expect(find.text('尚未返回时长'), findsOneWidget);
+    // User 11-11: playtime moved to the side rail, so an empty column guides
+    // the owner again.
+    expect(find.text('尚未返回时长'), findsNothing);
     expect(find.textContaining('编辑主页后'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

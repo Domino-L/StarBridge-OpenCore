@@ -8,9 +8,17 @@ internal static class ShipNameIndexTests
 {
     public static void RunAll()
     {
+        PolishShipAliasTests.RunAll();
         using var pack = typeof(ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
         using var reader = new StreamReader(pack);
         var shipped = ShipNameIndex.Parse(reader.ReadToEnd());
+        foreach (var model in new[] { "Taurus", "Andromeda", "Aquila", "Phoenix" })
+            Require(shipped.Find("Constellation Mk IV " + model)?.RuntimeId == "RSI_Constellation_" + model,
+                "Reviewed Mk IV alias retains exact runtime identity: " + model);
+        foreach (var alias in new[] { "Dragonfly Star Kitten Edition", "Dragonfly Star Kitten" })
+            Require(shipped.Find(alias)?.RuntimeId == "DRAK_Dragonfly_Pink", "Star Kitten exact alias: " + alias);
+        Require(shipped.Find("Constellation Mk IV Unknown") is null, "Unverified Mk IV remains unknown");
+        Require(shipped.Find("Constellation Mk IV Phoenix Emerald") is null, "Emerald has no unverified Mk IV alias");
         Require(shipped.Find("Anvil Carrack")?.RuntimeId == "ANVL_Carrack",
             "SCM manufacturer-qualified model names reuse the exact catalog identity");
         Require(shipped.Find("ANVL_Carrack_BIS2950")?.RuntimeId != "ANVL_Carrack",

@@ -15,7 +15,8 @@ internal sealed partial class ScmAccountBridgeHost
             token.ThrowIfCancellationRequested();
             if (generation != Generation) throw new BridgeStaleGenerationException(generation, Generation);
             var session = RequireSession(context);
-            if (_disposed || _reauthorizationRequired || _credentialTemporarilyUnavailable) throw new AccountBridgeHostException("ideas.sign_in");
+            if (_credentialTemporarilyUnavailable && !_reauthorizationRequired) throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_disposed || _reauthorizationRequired) throw new AccountBridgeHostException("ideas.sign_in");
             var result = await client.Send(session.AccessToken, payload, token);
             lock (_loginGate)
             {

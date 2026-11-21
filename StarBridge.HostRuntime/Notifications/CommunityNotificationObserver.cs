@@ -2,7 +2,8 @@ using StarBridge.HostRuntime.Communities;
 
 namespace StarBridge.HostRuntime.Notifications;
 
-internal sealed record CommunityNotificationCandidate(string SourceKey, NotificationEventKind Kind);
+internal sealed record CommunityNotificationCandidate(string SourceKey, NotificationEventKind Kind, DateTimeOffset OccurredAt,
+    int AnnouncementSummaryCount = 0);
 
 // No text is retained. First reads, gaps, rejoin and permission regrant are
 // quiet baselines. Call before all delivery gates so suppressed events expire.
@@ -35,13 +36,14 @@ internal sealed class CommunityNotificationObserver(TimeProvider? time = null)
             if (continuous && previous is { Chat: true, Server: {} server } && chat is {} incoming &&
                 incoming.ServerTime > server && incoming.ServerTime - server <= TimeSpan.FromSeconds(30) &&
                 incoming.Sequence > previous.Sequence && incoming.Incoming && incoming.Unread > 0 &&
-                incoming.CreatedAt > server && incoming.CreatedAt <= incoming.ServerTime)
-                candidates.Add(new(source.SourceKey, NotificationEventKind.OrganizationChat));
+                incoming.CreatedAt is { } created && created > server && created <= incoming.ServerTime)
+                candidates.Add(new(source.SourceKey, NotificationEventKind.OrganizationChat, created));
 
             var tasks = source.ManagementAvailable ? source.Tasks.Select(row => row.Key).ToHashSet(StringComparer.Ordinal) : [];
-            if (continuous && source.ManagementAvailable && previous is { Management: true } &&
-                source.Tasks.Any(row => !previous.Tasks.Contains(row.Key) && row.CreatedAt > _last && row.CreatedAt <= feed.ReceivedAt))
-                candidates.Add(new(source.SourceKey, NotificationEventKind.OrganizationManagement));
+            if (continuous && source.ManagementAvailable && previous is { Management: true }) {
+                var fresh = source.Tasks.Where(row => !previous.Tasks.Contains(row.Key) && row.CreatedAt > _last && row.CreatedAt <= feed.ReceivedAt).ToArray();
+                if (fresh.Length > 0) candidates.Add(new(source.SourceKey, NotificationEventKind.OrganizationManagement, fresh.Max(row => row.CreatedAt)));
+            }
             // Retain high water marks/tombstones across partial reads, but reset
             // availability so recovery never replays events from the gap.
             if (previous != null) tasks.UnionWith(previous.Tasks);

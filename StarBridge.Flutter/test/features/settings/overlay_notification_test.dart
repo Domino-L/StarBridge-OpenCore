@@ -44,7 +44,9 @@ void main() {
   });
 
   testWidgets(
-    'native overlay submission prevents foreground and desktop duplicates',
+    // 0.7.3: a room invite is a reminder card even when the overlay showed it
+    // in game (the overlay line is only the in-game mark).
+    'room invite shown on the overlay still becomes a card while the app is in the background',
     (tester) async {
       size(tester, const Size(1200, 850));
       final f = Fixture();
@@ -76,8 +78,10 @@ void main() {
           'overlayHandled': true,
         });
         await tester.pumpAndSettle();
-        expect(desktop.shown, isEmpty);
-        expect(find.text('房间提醒'), findsNothing);
+        expect(
+          desktop.shown,
+          hasLength(state == AppLifecycleState.paused ? 1 : 0),
+        );
       }
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     },

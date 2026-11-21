@@ -1,3 +1,5 @@
+import '../../_support/hangar_test_actions.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -476,8 +478,24 @@ void main() {
               await t.pumpWidget(probe.app());
               await _frames(t);
               final pageState = t.state(find.byType(LocalHangarPage));
+              // A narrow English toolbar wraps onto more lines than the
+              // card's first row can sit under; bring the card up first.
+              await t.scrollUntilVisible(
+                hangarKey('local-hangar-ship-alpha'),
+                200,
+                scrollable: find
+                    .descendant(
+                      of: find.byType(LocalHangarPage),
+                      matching: find.byType(Scrollable),
+                    )
+                    .first,
+              );
               expect(hangarKey('local-hangar-ship-alpha'), findsOneWidget);
-              await _activate(t, hangarKey('hangar-open-alpha'));
+              await openHangarDetails(
+                t,
+                hangarKey('hangar-open-alpha'),
+                activate: (target) => _activate(t, target),
+              );
               final detailState = t.state(find.byType(LocalHangarShipDetails));
               final phases = [
                 _layout(
@@ -557,8 +575,13 @@ void main() {
               await _activate(t, hangarKey('hangar-detail-close'));
               expect(find.byType(LocalHangarDetail), findsNothing);
               expect(t.state(find.byType(LocalHangarPage)), same(pageState));
+              await backToHangarWall(t);
               await _activate(t, hangarKey('hangar-list'));
-              await _activate(t, hangarKey('hangar-open-alpha'));
+              await openHangarDetails(
+                t,
+                hangarKey('hangar-open-alpha'),
+                activate: (target) => _activate(t, target),
+              );
               phases.add(
                 _layout(
                   t,
@@ -590,7 +613,23 @@ void main() {
         final probe = _DetailsProbe(suite, light, const Locale('zh', 'CN'));
         await t.pumpWidget(probe.app());
         await _frames(t);
-        await _activate(t, hangarKey('hangar-open-alpha'));
+        // The storage explanation and enlarged text can push the lazy ship
+        // card below the viewport. Build it by scrolling before opening it.
+        await t.scrollUntilVisible(
+          hangarKey('local-hangar-ship-alpha'),
+          200,
+          scrollable: find
+              .descendant(
+                of: find.byType(LocalHangarPage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await openHangarDetails(
+          t,
+          hangarKey('hangar-open-alpha'),
+          activate: (target) => _activate(t, target),
+        );
         final detailState = t.state(find.byType(LocalHangarShipDetails));
         for (final key in [
           'hangar-detail-expand',

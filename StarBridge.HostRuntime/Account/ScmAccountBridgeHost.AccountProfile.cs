@@ -15,6 +15,8 @@ internal sealed partial class ScmAccountBridgeHost
 
     private void RequireAccountProfileReadOwner(BridgeAccountContext context, long generation)
     {
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired && !_disposed && Generation == generation)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
         if (_disposed || Generation != generation || _credentialTemporarilyUnavailable || _reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         _ = RequireSession(context);

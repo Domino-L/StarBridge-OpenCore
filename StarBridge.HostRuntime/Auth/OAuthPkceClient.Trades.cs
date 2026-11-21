@@ -8,6 +8,23 @@ namespace StarBridge.HostRuntime.Auth;
 
 public sealed partial class OAuthPkceClient
 {
+    private readonly object _tradeRowsGate = new();
+    private readonly Dictionary<string, JsonElement> _tradeRows = new(StringComparer.Ordinal);
+
+    private JsonElement? TradeListRow(string owner, string number, JsonElement? value = null)
+    {
+        lock (_tradeRowsGate)
+        {
+            var key = owner + "\n" + number;
+            if (value is { } row)
+            {
+                if (_tradeRows.Count >= 2000) _tradeRows.Clear();
+                _tradeRows[key] = row;
+            }
+            return _tradeRows.TryGetValue(key, out var found) ? found : null;
+        }
+    }
+
     /// <summary>
     /// SCM's account checks before a trade (MemberUserServiceImpl) get their own stable codes,
     /// so the client can say exactly what is missing. Anything else stays a generic rejection.
@@ -17,6 +34,15 @@ public sealed partial class OAuthPkceClient
         code.ValueKind == JsonValueKind.Number && code.TryGetInt64(out var value)
             ? value switch
             {
+                1_004_017_004 => "marketplace.trade_blocked_self",
+                1_004_017_005 => "marketplace.trade_blocked_other",
+                1_004_015_000 => "marketplace.trade_restricted",
+                1_004_015_001 or 1_011_015_002 => "marketplace.trade_rate_limited",
+                1_011_010_003 or 1_011_010_009 => "marketplace.trade_quantity_unavailable",
+                1_011_010_001 or 1_011_009_003 => "marketplace.trade_listing_unavailable",
+                1_011_010_002 => "marketplace.trade_expired",
+                1_011_014_010 => "marketplace.report_expired",
+                1_011_014_002 => "marketplace.report_exists",
                 1_004_001_009 => "marketplace.account_unbound",
                 1_004_001_010 => "marketplace.trade_time_required",
                 1_004_001_011 => "marketplace.contact_required",
@@ -98,14 +124,26 @@ public sealed partial class OAuthPkceClient
         }
         string Chat(long member) => ChatPeerReference(ChatOwner(active), member);
         var escaped = Uri.EscapeDataString(number);
+        var language = MarketplaceTradePolicy.Text(input, "language") == "EN" ? "&language=EN" : "";
+        var owner = ChatOwner(active);
         if (op == "list")
         {
             var page = MarketplaceTradePolicy.Number(input, "page") ?? 1;
             var status = MarketplaceTradePolicy.Number(input, "status");
             if (page is < 1 or > 10000 || status is < 1 or > 3) throw new AccountBridgeHostException("marketplace.invalid_request");
             var data = await Send(HttpMethod.Get, "sc/order-transactions/page?pageSize=20&pageNo=" + page +
-                (status is null ? "" : "&transactionStatus=" + status));
-            var rows = data.GetProperty("list").EnumerateArray().Take(20).Select(row => MarketplaceTradePolicy.Project(row, Chat)).ToArray();
+                (status is null ? "" : "&transactionStatus=" + status) + language);
+            var rows = data.GetProperty("list").EnumerateArray().Take(20).Select(row =>
+            {
+                var projected = (Dictionary<string, object?>)MarketplaceTradePolicy.Project(row, Chat);
+                if (language.Length > 0 && MarketplaceTradePolicy.Text(row, "itemsName") is { } name)
+                    projected["itemsNameEn"] = name;
+                if (MarketplaceTradePolicy.Text(row, "transactionNumber") is { } tradeNumber)
+                    TradeListRow(owner, tradeNumber, JsonSerializer.SerializeToElement(projected
+                        .Where(p => p.Key is "amount" or "hasReported" or "reportHandleStatus")
+                        .ToDictionary(p => p.Key, p => p.Value)));
+                return projected;
+            }).ToArray();
             return (new { rows, total = data.GetProperty("total").Clone() }, active);
         }
         if (op == "create")
@@ -126,10 +164,18 @@ public sealed partial class OAuthPkceClient
             return (new { transactionNumber = created.GetString() }, active);
         }
         if (number.Length == 0) throw new AccountBridgeHostException("marketplace.invalid_request");
-        var detail = await Send(HttpMethod.Get, "sc/order-transactions/get?transactionNumber=" + escaped);
+        var detail = MarketplaceTradeDetails.Merge(
+            await Send(HttpMethod.Get, "sc/order-transactions/get?transactionNumber=" + escaped + language),
+            TradeListRow(owner, number));
         if (MarketplaceTradePolicy.Text(detail, "actorRole") is not ("buyer" or "seller"))
             throw new AccountBridgeHostException("marketplace.not_participant");
-        if (op == "detail") return (MarketplaceTradePolicy.Project(detail, Chat), active);
+        if (op == "detail")
+        {
+            var projected = (Dictionary<string, object?>)MarketplaceTradePolicy.Project(detail, Chat);
+            if (language.Length > 0 && MarketplaceTradePolicy.Text(detail, "itemsName") is { } name)
+                projected["itemsNameEn"] = name;
+            return (projected, active);
+        }
         if (op == "block")
         {
             // Resolve the counterparty only from an authenticated SCM detail, never a Flutter user id.
@@ -142,6 +188,10 @@ public sealed partial class OAuthPkceClient
             await Send(HttpMethod.Post, "member/user-blacklist/create", new { blockedUserId, reason = "交易单中拉黑" });
             return (new { transactionNumber = number, confirmed = true }, active);
         }
+        if (op == "report" && !MarketplaceTradeDetails.ReportWithinWindow(detail))
+            throw new AccountBridgeHostException("marketplace.report_expired");
+        if (op == "report" && detail.TryGetProperty("hasReported", out var reported) && reported.ValueKind == JsonValueKind.True)
+            throw new AccountBridgeHostException("marketplace.report_exists");
         if (!MarketplaceTradePolicy.Allows(detail, op)) throw new AccountBridgeHostException("marketplace.state_changed");
         switch (op)
         {
@@ -164,6 +214,12 @@ public sealed partial class OAuthPkceClient
                 if (reportType is < 1 or > 4 || string.IsNullOrWhiteSpace(reportContent) || reportContent.Length > 200)
                     throw new AccountBridgeHostException("marketplace.invalid_request");
                 await Send(HttpMethod.Post, "trade/order-report/create", new { transactionNumber = number, reportType, reportContent });
+                var ownReport = TradeListRow(owner, number) is { } previous
+                    ? previous.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone())
+                    : new Dictionary<string, JsonElement>();
+                ownReport["hasReported"] = JsonSerializer.SerializeToElement(true);
+                ownReport["reportHandleStatus"] = JsonSerializer.SerializeToElement(0);
+                TradeListRow(owner, number, JsonSerializer.SerializeToElement(ownReport));
                 break;
             default: throw new AccountBridgeHostException("marketplace.invalid_request");
         }

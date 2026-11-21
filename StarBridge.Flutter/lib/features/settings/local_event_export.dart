@@ -1,16 +1,20 @@
 import 'dart:async';
 
 import '../../platform/bridge/bridge_client_session.dart';
+import 'local_event_history.dart';
 
 final class LocalEventExportResult {
   const LocalEventExportResult(
     this.code, {
     this.count = 0,
     this.recovered = false,
+    this.unavailableSources = const [],
   });
   final String code;
   final int count;
   final bool recovered;
+  final List<String> unavailableSources;
+  bool get partial => unavailableSources.isNotEmpty;
 }
 
 abstract interface class LocalEventExportPort {
@@ -35,7 +39,23 @@ final class BridgeLocalEventExport implements LocalEventExportPort {
       );
       _operation = operation;
       final p = (await operation.future).payload;
-      if (p.length != 4 ||
+      final sources = p.containsKey('unavailableSources')
+          ? parseUnavailableLocalEventSources(p['unavailableSources'])
+          : const <String>[];
+      final partial = p.containsKey('partial') ? p['partial'] : false;
+      if (p.keys.any(
+            (key) => !const {
+              'schemaVersion',
+              'outcome',
+              'count',
+              'recovered',
+              'partial',
+              'unavailableSources',
+            }.contains(key),
+          ) ||
+          partial is! bool ||
+          partial != sources.isNotEmpty ||
+          partial && p['outcome'] != 'saved' ||
           p['schemaVersion'] != 1 ||
           p['count'] is! int ||
           p['recovered'] is! bool) {
@@ -48,6 +68,7 @@ final class BridgeLocalEventExport implements LocalEventExportPort {
           'saved',
           count: count,
           recovered: recovered,
+          unavailableSources: sources,
         );
       }
       if (p['outcome'] == 'cancelled' && count == 0 && !recovered) {

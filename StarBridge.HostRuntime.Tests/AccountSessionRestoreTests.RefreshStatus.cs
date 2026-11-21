@@ -22,7 +22,8 @@ internal static partial class AccountSessionRestoreTests
                 calls++;
                 return JsonResponse(status, body);
             });
-            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             AssertEqual<ScmOAuthSession?>(null, await oauth.TryRestoreSessionAsync(default), "cold restore rejects credential");
             AssertEqual(ScmSessionRestoreOutcome.ReauthorizationRequired, oauth.LastSessionRestoreOutcome,
                 "cold refresh rejection must require authorization");
@@ -70,7 +71,8 @@ internal static partial class AccountSessionRestoreTests
                 return JsonResponse(HttpStatusCode.OK,
                     "{\"subject\":\"subject-1\",\"displayName\":\"Synthetic Pilot\",\"capabilities\":[\"profile.read\"]}");
             });
-            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             oauth.SessionInvalidated += (_, _) => invalidations++;
             using var account = new AccountBridgeRuntime(new ScmAccountBridgeHost(oauth,
                 new ScmProfileCacheStore(), settings.EnvironmentName, () => null));
@@ -94,6 +96,7 @@ internal static partial class AccountSessionRestoreTests
                 AssertEqual(true, diagnostic.EndsWith("status=401 error=" + expectedError, StringComparison.Ordinal),
                     "401 diagnostic uses only the fixed error allowlist");
             }
+            clock.Now = clock.Now.AddMinutes(5);
             recovered = true;
             var retry = await ReadCurrent(account, "refresh-recovered");
             AssertEqual("signedIn", retry.Response.Payload.GetProperty("state").GetString(), "200 restores without login");

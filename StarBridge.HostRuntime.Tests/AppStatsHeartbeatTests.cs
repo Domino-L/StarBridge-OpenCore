@@ -555,7 +555,8 @@ internal static class AppStatsHeartbeatTests
         {
             if (request.Method == HttpMethod.Get)
             {
-                Check(request.RequestUri!.AbsolutePath == "/api/app-stats" && !request.Headers.Any(), "read-only anonymous discovery");
+                Check(request.RequestUri!.AbsolutePath == "/api/app-stats" &&
+                    request.Headers.All(header => header.Key == RelayClientVersion.HeaderName), "read-only anonymous discovery");
                 Probes++;
                 return new(Status) { Content = new StringContent(ResponseJson ?? "{}") };
             }
@@ -564,7 +565,8 @@ internal static class AppStatsHeartbeatTests
             if (Legacy && path == "/api/app-stats/v2/heartbeat") return new(HttpStatusCode.NotFound);
             Check(request.Method == HttpMethod.Post && path == (Legacy ? "/api/app-stats/heartbeat" : "/api/app-stats/v2/heartbeat"),
                 "fixed POST route");
-            Check(!request.Headers.Any(), "no account credentials or custom headers");
+            // Only the relay client version header (owner-alias 073): still no credentials or account data.
+            Check(request.Headers.All(header => header.Key == RelayClientVersion.HeaderName), "no account credentials or custom headers");
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             Bodies.Add(json.RootElement.Clone());
             Entered.TrySetResult();

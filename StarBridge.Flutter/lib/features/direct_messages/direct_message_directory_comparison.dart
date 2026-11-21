@@ -17,6 +17,7 @@ bool sameDirectMessageDirectory(List<Conversation> a, List<Conversation> b) {
           x.conversationKey,
           x.gameId,
           x.presence,
+          x.lastOnlineDays,
         ) !=
         (
           y.conversationKey?.isNotEmpty == true ? y.conversationKey : y.ref,
@@ -29,6 +30,7 @@ bool sameDirectMessageDirectory(List<Conversation> a, List<Conversation> b) {
           y.conversationKey,
           y.gameId,
           y.presence,
+          y.lastOnlineDays,
         )) {
       return false;
     }

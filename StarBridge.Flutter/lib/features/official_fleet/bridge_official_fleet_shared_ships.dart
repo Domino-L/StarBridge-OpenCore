@@ -164,14 +164,19 @@ final class BridgeOfficialFleetSharedShips
     } catch (error) {
       _owners.clear();
       _imageFeatures = null;
+      if (epoch != _transport.requestEpoch ||
+          source != _transport.sourceRef() ||
+          source == null) {
+        throw const CommunityFailure('identityUnavailable');
+      }
       if (error is FormatException || error is TypeError) {
         throw const CommunityFailure('dataInvalid');
       }
       if (error is CommunityFailure && error.code == 'unavailable') {
-        throw const CommunityFailure('identityUnavailable');
+        throw const CommunityFailure('readUnavailable');
       }
       if (error is! CommunityFailure) {
-        throw const CommunityFailure('identityUnavailable');
+        throw const CommunityFailure('readUnavailable');
       }
       rethrow;
     }
@@ -415,12 +420,21 @@ final class _OfficialShipsTransport extends CommunityBridgeTransport
         !RegExp(r'^officialFleet:[1-9][0-9]{0,18}$').hasMatch(source)) {
       throw const CommunityFailure('identityUnavailable');
     }
-    final result = await super.sendRequest(
-      command,
-      {...payload, if (name == 'communities.ships') 'sourceRef': source},
-      timeout: const Duration(seconds: 15),
-      officialAnnouncementCurrent: officialAnnouncementCurrent,
-    );
+    final Map<String, Object?> result;
+    try {
+      result = await super.sendRequest(
+        command,
+        {...payload, if (name == 'communities.ships') 'sourceRef': source},
+        timeout: const Duration(seconds: 15),
+        officialAnnouncementCurrent: officialAnnouncementCurrent,
+      );
+    } on BridgeClientException catch (error) {
+      if (name == 'communities.ships' &&
+          error.code == 'communities.readUnavailable') {
+        throw const CommunityFailure('readUnavailable');
+      }
+      rethrow;
+    }
     if (source != sourceRef()) {
       throw const CommunityFailure('identityUnavailable');
     }

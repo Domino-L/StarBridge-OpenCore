@@ -66,11 +66,7 @@ public sealed partial class OAuthPkceClient
         string Safe(string text) => SafeNotificationText(row, text);
         var name = TradeNotificationEvent.TextField(order, "traderName");
         if (name.Length == 0) name = legacy.Peer;
-        var item = TradeNotificationEvent.TextField(order, "productName");
-        if (item.Length == 0 && order.ValueKind == JsonValueKind.Object &&
-            order.TryGetProperty("providedItems", out var items) && items.ValueKind == JsonValueKind.Array)
-            item = string.Join("、", items.EnumerateArray().Take(3).Select(i => TradeNotificationEvent.TextField(i, "name")));
-        if (item.Length == 0) item = legacy.Item;
+        var item = MarketplaceNoticeItem.Describe(order, legacy.Item);
         // Station cards never carry the counterparty name, masked or not.
         if (name.Length > 0) title = title.Replace(name, "对方", StringComparison.Ordinal);
         var figures = TradeNotificationEvent.StationFigures(row, subType, reminder, new[] {

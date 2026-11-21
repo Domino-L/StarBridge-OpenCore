@@ -12,10 +12,12 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_ship_details.dar
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../features/friends/social_layout_test.dart' show loadFonts, size;
+import '../../_support/hangar_test_actions.dart';
 import 'interaction_batch3fb_hangar_test.dart'
     show
         HangarProbe,
         HangarProbePort,
+        activateHangar,
         hangarInventory,
         hangarKey,
         settleHangarMotion;
@@ -46,6 +48,10 @@ Future<DetailProbe> mountDetails(WidgetTester t, InteractionSuite suite) async {
 }
 
 Future<void> detailActivate(WidgetTester t, Finder target, String input) async {
+  if (hangarChoiceAncestor(target).evaluate().isNotEmpty) {
+    await activateHangar(t, target, input);
+    return;
+  }
   if (input == 'keyboard' && t.widget(target) is IconButton) {
     await t.ensureVisible(target);
     await settleHangarMotion(t);
@@ -90,7 +96,11 @@ void main() {
               if (list) {
                 await detailActivate(t, hangarKey('hangar-list'), input);
               }
-              await detailActivate(t, hangarKey('hangar-open-alpha'), input);
+              await openHangarDetails(
+                t,
+                hangarKey('hangar-open-alpha'),
+                activate: (target) => detailActivate(t, target, input),
+              );
               final route = detailRoute(t);
               expect(route.instant, input != 'pointer');
               expect(
@@ -145,6 +155,14 @@ void main() {
               expect(p.actual.reads, 1);
               await detailActivate(t, hangarKey('hangar-detail-close'), input);
               expect(find.byType(LocalHangarDetail), findsNothing);
+              final detailsFocusRestored = hangarControlFocus(
+                t,
+                hangarKey('hangar-stage-details'),
+              ).hasPrimaryFocus;
+              final restoredFocusLabel =
+                  FocusManager.instance.primaryFocus?.debugLabel;
+              expect(hangarKey('hangar-stage-details'), findsOneWidget);
+              await backToHangarWall(t);
               expect(hangarKey('local-hangar-ship-alpha'), findsOneWidget);
               // The original saved projection, not an optimistic selected flag.
               final favorite = t.widget<StarBridgeIconAction>(
@@ -157,6 +175,12 @@ void main() {
               );
               expect(favorite.selected, isTrue);
               expect(t.takeException(), isNull);
+              expect(
+                detailsFocusRestored,
+                isTrue,
+                reason:
+                    'Closing details must return focus to stage details; actual: $restoredFocusLabel',
+              );
               await t.pumpWidget(const SizedBox.shrink());
             } finally {
               semantics.dispose();
@@ -173,7 +197,11 @@ void main() {
           (t) async {
             final p = await mountDetails(t, suite);
             final old = p.actual;
-            await detailActivate(t, hangarKey('hangar-open-alpha'), 'pointer');
+            await openHangarDetails(
+              t,
+              hangarKey('hangar-open-alpha'),
+              activate: (target) => detailActivate(t, target, 'pointer'),
+            );
             old.pendingFavorite = Completer();
             await detailActivate(
               t,
@@ -228,6 +256,8 @@ void main() {
         final p = await mountDetails(t, suite);
         await t.ensureVisible(hangarKey('hangar-open-alpha'));
         await t.tap(hangarKey('hangar-open-alpha'));
+        await settleHangarMotion(t);
+        await t.tap(hangarKey('hangar-stage-details'));
         await t.pump();
         await t.pump(const Duration(milliseconds: 48));
         final route = detailRoute(t);
@@ -260,7 +290,11 @@ void main() {
       '$suite disposing while close reverses retires body but not a separate top modal',
       (t) async {
         final p = await mountDetails(t, suite);
-        await detailActivate(t, hangarKey('hangar-open-alpha'), 'pointer');
+        await openHangarDetails(
+          t,
+          hangarKey('hangar-open-alpha'),
+          activate: (target) => detailActivate(t, target, 'pointer'),
+        );
         final ctx = t.element(find.byType(LocalHangarDetail));
         final route = detailRoute(t);
         await t.tap(hangarKey('hangar-detail-close'));

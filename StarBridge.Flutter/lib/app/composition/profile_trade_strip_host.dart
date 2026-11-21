@@ -3,12 +3,14 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
+import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../features/marketplace/marketplace_controller.dart';
 import '../../features/marketplace/marketplace_copy.dart';
 import '../../features/marketplace/marketplace_details.dart';
 import '../../features/marketplace/marketplace_port.dart';
 import '../../features/marketplace/marketplace_trade_profile.dart';
 import '../../features/personal_profile/personal_profile_trade_strip.dart';
+import '../../features/personal_profile/personal_profile_public_facts.dart';
 
 /// Owner's trade strip on the personal profile. Reads the hall's trade
 /// profile (and the time-zone table it needs to convert the window to local
@@ -54,27 +56,53 @@ class _ProfileTradeStripHostState extends State<ProfileTradeStripHost> {
 
   @override
   Widget build(BuildContext context) {
-    if (c.port is! MarketplaceTradeProfilePort) return const SizedBox.shrink();
+    if (c.port is! MarketplaceTradeProfilePort) {
+      return _withFacts(context, null);
+    }
     return ListenableBuilder(
       listenable: c,
       builder: (context, _) {
         final profile = c.tradeProfile;
         // Still reading, or the read failed: say nothing rather than claim
         // the owner never set a trade profile.
-        if (profile == null) return const SizedBox.shrink();
+        if (profile == null) return _withFacts(context, null);
         if (!_read && c.blocks['timezones'] == null) {
-          return const SizedBox.shrink();
+          return _withFacts(context, null);
         }
-        final data = profileTradeStripData(context, c, profile);
+        var data = profileTradeStripData(context, c, profile);
+        // With SCM account facts the reputation and trade counts sit in the
+        // facts grid, as on every visitor page, and the strip keeps only the
+        // days and window, which visitors see too (user 11-08: the owner's
+        // page must look exactly like the visitor's).
+        final factsShown = ProfileOwnerTradeFactsScope.factsOf(context) != null;
+        if (factsShown && data != null) {
+          data = ProfileTradeStripData(
+            localDays: data.localDays,
+            localWindow: data.localWindow,
+            openNow: data.openNow,
+            ownerWindow: data.ownerWindow,
+          );
+        }
         return switch (widget.view) {
-          ProfileTradeStripView.owner => ProfileTradeStrip(
-            data: data,
-            isSelf: true,
-            onEdit: () => unawaited(_edit()),
+          ProfileTradeStripView.owner => _withFacts(
+            context,
+            ProfileTradeStrip(
+              data: data,
+              isSelf: true,
+              onEdit: () => unawaited(_edit()),
+            ),
+            hasReputation: data?.reputation?.isNotEmpty == true,
+            hasCompletedTrades:
+                data?.reputation != null &&
+                marketNumber(profile['completedTransactionCount']) != null,
           ),
-          ProfileTradeStripView.visitor => ProfileTradeStrip(
-            data: data,
-            isSelf: false,
+          ProfileTradeStripView.visitor => _withFacts(
+            context,
+            ProfileTradeStrip(data: data, isSelf: false),
+            hasReputation: data?.reputation?.isNotEmpty == true,
+            hasCompletedTrades:
+                data?.reputation != null &&
+                marketNumber(profile['completedTransactionCount']) != null,
           ),
           // Outside the visibility only the days and window stay public.
           ProfileTradeStripView.restrictedVisitor => ProfileTradeStrip(
@@ -90,6 +118,32 @@ class _ProfileTradeStripHostState extends State<ProfileTradeStripHost> {
           ),
         };
       },
+    );
+  }
+
+  Widget _withFacts(
+    BuildContext context,
+    Widget? strip, {
+    bool hasReputation = false,
+    bool hasCompletedTrades = false,
+  }) {
+    if (widget.view == ProfileTradeStripView.restrictedVisitor) {
+      return strip ?? const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ?strip,
+        // The same gap as between the strip and the numbers on a visitor page.
+        if (strip != null &&
+            ProfileOwnerTradeFactsScope.factsOf(context) != null)
+          SizedBox(height: context.tokens.space.lg),
+        ProfileOwnerTradeFactsScope.supplement(
+          context,
+          hasReputation: hasReputation,
+          hasCompletedTrades: hasCompletedTrades,
+        ),
+      ],
     );
   }
 }

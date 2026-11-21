@@ -23,8 +23,10 @@ internal sealed partial class CommunityClient
         // Independent domains keep their own baselines. A missing official
         // service must not silence valid community delivery (or vice versa).
         if (communities is null && official is null) throw communityFailure ?? Invalid();
+        var membership = OfficialNotificationMembership(scope);
         return new(_targetClock.GetUtcNow(), [.. communities?.Sources ?? [], .. official is null ? Array.Empty<CommunityNotificationSource>() : [official]],
-            CommunitiesConfirmed: communities is not null);
+            CommunitiesConfirmed: communities is not null, OfficialMembershipConfirmed: membership.Known,
+            OfficialMembershipSource: membership.Source);
     }
 
     internal async Task<CommunityNotificationSource> ReadOfficialFleetNotificationAsync(
@@ -40,8 +42,10 @@ internal sealed partial class CommunityClient
     {
         if (string.IsNullOrWhiteSpace(scope)) throw Invalid();
         current(); token.ThrowIfCancellationRequested();
-        var context = await OfficialNotificationContext(bearer, current, token);
+        var context = await OfficialNotificationContext(bearer, scope, current, token);
         var code = context.Source.ToUpperInvariant();
+        CommunityNotificationChat? chat = null;
+        try {
         var channel = FleetChatIdentity.FleetChannelId(code);
         var channels = await WorkspaceJson(bearer, "/api/official-fleets/chat/channels?fleetCode=" + Uri.EscapeDataString(code), token);
         current(); token.ThrowIfCancellationRequested();
@@ -52,19 +56,29 @@ internal sealed partial class CommunityClient
         if (!Text(page, "channelId", 272).Equals(channel, StringComparison.Ordinal)) throw Invalid();
         // Membership permits the message preview, not publication of archived
         // author identity. G1 author visibility is a separate permission seam.
-        var chat = NotificationChat(page, unread, includeCallsign: false);
-        var fresh = await OfficialNotificationContext(bearer, current, token);
-        if (fresh.Source != context.Source) throw new AccountBridgeHostException("communities.notAllowed");
+        chat = NotificationChat(page, unread, includeCallsign: false);
+        } catch (Exception e) when (e is AccountBridgeHostException or HttpRequestException or JsonException or
+            InvalidOperationException or KeyNotFoundException or FormatException or OverflowException) { }
+        var announcements = await NotificationAnnouncements(bearer, code, false, true, current, token);
+        var fresh = await OfficialNotificationContext(bearer, scope, current, token);
+        if (fresh.Source != context.Source || fresh.Identity != context.Identity) throw new AccountBridgeHostException("communities.notAllowed");
         current(); token.ThrowIfCancellationRequested();
         var key = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
-            new { kind = "officialFleet", scope, source = context.Source }))).ToLowerInvariant();
-        return new(key, fresh.Name, null, true, chat, false, [], NotificationPolicyStore.OfficialFleet(context.Source),
-            SourceKind: OrganizationNotificationSourceKind.OfficialFleet);
+            new { kind = "officialFleet", scope, source = context.Source, membership = context.Identity }))).ToLowerInvariant();
+        return new(key, fresh.Name, null, chat != null, chat, false, [], NotificationPolicyStore.OfficialFleet(context.Source),
+            SourceKind: OrganizationNotificationSourceKind.OfficialFleet, Announcements: announcements,
+            AnnouncementSource: announcements == null ? null : context.Source, AnnouncementIdentity: context.Source);
     }
 
-    private async Task<(string Source, string Name)> OfficialNotificationContext(string bearer, Action current, CancellationToken token)
+    private async Task<(string Source, string Name, string Identity)> OfficialNotificationContext(string bearer, string scope, Action current, CancellationToken token)
     {
-        var body = await WorkspaceJson(bearer, "/api/official-fleets/context", token);
+        JsonElement body;
+        try { body = await WorkspaceJson(bearer, "/api/official-fleets/context", token); }
+        catch (AccountBridgeHostException error) when (error.Code is "communities.notAllowed" or "communities.notFound") {
+            current(); token.ThrowIfCancellationRequested();
+            ObserveOfficialNotificationMembership(scope, null, out _);
+            throw;
+        }
         current(); token.ThrowIfCancellationRequested();
         if (Number(body, "schemaVersion", 1, 1) != 1 || !body.GetProperty("chatAvailable").GetBoolean() ||
             body.GetProperty("canManageAnnouncements").GetBoolean()) throw Invalid();
@@ -73,6 +87,6 @@ internal sealed partial class CommunityClient
         if (Text(body, "fleetCode", 64) != source.ToUpperInvariant()) throw Invalid();
         var name = Text(body, "name", 256);
         if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl)) throw Invalid();
-        return (source, name);
+        return (source, name, ObserveOfficialNotificationMembership(scope, source, out _));
     }
 }

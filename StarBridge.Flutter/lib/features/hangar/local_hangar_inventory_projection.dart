@@ -38,9 +38,13 @@ class LocalHangarInventoryProjection {
             copy.locale,
             a,
           ).compareTo(LocalHangarNames.primary(copy.locale, b)),
-          'added' => (b.addedAt ?? DateTime(1970)).compareTo(
-            a.addedAt ?? DateTime(1970),
-          ),
+          // Official pledge date, newest first; unknown dates go last.
+          'added' => switch ((a.acquiredOn, b.acquiredOn)) {
+            (final x?, final y?) => y.compareTo(x),
+            (null, null) => 0,
+            (null, _) => 1,
+            (_, null) => -1,
+          },
           'value' =>
             (LocalHangarPresentation.fromSaved(b).priceCents ?? -1).compareTo(
               LocalHangarPresentation.fromSaved(a).priceCents ?? -1,

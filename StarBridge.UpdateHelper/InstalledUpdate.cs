@@ -20,8 +20,8 @@ internal static class InstalledUpdate
                 if (recovery) return await transaction.RecoverAsync(operations) == "rolled-back" ? 0 : 5;
                 using var preparation = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                 await operations.VerifyInstallerAsync(preparation.Token);
-                var manifest = InstalledUpdateFiles.Read<FlutterInstallerUpdateSource.Manifest>(Path.Combine(root, "installer-manifest.json"));
-                var state = await transaction.ApplyAsync(manifest.Version, operations,
+                // The record may be v1 or v2; use the version the operations verified, never a v1-only re-read.
+                var state = await transaction.ApplyAsync(operations.Version, operations,
                     token => FlutterUpdateHandoff.ReportPreparedAsync(token, required: true));
                 return state == "committed" ? 0 : state == "rolled-back" ? 5 : 6;
             } finally { gate.Release(); }

@@ -16,7 +16,7 @@ internal static class FirstUseOnlineHandoffTests
     private static async Task Start(FirstUseOnlineReturnTests.Fixture f, bool confirm = true, TimeProvider? clock = null)
     {
         await f.Prepare(clock); f.Mode.RequestOnline(2, Id()); await f.Stage();
-        Check((await f.Login().WaitAsync(TimeSpan.FromSeconds(3))).Response.Status == BridgeResponseStatuses.Ok,
+        Check((await f.Login().WaitAsync(FirstUseTestWait.Bound)).Response.Status == BridgeResponseStatuses.Ok,
             "Use the actual PKCE candidate owner.");
         if (!confirm) return;
         var review = await f.Mode.ReadOnlineIdentityAsync(3);
@@ -74,7 +74,7 @@ internal static class FirstUseOnlineHandoffTests
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f);
         f.Transport.HoldIdentity = true;
         var read = f.Candidate!.ReadFirstUseIdentityAsync(f.Intent!, default);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var preparation = f.Mode.PrepareOnlineHandoffAsync(3);
         Check(!preparation.IsCompleted && f.Transport.IdentityToken.IsCancellationRequested && f.Mode.LocalMode().Active,
             "Cancellation requested is not actual transport exit.");
@@ -90,8 +90,8 @@ internal static class FirstUseOnlineHandoffTests
         catch (LocalFirstUseException error) when (error.Message == "firstUse.operation_in_progress") { }
         Check(f.Transport.Requests == requests, "Polling and duplicate preparation must not send another identity request.");
         f.Transport.ReleaseIdentity.TrySetResult();
-        Check((await read.WaitAsync(TimeSpan.FromSeconds(3))).State == "contextChanged" &&
-            await preparation.WaitAsync(TimeSpan.FromSeconds(3)) is { IsCurrent: true },
+        Check((await read.WaitAsync(FirstUseTestWait.Bound)).State == "contextChanged" &&
+            await preparation.WaitAsync(FirstUseTestWait.Bound) is { IsCurrent: true },
             "The original admission lease must exit before a live prepared owner is returned.");
         Check(f.Clock.Timers == 0 && f.Store.Read().Phase == "onlinePending", "No installation or publication occurred.");
     }
@@ -120,7 +120,7 @@ internal static class FirstUseOnlineHandoffTests
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f);
         f.Transport.HoldIdentity = true;
         var read = f.Candidate!.ReadFirstUseIdentityAsync(f.Intent!, default);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var preparation = f.Mode.PrepareOnlineHandoffAsync(3);
         try
         {
@@ -128,9 +128,9 @@ internal static class FirstUseOnlineHandoffTests
             Check(!cancel.IsCompleted && f.Mode.LocalMode().Active && f.Vault.LoadActiveAccountKey() is not null,
                 "Cancel must be admitted during handoff drain, not rejected by its mode writer; cleanup still awaits actual exit.");
             f.Transport.ReleaseIdentity.TrySetResult();
-            await read.WaitAsync(TimeSpan.FromSeconds(3));
-            Check(await preparation.WaitAsync(TimeSpan.FromSeconds(3)) is null &&
-                (await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local" &&
+            await read.WaitAsync(FirstUseTestWait.Bound);
+            Check(await preparation.WaitAsync(FirstUseTestWait.Bound) is null &&
+                (await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local" &&
                 f.Vault.LoadActiveAccountKey() is null && f.Clock.Timers == 0,
                 "Cancellation invalidates the late preparation and cleans only after the original request exits.");
             f.Local.RequireLocalStateUnchanged();
@@ -138,8 +138,8 @@ internal static class FirstUseOnlineHandoffTests
         finally
         {
             f.Transport.ReleaseIdentity.TrySetResult();
-            await read.WaitAsync(TimeSpan.FromSeconds(3));
-            await preparation.WaitAsync(TimeSpan.FromSeconds(3));
+            await read.WaitAsync(FirstUseTestWait.Bound);
+            await preparation.WaitAsync(FirstUseTestWait.Bound);
         }
     }
     private static async Task Abandoned()
@@ -147,7 +147,7 @@ internal static class FirstUseOnlineHandoffTests
         using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f);
         f.Transport.HoldIdentity = true;
         var read = f.Candidate!.ReadFirstUseIdentityAsync(f.Intent!, default);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         using var caller = new CancellationTokenSource();
         var preparation = f.Mode.PrepareOnlineHandoffAsync(3, caller.Token); caller.Cancel();
         try { await preparation; throw new InvalidOperationException("Caller cancellation must remain cancellation."); }
@@ -157,8 +157,8 @@ internal static class FirstUseOnlineHandoffTests
             "Abandoning the wait cannot reopen admission or claim cleanup.");
         var cancel = f.Cancel();
         Check(!cancel.IsCompleted && f.Vault.LoadActiveAccountKey() is not null, "Cleanup still waits for the actual read.");
-        f.Transport.ReleaseIdentity.TrySetResult(); await read.WaitAsync(TimeSpan.FromSeconds(3));
-        Check((await cancel.WaitAsync(TimeSpan.FromSeconds(3))).State == "local" && f.Vault.LoadActiveAccountKey() is null,
+        f.Transport.ReleaseIdentity.TrySetResult(); await read.WaitAsync(FirstUseTestWait.Bound);
+        Check((await cancel.WaitAsync(FirstUseTestWait.Bound)).State == "local" && f.Vault.LoadActiveAccountKey() is null,
             "The original cancellation path completes the original credential cleanup.");
     }
     private static async Task Stale()
@@ -175,11 +175,11 @@ internal static class FirstUseOnlineHandoffTests
         var clock = new Clock(); using var f = new FirstUseOnlineReturnTests.Fixture(); await Start(f, clock: clock);
         f.Transport.HoldIdentity = true;
         var read = f.Candidate!.ReadFirstUseIdentityAsync(f.Intent!, default);
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var preparation = f.Mode.PrepareOnlineHandoffAsync(3);
         clock.Now += TimeSpan.FromMinutes(3); f.Transport.ReleaseIdentity.TrySetResult();
-        await read.WaitAsync(TimeSpan.FromSeconds(3));
-        Check(await preparation.WaitAsync(TimeSpan.FromSeconds(3)) is null &&
+        await read.WaitAsync(FirstUseTestWait.Bound);
+        Check(await preparation.WaitAsync(FirstUseTestWait.Bound) is null &&
             f.Mode.CurrentOnlineIdentity(3).State == "operationInProgress" && f.Mode.LocalMode().Active,
             "A real drain doesn't revive expired review; local operation remains intact.");
         Check((await f.Cancel()).State == "local", "A failed preparation still supports explicit original retirement.");
@@ -209,7 +209,7 @@ internal static class FirstUseOnlineHandoffTests
         var prepared = await f.Mode.PrepareOnlineHandoffAsync(3); f.Mode.Close();
         Check(prepared is not null && !prepared.IsCurrent && !f.Mode.LocalMode().Active,
             "The original mode's exit fence invalidates the live preparation.");
-        Check(await f.Candidate!.RetireFirstUseOnlineCandidateAsync().WaitAsync(TimeSpan.FromSeconds(3)),
+        Check(await f.Candidate!.RetireFirstUseOnlineCandidateAsync().WaitAsync(FirstUseTestWait.Bound),
             "Mode exit still drains and retires its sole candidate owner.");
     }
 }

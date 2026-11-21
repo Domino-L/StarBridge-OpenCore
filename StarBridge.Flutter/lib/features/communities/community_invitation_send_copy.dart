@@ -3,6 +3,16 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const invitationSendCopy = <String, (String, String, String)>{
+  'identityRequired': (
+    '这个 SCM 账号还没有验证游戏身份，这次操作没有执行。请先到 设置 › 账号与识别 点“验证游戏身份”，完成后再试。',
+    '這個 SCM 帳號還沒有驗證遊戲身分，這次操作沒有執行。請先到 設定 › 帳號與識別 點「驗證遊戲身分」，完成後再試。',
+    "This SCM account hasn't verified its game identity, so nothing was changed. Go to Settings › Account & identity, choose Verify game identity, then try again.",
+  ),
+  'identityAmbiguous': (
+    '这次操作没有执行：组织里有同名的不同账号，暂时分不清是谁。不用重复提交，请联系组织管理员。',
+    '這次操作沒有執行：組織裡有同名的不同帳號，暫時分不清是誰。不用重複提交，請聯絡組織管理員。',
+    "Nothing was changed: different accounts in this organization share the same name, so the person can't be told apart yet. Don't submit again; contact an organization admin.",
+  ),
   'loadingRecords': ('正在读取发送记录…', '正在讀取傳送記錄…', 'Loading delivery records…'),
   'loadingOrganizations': (
     '正在读取已加入组织…',

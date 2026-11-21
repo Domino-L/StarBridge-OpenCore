@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import '../../app/localization/account_card_title.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
@@ -200,9 +201,12 @@ class AccountSafetyDialog extends StatelessWidget {
 String accountSafetyText(BuildContext context, String key) {
   final locale = Localizations.localeOf(context);
   final copy = _copy[key] ?? _copy['unknown']!;
-  if (locale.languageCode == 'en') return copy.$3;
-  if (locale.countryCode == 'TW' || locale.scriptCode == 'Hant') return copy.$2;
-  return copy.$1;
+  final text = locale.languageCode == 'en'
+      ? copy.$3
+      : locale.countryCode == 'TW' || locale.scriptCode == 'Hant'
+      ? copy.$2
+      : copy.$1;
+  return withAccountCardTitle(context, text);
 }
 
 const _copy = <String, (String, String, String)>{
@@ -234,6 +238,11 @@ const _copy = <String, (String, String, String)>{
     '登录后可查看账号状态。',
     '登入後可查看帳號狀態。',
     'Sign in to view your account status.',
+  ),
+  'scmOnly': (
+    '这个 SCM 账号还没有关联旧账号，暂时查不了封禁状态，也提交不了申诉和举报。其他功能不受影响。有旧账号的，可以到 设置 › 账号与识别 › {accountCard}。',
+    '這個 SCM 帳號還沒有關聯舊帳號，暫時查不了停權狀態，也提交不了申訴和檢舉。其他功能不受影響。有舊帳號的，可以到 設定 › 帳號與識別 › {accountCard}。',
+    "This SCM account isn't linked to an old account yet, so account status, appeals and reports aren't available for now. Everything else works as usual. If you have an old account, go to Settings › Account & identity › {accountCard}.",
   ),
   'forbidden': (
     '当前账号暂时无法查看这些资料。',

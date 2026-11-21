@@ -52,7 +52,7 @@ internal sealed partial class CommunityClient
     }
     private object OfficialAuthorProjectionResult(IReadOnlyDictionary<string, OfficialAuthorObservation> observations,
         Func<IReadOnlySet<string>, JsonNode> build, Action current, CancellationToken token, long operationStarted, string targetRef, bool preview = false, bool preserveLapsedVisible = false) =>
-        new OfficialAuthorProjection(observations, _targetClock, build, current, token, operationStarted,
+        new OfficialAuthorProjection(observations, _identityClock, build, current, token, operationStarted,
             () => _targets.TryGetValue(targetRef, out var target) && target.OfficialFleet &&
                 (target.AuthorIdentitySchemaVersion == 1 || preview && target.PreviewAuthorsAvailable), preserveLapsedVisible);
 }

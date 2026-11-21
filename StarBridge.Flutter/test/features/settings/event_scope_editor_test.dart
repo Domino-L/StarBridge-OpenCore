@@ -49,7 +49,7 @@ void main() {
                 description: 'Current room only',
                 choice: choice,
                 canEdit: true,
-                onChanged: (value) => setState(() => choice = value),
+                onChanged: (apply) => setState(() => choice = apply(choice)),
               ),
             ),
           ),

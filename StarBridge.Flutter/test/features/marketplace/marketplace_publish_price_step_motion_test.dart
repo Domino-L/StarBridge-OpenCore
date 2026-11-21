@@ -59,10 +59,11 @@ void main() {
         await tester.pumpAndSettle();
         // Re-measured 2026-10-20 after the user-requested price-step restyle
         // (6px field radius, centred quantity with borderless 40px steppers);
-        // Barter's wanted-item select makes its dialog 1px taller, so rows
-        // above the location row sit 0.5px higher and rows below 0.5px lower.
+        // Barter's wanted-item picker and its two per-trade quantities (LS9,
+        // re-measured 2026-11-14) make its dialog 137px taller, so rows above
+        // the location row sit 68.5px higher and rows below 68.5px lower.
         final barter = side == 'barter';
-        final up = barter ? -.5 : 0.0, down = barter ? .5 : 0.0;
+        final up = barter ? -68.5 : 0.0, down = barter ? 68.5 : 0.0;
         Rect above(double l, double t, double r, double b) =>
             Rect.fromLTRB(l, t + up, r, b + up);
         Rect at(double l, double t, double r, double b) =>
@@ -81,10 +82,8 @@ void main() {
         );
         if (side == 'barter') {
           expect(
-            tester.getRect(
-              find.byType(StarBridgeSelectFormField<String>).first,
-            ),
-            const Rect.fromLTRB(380, 414.5, 738, 458.5),
+            tester.getRect(_k('market-publish-wanted')),
+            const Rect.fromLTRB(380, 346.5, 738, 394.5),
           );
         }
         expect(

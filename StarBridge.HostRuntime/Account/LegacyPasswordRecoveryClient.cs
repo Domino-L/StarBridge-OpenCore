@@ -22,6 +22,7 @@ internal sealed class LegacyPasswordRecoveryClient : IDisposable
             throw new ArgumentException("Password recovery requires HTTPS or a loopback test endpoint.", nameof(baseUri));
         _baseUri = baseUri;
         _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal async Task<PasswordRecoveryResult> ExecuteAsync(string action, JsonElement payload, CancellationToken token)

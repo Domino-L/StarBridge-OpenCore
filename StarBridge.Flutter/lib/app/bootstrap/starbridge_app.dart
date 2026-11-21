@@ -26,6 +26,7 @@ import '../../design_system/theme/theme_builder.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../shared/inline_image_cache.dart';
 import '../../shared/remote_image.dart';
+import '../../shared/ships/scm_ship_thumbnail.dart';
 import '../../shared/release/official_client_profile.dart';
 import '../composition/app_composition.dart';
 import '../composition/guide_composition.dart';
@@ -36,6 +37,7 @@ import '../composition/room_session_listener.dart';
 import '../composition/session_warmup_listener.dart';
 import '../composition/local_notification_listener.dart';
 import '../localization/app_strings.dart';
+import '../runtime/frame_governor.dart';
 import '../preferences/app_preferences.dart';
 import '../preferences/app_preferences_projection.dart';
 import '../runtime/example_scene_control.dart';
@@ -215,7 +217,13 @@ class _StarBridgeAppState extends State<StarBridgeApp>
     _forwardDestination();
     widget.composition.account.projection.addListener(_resetMediaOwner);
     _resetMediaOwner();
+    widget.composition.preferences.projection.addListener(_syncPerformanceMode);
+    _syncPerformanceMode();
   }
+
+  // The frame governor reads the user's performance mode from here.
+  void _syncPerformanceMode() => performanceModePreference.value =
+      widget.composition.preferences.projection.value.effective.performanceMode;
 
   @override
   void didUpdateWidget(covariant StarBridgeApp oldWidget) {
@@ -236,6 +244,11 @@ class _StarBridgeAppState extends State<StarBridgeApp>
       widget.startupSession?.addListener(_handleMismatch.wake);
       oldWidget.composition.account.projection.removeListener(_resetMediaOwner);
       widget.composition.account.projection.addListener(_resetMediaOwner);
+      oldWidget.composition.preferences.projection
+          .removeListener(_syncPerformanceMode);
+      widget.composition.preferences.projection
+          .addListener(_syncPerformanceMode);
+      _syncPerformanceMode();
       _inlineImages.clear();
       _resetMediaOwner();
       _bindImages();
@@ -266,6 +279,8 @@ class _StarBridgeAppState extends State<StarBridgeApp>
     if (widget.promptQueue == null) _prompts.dispose();
     _navigationRequests.dispose();
     widget.composition.account.projection.removeListener(_resetMediaOwner);
+    widget.composition.preferences.projection
+        .removeListener(_syncPerformanceMode);
     _releaseImages?.call();
     _inlineImages.dispose();
     widget.composition.dispose();
@@ -333,7 +348,7 @@ class _StarBridgeAppState extends State<StarBridgeApp>
             final resolvedTokens = baseTokens.withReducedMotion(
               systemReduced || userReduced,
             );
-            return FadedNameTip(child: FirstUseSetupEntry(
+            return widget.composition.features.appScope(FadedNameTip(child: FirstUseSetupEntry(
               open: _firstUse?.supported == true ? _firstUse!.open : null,
               child: AppActivityListener(
                 activity: widget.composition.appActivity,
@@ -407,9 +422,12 @@ class _StarBridgeAppState extends State<StarBridgeApp>
                                             ),
                                       )
                                     : null,
-                                child: withTradeChat(
-                                  widget.composition.tradeChat,
-                                  child!,
+                                child: BridgeShipThumbnailScope(
+                                  session: widget.composition.firstUseSession,
+                                  child: withTradeChat(
+                                    widget.composition.tradeChat,
+                                    child!,
+                                  ),
                                 ),
                               ),
                             ),
@@ -420,7 +438,7 @@ class _StarBridgeAppState extends State<StarBridgeApp>
                   ),
                 ),
               ),
-            ));
+            )));
           },
           home: widget.startupSession != null
               ? StartupContentGate(

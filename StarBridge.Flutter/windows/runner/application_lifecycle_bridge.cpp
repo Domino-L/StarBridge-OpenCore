@@ -292,7 +292,7 @@ class ApplicationLifecycleBridge::Impl {
       data.hWnd = window_;
       data.uID = kTrayIconId;
       data.uFlags = NIF_INFO;
-      wcscpy_s(data.szInfoTitle, L"星海舰桥仍在运行");
+      wcscpy_s(data.szInfoTitle, L"SCM 星海舰桥仍在运行");
       wcscpy_s(data.szInfo,
                L"应用已进入系统托盘。需要停止后台运行时，请选择“完全退出”。");
       data.dwInfoFlags = NIIF_INFO;
@@ -335,7 +335,7 @@ class ApplicationLifecycleBridge::Impl {
     const auto next_icon = LoadTrayIcon();
     if (!next_icon) return;
     data.hIcon = next_icon;
-    wcscpy_s(data.szTip, L"星海舰桥");
+    wcscpy_s(data.szTip, L"SCM 星海舰桥");
     tray_icon_added_ = Shell_NotifyIconW(NIM_ADD, &data) == TRUE;
     if (tray_icon_added_) {
       if (tray_icon_) DestroyIcon(tray_icon_);

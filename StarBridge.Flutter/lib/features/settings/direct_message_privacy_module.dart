@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'privacy_read_retry.dart';
+
 enum DirectMessagePrivacyAvailability {
   loading,
   signedOut,
@@ -13,6 +15,7 @@ enum DirectMessagePrivacyOperation { none, saving }
 
 enum DirectMessagePrivacyFailure {
   hostUnavailable,
+  capabilityMissing,
   identityUnavailable,
   readFailed,
   writeFailed,
@@ -107,6 +110,7 @@ final class DirectMessagePrivacyModule {
     _subscription = _port.invalidations.listen((_) {
       if (_disposed) return;
       // Identity invalidation must never retain another account's settings.
+      _readRetry.reset();
       _epoch++;
       _reading = false;
       _busy = false;
@@ -119,6 +123,7 @@ final class DirectMessagePrivacyModule {
   }
 
   final DirectMessagePrivacyPort _port;
+  final _readRetry = PrivacyReadRetry();
   final ValueNotifier<DirectMessagePrivacyProjection> projection =
       ValueNotifier(
         const DirectMessagePrivacyProjection(
@@ -139,6 +144,14 @@ final class DirectMessagePrivacyModule {
     await refresh();
   }
 
+  Future<void> refreshIfUnavailable() async {
+    if (!_disposed && _canRetry(projection.value.snapshot)) await refresh();
+  }
+
+  bool _canRetry(DirectMessagePrivacySnapshot snapshot) =>
+      snapshot.availability == DirectMessagePrivacyAvailability.unavailable &&
+      snapshot.failure != DirectMessagePrivacyFailure.capabilityMissing;
+
   Future<void> refresh() async {
     if (_disposed) return;
     if (_busy) {
@@ -146,11 +159,13 @@ final class DirectMessagePrivacyModule {
       return;
     }
     if (_reading) return;
+    _readRetry.cancelPending();
     _reading = true;
     final epoch = _epoch;
     final snapshot = await _port.read();
     if (_disposed || epoch != _epoch) return;
     _reading = false;
+    _readRetry.afterRead(shouldRetry: _canRetry(snapshot), refresh: refresh);
     projection.value = DirectMessagePrivacyProjection(
       snapshot: snapshot,
       failure: snapshot.failure,
@@ -197,6 +212,7 @@ final class DirectMessagePrivacyModule {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _readRetry.reset();
     unawaited(_subscription.cancel());
     projection.dispose();
     unawaited(_port.close());

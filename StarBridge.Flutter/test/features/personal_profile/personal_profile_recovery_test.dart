@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/standard_interaction.dart';
+
 import 'package:starbridge_flutter/design_system/interaction/starbridge_action_button.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
@@ -132,6 +135,7 @@ Future<void> _openProfile(WidgetTester tester, _RecoveryPort port) async {
     StarBridgeApp(
       composition: AppComposition.forTest(
         windowChrome: InMemoryWindowChrome(),
+        preferences: standardInteraction(),
         accountPort: InMemoryAccountAdapter.forReview(
           AccountReviewState.signedIn,
         ),

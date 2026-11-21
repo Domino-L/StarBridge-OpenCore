@@ -1,3 +1,5 @@
+import '../common/last_online_days.dart';
+
 import 'dart:async';
 
 import '../../platform/bridge/bridge_client_session.dart';
@@ -378,6 +380,7 @@ OfficialFleetMemberDirectorySnapshot parseOfficialFleetMembers(
     members.add(
       OfficialFleetMember(
         memberRef: reference,
+        lastOnlineDays: readLastOnlineDays(row['lastOnlineDays']),
         callsign: restricted ? '' : wire.requiredString(row, 'callsign'),
         gameId: '',
         avatarUrl: avatar,

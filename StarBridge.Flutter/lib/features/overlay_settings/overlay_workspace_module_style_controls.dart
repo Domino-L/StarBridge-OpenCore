@@ -4,7 +4,8 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/interaction/starbridge_slider.dart';
 import '../../design_system/interaction/starbridge_switch.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
-import 'overlay_calm_display_controls.dart';
+import 'overlay_settings_help.dart';
+import 'overlay_workspace_global_group.dart';
 import 'overlay_workspace_models.dart';
 
 const _moduleKeyByGroup = <String, String>{
@@ -22,10 +23,18 @@ class OverlayWorkspaceModuleStyleControls extends StatelessWidget {
     required this.settings,
     required this.onLayoutChanged,
     required this.onSettingChanged,
+    this.onOpenGlobal,
+    this.onSizeStep,
+    this.layoutLocked = false,
     super.key,
   });
 
+  /// Opens the global group, where calm display is set (null: no link).
+  final VoidCallback? onOpenGlobal;
+
   final String group;
+  final bool layoutLocked;
+  final void Function(String field, Object? value)? onSizeStep;
   final List<OverlayWorkspaceLayoutItem> layout;
   final OverlayWorkspaceSettings settings;
   final void Function(OverlayWorkspaceLayoutItem item, bool coalesce)
@@ -59,22 +68,20 @@ class OverlayWorkspaceModuleStyleControls extends StatelessWidget {
       key: Key('overlay-module-style-$moduleKey'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // the block's look, apart from what it shows and how (11-11 user)
         Text(
-          AppStrings.of(context).text('overlay.editor.opacityControls'),
+          AppStrings.of(context).text('overlay.workspace.group.look'),
+          key: Key('overlay-module-look-$moduleKey'),
           style: Theme.of(context).textTheme.titleSmall,
         ),
-        if (item != null) ...[
-          SizedBox(height: tokens.space.xs),
-          StarBridgeSwitch.tile(
-            controlKey: Key('overlay-module-lock-$moduleKey'),
-            preserveNativeTile: true,
-            label: AppStrings.of(context)
-                .text('overlay.workspace.layout.lockPositionSize'),
-            value: item.isLocked,
-            onChanged: (value) =>
-                onLayoutChanged(item.copyWith(isLocked: value), false),
-          ),
-        ],
+        SizedBox(height: tokens.space.xs),
+        OverlayWorkspaceBlockLook(
+          onSizeStep: onSizeStep,
+          sizeLocked: layoutLocked || (item?.isLocked ?? false),
+          moduleKey: moduleKey,
+          settings: settings,
+          onChanged: onSettingChanged,
+        ),
         _OpacityControl(
           key: Key('overlay-module-text-opacity-$moduleKey'),
           label: AppStrings.of(context)
@@ -120,14 +127,43 @@ class OverlayWorkspaceModuleStyleControls extends StatelessWidget {
             }
           },
         ),
-        if (moduleKey case 'Squads' || 'Members' || 'Chat')
-          OverlayCalmDisplayControls(
-            settings: settings,
-            onSettingChanged: onSettingChanged,
-            chatBarrage:
-                moduleKey == 'Chat' &&
-                settings['chatDisplayMode'] == 'FullScreenBarrage',
+        Padding(
+          padding: EdgeInsets.only(top: tokens.space.xs),
+          child: OverlaySettingsHelp(
+            AppStrings.of(context)
+                .text('overlay.workspace.layout.backgroundHelp'),
+            key: Key('overlay-module-background-help-$moduleKey'),
           ),
+        ),
+        // calm display is the whole visor's: set in the global group (11-11)
+        if (moduleKey case 'Squads' || 'Members' || 'Chat') ...[
+          SizedBox(height: tokens.space.sm),
+          OverlayWorkspaceGlobalLink(
+            key: const Key('overlay-calm-global-link'),
+            text: AppStrings.of(context).text(
+              settings['calmDisplay'] == 'On'
+                  ? 'overlay.workspace.global.calmOn'
+                  : 'overlay.workspace.global.calmOff',
+            ),
+            onOpen: onOpenGlobal,
+          ),
+        ],
+        if (item != null) ...[
+          SizedBox(height: tokens.space.md),
+          Text(
+            AppStrings.of(context).text('overlay.editor.opacityControls'),
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          StarBridgeSwitch.tile(
+            controlKey: Key('overlay-module-lock-$moduleKey'),
+            preserveNativeTile: true,
+            label: AppStrings.of(context)
+                .text('overlay.workspace.layout.lockPositionSize'),
+            value: item.isLocked,
+            onChanged: (value) =>
+                onLayoutChanged(item.copyWith(isLocked: value), false),
+          ),
+        ],
       ],
     );
   }

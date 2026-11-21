@@ -43,7 +43,7 @@ internal sealed partial class CommunityClient
             current(); token.ThrowIfCancellationRequested();
             var target = Resolve(reference, scope);
             if (!_shipTargets.TryGetValue(shipRef, out var ship) || ship.Scope != scope || ship.Code != target.Code ||
-                ship.Expires <= DateTimeOffset.UtcNow) return Receipt(new("rejected", "refreshRequired"));
+                ship.Expires <= _targetClock.GetUtcNow()) return Receipt(new("rejected", "refreshRequired"));
             var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(scope + "\0" + target.Code + "\0" + requestId)))[..32].ToLowerInvariant();
             var fingerprint = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { ship.Id, version, reason, details })));
             if (_shipReportAttempts.TryGetValue(key, out var prior))

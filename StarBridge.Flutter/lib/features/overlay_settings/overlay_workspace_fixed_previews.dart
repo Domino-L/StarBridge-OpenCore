@@ -1,17 +1,17 @@
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/localization/app_strings.dart';
-import '../../design_system/interaction/starbridge_tooltip.dart';
 import '../../design_system/styles/overlay_preview_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'overlay_workspace_layout_geometry.dart';
-import 'overlay_workspace_preview_content.dart';
 import 'overlay_preview_sources.dart';
 import 'overlay_workspace_models.dart';
 import 'overlay_workspace_runtime_projection.dart';
+import 'overlay_event_notification_preview.dart';
+import 'overlay_visor_layout.dart';
+import 'overlay_visor_projection.dart';
 
 /// Non-rectangular WPF modules share their settings between both canvases.
 class OverlayWorkspaceFixedPreviews extends StatelessWidget {
@@ -27,14 +27,20 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
     this.chatTextOpacity = 1,
     this.simulate = false,
     this.surfaceSize = OverlayWorkspaceLayoutGeometry.referenceSize,
+    this.layout = const [],
     super.key,
   });
   final OverlayWorkspaceSettings settings;
+
+  /// The saved layout: with the visor the event preview sits where the visor
+  /// shows the events (review R6); the chat preview takes the chat module's
+  /// text opacity from it (else [chatTextOpacity]).
+  final List<OverlayWorkspaceLayoutItem> layout;
   final bool simulate;
   final Size surfaceSize;
   final ValueChanged<String>? onSelected;
   final bool selectionOnly;
-  final void Function(String side, double normalizedY)?
+  final void Function(String side, double normalizedY, {double? x})?
   onEventNotificationPlacement;
   final VoidCallback? onEventNotificationGestureStart;
   final VoidCallback? onEventNotificationGestureEnd;
@@ -64,15 +70,34 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
           (constraints.maxHeight - scaledSurface.height) / 2,
         );
         final size = (settings['crosshairSize']! as num).toDouble();
-        final eventRect =
+        final moduleEventRect =
             OverlayWorkspaceLayoutGeometry.resolveEventNotificationRect(
               surfaceWidth: surfaceSize.width,
               surfaceHeight: surfaceSize.height,
               side: settings['eventNotificationSide']! as String,
-              normalizedY: (settings['eventNotificationY']! as num).toDouble(),
+              // The visor shows untouched events at the top of its right column.
+              normalizedY: OverlayVisorLayout.eventDisplayY(
+                settings,
+                surfaceSize,
+              ),
               preferredHeight: OverlayWorkspaceLayoutGeometry
                   .singleEventNotificationPlacementHeight,
             );
+        // with the visor, the events block is the visor's own events box: its
+        // size follows the most events at once and it leans like the visor
+        // draws it (11-11 user: "跟用户选择的最大同时事件挂钩", "同样的3d效果")
+        final visorEvents = OverlayVisorLayout.active(settings)
+            ? OverlayVisorLayout.eventsPlacement(layout, settings, surfaceSize)
+            : null;
+        final eventRect = visorEvents ?? moduleEventRect;
+        final eventsTilt = visorEvents == null
+            ? null
+            : OverlayVisorProjection.tilts(
+                layout,
+                settings,
+                surfaceSize,
+              )['Events'];
+        final tiltDegrees = OverlayVisorProjection.degrees(settings);
         return Stack(
           children: [
             if (simulate &&
@@ -95,7 +120,12 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
                       height: surfaceSize.height,
                       child: _BarragePreview(
                         settings: settings,
-                        textOpacity: chatTextOpacity,
+                        textOpacity:
+                            layout
+                                .where((item) => item.key == 'Chat')
+                                .map((item) => item.textOpacity)
+                                .firstOrNull ??
+                            chatTextOpacity,
                         onSelected: selectionOnly && onSelected != null
                             ? () => onSelected!('chat')
                             : null,
@@ -139,22 +169,34 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
                 top: surfaceOffset.dy + eventRect.top * scale,
                 width: eventRect.width * scale,
                 height:
-                    OverlayWorkspaceLayoutGeometry
-                        .singleEventNotificationPreviewHeight *
+                    (visorEvents?.height ??
+                        OverlayWorkspaceLayoutGeometry
+                            .singleEventNotificationPreviewHeight) *
                     scale,
-                child: _EventNotificationPreview(
-                  settings: settings,
-                  eventRect: eventRect,
-                  surfaceSize: surfaceSize,
-                  scaleX: scale,
-                  scaleY: scale,
-                  snapPixels: eventNotificationSnapPixels,
-                  smartSnap: eventNotificationSmartSnap,
-                  simulate: simulate,
-                  onSelected: onSelected,
-                  onPlacementChanged: onEventNotificationPlacement,
-                  onGestureStart: onEventNotificationGestureStart,
-                  onGestureEnd: onEventNotificationGestureEnd,
+                child: _leaning(
+                  eventsTilt,
+                  tiltDegrees,
+                  OverlayVisorProjection.distance(settings),
+                  eventRect,
+                  scale,
+                  surfaceSize,
+                  OverlayEventNotificationPreview(
+                    settings: settings,
+                    eventRect: eventRect,
+                    visorPlacement: visorEvents != null,
+                    tiltRight: eventsTilt,
+                    tiltDegrees: tiltDegrees,
+                    surfaceSize: surfaceSize,
+                    scaleX: scale,
+                    scaleY: scale,
+                    snapPixels: eventNotificationSnapPixels,
+                    smartSnap: eventNotificationSmartSnap,
+                    simulate: simulate,
+                    onSelected: onSelected,
+                    onPlacementChanged: onEventNotificationPlacement,
+                    onGestureStart: onEventNotificationGestureStart,
+                    onGestureEnd: onEventNotificationGestureEnd,
+                  ),
                 ),
               ),
           ],
@@ -162,162 +204,30 @@ class OverlayWorkspaceFixedPreviews extends StatelessWidget {
       },
     );
   }
-}
 
-class _EventNotificationPreview extends StatefulWidget {
-  const _EventNotificationPreview({
-    required this.settings,
-    required this.eventRect,
-    required this.surfaceSize,
-    required this.scaleX,
-    required this.scaleY,
-    required this.snapPixels,
-    required this.smartSnap,
-    required this.simulate,
-    this.onSelected,
-    this.onPlacementChanged,
-    this.onGestureStart,
-    this.onGestureEnd,
-  });
-
-  final OverlayWorkspaceSettings settings;
-  final Rect eventRect;
-  final Size surfaceSize;
-  final double scaleX;
-  final double scaleY;
-  final double snapPixels;
-  final bool smartSnap;
-  final bool simulate;
-  final ValueChanged<String>? onSelected;
-  final void Function(String side, double normalizedY)? onPlacementChanged;
-  final VoidCallback? onGestureStart;
-  final VoidCallback? onGestureEnd;
-
-  @override
-  State<_EventNotificationPreview> createState() =>
-      _EventNotificationPreviewState();
-}
-
-class _EventNotificationPreviewState extends State<_EventNotificationPreview> {
-  int? _pointer;
-  double? _rawTop;
-  double? _pointerX;
-
-  void _start(PointerDownEvent event) {
-    if ((event.buttons & kPrimaryMouseButton) == 0 || _pointer != null) return;
-    widget.onSelected?.call('events');
-    if (widget.onPlacementChanged == null) return;
-    _pointer = event.pointer;
-    _rawTop = widget.eventRect.top;
-    _pointerX =
-        widget.eventRect.left +
-        event.localPosition.dx / widget.scaleX.clamp(0.0001, double.infinity);
-    widget.onGestureStart?.call();
-  }
-
-  void _update(PointerMoveEvent event) {
-    if (event.pointer != _pointer || _rawTop == null || _pointerX == null) {
-      return;
-    }
-    _rawTop =
-        _rawTop! +
-        event.delta.dy / widget.scaleY.clamp(0.0001, double.infinity);
-    _pointerX =
-        _pointerX! +
-        event.delta.dx / widget.scaleX.clamp(0.0001, double.infinity);
-    final minTop =
-        OverlayWorkspaceLayoutGeometry.eventNotificationVerticalInset;
-    final maxTop = math.max(
-      minTop,
-      widget.surfaceSize.height -
-          widget.eventRect.height -
-          OverlayWorkspaceLayoutGeometry.eventNotificationVerticalInset,
-    );
-    final available = math.max(1.0, maxTop - minTop);
-    var top = _rawTop!.clamp(minTop, maxTop).toDouble();
-    if (widget.snapPixels > 0) {
-      top = (top / widget.snapPixels).round() * widget.snapPixels;
-    }
-    if (widget.smartSnap) {
-      final centeredTop = minTop + available / 2;
-      for (final target in [minTop, centeredTop, maxTop]) {
-        if ((top - target).abs() <=
-            OverlayWorkspaceLayoutGeometry.edgeSnapThreshold) {
-          top = target;
-          break;
-        }
-      }
-    }
-    top = top.clamp(minTop, maxTop).toDouble();
-    widget.onPlacementChanged!(
-      _pointerX! < widget.surfaceSize.width / 2 ? 'Left' : 'Right',
-      ((top - minTop) / available).clamp(0.0, 1.0).toDouble(),
-    );
-  }
-
-  void _end(int pointer) {
-    if (pointer != _pointer || _rawTop == null) return;
-    _pointer = null;
-    _rawTop = null;
-    _pointerX = null;
-    widget.onGestureEnd?.call();
-  }
-
-  @override
-  Widget build(BuildContext context) => StarBridgeTooltip(
-    message: widget.onPlacementChanged == null
-        ? ''
-        : AppStrings.of(context).text('overlay.preview.eventDrag'),
-    consumeEscape: false,
-    child: MouseRegion(
-      cursor: widget.onPlacementChanged == null
-          ? widget.onSelected == null
-                ? SystemMouseCursors.basic
-                : SystemMouseCursors.click
-          : SystemMouseCursors.move,
-      child: Listener(
-        key: const Key('overlay-runtime-preview-event'),
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: _start,
-        onPointerMove: _update,
-        onPointerUp: (event) => _end(event.pointer),
-        onPointerCancel: (event) => _end(event.pointer),
-        child: FittedBox(
-          fit: BoxFit.contain,
-          alignment: Alignment.topLeft,
-          child: SizedBox(
-            width: widget.eventRect.width,
-            height: OverlayWorkspaceLayoutGeometry
-                .singleEventNotificationPreviewHeight,
-            child: OverlayPreviewModuleSurface(
-              settings: widget.settings,
-              backgroundOpacity:
-                  (widget.settings['eventNotificationBackgroundOpacity']!
-                          as num)
-                      .toDouble(),
-              textOpacity:
-                  (widget.settings['eventNotificationTextOpacity']! as num)
-                      .toDouble(),
-              decorationOpacity:
-                  (widget.settings['eventNotificationDecorationOpacity']!
-                          as num)
-                      .toDouble(),
-              child: OverlayPreviewContent(
-                moduleKey: 'Events',
-                settings: widget.settings,
-                referenceSize: Size(
-                  widget.eventRect.width,
-                  OverlayWorkspaceLayoutGeometry
-                      .singleEventNotificationPreviewHeight,
-                ),
-                simulate: widget.simulate,
-              ),
-            ),
+  /// The events block through the visor's camera when the visor tilts it.
+  static Widget _leaning(
+    bool? right,
+    double degrees,
+    double distance,
+    Rect box,
+    double scale,
+    Size surface,
+    Widget child,
+  ) => right == null || degrees == 0
+      ? child
+      : Transform(
+          transform: OverlayVisorProjection.forWidget(
+            box,
+            right: right,
+            degrees: degrees,
+            surface: surface,
+            distance: distance,
+            scaleX: scale,
+            scaleY: scale,
           ),
-        ),
-      ),
-    ),
-  );
+          child: child,
+        );
 }
 
 class _BarragePreview extends StatelessWidget {

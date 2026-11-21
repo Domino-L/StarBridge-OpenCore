@@ -28,7 +28,8 @@ internal static partial class AccountSessionRestoreTests
                 await releaseProfile.Task.WaitAsync(token);
                 return JsonResponse(HttpStatusCode.OK, "{\"subject\":\"subject-1\",\"displayName\":\"Synthetic late metadata\"}");
             });
-            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options);
+            var clock = new CredentialClock();
+            var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
             var initial = (await oauth.TryRestoreSessionAsync(default))!;
             var oldProfile = oauth.LoadProfileAsync(initial, default);
             await profileEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -49,6 +50,7 @@ internal static partial class AccountSessionRestoreTests
             AssertEqual(key, vault.LoadActiveAccountKey(), "late realtime clear preserves selection");
             if (unconfirmed)
             {
+                clock.Now = clock.Now.AddMinutes(5);
                 failIdentity = false;
                 var restored = await oauth.TryRestoreSessionAsync(default);
                 AssertEqual(latestVersion, restored?.CredentialVersion, "identity retry preserves committed version");

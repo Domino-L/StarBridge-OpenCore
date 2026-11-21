@@ -16,8 +16,9 @@ internal static class AchievementCelebrationLiveProbe
     internal static async Task Run(string assetRoot, bool throughGrant = false)
     {
         var master = Path.Combine(Path.GetFullPath(assetRoot), "achievement.unlock.wav");
+        // F1 replaces G3 per the audio README and cue catalog registered in 7db6e267.
         Require(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(master))) ==
-            "738C9EBF57B2B714CE11A1F31B11FE6DAD91448E8FCC6CBD48C9742432D040D6", "Probe uses the approved original G3 master");
+            "ACCE64CEF4B0539512F00E119A6DE109EB7A3326423F867C65446D4CFF62D6E9", "Probe uses the approved F1 master");
         var root = Path.Combine(Path.GetTempPath(), "sb-achievement-live-probe-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -40,7 +41,7 @@ internal static class AchievementCelebrationLiveProbe
             using var achievements = new AchievementRuntime(new(root), cloud, () => (current ? owner : null, 1),
                 () => evidence, _ => { }, startTimer: false,
                 earned: (generation, at) => { earnedCallbacks++; delivery.FirstEntryEarned(generation, at); });
-            Console.WriteLine("LOCAL PRESENTATION TEST: production native card + original G3 at 70%; no award, account, network or product preference changes.");
+            Console.WriteLine("LOCAL PRESENTATION TEST: production native card + approved F1 at 70%; no award, account, network or product preference changes.");
             await Task.Delay(3000);
             if (throughGrant)
             {
@@ -67,10 +68,10 @@ internal static class AchievementCelebrationLiveProbe
             Require(visible, "Full production runtime must create and show the native card after Submit");
             Require(readable, "Native card must remain visible during its readable hold");
             Require(played.Task.IsCompletedSuccessfully && played.Task.Result,
-                "Native presentation must reach successful verified G3 playback despite ordinary DND guards");
+                "Native presentation must reach successful verified F1 playback despite ordinary DND guards");
             Require(FindOwnCard() == IntPtr.Zero, "Native runtime must dismiss its card after the presentation lifetime");
-            Console.WriteLine("PASS full native presentation: Submit/STA/visible hold/dismiss + verified G3 playback, DND fixture, zero product writes");
-            if (throughGrant) Console.WriteLine("PASS local grant-to-native chain: validated new receipt / blocked outbox cleanup / one delivery / one real card and G3");
+            Console.WriteLine("PASS full native presentation: Submit/STA/visible hold/dismiss + verified F1 playback, DND fixture, zero product writes");
+            if (throughGrant) Console.WriteLine("PASS local grant-to-native chain: validated new receipt / blocked outbox cleanup / one delivery / one real card and F1");
         }
         finally { Directory.Delete(root, true); }
     }

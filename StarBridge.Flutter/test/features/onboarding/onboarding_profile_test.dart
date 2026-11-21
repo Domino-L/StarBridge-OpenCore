@@ -242,8 +242,8 @@ void main() {
       );
       await bridge.adapter.read();
       expect(
-        await bridge.adapter.saveCallSign('Pilot Example', 'Night Pilot'),
-        'Night Pilot',
+        await bridge.adapter.saveCallSign('Pilot Example', 'Night Ace'),
+        'Night Ace',
       );
       final rename = bridge.requests.last;
       expect(rename.name, 'account.updateCallSign');
@@ -251,7 +251,7 @@ void main() {
       expect(rename.payload, {
         'schemaVersion': 1,
         'expectedCallSign': 'Pilot Example',
-        'callSign': 'Night Pilot',
+        'callSign': 'Night Ace',
       });
       await bridge.close();
     });
@@ -272,7 +272,7 @@ void main() {
               (const {'schemaVersion': 1}, _owner, code);
           await bridge.adapter.read();
           await expectLater(
-            bridge.adapter.saveCallSign('Pilot Example', 'Night Pilot'),
+            bridge.adapter.saveCallSign('Pilot Example', 'Night Ace'),
             throwsA(
               isA<OnboardingProfileSaveException>()
                   .having((e) => e.key, 'key', key)
@@ -290,7 +290,7 @@ void main() {
       expect((await bridge.adapter.read())!.canRename, isFalse);
       final sent = bridge.requests.length;
       await expectLater(
-        bridge.adapter.saveCallSign('Pilot Example', 'Night Pilot'),
+        bridge.adapter.saveCallSign('Pilot Example', 'Night Ace'),
         throwsA(isA<OnboardingProfileSaveException>()),
       );
       expect(bridge.requests.length, sent);
@@ -306,7 +306,7 @@ void main() {
       expect(port.reads, 1);
       expect(controller.value.visible, isTrue);
       expect(controller.value.canSave, isFalse);
-      controller.edit('Night Pilot');
+      controller.edit('Night Ace');
       expect(controller.value.dirty && controller.value.canSave, isTrue);
       expect(port.saves, isEmpty);
     });
@@ -315,12 +315,12 @@ void main() {
       final port = FakeProfilePort()
         ..failure = const OnboardingProfileSaveException('profile.save.failed');
       final controller = await _ready(port);
-      controller.edit('Night Pilot');
+      controller.edit('Night Ace');
       await controller.save();
-      expect(port.saves, [('Pilot Example', 'Night Pilot')]);
+      expect(port.saves, [('Pilot Example', 'Night Ace')]);
       expect(controller.value.failureKey, 'profile.save.failed');
       expect(controller.value.snapshot!.callSign, 'Pilot Example');
-      expect(controller.value.draft, 'Night Pilot');
+      expect(controller.value.draft, 'Night Ace');
       expect(port.saves.length, 1);
     });
 
@@ -331,7 +331,7 @@ void main() {
           conflict: true,
         );
       final controller = await _ready(port);
-      controller.edit('Night Pilot');
+      controller.edit('Night Ace');
       port.snapshot = const OnboardingProfileSnapshot(
         callSign: 'Changed Elsewhere',
         canRename: true,
@@ -339,13 +339,14 @@ void main() {
       await controller.save();
       expect(port.reads, 2);
       expect(controller.value.snapshot!.callSign, 'Changed Elsewhere');
-      expect(controller.value.draft, 'Night Pilot');
+      expect(controller.value.draft, 'Night Ace');
       expect(controller.value.failureKey, 'profile.save.conflict');
     });
 
     test('invalid names cannot be saved', () async {
       final controller = await _ready(FakeProfilePort());
-      for (final bad in ['', '   ', 'x' * 33, 'a\u0007b']) {
+      // 11-15: the one SCM callsign is at most 10 (CJK counts 2).
+      for (final bad in ['', '   ', 'x' * 33, 'x' * 11, '飞鹰飞鹰飞鹰', 'a\u0007b']) {
         controller.edit(bad);
         expect(controller.value.canSave, isFalse, reason: bad);
       }
@@ -378,14 +379,14 @@ void main() {
       );
       await tester.enterText(
         find.byKey(const Key('onboarding-profile-name')),
-        'Night Pilot',
+        'Night Ace',
       );
       await tester.pump();
       expect(find.byKey(const Key('profile-status-unsaved')), findsOneWidget);
       expect(_note(tester), contains('直接进入会保留原昵称'));
       await tester.tap(find.byKey(const Key('onboarding-profile-save')));
       await tester.pumpAndSettle();
-      expect(port.saves, [('Pilot Example', 'Night Pilot')]);
+      expect(port.saves, [('Pilot Example', 'Night Ace')]);
       expect(find.byKey(const Key('profile-status-saved')), findsOneWidget);
       await tester.tap(find.byKey(const Key('onboarding-profile-open-rsi')));
       await tester.pump();
@@ -399,7 +400,7 @@ void main() {
       await _pumpPanel(tester, controller);
       await tester.enterText(
         find.byKey(const Key('onboarding-profile-name')),
-        'Night Pilot',
+        'Night Ace',
       );
       await tester.pump();
       await tester.tap(find.byKey(const Key('onboarding-profile-save')));

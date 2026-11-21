@@ -31,13 +31,13 @@ public readonly record struct OverlayCalmDisplayLevels(bool Enabled, double Idle
     public static IReadOnlyList<int> WaitChoices { get; } = [5, 10, 20, 30];
 
     /// <summary>
-    /// Unset idle/lit values (0) follow the existing opacity: resting never makes a
-    /// module darker than the user already set it, and lighting lifts a low setting
-    /// to a readable level. Resting is never brighter than lit.
+    /// Unset idle/lit values (0) take the defaults: resting at <see cref="DefaultIdleCeiling"/>, lit at full.
+    /// Resting is never brighter than lit. The overall opacity is retired (user 11-12: "全局里的整体透明度应该去掉，
+    /// 这是之前遗留的废弃项"): a saved value no longer counts, the overlay draws as if it were 100%.
     /// </summary>
     public static OverlayCalmDisplayLevels Resolve(OverlayDisplaySettings settings)
     {
-        var baseOpacity = Math.Clamp(settings.Opacity, MinimumOpacity, 1);
+        const double baseOpacity = 1;
         var idle = settings.CalmIdleOpacity > 0
             ? Math.Clamp(settings.CalmIdleOpacity, MinimumOpacity, 1)
             : Math.Max(MinimumOpacity, Math.Min(baseOpacity, DefaultIdleCeiling));

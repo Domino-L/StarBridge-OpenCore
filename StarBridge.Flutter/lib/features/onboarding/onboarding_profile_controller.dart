@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'onboarding_profile_port.dart';
+import '../common/callsign_rules.dart';
 
 enum OnboardingProfileLoad { idle, loading, absent, ready, failed }
 
@@ -33,7 +34,9 @@ final class OnboardingProfileView {
       snapshot!.canRename &&
       !saving &&
       dirty &&
-      validOnboardingCallSign(draft.trim());
+      validOnboardingCallSign(draft.trim()) &&
+      // A new name is the one SCM callsign (11-15): legacy rules, at most 10.
+      CallsignRules.valid(draft);
 
   OnboardingProfileView copyWith({
     OnboardingProfileLoad? load,

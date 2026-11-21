@@ -19,6 +19,7 @@ internal sealed partial class CommunityClient
             var fleets = await WpfS2Membership(bearer, token);
             if (fleets.Length > 64) throw Invalid();
             var sources = new List<CommunityNotificationSource>();
+            using var announcementBudget = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             foreach (var fleet in fleets) {
                 current(); token.ThrowIfCancellationRequested();
                 var code = Text(fleet, "code", 256);
@@ -56,8 +57,12 @@ internal sealed partial class CommunityClient
                 } catch (AccountBridgeHostException) { tasks = []; managementConfirmed = false; }
                   catch (HttpRequestException) { tasks = []; managementConfirmed = false; }
                 current(); token.ThrowIfCancellationRequested();
+                var announcements = await NotificationAnnouncements(bearer, code, true, false, current, token, announcementBudget.Token);
                 sources.Add(new(key, name, joined, chatAvailable, chat, managementAvailable, tasks,
-                    Notifications.NotificationPolicyStore.Organization(code, joined), managementConfirmed));
+                    Notifications.NotificationPolicyStore.Organization(code, joined), managementConfirmed,
+                    Announcements: announcements,
+                    AnnouncementSource: announcements == null ? null : NotificationAnnouncementTarget(code, scope, name, viewerId),
+                    AnnouncementIdentity: "community:" + code.ToUpperInvariant()));
             }
             current(); token.ThrowIfCancellationRequested();
             return new(_targetClock.GetUtcNow(), sources.ToArray());

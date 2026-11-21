@@ -39,11 +39,20 @@ internal sealed class ApplicationPreferencesStore : IApplicationPreferencesStore
                 File.ReadAllText(_settingsPath),
                 BridgeProtocol.JsonOptions);
             var normalized = stored?.Normalize();
-            return normalized is { } && normalized.IsSupported()
-                ? new ApplicationPreferencesReadResult(
-                    normalized,
-                    ApplicationPreferencesStorageStates.Ready)
-                : ApplicationPreferencesReadResult.RecoveredDefaults;
+            if (normalized is null || !normalized.IsSupported())
+            {
+                return ApplicationPreferencesReadResult.RecoveredDefaults;
+            }
+
+            // Pure in-memory step: any reader sees the migrated value; only the
+            // preferences dispatcher writes it back (under its gate).
+            var migrated = normalized.WithScanDefaultMigration();
+            return new ApplicationPreferencesReadResult(
+                migrated,
+                ApplicationPreferencesStorageStates.Ready)
+            {
+                MigrationPending = !ReferenceEquals(migrated, normalized)
+            };
         }
         catch (JsonException)
         {

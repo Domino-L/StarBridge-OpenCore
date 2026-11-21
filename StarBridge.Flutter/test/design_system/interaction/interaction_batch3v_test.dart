@@ -483,6 +483,14 @@ void main() {
         await t.sendKeyEvent(LogicalKeyboardKey.escape);
         await t.pumpAndSettle();
         expect(changes, isEmpty);
+        // 0.7.3 overlay v2: the skin selector is not shown until v2 (only the visor);
+        // the theme part above still applies.
+        if (!overlayWorkspaceFieldVisible('skin', settings())) {
+          await t.pumpWidget(const SizedBox());
+          await t.pumpAndSettle();
+          handle.dispose();
+          return;
+        }
         await t.pumpWidget(
           scopedApp(
             OverlayWorkspaceSettingsGroup(

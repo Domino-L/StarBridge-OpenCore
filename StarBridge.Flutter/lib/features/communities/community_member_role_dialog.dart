@@ -19,6 +19,7 @@ import 'package:starbridge_interaction/starbridge_interaction.dart';
 import 'community_member_role_port.dart';
 import 'community_member_role_controller.dart';
 import 'community_member_role_copy.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 class CommunityMemberRoleDialog extends StatefulWidget {
   const CommunityMemberRoleDialog({
@@ -217,7 +218,7 @@ class _CommunityMemberRoleDialogState extends State<CommunityMemberRoleDialog> {
           child: Text(
             name,
             maxLines: 1,
-            overflow: TextOverflow.fade,
+            overflow: fadeOverflow(context),
             softWrap: false,
             style: Theme.of(context).textTheme.bodyMedium,
           ),

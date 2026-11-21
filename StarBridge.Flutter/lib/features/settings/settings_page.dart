@@ -27,6 +27,7 @@ class SettingsPage extends StatefulWidget {
     this.confirmNotificationsLeave,
     this.diagnosticsBuilder,
     this.helpSupportBuilder,
+    this.screenReadingBuilder,
     super.key,
   });
 
@@ -37,6 +38,7 @@ class SettingsPage extends StatefulWidget {
   final SettingsContentBuilder notificationsBuilder;
   final SettingsContentBuilder? diagnosticsBuilder;
   final SettingsContentBuilder? helpSupportBuilder;
+  final SettingsContentBuilder? screenReadingBuilder;
   final DestinationLeaveGuard? confirmPrivacyLeave;
   final DestinationLeaveGuard? confirmNotificationsLeave;
 
@@ -182,6 +184,10 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     if (_selected == SettingsSection.syncPrivacy) {
       return widget.syncPrivacyBuilder(context);
+    }
+    if (_selected == SettingsSection.screenReading &&
+        widget.screenReadingBuilder != null) {
+      return widget.screenReadingBuilder!(context);
     }
     if (_selected == SettingsSection.notifications) {
       return widget.notificationsBuilder(context);

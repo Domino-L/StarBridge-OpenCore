@@ -35,7 +35,8 @@ public sealed partial class NativeInformationOverlayRuntime : IInformationOverla
     }
 
     public IReadOnlyList<string> GetLiveAppearancePreviewIds() => _disposed ? [] :
-        OverlaySkinCatalog.Listed.Where(p => p.IsPreviewAvailable).Select(p => p.Id.ToString()).Take(8).ToArray();
+        // 0.7.3 overlay v2: a hidden appearance offers no live preview (it stays listed and qualified)
+        OverlaySkinCatalog.Listed.Where(p => p.IsPreviewAvailable && !OverlaySkinCatalog.IsHiddenUntilV2(p.Id)).Select(p => p.Id.ToString()).Take(8).ToArray();
 
     public async ValueTask<string?> OpenLiveAppearancePreviewAsync(InformationOverlayLivePreviewDraft draft,
         InformationOverlayLivePreviewScope scope, CancellationToken cancellationToken = default)
@@ -94,6 +95,8 @@ public sealed partial class NativeInformationOverlayRuntime : IInformationOverla
             cancellationToken.ThrowIfCancellationRequested();
             ValidateLivePreviewScope();
             if (_livePreviewSession != sessionId || _livePreviewSurface is not { } surface) return null;
+            // the same appearance list as opening: an update cannot switch to a hidden appearance
+            if (!GetLiveAppearancePreviewIds().Contains(draft.AppearanceId, StringComparer.Ordinal)) return null;
             var frame = LiveFrame(revision, draft);
             var bounds = ResolveTargetSurfaceBounds(out var dpi);
             if (!surface.Update(frame, bounds, dpi)) return null;

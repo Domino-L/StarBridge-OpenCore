@@ -34,6 +34,7 @@ import 'package:starbridge_flutter/features/overlay_settings/overlay_settings_fe
 import 'package:starbridge_flutter/features/overlay_settings/overlay_settings_page.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_preview_identity.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_models.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_visor_layout.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_rules.dart';
 import 'package:starbridge_flutter/app/composition/account_shell_chrome.dart';
 import 'package:starbridge_flutter/features/account/account_module.dart';
@@ -72,6 +73,11 @@ class _MenuReadLease implements MenuFriendsReadLease {
   @override
   void dispose() {}
 }
+
+// 0.7.3 overlay v2 (user, 11-07: "藏，等之后做v2"): the other appearances are put
+// away and only the visor is offered, so these appearance-choice tests wait for
+// v2. Turn this off when an appearance comes back.
+const _hiddenUntilV2 = true;
 
 void main() {
   test('an archived transition or theme alone keeps a valid appearance', () {
@@ -383,7 +389,7 @@ void main() {
       await tester.ensureVisible(find.text('查看详细设置'));
       await tester.tap(find.text('查看详细设置'));
       await tester.pumpAndSettle();
-      expect(find.text('准星透明度'), findsOneWidget);
+      expect(find.text('准星不透明度'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
@@ -959,6 +965,10 @@ void main() {
           ),
         );
       }
+      // 11-11 user: the page opens on the global group, at the top
+      expect(find.byKey(const Key('overlay-group-global')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('overlay-group-nav-notice')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('overlay-field-showNotice')), findsOneWidget);
       expect(
         find.byKey(const Key('overlay-module-text-opacity-Notice')),
@@ -968,17 +978,11 @@ void main() {
         find.byKey(const Key('overlay-module-background-opacity-Notice')),
         findsOneWidget,
       );
-      await tester.tap(
+      // 11-12 user: no fleet overview group of its own (it is a line on top
+      // of the members)
+      expect(
         find.byKey(const Key('overlay-group-nav-fleetOverview')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('overlay-module-text-opacity-Squads')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('overlay-module-background-opacity-Squads')),
-        findsOneWidget,
+        findsNothing,
       );
       await tester.tap(find.byKey(const Key('overlay-group-nav-members')));
       await tester.pumpAndSettle();
@@ -1059,7 +1063,12 @@ void main() {
         find.byKey(const Key('overlay-appearance-center')),
         findsOneWidget,
       );
-      expect(find.byKey(const Key('overlay-field-theme')), findsOneWidget);
+      // the colour is in the global group since 11-11; the centre points there
+      expect(find.byKey(const Key('overlay-field-theme')), findsNothing);
+      expect(
+        find.byKey(const Key('overlay-appearance-global-link')),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('overlay-preview-stage')), findsNothing);
 
       await tester.tap(find.byKey(const Key('overlay-appearance-center-back')));
@@ -1133,6 +1142,9 @@ void main() {
     await module.initialize();
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
     await tester.pumpAndSettle();
+    // the page opens on the global group (11-11)
+    await tester.tap(find.byKey(const Key('overlay-group-nav-notice')));
+    await tester.pumpAndSettle();
 
     tester
         .widget<Slider>(
@@ -1190,6 +1202,9 @@ void main() {
     addTearDown(module.dispose);
     await module.initialize();
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+    await tester.pumpAndSettle();
+    // the page opens on the global group (11-11)
+    await tester.tap(find.byKey(const Key('overlay-group-nav-notice')));
     await tester.pumpAndSettle();
     final slider = find.descendant(
       of: find.byKey(const Key('overlay-module-text-opacity-Notice')),
@@ -1714,10 +1729,88 @@ void main() {
     },
   );
 
+  test('visor fold angle: 0-60 whole degrees, 15 from an older Host', () {
+    final spec = overlayWorkspaceFieldSpecs.singleWhere(
+      (candidate) => candidate.field == 'visorTilt',
+    );
+    expect(spec.kind, OverlayWorkspaceFieldKind.number);
+    expect(spec.minimum, 0);
+    expect(spec.maximum, 60);
+    expect(spec.divisions, 60);
+    expect(spec.unit, OverlayWorkspaceUnit.degrees);
+    final older = _completeWorkspaceSettings()
+      ..remove('visorTilt')
+      ..remove('visorChatPlate')
+      ..remove('visorMembersAutoWidth')
+      ..remove('visorMembersAutoHeight')
+      ..remove('visorMembersWidth')
+      ..remove('visorMembersHeight')
+      ..remove('visorEventsAutoWidth')
+      ..remove('visorChatAutoWidth')
+      ..remove('visorEventsWidth')
+      ..remove('visorChatWidth');
+    final settings = OverlayWorkspaceSettings.fromMap(older);
+    expect(settings['visorTilt'], 15.0);
+    // 11-07 聊天底框: on unless the user turns it off
+    expect(settings['visorChatPlate'], isTrue);
+    // 11-07 members size: both adaptive, 364 x 415 design units
+    expect(settings['visorMembersAutoWidth'], isTrue);
+    expect(settings['visorMembersAutoHeight'], isTrue);
+    expect(settings['visorMembersWidth'], 364.0);
+    expect(settings['visorMembersHeight'], 394.0);
+    // 11-07 "2放": events and chat width, adaptive with 364
+    expect(settings['visorEventsAutoWidth'], isTrue);
+    expect(settings['visorChatAutoWidth'], isTrue);
+    expect(settings['visorEventsWidth'], 364.0);
+    expect(settings['visorChatWidth'], 364.0);
+    expect(
+      overlayWorkspaceFieldLabelKey(
+        'visorChatWidth',
+        settings.withValue('visorChatAutoWidth', false),
+      ),
+      'overlay.workspace.field.visorChatWidth.fixed',
+    );
+    // the size values read as a maximum while adaptive, as the fixed size otherwise
+    expect(
+      overlayWorkspaceFieldLabelKey('visorMembersWidth', settings),
+      'overlay.workspace.field.visorMembersWidth.max',
+    );
+    final fixed = settings
+        .withValue('visorMembersAutoWidth', false)
+        .withValue('visorMembersAutoHeight', false);
+    expect(
+      overlayWorkspaceFieldLabelKey('visorMembersWidth', fixed),
+      'overlay.workspace.field.visorMembersWidth.fixed',
+    );
+    // 11-10 user: the members height is always fixed; the adaptive-height
+    // switch is no longer offered (the saved value is kept for older versions)
+    for (final values in [settings, fixed]) {
+      expect(
+        overlayWorkspaceFieldLabelKey('visorMembersHeight', values),
+        'overlay.workspace.field.visorMembersHeight',
+      );
+    }
+    expect(
+      overlayWorkspaceFieldSpecs
+          .singleWhere(
+            (candidate) => candidate.field == 'visorMembersAutoHeight',
+          )
+          .userVisible,
+      isFalse,
+    );
+    expect(overlayWorkspaceFieldLabelKey('visorTilt', fixed), isNull);
+    final width = overlayWorkspaceFieldSpecs.singleWhere(
+      (candidate) => candidate.field == 'visorMembersWidth',
+    );
+    expect(width.unit, OverlayWorkspaceUnit.visorPixels);
+    expect([width.minimum, width.maximum], [220, 480]);
+  });
+
   test(
     'workspace adapter preserves the complete WPF settings contract',
     () async {
-      expect(OverlayWorkspaceSettings.requiredFields, hasLength(79));
+      // 95 since the 11-12 events place across (94 with the viewing distance)
+      expect(OverlayWorkspaceSettings.requiredFields, hasLength(95));
       final pair = InMemoryBridgeConnection.createPair();
       final session = BridgeClientSession(
         connection: pair.client,
@@ -1777,7 +1870,7 @@ void main() {
       expect(result.activePresetId, 'preset1');
       expect(result.hotkey?.binding, 'Ctrl+Shift+O');
       expect(result.hotkey?.enabled, isTrue);
-      expect(result.appearances, hasLength(3));
+      expect(result.appearances, hasLength(4)); // with the visor
       expect(
         result.appearances
             .singleWhere((appearance) => appearance.id == 'NightShadow')
@@ -1791,7 +1884,7 @@ void main() {
         isFalse,
       );
       // The fixture Host predates calm display; its six fields get defaults.
-      expect(result.settings?.values, hasLength(79));
+      expect(result.settings?.values, hasLength(95));
       expect(result.settings?['calmDisplay'], 'Unset');
       expect(result.settings?['crosshairMode'], 'Cross');
       expect(result.layout, hasLength(4));
@@ -2014,7 +2107,9 @@ void main() {
   });
 
   test('each WPF overlay module owns one clear settings entry', () {
+    // 11-11 user: the whole-visor settings in one global group on top
     expect(overlayWorkspaceGroupOrder, const [
+      'global',
       'notice',
       'fleetOverview',
       'members',
@@ -2035,11 +2130,15 @@ void main() {
 
     expect(fieldsByGroup['notice'], {
       'showNotice',
-      'communicationFriendEvents',
-      'communicationMessagePreview',
       'communicationEventDurationSeconds',
       'fleetChatScope',
     });
+    // with the DM badge gone the direct-message switches are chat settings
+    // (11-13 user)
+    expect(
+      fieldsByGroup['chat'],
+      containsAll({'communicationFriendEvents', 'communicationMessagePreview'}),
+    );
     expect(fieldsByGroup['fleetOverview'], {
       'showSquads',
       'hideSquadIcons',
@@ -2058,7 +2157,9 @@ void main() {
     expect(fieldsByGroup['chat']!.first, 'showChat');
     expect(fieldsByGroup['events']!.first, 'showEventNotifications');
     expect(fieldsByGroup['crosshair']!.first, 'showCrosshair');
-    expect(fieldsByGroup['appearance'], contains('opacity'));
+    expect(fieldsByGroup['global'], contains('opacity'));
+    expect(fieldsByGroup['global'], contains('visorTilt'));
+    expect(fieldsByGroup['global'], contains('calmDisplay'));
     expect(
       fieldsByGroup['startup'],
       containsAll({'enableTrayMode', 'scenePreference'}),
@@ -2129,38 +2230,36 @@ void main() {
         ),
       );
 
+      // on the visor the events block is the visor's own events box, sized by
+      // the most events at once (11-11), at full size in fullscreen
+      final visorEvents = OverlayVisorLayout.eventsBoxSize(settings);
       await tester.pumpWidget(preview(const Size(1920, 1080)));
       await tester.pumpAndSettle();
       expect(
         tester.getSize(find.byKey(const Key('overlay-runtime-preview-event'))),
-        const Size(380, 64),
+        visorEvents,
       );
       final fullscreenEvent = find.byKey(
         const Key('overlay-runtime-preview-event'),
       );
-      final eventText = find.descendant(
+      // the editor's simplified panel fills exactly the visor's events box
+      // (11-12): no empty block below the rows the visor keeps
+      final panel = find.descendant(
         of: fullscreenEvent,
-        matching: find.byType(Text),
+        matching: find.byKey(const Key('overlay-simulated-structure-Events')),
       );
-      final eventBottom = tester.getRect(fullscreenEvent).bottom;
-      var contentBottom = double.negativeInfinity;
-      for (var index = 0; index < eventText.evaluate().length; index += 1) {
-        final bottom = tester.getRect(eventText.at(index)).bottom;
-        if (bottom > contentBottom) {
-          contentBottom = bottom;
-        }
-      }
+      expect(panel, findsOneWidget);
       expect(
-        eventBottom - contentBottom,
-        lessThanOrEqualTo(22),
-        reason: 'A single event row must not reserve an empty lower block.',
+        tester.getRect(panel),
+        rectMoreOrLessEquals(tester.getRect(fullscreenEvent), epsilon: 0.5),
       );
 
       await tester.pumpWidget(preview(const Size(960, 540)));
       await tester.pumpAndSettle();
       expect(
         tester.getSize(find.byKey(const Key('overlay-runtime-preview-event'))),
-        const Size(190, 32),
+        visorEvents / 2,
+        reason: 'uniformly scaled inline',
       );
       expect(tester.takeException(), isNull);
     },
@@ -2323,9 +2422,19 @@ void main() {
           .initialValue,
       'notice',
     );
+    // the visor's rally docks top or bottom and is always centred: only the
+    // dock is offered (11-11 "去掉没用的控件")
+    expect(
+      find.byKey(const Key('overlay-layout-vertical-anchor-Notice')),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const Key('overlay-layout-horizontal-anchor-Notice')),
-      findsOneWidget,
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('overlay-layout-nudge-left-Notice')),
+      findsNothing,
     );
     expect(module.workspace!.projection.value.settings!['showMembers'], isTrue);
 
@@ -2542,7 +2651,7 @@ void editorRegressionTests() {
     tester
         .widgetList<Slider>(
           find.descendant(
-            of: find.byKey(const Key('overlay-layout-text-opacity-Notice')),
+            of: find.byKey(const Key('overlay-module-text-opacity-Notice')),
             matching: find.byType(Slider),
           ),
         )
@@ -2553,7 +2662,7 @@ void editorRegressionTests() {
         .widgetList<Slider>(
           find.descendant(
             of: find.byKey(
-              const Key('overlay-layout-background-opacity-Notice'),
+              const Key('overlay-module-background-opacity-Notice'),
             ),
             matching: find.byType(Slider),
           ),
@@ -2571,7 +2680,7 @@ void editorRegressionTests() {
         .widgetList<Slider>(
           find.descendant(
             of: find.byKey(
-              const Key('overlay-layout-decoration-opacity-Notice'),
+              const Key('overlay-module-decoration-opacity-Notice'),
             ),
             matching: find.byType(Slider),
           ),
@@ -2593,9 +2702,10 @@ void editorRegressionTests() {
             matching: find.byType(DropdownButtonFormField<String>),
           ),
         )
-        .onChanged!('appearance');
+        .onChanged!('global');
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('overlay-group-appearance')), findsOneWidget);
+    expect(find.byKey(const Key('overlay-group-global')), findsOneWidget);
+    // 11-12 user: the overall opacity is retired ("全局里的整体透明度应该去掉")
     expect(find.byKey(const Key('overlay-field-opacity')), findsNothing);
 
     tester
@@ -2774,7 +2884,7 @@ void editorRegressionTests() {
       expect(settings['theme'], entry.value.$1, reason: entry.key);
       expect(settings['autoThemeByShip'], isFalse, reason: entry.key);
     }
-  });
+  }, skip: _hiddenUntilV2);
 
   testWidgets('fixed appearance keeps palette fields visible and read-only', (
     tester,
@@ -2826,7 +2936,7 @@ void editorRegressionTests() {
       find.byKey(const Key('overlay-field-nightShadowBloom')),
       findsOneWidget,
     );
-  });
+  }, skip: _hiddenUntilV2);
 
   testWidgets(
     'without entitlement facts an appearance reads as unavailable offline, not locked',
@@ -2890,6 +3000,7 @@ void editorRegressionTests() {
         findsOneWidget,
       );
     },
+    skip: _hiddenUntilV2,
   );
 
   test(
@@ -2918,6 +3029,7 @@ void editorRegressionTests() {
       expect(online['skin'], 'NightShadow');
       expect(online['requestedSkin'], 'NightShadow');
     },
+    skip: _hiddenUntilV2,
   );
 
   test(
@@ -3029,6 +3141,146 @@ void editorRegressionTests() {
       module.workspace!.updateSetting('skin', 'Verdict');
       expect(module.workspace!.projection.value.settings!['skin'], 'Default');
     },
+    skip: _hiddenUntilV2,
+  );
+
+  testWidgets(
+    '0.7.3 overlay v2: a saved hidden appearance shows as the visor and is kept on save',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      for (final available in [true, false]) {
+        final saved =
+            OverlayWorkspaceSettings.fromMap(_completeWorkspaceSettings())
+                .withValue('skin', 'NightShadow')
+                .withValue('requestedSkin', 'NightShadow')
+                .withValue('theme', 'NightShadow');
+        final appearances = _workspaceAppearances()
+            .map(
+              (appearance) => appearance.id == 'NightShadow'
+                  ? appearance.copyWith(isAvailable: available)
+                  : appearance,
+            )
+            .toList(growable: false);
+        final port = _MemoryWorkspacePort(
+          _workspaceSnapshot(
+            settingsOverride: saved,
+            appearancesOverride: appearances,
+          ),
+        );
+        final module = OverlaySettingsModule(
+          InMemoryOverlaySettingsAdapter(),
+          workspacePort: port,
+          editorWindow: _MemoryEditorWindow(),
+        );
+        addTearDown(module.dispose);
+        await module.initialize();
+        final workspace = module.workspace!;
+        final settings = workspace.projection.value.settings!;
+        final tag = available ? 'qualified' : 'not qualified';
+        // the saved choice is read as it is, and shown as the visor
+        expect(settings['skin'], 'NightShadow', reason: tag);
+        expect(settings['requestedSkin'], 'NightShadow', reason: tag);
+        expect(overlayWorkspaceShownSkin(settings), 'Visor', reason: tag);
+        expect(OverlayVisorLayout.active(settings), isTrue, reason: tag);
+        // the visor's own settings apply; the palette is not locked
+        expect(overlayWorkspaceFieldEnabled('visorSize', settings), isTrue);
+        // 11-07 立体程度 sits with the visor's own settings
+        expect(overlayWorkspaceFieldEnabled('visorTilt', settings), isTrue);
+        expect(overlayWorkspaceFieldVisible('visorTilt', settings), isTrue);
+        expect(
+          overlayWorkspaceFieldEnabled('visorChatPlate', settings),
+          isTrue,
+        );
+        expect(
+          overlayWorkspaceFieldVisible('visorChatPlate', settings),
+          isTrue,
+        );
+        for (final field in const [
+          'visorMembersAutoWidth',
+          'visorMembersWidth',
+          'visorMembersHeight',
+        ]) {
+          expect(overlayWorkspaceFieldEnabled(field, settings), isTrue);
+          expect(overlayWorkspaceFieldVisible(field, settings), isTrue);
+        }
+        expect(overlayWorkspaceFieldEnabled('theme', settings), isTrue);
+        // nothing to choose, no holiday look
+        expect(overlayWorkspaceFieldVisible('skin', settings), isFalse);
+        expect(
+          overlayWorkspaceFieldVisible('visorHolidayGold', settings),
+          isFalse,
+        );
+
+        workspace.updateSetting('opacity', 0.8);
+        await workspace.save();
+        final written = port.lastMutation!.settings!;
+        expect(written['opacity'], 0.8, reason: tag);
+        expect(written['skin'], 'NightShadow', reason: tag);
+        expect(written['requestedSkin'], 'NightShadow', reason: tag);
+      }
+    },
+  );
+
+  testWidgets(
+    '0.7.3 overlay v2: the appearance page offers only the visor and keeps its settings',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final module = OverlaySettingsModule(
+        InMemoryOverlaySettingsAdapter(),
+        workspacePort: _MemoryWorkspacePort(_workspaceSnapshot()),
+        editorWindow: _MemoryEditorWindow(),
+      );
+      addTearDown(module.dispose);
+      await module.initialize();
+
+      await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('overlay-appearance-center-entry')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('overlay-appearance-specimen-Visor')),
+        findsOneWidget,
+      );
+      for (final id in overlayAppearancesHiddenUntilV2) {
+        expect(
+          find.byKey(Key('overlay-appearance-specimen-$id')),
+          findsNothing,
+          reason: id,
+        );
+      }
+      // 11-11 user: the whole-visor settings are in the global group; the
+      // centre keeps the appearance itself and points there
+      expect(find.byKey(const Key('overlay-field-theme')), findsNothing);
+      expect(find.byKey(const Key('overlay-field-visorSize')), findsNothing);
+      expect(find.byKey(const Key('overlay-field-skin')), findsNothing);
+      expect(
+        find.byKey(const Key('overlay-field-visorHolidayGold')),
+        findsNothing,
+      );
+      final link = find.byKey(const Key('overlay-appearance-global-link'));
+      expect(link, findsOneWidget);
+      await tester.tap(
+        find.descendant(
+          of: link,
+          matching: find.byKey(const Key('overlay-open-global')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('overlay-appearance-center')), findsNothing);
+      expect(find.byKey(const Key('overlay-group-global')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-field-theme')), findsOneWidget);
+      expect(find.byKey(const Key('overlay-field-visorSize')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
   );
 
   testWidgets('preview-ready unreleased Verdict cannot be applied', (
@@ -3133,7 +3385,7 @@ void editorRegressionTests() {
     );
     module.workspace!.updateSetting('skin', 'Verdict');
     expect(module.workspace!.projection.value.settings!['skin'], 'Default');
-  });
+  }, skip: _hiddenUntilV2);
 
   testWidgets(
     'released appearances use data-free overlay structure and apply their locked identity',
@@ -3193,6 +3445,7 @@ void editorRegressionTests() {
       expect(module.workspace!.projection.value.dirty, isFalse);
       expect(port.lastMutation?.settings?['skin'], 'NightShadow');
     },
+    skip: _hiddenUntilV2,
   );
 
   test('Flutter workspace covers every persisted WPF display setting', () {
@@ -3208,7 +3461,7 @@ void editorRegressionTests() {
     );
     final fields =
         RegExp(
-          r'^\s*(?:bool|double|int|Overlay[A-Za-z]+|string)\s+([A-Za-z]+),?\s*$',
+          r'^\s*(?:bool|double|int|Overlay[A-Za-z]+|string)\s+([A-Za-z]+)(?:\s*=\s*[A-Za-z.]+)?,?\s*$',
           multiLine: true,
         ).allMatches(declaration).map((match) {
           final name = match.group(1)!;
@@ -3231,8 +3484,10 @@ void editorRegressionTests() {
       'startupTransitionFollowOverlayTheme',
       'eventNotificationY',
       'chatSide',
-      'chatMaxVisibleCount',
       'fleetChatScope',
+      // retired 11-12: the overall opacity; set by dragging: the events' place
+      'opacity',
+      'visorEventsX',
     }) {
       expect(field(hidden).userVisible, isFalse, reason: hidden);
     }
@@ -3241,11 +3496,8 @@ void editorRegressionTests() {
       field('startupTransitionStyle').kind,
       OverlayWorkspaceFieldKind.readOnlyChoice,
     );
-    expect(field('skin').selectableOptions, const [
-      'Default',
-      'NightShadow',
-      'Verdict',
-    ]);
+    // 0.7.3 overlay v2: only the visor is offered for now.
+    expect(field('skin').selectableOptions, const ['Visor']);
     expect(field('theme').selectableOptions, const [
       'Default',
       'Anvil',
@@ -3269,6 +3521,7 @@ void editorRegressionTests() {
       20,
     ]);
     expect(field('chatBarrageFontSize').numberOptions, const [14, 16, 20, 24]);
+    // Retired event-box option; its stored bit remains in the wire model.
     expect(overlayEventTypes.map((entry) => entry.$1), isNot(contains(1024)));
   });
 
@@ -3289,7 +3542,7 @@ void editorRegressionTests() {
     final settings = workspace.projection.value.settings!;
     expect(settings['startupTransitionStyle'], 'NightShadowFlowField');
     expect(settings['startupTransitionFollowOverlayTheme'], isTrue);
-  });
+  }, skip: _hiddenUntilV2);
 
   test('experience presets apply the exact WPF motion values', () async {
     final module = OverlaySettingsModule(
@@ -3387,14 +3640,14 @@ void editorRegressionTests() {
             .every((c) => c.simulate),
         isTrue,
       );
-      final inlineBody = find.text('已接入舰队频道，等待指挥同步');
+      // m102: on the visor the rally block holds the sample rally, drawn at
+      // the block's size (not scaled from the reference size): the inline
+      // preview shows it smaller than the fullscreen editor does
+      final inlineBody = find.byKey(
+        const Key('overlay-visor-rally-sample-mark'),
+      );
       expect(inlineBody, findsOneWidget);
-      final inlineCanvas = find.byKey(const Key('overlay-layout-canvas'));
-      final inlineTransform = tester
-          .renderObject<RenderBox>(inlineBody)
-          .getTransformTo(tester.renderObject<RenderBox>(inlineCanvas));
-      expect(inlineTransform.entry(0, 0), lessThan(1));
-      expect(inlineTransform.entry(1, 1), lessThan(1));
+      final inlineMark = tester.getSize(inlineBody);
       await tester.pumpWidget(
         _app(
           OverlayWorkspaceFullscreenEditor(module: workspace, editor: editor),
@@ -3412,18 +3665,28 @@ void editorRegressionTests() {
       );
       expect(
         tester.getSize(find.byKey(const Key('overlay-runtime-preview-event'))),
-        const Size(320, 64),
+        // the visor's events box (11-11) at the fullscreen surface's scale
+        _closeToSize(
+          OverlayVisorLayout.eventsBoxSize(
+                workspace.projection.value.settings!,
+              ) *
+              (1000 / 1080),
+        ),
       );
-      final body = find.text('已接入舰队频道，等待指挥同步');
+      final body = find.byKey(const Key('overlay-visor-rally-sample-mark'));
       expect(body, findsOneWidget);
       final transform = tester
           .renderObject<RenderBox>(body)
           .getTransformTo(tester.renderObject<RenderBox>(canvas));
       expect(transform.entry(0, 0), 1.0);
       expect(transform.entry(1, 1), 1.0);
+      expect(inlineMark.height, lessThan(tester.getSize(body).height));
       await tester.pumpWidget(_app(SingleChildScrollView(child: inline())));
       await tester.pumpAndSettle();
-      expect(find.text('已接入舰队频道，等待指挥同步'), findsOneWidget);
+      expect(
+        find.byKey(const Key('overlay-visor-rally-sample-mark')),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('overlay-editor-simulate')), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -3468,7 +3731,7 @@ void editorRegressionTests() {
     for (final skin in ['NightShadow', 'Verdict']) {
       settings = settings.withValue('skin', skin).withValue('theme', skin);
       expect(await render(), baseline);
-      expect(find.text('已接入舰队频道，等待指挥同步'), findsOneWidget);
+      expect(find.text('示例召集内容'), findsOneWidget);
     }
   });
   test('surface-aware geometry preserves native constraints and direct pixel moves', () {
@@ -3610,56 +3873,63 @@ void editorRegressionTests() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('已接入舰队频道，等待指挥同步'), findsOneWidget);
-      expect(find.text('舰队总览'), findsAtLeast(1));
-      expect(find.textContaining('在线 3'), findsOneWidget);
-      expect(find.textContaining('游戏中 2'), findsOneWidget);
+      expect(
+        find.byKey(const Key('overlay-visor-rally-sample-mark')),
+        findsOneWidget,
+      );
+      // 0.7.3: every preset shows as the visor, which carries the overview
+      // inside the members block instead of a block of its own.
+      expect(find.text('舰队总览'), findsNothing);
+      expect(find.textContaining('在线 3'), findsNothing);
+      expect(find.textContaining('游戏中 2'), findsNothing);
       expect(find.text('Alpha 小队'), findsNothing);
-      expect(find.text('多米诺 (domino_CN)'), findsOneWidget);
+      // 11-12: the visor's members, chat and events are the editor's
+      // simplified panels (drawn, not text widgets) with plainly sample names
+      // when there is no Host content, never the user's own name
+      expect(find.text('多米诺 (domino_CN)'), findsNothing);
       expect(find.textContaining('NOVA-7'), findsNothing);
       expect(find.textContaining('Li)'), findsNothing);
-      expect(find.text('发送者'), findsOneWidget);
       expect(find.text('NightShadow'), findsNothing);
-      expect(find.text('准备完成，正在前往集合点。'), findsOneWidget);
-      expect(find.text('成员上线'), findsOneWidget);
-      for (final key in const ['Notice', 'Squads', 'Members', 'Chat']) {
+      // 0.7.3: the visor carries the overview inside the members block
+      expect(
+        find.byKey(const Key('overlay-simulated-structure-Squads')),
+        findsNothing,
+      );
+      // m102 (11-18 "照真实召集的样子"): the rally block shows the sample rally
+      expect(
+        find.byKey(const Key('overlay-simulated-structure-Notice')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('overlay-visor-rally-sample')),
+        findsOneWidget,
+      );
+      for (final key in const ['Members', 'Chat']) {
         expect(
-          find.byKey(Key('overlay-simulated-structure-$key')),
+          find.byKey(Key('overlay-visor-sim-$key')),
           findsOneWidget,
-          reason: '$key must use the real module structure with sample data',
+          reason: '$key shows the simplified visor panel',
         );
       }
       expect(
         find.byKey(const Key('overlay-simulated-structure-Events')),
         findsOneWidget,
       );
+      // the user's own name never replaces the samples on the visor panels
       previewIdentity.value = const OverlayPreviewIdentity(
         callSign: '多米诺',
         gameHandle: 'Domino_CN',
       );
       await tester.pumpAndSettle();
-      expect(find.text('多米诺 (Domino_CN)'), findsOneWidget);
-      expect(find.text('多米诺 (domino_cn)'), findsNothing);
-      expect(
-        tester.widget<Text>(find.text('多米诺 (Domino_CN)')).overflow,
-        isNot(TextOverflow.ellipsis),
-      );
-      final memberNameFit = find.ancestor(
-        of: find.text('多米诺 (Domino_CN)'),
-        matching: find.byType(FittedBox),
-      );
-      expect(
-        tester
-            .widgetList<FittedBox>(memberNameFit)
-            .any((fitted) => fitted.fit == BoxFit.scaleDown),
-        isTrue,
-      );
+      expect(find.text('多米诺 (Domino_CN)'), findsNothing);
       final surfaces = tester
           .widgetList<OverlayPreviewModuleSurface>(
             find.byType(OverlayPreviewModuleSurface),
           )
           .toList();
-      expect(surfaces, hasLength(5));
+      // 0.7.3: no separate overview block under the visor; the events are
+      // the simplified panel alone (11-12)
+      expect(surfaces, hasLength(3));
       expect(
         surfaces.every(
           (s) =>
@@ -3765,7 +4035,8 @@ void editorRegressionTests() {
     },
   );
 
-  testWidgets('B5 inline preview selects without moving or resizing modules', (
+  // 11-13 user: "小预览也该可以进行全屏编辑能进行的大部分操作 比如移动缩放等等"
+  testWidgets('inline preview selects and moves modules like the editor', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1000);
@@ -3782,7 +4053,11 @@ void editorRegressionTests() {
     module.workspace!.updateSetting('showMembers', true);
     await tester.pumpWidget(_app(OverlaySettingsPage(module: module)));
     await tester.pumpAndSettle();
-    final before = module.workspace!.projection.value.layout[2];
+    String placed() => [
+      for (final item in module.workspace!.projection.value.layout)
+        '${item.key}:${item.x}:${item.y}:${item.width}:${item.height}',
+    ].join(',');
+    final before = placed();
     final previewMember = find.descendant(
       of: find.byKey(const Key('overlay-preview-stage')),
       matching: find.byKey(const Key('overlay-runtime-preview-Members')),
@@ -3790,18 +4065,7 @@ void editorRegressionTests() {
     expect(previewMember, findsOneWidget);
     await tester.drag(previewMember, const Offset(50, 30));
     await tester.pumpAndSettle();
-    final after = module.workspace!.projection.value.layout[2];
-    expect(
-      after.x,
-      before.x,
-      reason: 'B5 inline preview selects without editing layout',
-    );
-    expect(after.y, before.y);
-    expect(after.width, before.width);
-    expect(
-      find.byKey(const Key('overlay-layout-resize-Members')),
-      findsNothing,
-    );
+    expect(placed(), isNot(before), reason: 'the drag moved the block');
     expect(
       find.byKey(const Key('overlay-field-memberNameMode')),
       findsOneWidget,
@@ -4178,6 +4442,9 @@ Map<String, Object?> _completeWorkspaceSettings() {
         field.field == 'eventNotificationMaxVisibleCount' ||
                 field.field == 'chatMaxVisibleCount'
             ? field.minimum.round()
+            // the visor's camera as it always was (11-11 viewing distance)
+            : field.field == 'visorViewingDistance'
+            ? 1000.0
             : field.minimum,
       OverlayWorkspaceFieldKind.color => '#FFFFFF',
       OverlayWorkspaceFieldKind.hotkey => '',
@@ -4185,6 +4452,11 @@ Map<String, Object?> _completeWorkspaceSettings() {
       OverlayWorkspaceFieldKind.eventDurations => <String, Object?>{},
     };
   }
+  // 11-07 the visor members size at its defaults (the minimum is a corner case)
+  settings['visorMembersWidth'] = 364.0;
+  settings['visorMembersHeight'] = 394.0;
+  settings['visorEventsWidth'] = 364.0;
+  settings['visorChatWidth'] = 364.0;
   settings['eventNotificationDurations'] = <String, Object?>{
     'memberPresence': 0,
     'memberServer': 0,
@@ -4284,6 +4556,24 @@ List<Map<String, Object?>> _workspaceAppearanceMaps() => [
     'previewSurface': '#081722',
     'previewPrimary': '#29AFFF',
     'previewSecondary': '#69CCFF',
+    'locksTheme': false,
+    'supportsBloom': false,
+    'startupTransition': 'BridgeTerminal',
+    'requiresEntitlement': false,
+    'isReleased': true,
+    'isAvailable': true,
+  },
+  {
+    'id': 'Visor',
+    'displayNameZh': '面罩投影',
+    'displayNameEn': 'Visor Projection',
+    'summaryZh': '面罩投影浮层',
+    'summaryEn': 'Visor projection overlay',
+    'traitsZh': ['面罩投影', '贴边摆放', '跟随舰船配色'],
+    'traitsEn': ['Visor projection', 'Edge layout', 'Manufacturer colors'],
+    'previewSurface': '#081722',
+    'previewPrimary': '#53BEFF',
+    'previewSecondary': '#EBF7FF',
     'locksTheme': false,
     'supportsBloom': false,
     'startupTransition': 'BridgeTerminal',
@@ -4436,3 +4726,7 @@ final class _MemoryWorkspacePort implements OverlayWorkspacePort {
   @override
   Future<void> close() async {}
 }
+
+Matcher _closeToSize(Size size) => isA<Size>()
+    .having((s) => s.width, 'width', closeTo(size.width, 0.01))
+    .having((s) => s.height, 'height', closeTo(size.height, 0.01));

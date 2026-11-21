@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
+import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
+import 'marketplace_trade_chat_copy.dart';
 
 import '../account/account_login_dialog.dart';
 import '../../app/feature_registry.dart';
@@ -11,7 +14,10 @@ import 'marketplace_attention.dart';
 import 'marketplace_chat_controller.dart';
 import 'marketplace_controller.dart';
 import 'marketplace_page.dart';
+import 'marketplace_order_sheet.dart';
+import 'marketplace_trade_chat_entry.dart';
 import 'marketplace_port.dart';
+import 'marketplace_widgets.dart' show MarketSnackBars;
 
 /// The hall's single controller. The composition creates it once so other
 /// surfaces (the profile's trade strip) read the same trade profile.
@@ -25,6 +31,37 @@ MarketplaceController createMarketplaceController(
           ? UnavailableMarketplacePort()
           : BridgeMarketplacePort(session, mode)),
 );
+
+/// Gives the hall its trade chat: entries in orders and trades open it, and
+/// the composer offers the hall's recent orders. The menu's hall uses it too.
+void bindTradeChat(
+  MarketplaceController controller,
+  MarketplaceChatController? chat,
+  BridgeClientSession? session,
+) {
+  controller.tradeChat = chat;
+  chat?.openOrderDetail = (context, number) async {
+    final row = await controller.fullOrders.fullOrder({
+      'orderNumber': number, 'chatSnapshot': true,
+    });
+    if (!context.mounted) return;
+    if (row == null) {
+      ScaffoldMessenger.maybeOf(context)?.showOnly(starBridgeTimedSnackBar(
+        content: Text(chatText(context, '暂时读不到订单，请稍后再试。'))));
+      return;
+    }
+    await showMarketOrder(context, controller, row);
+  };
+  chat?.recentOrders = () => [
+    for (final row in controller.fullOrders.recentOrders)
+      ?tradeChatAttachment(row),
+  ];
+  if (session != null) {
+    chat?.openScm = () => unawaited(
+      session.request('helpSupport.openScm', payload: {'schemaVersion': 1}),
+    );
+  }
+}
 
 /// The feature owns [shared] (or the controller it creates) and disposes it.
 FeatureDescriptor createMarketplaceFeature(
@@ -54,20 +91,7 @@ FeatureDescriptor createMarketplaceFeature(
   chat ??= hallPort is MarketplaceChatPort
       ? MarketplaceChatController(hallPort as MarketplaceChatPort)
       : null;
-  controller.tradeChat = chat;
-  chat?.recentOrders = () => [
-    for (final row in controller.trades.rows)
-      if ((row['orderId'] as num?)?.toInt() case final id? when id > 0)
-        MarketChatAttachment(
-          id,
-          '${row['itemsName'] ?? ''} ×${row['number'] ?? 1} · #${row['transactionNumber'] ?? ''}',
-        ),
-  ];
-  if (session != null) {
-    chat?.openScm = () => unawaited(
-      session.request('helpSupport.openScm', payload: {'schemaVersion': 1}),
-    );
-  }
+  bindTradeChat(controller, chat, session);
   final attention = MarketplaceAttention(controller, chat);
   var generation = account.projection.value.generation;
   var state = account.projection.value.sessionState;
@@ -112,10 +136,10 @@ FeatureDescriptor createMarketplaceFeature(
     prefetch: attention.prefetch,
     // 通知中心 → 交易: 我的交易.
     openSection: (section) {
-      if (section == 'trades') controller.tab(3);
+      if (section == 'trades') controller.openMyTrades();
       // A trade reminder (CX-T23): 我的交易, then that transaction's sheet.
       if (section.startsWith('trade:')) {
-        controller.tab(3);
+        controller.openMyTrades();
         controller.trades.requestOpen(section.substring(6));
       }
     },

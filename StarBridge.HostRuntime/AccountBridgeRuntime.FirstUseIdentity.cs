@@ -5,6 +5,9 @@ namespace StarBridge.HostRuntime;
 
 public sealed partial class AccountBridgeRuntime
 {
+    internal FirstUseOnlineIdentityObservation FirstUseAccountDisplay(FirstUseOnlineCandidateIntent intent) =>
+        !_requestRetirement.IsClosed && IsFirstUseOnlineCandidateFor(intent) && _host is ScmAccountBridgeHost scm
+            ? scm.FirstUseAccountDisplay : new("unavailable");
     internal string FirstUseSignInState(FirstUseOnlineCandidateIntent intent) =>
         !_requestRetirement.IsClosed && IsFirstUseOnlineCandidateFor(intent) && _host is ScmAccountBridgeHost scm
             ? scm.FirstUseSignInState : "contextChanged";

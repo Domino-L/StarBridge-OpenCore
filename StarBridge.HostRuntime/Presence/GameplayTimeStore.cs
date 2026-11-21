@@ -26,10 +26,15 @@ public sealed class GameplayTimeException(string code) : Exception(code)
 /// <summary>One writer per account for the Host lifetime. No legacy import or remote IO.</summary>
 public sealed class GameplayTimeStore(string root)
 {
+    internal GameplayRecordingConsent InitialConsent(string? verifiedHandle, out bool identityPending) =>
+        Onboarding.OnlineGameplayConsent.Read(root, verifiedHandle, out identityPending);
     internal Func<BridgeAccountContext, BridgeAccountContext>? ResolveOwner { get; set; }
+    internal GameplayFailureJournal Journal { get; } = new();
+    internal VisitorGameplayTimeReceiptStore VisitorReceipts { get; } = new(root);
     private BridgeAccountContext StorageOwner(BridgeAccountContext owner)
     {
         try { return ResolveOwner?.Invoke(owner) ?? owner; }
+        catch (Privacy.LocalPrivacyOwnerUnavailableException) { throw; }
         catch (Privacy.LocalPrivacyException) { throw new GameplayTimeException("gameplay.account_changed"); }
     }
     private readonly string _directory = Path.Combine(Path.GetFullPath(root), "gameplay-time-local-v1");
@@ -56,6 +61,7 @@ public sealed class GameplayTimeStore(string root)
             Check(path + ".lock", false);
             var lease = new Lease(path, hash, new FileStream(path + ".lock", FileMode.OpenOrCreate,
                 FileAccess.ReadWrite, FileShare.None)) {
+                Journal = Journal,
                 EnsureOwnerCurrent = () => {
                     if (StorageOwner(authentication) != owner) throw new GameplayTimeException("gameplay.account_changed");
                 }
@@ -63,12 +69,36 @@ public sealed class GameplayTimeStore(string root)
             try { lease.ValidateOwner(); return lease; }
             catch { lease.Dispose(); throw; }
         }
-        catch (Exception e) when (StorageError(e)) { throw new GameplayTimeException("gameplay.storage_unavailable"); }
+        catch (Exception e) when (StorageError(e))
+        {
+            Journal.Record("gameplay-store", $"code=storage_unavailable file={hash[..8]}",
+                $"code=storage_unavailable file={hash[..8]} exception={Support.IdentityGateJournal.Type(e)}");
+            throw new GameplayTimeException("gameplay.storage_unavailable");
+        }
     }
+
+    // A file this version cannot read keeps its bytes: the store never rewrites it.
+    // The journal names the first failed check so a newer or foreign writer is visible.
+    private sealed class StoreRejected(string reason) : IOException(reason)
+    {
+        internal string Reason { get; } = reason;
+    }
+    private static StoreRejected Rejected(string reason) => new(reason);
+
+    private static readonly HashSet<string> FileFields = Names(typeof(FileData));
+    private static readonly HashSet<string> SnapshotFields = Names(typeof(GameplayTimeSaved));
+    private static HashSet<string> Names(Type type) => type.GetProperties()
+        .Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).ToHashSet(StringComparer.Ordinal);
+    private static bool UnknownField(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object &&
+        (root.EnumerateObject().Any(p => !FileFields.Contains(p.Name)) ||
+         root.TryGetProperty("snapshot", out var snapshot) && snapshot.ValueKind == JsonValueKind.Object &&
+         snapshot.EnumerateObject().Any(p => !SnapshotFields.Contains(p.Name)));
 
     public sealed class Lease : IDisposable
     {
         internal Action? EnsureOwnerCurrent { get; init; }
+        internal GameplayFailureJournal? Journal { get; init; }
         internal void ValidateOwner() => EnsureOwnerCurrent?.Invoke();
         private readonly string _path;
         private readonly string _hash;
@@ -90,29 +120,47 @@ public sealed class GameplayTimeStore(string root)
                 Check(Path.GetDirectoryName(_path)!, true);
                 if (!Check(_path, false)) return new(0, GameplayRecordingConsent.Unknown, 0);
                 using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-                if (stream.Length is <= 0 or > 4096) throw new IOException();
+                if (stream.Length is <= 0 or > 4096) throw Rejected("size");
                 var bytes = new byte[(int)stream.Length];
                 stream.ReadExactly(bytes);
-                if (stream.ReadByte() != -1) throw new IOException();
+                if (stream.ReadByte() != -1) throw Rejected("size");
                 using var doc = JsonDocument.Parse(bytes);
-                Profiles.LocalPersonalProfileStore.RejectDuplicates(doc.RootElement);
+                try { Profiles.LocalPersonalProfileStore.RejectDuplicates(doc.RootElement); }
+                catch (Exception e) when (StorageError(e)) { throw Rejected("duplicate-field"); }
+                if (UnknownField(doc.RootElement)) throw Rejected("unknown-field");
                 var file = JsonSerializer.Deserialize<FileData>(bytes, Json);
-                if (file is null || file.SchemaVersion != 1 || file.OwnerHash != _hash || file.Snapshot is null ||
-                    file.Integrity != Integrity(_hash, file.Snapshot) || file.Snapshot.Revision <= 0 ||
-                    file.Snapshot.Seconds < 0 || !Enum.IsDefined(file.Snapshot.Consent) ||
-                    file.Snapshot.AppliedResetRevision < 0 ||
-                    file.Snapshot.PendingImport is { } import &&
-                        (!ValidImport(import) || file.Snapshot.PendingReset is not null) ||
-                    file.Snapshot.PendingReset is { } pending &&
-                        (pending.ExpectedRevision < 0 || !Guid.TryParseExact(pending.OperationId, "N", out _)) ||
-                    file.Snapshot.HistoricalSeconds < 0 || file.Snapshot.HistoricalSeconds > file.Snapshot.Seconds ||
-                    file.Snapshot.HistoricalSeconds > 0 && file.Snapshot.HistoryImportedAt is null ||
-                    file.Snapshot.ImportReceipt is { } receipt && (receipt.Length != 32 || !Guid.TryParseExact(receipt, "N", out _) ||
-                        file.Snapshot.HistoryImportedAt is null)) throw new IOException();
+                if (file is null || file.Snapshot is null) throw Rejected("empty");
+                if (file.SchemaVersion != 1) throw Rejected("schema");
+                if (file.OwnerHash != _hash) throw Rejected("owner");
+                if (file.Integrity != Integrity(_hash, file.Snapshot)) throw Rejected("integrity");
+                if (InvalidSnapshot(file.Snapshot) is { } reason) throw Rejected(reason);
                 return file.Snapshot;
             }
-            catch (Exception e) when (StorageError(e)) { throw new GameplayTimeException("gameplay.read_failed"); }
+            catch (Exception e) when (StorageError(e))
+            {
+                // Reason tokens and exception type names only; never contents or paths.
+                var line = $"code=read_failed file={FilePrefix} reason=" +
+                    (e is StoreRejected rejected ? rejected.Reason : "exception-" + Support.IdentityGateJournal.Type(e));
+                Journal?.Record("gameplay-store", line, line);
+                throw new GameplayTimeException("gameplay.read_failed");
+            }
         }
+
+        internal string FilePrefix => _hash[..8];
+
+        private static string? InvalidSnapshot(GameplayTimeSaved snapshot) =>
+            snapshot.Revision <= 0 ? "revision" :
+            snapshot.Seconds < 0 ? "seconds" :
+            !Enum.IsDefined(snapshot.Consent) ? "consent" :
+            snapshot.AppliedResetRevision < 0 ? "reset-revision" :
+            snapshot.PendingImport is { } import &&
+                (!ValidImport(import) || snapshot.PendingReset is not null) ? "pending-import" :
+            snapshot.PendingReset is { } pending &&
+                (pending.ExpectedRevision < 0 || !Guid.TryParseExact(pending.OperationId, "N", out _)) ? "pending-reset" :
+            snapshot.HistoricalSeconds < 0 || snapshot.HistoricalSeconds > snapshot.Seconds ? "historical-seconds" :
+            snapshot.HistoricalSeconds > 0 && snapshot.HistoryImportedAt is null ? "history-date" :
+            snapshot.ImportReceipt is { } receipt && (receipt.Length != 32 || !Guid.TryParseExact(receipt, "N", out _) ||
+                snapshot.HistoryImportedAt is null) ? "import-receipt" : null;
 
         public GameplayTimeSaved Save(GameplayTimeSaved previous, GameplayRecordingConsent consent,
             long seconds, Func<bool> canCommit)
@@ -219,7 +267,12 @@ public sealed class GameplayTimeStore(string root)
                 else File.Replace(temporary, _path, null);
                 return next;
             }
-            catch (Exception e) when (StorageError(e)) { throw new GameplayTimeException("gameplay.write_failed"); }
+            catch (Exception e) when (StorageError(e))
+            {
+                Journal?.Record("gameplay-store", $"code=write_failed file={FilePrefix}",
+                    $"code=write_failed file={FilePrefix} exception={Support.IdentityGateJournal.Type(e)}");
+                throw new GameplayTimeException("gameplay.write_failed");
+            }
             finally
             {
                 if (temporary is not null)

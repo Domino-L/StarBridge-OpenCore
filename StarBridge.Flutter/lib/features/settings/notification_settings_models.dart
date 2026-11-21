@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'notification_organization_options.dart';
+
 enum NotificationSettingsAvailability {
   loading,
   signedOut,
@@ -123,10 +125,12 @@ final class NotificationSourceRule {
     required this.mode,
     this.logoImageData,
     this.organizationCode,
+    this.organizationOptions = const NotificationOrganizationOptions(),
   });
 
   /// A community's code, for finding its rule from its own page.
   final String? organizationCode;
+  final NotificationOrganizationOptions organizationOptions;
   final String sourceRef;
   final NotificationSourceKind kind;
   final String displayName;
@@ -137,15 +141,17 @@ final class NotificationSourceRule {
   NotificationSourceRule copyWith({
     NotificationSourceMode? mode,
     String? organizationCode,
+    NotificationOrganizationOptions? organizationOptions,
   }) => NotificationSourceRule(
-        organizationCode: organizationCode ?? this.organizationCode,
-        sourceRef: sourceRef,
-        kind: kind,
-        displayName: displayName,
-        contextLabel: contextLabel,
-        mode: mode ?? this.mode,
-        logoImageData: logoImageData,
-      );
+    organizationCode: organizationCode ?? this.organizationCode,
+    organizationOptions: organizationOptions ?? this.organizationOptions,
+    sourceRef: sourceRef,
+    kind: kind,
+    displayName: displayName,
+    contextLabel: contextLabel,
+    mode: mode ?? this.mode,
+    logoImageData: logoImageData,
+  );
 }
 
 @immutable

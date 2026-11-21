@@ -75,6 +75,7 @@ public sealed partial class AccountBridgeRuntime
             Stop(() => _playerActivity?.RetireAccountActivityAsync() ?? Task.CompletedTask),
             Stop(() => _overlayCommunities?.RetireAsync() ?? Task.CompletedTask),
             Stop(() => _gameplayTime?.RetireAsync() ?? Task.CompletedTask),
+            Stop(() => _missionRecords?.DisposeAsync().AsTask() ?? Task.CompletedTask),
             Stop(() => {
                 // Seal the candidate's complete sampler with its siblings, but
                 // await that cached physical exit only AFTER publication

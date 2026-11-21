@@ -55,6 +55,7 @@ internal sealed class RelayDeviceSession : IDisposable
         _origin = origin;
         _http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }, handler is null)
             { Timeout = TimeSpan.FromSeconds(2) };
+        Support.RelayClientVersion.Apply(_http);
     }
 
     internal void Start(string mode, Func<string?> bearer, Action replaced, object? replacementGate = null)

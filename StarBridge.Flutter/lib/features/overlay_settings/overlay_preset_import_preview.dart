@@ -13,6 +13,7 @@ import '../../design_system/icons/color_choice_icon.dart';
 import '../../design_system/icons/native_dropdown_indicator_icon.dart';
 import 'overlay_workspace_layout_editor.dart';
 import 'overlay_workspace_models.dart';
+import 'overlay_workspace_rules.dart';
 import 'overlay_workspace_schema.dart';
 import 'overlay_workspace_value_format.dart';
 
@@ -51,7 +52,14 @@ class OverlayPresetImportPreview extends StatelessWidget {
     final strings = AppStrings.of(context);
     String copy(String key) => strings.text('overlay.importPreview.$key');
     final fields = overlayWorkspaceFieldSpecs
-        .where((field) => field.userVisible && field.field != 'scenePreference')
+        .where(
+          (field) =>
+              field.userVisible &&
+              field.field != 'scenePreference' &&
+              // the same rule as the settings page: what the imported look
+              // does not show is not listed (review CX-VISOR-SETTINGS-B87-R7)
+              overlayWorkspaceFieldVisible(field.field, settings),
+        )
         .toList();
     final changes = currentSettings == null
         ? null
@@ -179,7 +187,8 @@ class OverlayPresetImportPreview extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   for (final module in _modules.entries)
-                    Chip(
+                    if (overlayWorkspaceFieldVisible(module.value, settings))
+                      Chip(
                       avatar: ColorChoiceIcon.selection(
                         selected: settings[module.value] == true,
                       ),

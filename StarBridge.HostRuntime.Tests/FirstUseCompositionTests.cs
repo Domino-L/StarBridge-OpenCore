@@ -65,7 +65,7 @@ internal static class FirstUseCompositionTests
         });
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await entered.Task.WaitAsync(FirstUseTestWait.Bound);
             var drain = binding.DrainCallbacksAsync();
             Check(!drain.IsCompleted && ReferenceEquals(drain, binding.DrainCallbacksAsync()) && binding.Generation == -1,
                 "Native shutdown must retain the actual callback until exit, close new admission and share one drain.");
@@ -74,7 +74,7 @@ internal static class FirstUseCompositionTests
             release.TrySetResult();
             try { await read; throw new InvalidOperationException("Late native callback result escaped."); }
             catch (OperationCanceledException) { }
-            await drain.WaitAsync(TimeSpan.FromSeconds(3));
+            await drain.WaitAsync(FirstUseTestWait.Bound);
             Check((await f.Runtime.DispatchAsync(accountRequest)).Response.Status == BridgeResponseStatuses.Ok,
                 "Draining native callbacks alone is not account disposal, logout or business activation.");
             Check(!f.Vault.Deleted, "Native drain cannot clear credentials.");
@@ -140,18 +140,18 @@ internal static class FirstUseCompositionTests
         using var release = new ManualResetEventSlim();
         var configuration = Task.Run(() => f.Runtime.TryConfigureAccountBusiness(_ => {
             entered.TrySetResult();
-            Check(release.Wait(TimeSpan.FromSeconds(3)), "Synthetic Native construction wasn't released.");
+            Check(release.Wait(FirstUseTestWait.Bound), "Synthetic Native construction wasn't released.");
         }));
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await entered.Task.WaitAsync(FirstUseTestWait.Bound);
             var stop = f.Runtime.FirstUseMode!.ApplyLocalAsync(0, Id(), f.Host.Generation);
             Check(!stop.IsCompleted && !f.Runtime.TryConfigureAccountBusiness(_ =>
                 throw new InvalidOperationException("Late consumer constructor was admitted.")),
                 "Retirement closes new admission but cannot acknowledge unfinished real configuration.");
             release.Set();
-            Check(!await configuration.WaitAsync(TimeSpan.FromSeconds(3)) &&
-                (await stop.WaitAsync(TimeSpan.FromSeconds(3))).State == "local",
+            Check(!await configuration.WaitAsync(FirstUseTestWait.Bound) &&
+                (await stop.WaitAsync(FirstUseTestWait.Bound)).State == "local",
                 "Only actual configuration exit completes the original owner's retirement.");
             f.RequireLocalStateUnchanged();
         }
@@ -188,7 +188,7 @@ internal static class FirstUseCompositionTests
             throw new InvalidOperationException("Expected the real configuration error.");
         }
         catch (InvalidOperationException error) when (error.Message == "Synthetic Native configuration failure.") { }
-        Check((await f.Runtime.FirstUseMode!.ApplyLocalAsync(0, Id(), f.Host.Generation).WaitAsync(TimeSpan.FromSeconds(3))).State == "local",
+        Check((await f.Runtime.FirstUseMode!.ApplyLocalAsync(0, Id(), f.Host.Generation).WaitAsync(FirstUseTestWait.Bound)).State == "local",
             "Thrown constructor must release its actual lease so retirement can complete.");
         f.Runtime.Dispose();
         var calls = 0;

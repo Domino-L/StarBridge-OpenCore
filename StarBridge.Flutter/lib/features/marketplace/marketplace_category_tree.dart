@@ -7,6 +7,7 @@ import 'marketplace_copy.dart';
 import 'marketplace_port.dart';
 import 'marketplace_silhouette.dart';
 import 'marketplace_widgets.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// The market's two-level SCM category tree, shared by 市场 and the publish
 /// wizard so both browse categories the same way.
@@ -129,7 +130,7 @@ class MarketCategoryTreeRow extends StatelessWidget {
                   child: Text(
                     name,
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: TextStyle(
                       fontSize: child ? 12.5 : 13,

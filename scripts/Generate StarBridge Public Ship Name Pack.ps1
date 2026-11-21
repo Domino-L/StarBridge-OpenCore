@@ -2,7 +2,7 @@ param(
     [string]$LegacyPath = "",
     [string]$OutputPath = "",
     [string]$ProvenancePath = "",
-    [string]$Revision = "2026-09-30.1"
+    [string]$Revision = "2026-11-02.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -198,6 +198,30 @@ foreach ($runtimeId in @($groups.Keys | Sort-Object)) {
         }
     }
 
+    # Maintainer-reviewed SCM/community spellings; these are aliases only,
+    # never a change to the canonical English name or runtime identity.
+    $polishAliases = switch ($runtimeId) {
+        # Already shipped exact aliases absent from the legacy translation input.
+        "CRUS_Star_Runner" { "Mercury" }
+        "CRUS_Starlifter_A2" { "A2 Hercules" }
+        "CRUS_Starlifter_C2" { "C2 Hercules" }
+        "CRUS_Starlifter_M2" { "M2 Hercules" }
+        "CRUS_Starliner" { "Genesis" }
+        "RSI_Aurora_CL" { "Aurora Mk I CL" }
+        "RSI_Aurora_ES" { "Aurora Mk I ES" }
+        "RSI_Aurora_LN" { "Aurora Mk I LN" }
+        "RSI_Aurora_LX" { "Aurora Mk I LX" }
+        "RSI_Aurora_MR" { "Aurora Mk I MR" }
+        "RSI_Constellation_Taurus" { "Constellation Mk IV Taurus" }
+        "RSI_Constellation_Andromeda" { "Constellation Mk IV Andromeda" }
+        "RSI_Constellation_Aquila" { "Constellation Mk IV Aquila" }
+        "RSI_Constellation_Phoenix" { "Constellation Mk IV Phoenix" }
+        "DRAK_Dragonfly_Pink" { "Dragonfly Star Kitten Edition"; "Dragonfly Star Kitten" }
+    }
+    foreach ($alias in $polishAliases) {
+        if ($aliasSet.Add($alias)) { $aliases.Add($alias) }
+    }
+
     $entries.Add([ordered]@{
         runtimeId = $runtimeId
         englishName = $englishName
@@ -215,6 +239,21 @@ if (@($entries | Where-Object { $_.runtimeId -eq "AEGS_Sabre_Raven_EX" }).Count 
         englishName = "Sabre Raven EX"
         chineseName = [Text.RegularExpressions.Regex]::Unescape("\u6e21\u9e26EX")
         aliases = @([Text.RegularExpressions.Regex]::Unescape("\u5723\u76fe \u6e21\u9e26EX"))
+    })
+}
+
+# Keep the already-shipped 2026-10-14 observation reproducible. The legacy
+# translation source does not contain this entry; do not lose it on regeneration.
+if (@($entries | Where-Object { $_.runtimeId -eq "RSI_Constellation_Mk5_Centaurus" }).Count -eq 0) {
+    $entries.Add([ordered]@{
+        runtimeId = "RSI_Constellation_Mk5_Centaurus"
+        englishName = "Constellation Mk V Centaurus"
+        chineseName = [Text.RegularExpressions.Regex]::Unescape("\u661f\u5ea7 Mk V \u534a\u4eba\u9a6c\u5ea7")
+        aliases = @(
+            [Text.RegularExpressions.Regex]::Unescape("RSI \u661f\u5ea7 Mk V \u534a\u4eba\u9a6c\u5ea7"),
+            [Text.RegularExpressions.Regex]::Unescape("\u661f\u5ea7 MKV \u534a\u4eba\u9a6c\u5ea7"),
+            "Constellation Mk5 Centaurus"
+        )
     })
 }
 
@@ -241,6 +280,16 @@ $provenance = [ordered]@{
         }
     )
     entryOverrides = @(
+        [ordered]@{
+            runtimeId = "RSI_Constellation_Mk5_Centaurus"
+            sourceType = "field-observation"
+            sourceName = "StarBridge maintainer field observation"
+            sourceReference = "Exact raw ship identifier independently confirmed by maintainer; English model name checked against supplied RSI store page"
+            verifiedDate = "2026-10-14"
+            translator = "StarBridge maintainer approved display wording"
+            licenseOrPermission = "No license claim is made for game identifiers, names or marks. No personal log or screenshot is included."
+            maintainer = "StarBridge contributors"
+        }
         [ordered]@{
             runtimeId = "AEGS_Sabre_Raven_EX"
             sourceType = "field-observation"

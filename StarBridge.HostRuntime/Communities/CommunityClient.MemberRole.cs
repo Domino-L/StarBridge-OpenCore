@@ -171,7 +171,10 @@ internal sealed partial class CommunityClient
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             current();
             CommunityCommand receipt;
-            if (response.StatusCode != HttpStatusCode.OK)
+            if (response.StatusCode != HttpStatusCode.OK &&
+                await CommunityRelayRefusal.ReasonAsync(response, token) is { } refusal)
+                receipt = new("rejected", refusal);
+            else if (response.StatusCode != HttpStatusCode.OK)
                 receipt = response.StatusCode switch
                 {
                     HttpStatusCode.Conflict => new("rejected", "conflict"),

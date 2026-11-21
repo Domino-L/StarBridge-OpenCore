@@ -101,4 +101,28 @@ const _copy = <String, List<String>>{
     'For reference: lowest any quality {n} (other tier, not compared)',
   ],
   'tierEmpty': ['暂无', '暫無', 'None'],
+  // Buy orders from the seller's side (user 2026-11-07); {ref} {p} {n} {pct}.
+  'bidHigh': ['卖给他：出价高', '賣給他：出價高', 'Selling to them: high bid'],
+  'bidNear': ['卖给他：接近卖价', '賣給他：接近賣價', 'Selling to them: near asks'],
+  'bidLow': ['卖给他：出价偏低', '賣給他：出價偏低', 'Selling to them: low bid'],
+  // The reference may sit in a higher tier: it is the cheapest ask that meets
+  // the requirement, not the requirement's own tier (CX-BUYTAG-REVIEW P3).
+  'bidRefTier': [
+    '满足要求的最低卖价',
+    '滿足要求的最低賣價',
+    'lowest ask meeting it',
+  ],
+  'bidRefAny': ['最低卖价', '最低賣價', 'lowest ask'],
+  'bidMore': [
+    '比{ref} {p} 多 {n}（+{pct}%）',
+    '比{ref} {p} 多 {n}（+{pct}%）',
+    '{n} (+{pct}%) above the {ref} {p}',
+  ],
+  'bidShare': ['是{ref}的 {pct}%', '是{ref}的 {pct}%', '{pct}% of the {ref}'],
+  'bidLess': [
+    '比{ref} {p} 少 {n}（−{pct}%）',
+    '比{ref} {p} 少 {n}（−{pct}%）',
+    '{n} (−{pct}%) below the {ref} {p}',
+  ],
+  'bidNoRef': ['暂无可比的卖价', '暫無可比的賣價', 'No asks to compare'],
 };

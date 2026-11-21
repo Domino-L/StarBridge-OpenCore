@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 
 import 'onboarding_models.dart';
+import '../settings/usage_mode_copy.dart' show usageModeWords;
+import 'onboarding_copy_nolog.dart';
 import 'onboarding_copy_behavior_prompt.dart';
 import 'onboarding_copy_profile.dart';
 import 'onboarding_copy_setup.dart';
@@ -13,7 +15,12 @@ final class OnboardingCopy {
 
   String text(String key) {
     final words =
+        (key == 'step.online' || key == 'title.online' || key == 'reviewOnline'
+            ? usageModeWords['enableOnline']
+            : null) ??
+        (key == 'description.mode' ? usageModeWords['description'] : null) ??
         _words[key] ??
+        onboardingNoLogWords[key] ??
         onboardingSetupWords[key] ??
         onboardingProfileWords[key] ??
         onboardingVerifyWords[key] ??
@@ -53,12 +60,20 @@ final class OnboardingCopy {
       'Online mode was not restored. Local mode is available. Close this window and try again.',
     ),
     'onlineRestore.recovery': (
-      '切换尚未完成。请重新检查状态或查看诊断信息。',
-      '切換尚未完成。請重新檢查狀態或查看診斷資訊。',
-      'The switch has not finished. Check the status or diagnostics.',
+      '切换尚未完成。请重新检查，或先切回本机模式。',
+      '切換尚未完成。請重新檢查，或先切回本機模式。',
+      'The switch has not finished. Check again, or switch back to local mode first.',
     ),
     'onlineRestore.recheck': ('重新检查', '重新檢查', 'Check again'),
-    'onlineRestore.diagnostic': ('诊断代码', '診斷代碼', 'Diagnostic code'),
+    'logSearch.found': ('找到了你的游戏日志', '找到了你的遊戲日誌', 'Found your game log'),
+    'logSearch.use': ('使用这个', '使用這個', 'Use this one'),
+    'logSearch.other': ('选择其他', '選擇其他', 'Choose another'),
+    'logSearch.again': ('重新查找', '重新尋找', 'Search again'),
+    'logSearch.empty': (
+      '没有找到游戏日志，请手动选择',
+      '沒有找到遊戲日誌，請手動選擇',
+      'No game log found. Choose one manually.',
+    ),
     'onlineRestore.close': ('关闭', '關閉', 'Close'),
     'onlineReview.title': ('核对联网账号', '核對連線帳號', 'Check your online account'),
     'onlineReview.resume': ('恢复在线', '恢復線上', 'Resume online'),
@@ -103,6 +118,7 @@ final class OnboardingCopy {
       '確認這兩個 Handle',
       'Confirm these Handles',
     ),
+    'onlineReview.confirmOne': ('确认 Handle', '確認 Handle', 'Confirm Handle'),
     'onlineReview.confirmAccount': ('恢复此账号', '恢復此帳號', 'Restore this account'),
     'onlineReview.accountReviewRequired': (
       '原登录会话已复核。恢复账号后，可继续设置游戏日志和身份。',
@@ -196,9 +212,9 @@ final class OnboardingCopy {
       'Reauthorization is needed to continue. Authorize your original SCM account in the browser, then check your Handle. Local profiles stay separate.',
     ),
     'onlineReview.recoveryRequired': (
-      '上次切换尚未完成，暂时无法确认功能是否可用。请重新检查状态或查看诊断信息。',
-      '上次切換尚未完成，暫時無法確認功能是否可用。請重新檢查狀態或查看診斷資訊。',
-      'The previous switch has not finished, so feature availability is not confirmed. Check the status or diagnostics.',
+      '上次切换尚未完成，暂时无法确认功能是否可用。请重新检查，或先切回本机模式。',
+      '上次切換尚未完成，暫時無法確認功能是否可用。請重新檢查，或先切回本機模式。',
+      'The previous switch has not finished, so feature availability is not confirmed. Check again, or switch back to local mode first.',
     ),
     'onlineReview.unavailable': (
       '尚未确认联网账号状态。请重新检查。',
@@ -451,6 +467,12 @@ final class OnboardingCopy {
       'Setup status is unavailable. Check again or continue later.',
     ),
     'retry': ('重新检查', '重新檢查', 'Check again'),
+    'logSetupPending': (
+      '游戏日志已确认，但统计设置还没保存好。',
+      '遊戲日誌已確認，但統計設定還沒儲存好。',
+      "Your game log is confirmed, but the statistics setting hasn't been saved yet.",
+    ),
+    'finishLogSetup': ('重试', '重試', 'Try again'),
     'online': ('登录 SCM', '登入 SCM', 'Sign in to SCM'),
     'onlineDescription': (
       '使用账号资料、好友与协作功能。仍需连接本机游戏日志。',
@@ -459,9 +481,9 @@ final class OnboardingCopy {
     ),
     'local': ('暂不联网', '暫不連線', 'Use local features for now'),
     'localDescription': (
-      '先设置本机功能，以后从账号入口登录，无需重做基础设置。',
-      '先設定本機功能，以後從帳號入口登入，無需重做基礎設定。',
-      'Set up local features now. Sign in later from Account without repeating the basics.',
+      '先设置本机功能，以后可以在 设置 › 账号与识别 › 使用模式 切换到在线，无需重做基础设置。',
+      '先設定本機功能，以後可以在 設定 › 帳號與識別 › 使用模式 切換到線上，無需重做基礎設定。',
+      'Set up local features now. You can switch to online later in Settings › Account & identity › Usage mode without repeating the basics.',
     ),
     'login': ('打开 SCM 登录', '開啟 SCM 登入', 'Open SCM sign-in'),
     'cancelLogin': ('取消登录', '取消登入', 'Cancel sign-in'),
@@ -757,9 +779,9 @@ final class OnboardingCopy {
       'Connect online features on your terms',
     ),
     'description.online': (
-      '登录和身份核对不代表同意共享或继承资料。',
-      '登入和身分核對不代表同意共享或繼承資料。',
-      'Signing in and matching identity do not consent to sharing or profile inheritance.',
+      '登录和身份核对不代表同意共享。已关联旧账号的，旧账号的好友、组织、聊天和联网时长会转到这个 SCM 账号，本机档案不变。',
+      '登入和身分核對不代表同意共享。已關聯舊帳號的，舊帳號的好友、組織、聊天和連線時長會轉到這個 SCM 帳號，本機檔案不變。',
+      'Signing in and matching identity do not consent to sharing. If you linked an old account, its friends, organizations, chats and online playtime move to this SCM account; your local profile stays the same.',
     ),
     'title.summary': ('检查你的设置', '檢查你的設定', 'Review your setup'),
     'description.summary': (

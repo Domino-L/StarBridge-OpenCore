@@ -162,6 +162,9 @@ internal sealed partial class CommunityClient
             // These exact WPF endpoints return 200 only after SaveAsync completes.
             // Do not deserialize or forward their unrestricted bulk snapshot. The UI
             // refreshes the narrow admissions projection separately, including the code.
+            if (response.StatusCode != HttpStatusCode.OK &&
+                await CommunityRelayRefusal.ReasonAsync(response, token) is { } refusal)
+                return Finish(new("rejected", refusal));
             return Finish(response.StatusCode switch
             {
                 HttpStatusCode.OK => new("accepted"),

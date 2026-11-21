@@ -22,6 +22,8 @@ import 'account_view_components.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/controls/semantic_action_style.dart';
 import 'account_operation_motion.dart';
+import 'account_migration_controller.dart';
+import 'account_migration_entry.dart';
 import 'game_identity_verification.dart';
 import 'game_identity_verification_dialog.dart';
 
@@ -32,6 +34,7 @@ class AccountSignedInView extends StatelessWidget {
     this.localStatus,
     this.localRecognition,
     this.gameIdentity,
+    this.migration,
     super.key,
   });
 
@@ -40,6 +43,9 @@ class AccountSignedInView extends StatelessWidget {
   final Widget? localStatus;
   final Widget? localRecognition;
   final GameIdentityVerificationPort? gameIdentity;
+
+  /// Old-account migration (plan item 9); null keeps the existing card.
+  final AccountMigrationController? migration;
 
   @override
   Widget build(BuildContext context) {
@@ -80,10 +86,12 @@ class AccountSignedInView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 pair(
-                  AccountCompatibilityCard(
-                    projection: projection,
-                    module: module,
-                    existingAccountOnly: true,
+                  _compatibility(
+                    AccountCompatibilityCard(
+                      projection: projection,
+                      module: module,
+                      existingAccountOnly: true,
+                    ),
                   ),
                   _IdentityCard(
                     identity: projection.identity,
@@ -112,6 +120,16 @@ class AccountSignedInView extends StatelessWidget {
       ],
     );
   }
+}
+
+extension on AccountSignedInView {
+  Widget _compatibility(Widget card) => migration == null
+      ? card
+      : AccountMigrationEntry(
+          controller: migration!,
+          module: module,
+          fallback: card,
+        );
 }
 
 class _AccountHeader extends StatelessWidget {

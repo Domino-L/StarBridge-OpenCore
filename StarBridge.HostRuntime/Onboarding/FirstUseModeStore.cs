@@ -31,6 +31,7 @@ internal sealed partial class FirstUseModeStore(string root, TimeProvider? time 
         [property: JsonRequired] FirstUseModeChoice Value);
 
     internal FirstUseModeChoice Read() => ReadCore(_unwrittenOriginalOwner, _ownedTemporary);
+    internal bool SetupCompleted => new FirstUseCompletionStore(root).Read() is not null;
 
     // Only the original runtime that actually observed no tree may retain its
     // no-choice observation across a failed initial write. A cold runtime must
@@ -42,8 +43,12 @@ internal sealed partial class FirstUseModeStore(string root, TimeProvider? time 
         return value;
     }
 
+    // Diagnostic count of durable reads; lets tests prove that scans stay in memory.
+    private long _reads;
+    internal long Reads => Interlocked.Read(ref _reads);
     private FirstUseModeChoice ReadCore(bool freshWriter, string? ownedTemporary)
     {
+        Interlocked.Increment(ref _reads);
         try
         {
             Safe(StatePath);

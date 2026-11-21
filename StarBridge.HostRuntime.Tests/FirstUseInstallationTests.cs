@@ -76,7 +76,7 @@ internal static partial class FirstUseBusinessOwnerTests
         {
             owner.ConfigureOverlayCommunitySource(f.Original.Local.Root);
             entered.TrySetResult();
-            if (!release.Task.Wait(TimeSpan.FromSeconds(8))) throw new TimeoutException();
+            if (!release.Task.Wait(FirstUseTestWait.Bound)) throw new TimeoutException();
             try { owner.ConfigureLiveOverlayUpdates(new InstallationSink()); }
             catch (InvalidOperationException) { rejected = true; }
         }));

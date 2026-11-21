@@ -63,7 +63,7 @@ if (Test-Path -LiteralPath $readmePath) {
     $readme = [IO.File]::ReadAllText($readmePath)
     $requiredReadmeText = @(
         "https://scstarbridge.com/",
-        "StarBridge-0.7.2.1-",
+        "StarBridge-0.7.3-",
         "SHA256SUMS.txt",
         "Apache License 2.0",
         "BINARY-DISTRIBUTION-NOTICE.md",
@@ -90,6 +90,7 @@ $forbiddenPublicPaths = @(
     "StarBridge.Desktop/Data/ship-loaner-matrix.tsv",
     "StarBridge.Desktop/Data/location-names-zh-unverified.txt",
     "StarBridge.Desktop/Data/location-names-zh.txt",
+    "StarBridge.Desktop/Data/KeyBindingDefaults",
     "StarBridge.Desktop/Data/ShipImages",
     "StarBridge.Desktop/Data/ShipDetailImages",
     "StarBridge.Desktop/Assets/systems",
@@ -249,12 +250,12 @@ $releaseVerificationPath = Join-Path $Root "docs/RELEASE-VERIFICATION.md"
 if (Test-Path -LiteralPath $releaseVerificationPath) {
     $releaseVerification = [IO.File]::ReadAllText($releaseVerificationPath)
     foreach ($requiredVerificationValue in @(
-        "StarBridge-0.7.2.1-20261103-01-win-x64-setup.exe",
-        "StarBridge-0.7.2.1-win-x64-setup.exe",
-        "AD9CF2A7CE957CB8E1895AAA21530F148913870269353665446E9170E80828C8",
-        "411803296",
-        "gh release verify v0.7.2.1",
-        "gh release verify-asset v0.7.2.1",
+        "StarBridge-0.7.3-20261121-03-win-x64-setup.exe",
+        "StarBridge-0.7.3-win-x64-setup.exe",
+        "C42837C38FA96367C57DE5D304B0852DD75487D1D85D9374B9133DCE6EE92D41",
+        "396265088",
+        "gh release verify v0.7.3",
+        "gh release verify-asset v0.7.3",
         "StarBridge-0.7.0.3-20260925-03-win-x64-setup.exe",
         "0d2e8965589917685951cb57b8725512776d92fa58a8711012fe85f566516009",
         "gh release verify",

@@ -59,14 +59,14 @@ internal sealed partial class CommunityClient
             if (!hintValid) diagnostic.ParseFailed();
             var identities = hintValid ? AuthorIdentities(root, ids, detail: true, diagnostic: diagnostic, preserveLapsedVisible: true) : new Dictionary<string, OfficialAuthorObservation>();
             var observation = identities.GetValueOrDefault(message.SenderId) ?? new OfficialAuthorObservation("unavailable");
-            refresh = refresh || !observation.Current(_targetClock.GetUtcNow()) || observation.IdentityVersion != expected;
+            refresh = refresh || !observation.Current(_identityClock.GetUtcNow()) || observation.IdentityVersion != expected;
             if (observation.State != "hidden" && observation.IdentityVersion != expected) observation = new("unavailable");
             if (message.SenderRef is null) throw new AccountBridgeHostException("communities.refreshRequired");
             var captured = new Dictionary<string, OfficialAuthorObservation>(StringComparer.Ordinal) { { message.SenderId, observation } };
             return OfficialAuthorProjectionResult(captured, retired =>
             {
                 var authorObservation = retired.Contains(message.SenderId) ? new OfficialAuthorObservation("unavailable") : observation;
-                var currentVisible = authorObservation.Current(_targetClock.GetUtcNow());
+                var currentVisible = authorObservation.Current(_identityClock.GetUtcNow());
                 // The matching response is display data; only Current may admit its proof.
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(new { avatarImageData = authorObservation.State == "visible" ? authorObservation.Avatar : null, attachment }, ChatJson);
                 var author = new JsonObject { ["senderRef"] = message.SenderRef }; ApplyOfficialPerson(author, authorObservation, preserveLapsedVisible: true);

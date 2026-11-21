@@ -10,7 +10,8 @@ import 'community_sharing.dart';
 import 'event_scope_editor.dart';
 
 final class EventSharingController extends ChangeNotifier {
-  EventSharingController(this.session) {
+  EventSharingController(this.session, {this.scmOnly}) {
+    scmOnly?.addListener(notifyListeners);
     _subscription = session.events.listen((event) {
       if (event.name == 'account.changed' ||
           event.name == 'bootstrap.invalidated') {
@@ -24,10 +25,18 @@ final class EventSharingController extends ChangeNotifier {
         unawaited(refresh());
       }
     });
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => refresh());
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) {
+      // The relay keeps event sharing only for linked accounts; rechecking a
+      // SCM-only account every 15 seconds would only repeat the same refusal.
+      if (scmOnlyUnavailable) return;
+      unawaited(refresh());
+    });
     unawaited(refresh());
   }
   final BridgeClientSession session;
+
+  /// True for a SCM account without a linked legacy account.
+  final ValueListenable<bool>? scmOnly;
   late final StreamSubscription _subscription;
   late final Timer _timer;
   int _epoch = 0;
@@ -37,6 +46,11 @@ final class EventSharingController extends ChangeNotifier {
   String? error;
   String? _ownerKey;
   String? get accountKey => _ownerKey;
+
+  /// The account is SCM-only and the relay refused it, so this is not a
+  /// passing failure.
+  bool get scmOnlyUnavailable =>
+      error == 'events.identity_unavailable' && scmOnly?.value == true;
   String state = 'inactive';
   bool hasCommunityChoice(CommunitySharingTarget target) =>
       (snapshot?['settings'] as Map?)?['communities'] is List &&
@@ -229,17 +243,23 @@ final class EventSharingController extends ChangeNotifier {
     await saveChoices({code: next});
   }
 
-  Future<bool> saveChoices(Map<String?, EventSharingChoice> choices) async {
+  Future<bool> saveChoices(
+    Map<String?, EventSharingChoice> choices, {
+    bool omitUnconfirmedCommunities = false,
+  }) async {
     if (!canEdit) return false;
     final epoch = _epoch;
     final room = choices[null] ?? choice(null);
     final rows = [
       for (final target in targets!.communities)
-        {
-          'code': target.code,
-          'joinedAt': target.joinedAt,
-          'choice': (choices[target.code] ?? choice(target.code)).toJson(),
-        },
+        if (!omitUnconfirmedCommunities ||
+            (choices[target.code] ?? choice(target.code)) !=
+                EventSharingChoice.unconfirmed)
+          {
+            'code': target.code,
+            'joinedAt': target.joinedAt,
+            'choice': (choices[target.code] ?? choice(target.code)).toJson(),
+          },
     ];
     final settings = {'room': room.toJson(), 'communities': rows};
     final enabled =
@@ -297,6 +317,7 @@ final class EventSharingController extends ChangeNotifier {
     _closed = true;
     _epoch++;
     _timer.cancel();
+    scmOnly?.removeListener(notifyListeners);
     unawaited(_subscription.cancel());
     super.dispose();
   }

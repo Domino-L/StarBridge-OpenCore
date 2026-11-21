@@ -5,7 +5,8 @@ namespace StarBridge.HostRuntime.Support;
 
 // Borrows the single existing journal owner. Does not open its own store.
 public sealed class LocalEventClearDispatcher(LocalGameEventJournal journal,
-    Func<long> generation) : IBridgeRequestDispatcher
+    Func<long> generation, LocalContractHistory? contracts = null,
+    Func<BridgeAccountContext?>? account = null) : IBridgeRequestDispatcher
 {
     public const string RequestName = "diagnostics.clearLocalEvents";
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } = ["diagnostics.localEventsClear"];
@@ -30,7 +31,15 @@ public sealed class LocalEventClearDispatcher(LocalGameEventJournal journal,
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return Error(request, "localEventsClear.busy");
             acquired = true;
             using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            var result = await journal.ClearAsync(Current, cancellation.Token);
+            var owner = account?.Invoke();
+            bool SameScope() => Current() && (account is null || account() == owner);
+            if (contracts is not null)
+            {
+                var contractResult = await contracts.ClearAsync(owner, SameScope, cancellation.Token);
+                if (contractResult == LocalJournalClearResult.Cancelled) return new(BridgeEnvelope.CancelledResponse(request), []);
+                if (contractResult != LocalJournalClearResult.Cleared) return Error(request, "localEventsClear.failed");
+            }
+            var result = await journal.ClearAsync(SameScope, cancellation.Token);
             if (result == LocalJournalClearResult.Cancelled) return new(BridgeEnvelope.CancelledResponse(request), []);
             if (result != LocalJournalClearResult.Cleared) return Error(request, "localEventsClear.failed");
             return new(BridgeEnvelope.Response(request, new { schemaVersion = 1, outcome = "cleared" },

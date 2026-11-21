@@ -54,23 +54,30 @@ internal static class OverlayArchivedAppearanceMigrationTests
                 "An archived transition alone keeps a valid Night Shadow appearance: " + legacy);
         }
 
-        var csv = expected.Serialize().Split(',');
+        // An earlier client stored the old background scale (100% = the faint plate); 0.7.3 reads it at 15% ("背景可以").
+        var stored = expected with { EventNotificationBackgroundOpacity = 1.0 };
+        var csv = stored.Serialize().Split(',');
         csv[43] = csv[72] = csv[10] = "LagrangeWeave";
         csv[20] = "LagrangeWeaveEquilibrium";
         var oldSettings = string.Join(',', csv);
         var oldPreset = new OverlaySharedPreset(1, "Archived fixture", oldSettings,
             InformationOverlayLayoutItem.SerializeMany(layout));
         var shared = OverlaySharedPreset.Parse(oldPreset.Serialize());
-        var normal = OverlaySharedPreset.Parse((oldPreset with { Settings = expected.Serialize() }).Serialize());
+        var normal = OverlaySharedPreset.Parse((oldPreset with { Settings = stored.Serialize() }).Serialize());
         Check(shared == normal, "Shared WPF v1 preset keeps its name and layout while migrating settings.");
 
         var root = Path.Combine(Environment.GetEnvironmentVariable("STARBRIDGE_DEBUG_DATA_ROOT") is { Length: > 0 } debugRoot ? debugRoot : Path.GetTempPath(), "cx80-migration-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "overlay.settings"), oldSettings);
+        // An older client wrote 80 columns.
+        var oldFile = string.Join(',', csv.Take(80));
+        File.WriteAllText(Path.Combine(root, "overlay.settings"), oldFile);
         File.WriteAllText(Path.Combine(root, "overlay.layout"), InformationOverlayLayoutItem.SerializeMany(layout));
         var workspace = new OverlayWorkspaceStore(root).Inspect();
-        Check(workspace.Settings.Serialize() == expected.Serialize(), "Legacy workspace CSV migrates without changing unrelated settings.");
-        Check(File.ReadAllText(Path.Combine(root, "overlay.settings")) == oldSettings, "Inspect never rewrites the old file.");
+        // The archived appearance falls back to the standard look; every other field is unchanged. (Overlay v2
+        // keeps its own folder and never switches saved settings, so this earlier storage reads them as they are.)
+        Check(workspace.Settings.Serialize() == expected.Serialize(),
+            "Legacy workspace CSV migrates without changing unrelated settings.");
+        Check(File.ReadAllText(Path.Combine(root, "overlay.settings")) == oldFile, "Inspect never rewrites the old file.");
         Console.WriteLine("PASS CX-80 archived settings, shared presets and workspace JSON migrate without field loss");
     }
 

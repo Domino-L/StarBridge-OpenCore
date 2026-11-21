@@ -367,6 +367,10 @@ void main() {
       expect((await h.port.read(generation: 1)).isReady, isFalse);
       h.progress = {'journey-unknown': 1};
       expect((await h.port.read(generation: 1)).isReady, isFalse);
+      for (final id in ['journey-pyro-majors', 'journey-pyro-all']) {
+        h.progress = {id: 1};
+        expect((await h.port.read(generation: 1)).isReady, isFalse);
+      }
     },
   );
   // Host forwards the server's read: Java writes Z, a Host snapshot writes +00:00.

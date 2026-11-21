@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'privacy_read_retry.dart';
+
 enum FriendRequestPrivacyAvailability {
   loading,
   available,
@@ -13,6 +15,7 @@ enum FriendRequestPrivacyOperation { none, saving }
 
 enum FriendRequestPrivacyFailure {
   hostUnavailable,
+  capabilityMissing,
   identityUnavailable,
   readFailed,
   writeFailed,
@@ -105,6 +108,7 @@ final class FriendRequestPrivacyModule {
     _subscription = _port.invalidations.listen((_) {
       if (_disposed) return;
       // Identity invalidation must never retain another account's settings.
+      _readRetry.reset();
       _epoch++;
       _reading = false;
       _busy = false;
@@ -117,6 +121,7 @@ final class FriendRequestPrivacyModule {
   }
 
   final FriendRequestPrivacyPort _port;
+  final _readRetry = PrivacyReadRetry();
   final ValueNotifier<FriendRequestPrivacyProjection> projection =
       ValueNotifier(
         const FriendRequestPrivacyProjection(
@@ -137,6 +142,14 @@ final class FriendRequestPrivacyModule {
     await refresh();
   }
 
+  Future<void> refreshIfUnavailable() async {
+    if (!_disposed && _canRetry(projection.value.snapshot)) await refresh();
+  }
+
+  bool _canRetry(FriendRequestPrivacySnapshot snapshot) =>
+      snapshot.availability == FriendRequestPrivacyAvailability.unavailable &&
+      snapshot.failure != FriendRequestPrivacyFailure.capabilityMissing;
+
   Future<void> refresh() async {
     if (_disposed) return;
     if (_busy) {
@@ -144,11 +157,13 @@ final class FriendRequestPrivacyModule {
       return;
     }
     if (_reading) return;
+    _readRetry.cancelPending();
     _reading = true;
     final epoch = _epoch;
     final snapshot = await _port.read();
     if (_disposed || epoch != _epoch) return;
     _reading = false;
+    _readRetry.afterRead(shouldRetry: _canRetry(snapshot), refresh: refresh);
     projection.value = FriendRequestPrivacyProjection(
       snapshot: snapshot,
       failure: snapshot.failure,
@@ -195,6 +210,7 @@ final class FriendRequestPrivacyModule {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _readRetry.reset();
     unawaited(_subscription.cancel());
     projection.dispose();
     unawaited(_port.close());

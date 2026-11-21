@@ -69,6 +69,19 @@ final class OnlineReviewSnapshot {
       authoritativeHandle,
       accountDisplayName,
       confirmationKey;
+  bool get accountGameIdentityVerified =>
+      authoritativeHandle != null &&
+      const {
+        OnlineReviewState.needsLocalIdentity,
+        OnlineReviewState.identityCheckRequired,
+        OnlineReviewState.reviewRequired,
+        OnlineReviewState.confirmedForHandoff,
+        OnlineReviewState.accountReviewRequired,
+        OnlineReviewState.accountConfirmedForHandoff,
+        OnlineReviewState.installedReviewRequired,
+        OnlineReviewState.boundOnlineIdentity,
+        OnlineReviewState.mismatch,
+      }.contains(state);
   bool get canBegin =>
       revision != null &&
       (modeState == OnlineReviewModeState.local ||

@@ -1,11 +1,11 @@
 const overlayCalmZhCn = <String, String>{
   'overlay.calm.title': '安静显示',
-  'overlay.calm.subtitle': '舰队总览、成员和聊天一段时间没有变化就变淡，和你相关的变化时点亮。三个模块共用这些设置。',
-  'overlay.calm.barrageNote': '全屏弹幕模式下聊天没有常驻框，不参与安静显示；舰队总览和成员仍按这里的设置。',
+  'overlay.calm.subtitle': '成员和聊天一段时间没有变化就变淡，和你相关的变化时点亮。两个模块共用这些设置。',
+  'overlay.calm.barrageNote': '全屏弹幕模式下聊天没有常驻框，不参与安静显示；成员仍按这里的设置。',
   'overlay.calm.offHint': '开启安静显示后可调整下面的设置。',
   'overlay.calm.idle': '空闲时不透明度',
   'overlay.calm.lit': '点亮时不透明度',
-  'overlay.calm.following': '跟随浮层不透明度自动设定',
+  'overlay.calm.following': '自动设定',
   'overlay.calm.custom': '已自定义',
   'overlay.calm.follow': '恢复自动',
   'overlay.calm.previewModule': '成员',
@@ -26,7 +26,7 @@ const overlayCalmZhCn = <String, String>{
   'overlay.calm.peekClear': '清除',
   'overlay.calm.introTitle': '新功能：安静显示',
   'overlay.calm.introBody':
-      '舰队总览、成员和聊天一段时间没有变化会变淡，有和你相关的变化时再点亮。可以在这三个模块的“当前模块”里调整空闲时和点亮时的不透明度。',
+      '成员和聊天一段时间没有变化会变淡，有和你相关的变化时再点亮。空闲时和点亮时的不透明度在“全局 → 安静显示”里调整。',
   'overlay.calm.introOn': '开启',
   'overlay.calm.introLater': '暂不开启',
   'overlay.workspace.field.calmDisplay': '安静显示',
@@ -40,17 +40,17 @@ const overlayCalmZhCn = <String, String>{
   'overlay.workspace.option.Relevant': '只在和我相关时',
   'overlay.workspace.option.Any': '任何变化',
   'overlay.calm.introOpen': '了解并设置',
-  'overlay.calm.introShort': '舰队总览、成员和聊天没有变化时会变淡。',
+  'overlay.calm.introShort': '成员和聊天没有变化时会变淡。',
 };
 
 const overlayCalmZhTw = <String, String>{
   'overlay.calm.title': '安靜顯示',
-  'overlay.calm.subtitle': '艦隊總覽、成員和聊天一段時間沒有變化就變淡，和你相關的變化時點亮。三個模組共用這些設定。',
-  'overlay.calm.barrageNote': '全螢幕彈幕模式下聊天沒有常駐框，不參與安靜顯示；艦隊總覽和成員仍依這裡的設定。',
+  'overlay.calm.subtitle': '成員和聊天一段時間沒有變化就變淡，和你相關的變化時點亮。兩個模組共用這些設定。',
+  'overlay.calm.barrageNote': '全螢幕彈幕模式下聊天沒有常駐框，不參與安靜顯示；成員仍依這裡的設定。',
   'overlay.calm.offHint': '開啟安靜顯示後可調整下面的設定。',
   'overlay.calm.idle': '閒置時不透明度',
   'overlay.calm.lit': '點亮時不透明度',
-  'overlay.calm.following': '跟隨浮層不透明度自動設定',
+  'overlay.calm.following': '自動設定',
   'overlay.calm.custom': '已自訂',
   'overlay.calm.follow': '恢復自動',
   'overlay.calm.previewModule': '成員',
@@ -71,7 +71,7 @@ const overlayCalmZhTw = <String, String>{
   'overlay.calm.peekClear': '清除',
   'overlay.calm.introTitle': '新功能：安靜顯示',
   'overlay.calm.introBody':
-      '艦隊總覽、成員和聊天一段時間沒有變化會變淡，有和你相關的變化時再點亮。可以在這三個模組的「目前模組」裡調整閒置時和點亮時的不透明度。',
+      '成員和聊天一段時間沒有變化會變淡，有和你相關的變化時再點亮。閒置時和點亮時的不透明度在「全域 → 安靜顯示」裡調整。',
   'overlay.calm.introOn': '開啟',
   'overlay.calm.introLater': '暫不開啟',
   'overlay.workspace.field.calmDisplay': '安靜顯示',
@@ -85,17 +85,17 @@ const overlayCalmZhTw = <String, String>{
   'overlay.workspace.option.Relevant': '只在和我相關時',
   'overlay.workspace.option.Any': '任何變化',
   'overlay.calm.introOpen': '了解並設定',
-  'overlay.calm.introShort': '艦隊總覽、成員和聊天沒有變化時會變淡。',
+  'overlay.calm.introShort': '成員和聊天沒有變化時會變淡。',
 };
 
 const overlayCalmEn = <String, String>{
   'overlay.calm.title': 'Calm display',
-  'overlay.calm.subtitle': 'Fleet overview, members and chat fade after a quiet period and light up for changes that concern you. These settings are shared by the three modules.',
-  'overlay.calm.barrageNote': 'In full-screen barrage mode chat has no resting box and does not take part. Fleet overview and members still follow these settings.',
+  'overlay.calm.subtitle': 'Members and chat fade after a quiet period and light up for changes that concern you. These settings are shared by both modules.',
+  'overlay.calm.barrageNote': 'In full-screen barrage mode chat has no resting box and does not take part. Members still follow these settings.',
   'overlay.calm.offHint': 'Turn on calm display to adjust the settings below.',
   'overlay.calm.idle': 'Resting opacity',
   'overlay.calm.lit': 'Lit opacity',
-  'overlay.calm.following': 'Set automatically from the overlay opacity',
+  'overlay.calm.following': 'Set automatically',
   'overlay.calm.custom': 'Custom',
   'overlay.calm.follow': 'Use automatic',
   'overlay.calm.previewModule': 'Members',
@@ -114,7 +114,7 @@ const overlayCalmEn = <String, String>{
   'overlay.calm.peekRecord': 'Set key',
   'overlay.calm.peekClear': 'Clear',
   'overlay.calm.introTitle': 'New: calm display',
-  'overlay.calm.introBody': 'Fleet overview, members and chat fade after a quiet period and light up again for changes that concern you. Adjust the resting and lit opacity under "This module" in those three modules.',
+  'overlay.calm.introBody': 'Members and chat fade after a quiet period and light up again for changes that concern you. Adjust the resting and lit opacity under Global → Calm display.',
   'overlay.calm.introOn': 'Turn on',
   'overlay.calm.introLater': 'Not now',
   'overlay.workspace.field.calmDisplay': 'Calm display',
@@ -128,6 +128,5 @@ const overlayCalmEn = <String, String>{
   'overlay.workspace.option.Relevant': 'Changes that concern me',
   'overlay.workspace.option.Any': 'Any change',
   'overlay.calm.introOpen': 'Learn and set up',
-  'overlay.calm.introShort':
-      'Fleet overview, members and chat fade when nothing changes.',
+  'overlay.calm.introShort': 'Members and chat fade when nothing changes.',
 };

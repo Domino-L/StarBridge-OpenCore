@@ -2,6 +2,7 @@ import 'menu_overlay_locale.dart';
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -84,6 +85,7 @@ class MenuBridgePreview extends StatefulWidget {
     this.onHangarSnapshot,
     this.onOpenHangar,
     this.hangarOpenFailed = false,
+    this.relayPages = const {},
   });
   final bool visible;
   final VoidCallback onDismiss;
@@ -126,6 +128,9 @@ class MenuBridgePreview extends StatefulWidget {
   final ValueChanged<MenuExecHangarSummary>? onHangarSnapshot;
   final VoidCallback? onOpenHangar;
   final bool hangarOpenFailed;
+
+  /// Client pages shown through the page relay, by panel id; empty without it.
+  final Map<String, Widget Function()> relayPages;
   @override
   State<MenuBridgePreview> createState() => _MenuBridgePreviewState();
 }
@@ -149,6 +154,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
       const Size(1200, 800);
   List<MenuPanelSpec> get _specs => menuBridgePanelSpecs(
     hasHangar: widget.hangar != null,
+    hasMarketplace: widget.relayPages.containsKey('marketplace'),
+    hasFleet: widget.relayPages.containsKey('officialFleet'),
+    clientOrganizations: widget.relayPages.containsKey('organizations'),
     hasLocalTools: widget.localCall != null,
     profileIds: _profileTargets.keys,
     hudPanel: widget.onFeatureVisible != null ? menuHudPanelSpec() : null,
@@ -244,7 +252,11 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
     for (final id in const ['organizations', 'rooms', 'hud']) {
       final shown = id == 'hud'
           ? widget.visible
-          : workspace.panelsVisible && workspace.isOpen(id);
+          : workspace.panelsVisible &&
+                workspace.isOpen(id) &&
+                // The client page reads for itself; the old feed stays off.
+                !(id == 'organizations' &&
+                    widget.relayPages.containsKey('organizations'));
       if (shown != _featuresShown.contains(id)) {
         shown ? _featuresShown.add(id) : _featuresShown.remove(id);
         widget.onFeatureVisible?.call(id, shown);
@@ -276,6 +288,8 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
               'browser',
               'settings',
               'execHangar',
+              'marketplace',
+              'officialFleet',
             ].contains(p['id']),
           )
           .toList(),
@@ -311,6 +325,12 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
       _desktopWidgets =
           MenuDesktopWidgets.parse(widget.initialSettings?['widgets']) ??
           const MenuDesktopWidgets();
+    }
+    if (!setEquals(
+      oldWidget.relayPages.keys.toSet(),
+      widget.relayPages.keys.toSet(),
+    )) {
+      workspace.reconcile(scope: _scope, panels: _specs);
     }
     if (oldWidget.browserResume != widget.browserResume) {
       _browserResume?.dispose();
@@ -612,6 +632,14 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                 ),
                                               ),
                                             BridgePreviewDock(
+                                              relayPages: {
+                                                for (final panel
+                                                    in BridgePreviewPanel
+                                                        .values)
+                                                  if (widget.relayPages
+                                                      .containsKey(panel.name))
+                                                    panel,
+                                              },
                                               execHangarEnabled:
                                                   widget.hangar != null,
                                               attention: widget.attention,
@@ -624,28 +652,9 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                                                   widget.settingsPreview ||
                                                   widget.onFeatureVisible !=
                                                       null,
-                                              selected: switch (workspace
-                                                  .activeId) {
-                                                'friends' =>
-                                                  BridgePreviewPanel.friends,
-                                                'comms' =>
-                                                  BridgePreviewPanel.comms,
-                                                'organizations' =>
-                                                  BridgePreviewPanel
-                                                      .organizations,
-                                                'rooms' =>
-                                                  BridgePreviewPanel.rooms,
-                                                'hud' => BridgePreviewPanel.hud,
-                                                'screenshot' =>
-                                                  BridgePreviewPanel.screenshot,
-                                                'image' =>
-                                                  BridgePreviewPanel.image,
-                                                'browser' =>
-                                                  BridgePreviewPanel.browser,
-                                                'execHangar' =>
-                                                  BridgePreviewPanel.execHangar,
-                                                _ => null,
-                                              },
+                                              selected: BridgePreviewPanel.values
+                                                  .asNameMap()[workspace
+                                                  .activeId],
                                               openPanels: {
                                                 if (widget
                                                         .features['hud']
@@ -700,6 +709,7 @@ class _MenuBridgePreviewState extends State<MenuBridgePreview> {
                               ),
                             ),
                             MenuBridgeWorkspace(
+                              relayPages: widget.relayPages,
                               hangar: widget.hangar,
                               hangarInitial: widget.hangarInitial,
                               onHangarSnapshot: widget.onHangarSnapshot,

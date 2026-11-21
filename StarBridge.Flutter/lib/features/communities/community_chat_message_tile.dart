@@ -30,6 +30,7 @@ import 'community_preset_port.dart';
 import 'community_preset_dialog.dart';
 import '../overlay_settings/overlay_shared_preset_card.dart';
 import '../overlay_settings/overlay_preset_transfer.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 class CommunityChatMessageTile extends StatefulWidget {
   const CommunityChatMessageTile({
@@ -70,6 +71,16 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
     }
     final seen = widget.seenAuthors, sender = widget.message.senderRef;
     final identity = widget.message.authorIdentity;
+    if (_official) {
+      if (identity?.state == CommunityAuthorState.lastSeen) {
+        avatar = null;
+        return seen?.avatarOf(sender);
+      }
+      if (!_authorAvatarAllowed) {
+        avatar = null;
+        return null;
+      }
+    }
     final version = identity?.visible == true ? identity?.avatarVersion : null;
     final current = avatar;
     if (seen == null) return current;
@@ -312,13 +323,25 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
 
   @override
   Widget build(BuildContext context) {
-    final message = widget.message;
+    var message = widget.message;
+    // A tile may repaint from its own late media completion before its parent.
+    // Recheck the held name as well as the avatar on that first resumed frame.
+    if (_official &&
+        _ownIdentity == null &&
+        (message.authorIdentity?.state == CommunityAuthorState.lastSeen &&
+                widget.seenAuthors?.retains(message.senderRef) != true ||
+            message.authorIdentity?.visible == true &&
+                widget.authorIsCurrent != null &&
+                !widget.authorIsCurrent!(message))) {
+      message = CommunityChatMessage.neutralAuthor(message);
+    }
     final card = detail?.attachment;
     String t(String key) => communityChatText(context, key);
     final ownName = _ownIdentity?.ownChatName?.trim();
     final sender = ownName != null && ownName.isNotEmpty
         ? ownName
-        : widget.port is CommunityAuthorProjectionPort && message.callsign.isEmpty
+        : widget.port is CommunityAuthorProjectionPort &&
+              message.callsign.isEmpty
         ? t(message.isSelf ? 'self' : 'member')
         : message.gameId.isEmpty
         ? message.callsign
@@ -349,7 +372,7 @@ class _CommunityChatMessageTileState extends State<CommunityChatMessageTile> {
       child: Text(
         message.roleTitle,
         maxLines: 1,
-        overflow: TextOverflow.fade,
+        overflow: fadeOverflow(context),
         softWrap: false,
         style: TextStyle(
           color: Color(

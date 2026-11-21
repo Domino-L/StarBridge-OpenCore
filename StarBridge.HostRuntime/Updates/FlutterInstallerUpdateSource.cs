@@ -45,13 +45,14 @@ public sealed partial class FlutterInstallerUpdateSource : IApplicationUpdateSou
     public async Task<ApplicationUpdateCheck> CheckForUpdateAsync(CancellationToken cancellation = default)
     {
         if (!await _operation.WaitAsync(0, cancellation)) throw new InvalidOperationException("Update operation is in progress.");
-        try { return await CheckCoreAsync(cancellation); }
+        try { return _manifestMirrors.Length == 0 ? await CheckCoreAsync(cancellation) : await CheckMirrorsAsync(cancellation); }
+        catch { SetAvailable(null); throw; }
         finally { _operation.Release(); }
     }
 
     private async Task<ApplicationUpdateCheck> CheckCoreAsync(CancellationToken cancellation)
     {
-        _available = null;
+        var completed = false;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         try
@@ -61,6 +62,8 @@ public sealed partial class FlutterInstallerUpdateSource : IApplicationUpdateSou
             {
                 if ((int)response.StatusCode >= 500 || response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests)
                     throw new HttpRequestException("Update service is temporarily unavailable.");
+                SetAvailable(null);
+                completed = true;
                 return new("channel-unavailable");
             }
             if (response.Content.Headers.ContentLength is > 65536) throw new InvalidDataException();
@@ -81,13 +84,15 @@ public sealed partial class FlutterInstallerUpdateSource : IApplicationUpdateSou
             var manifest = document.RootElement.Deserialize<Manifest>(Json) ?? throw new InvalidDataException();
             var candidate = Verify(manifest);
             cancellation.ThrowIfCancellationRequested();
-            if (candidate > _current) _available = manifest;
+            SetAvailable(candidate > _current ? manifest : null, _uri, ManifestProtocol.V1);
+            completed = true;
             return candidate > _current ? new("available", manifest.Version, manifest.Notes) : new("up-to-date");
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
             throw new HttpRequestException("Update check timed out.");
         }
+        finally { if (!completed) SetAvailable(null); }
     }
 
     private Version Verify(Manifest manifest) => VerifyManifest(manifest, _platform, _keys);

@@ -540,7 +540,7 @@ void main() {
         primaryFleetCode: 'A',
         communities: [target('A'), target('B')],
       );
-      await tester.pump(const Duration(seconds: 16));
+      await tester.pump(const Duration(minutes: 5));
       await h.settle(tester);
       expect(find.text('Organization B'), findsOneWidget);
       expect(h.port.writes, 0);
@@ -589,8 +589,9 @@ class Harness {
     CommunityHangarSharingPort? hangar,
     BridgeClientSession? eventSession,
     Locale locale = const Locale('zh', 'CN'),
+    SharingFixture? fixture,
   }) async {
-    final port = SharingFixture()
+    final port = (fixture ?? SharingFixture())
       ..settings = LocalPrivacySettings.editorDefaults.copyWith(
         publicationEnabled: enabled,
         communities: legacy ? null : [target('A').choice(fields: 1)],

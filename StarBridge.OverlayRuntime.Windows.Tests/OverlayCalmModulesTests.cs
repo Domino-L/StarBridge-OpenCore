@@ -87,8 +87,9 @@ internal static class OverlayCalmModulesTests
     {
         var tracker = new OverlayCalmModulesTracker();
         tracker.Configure(OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { Opacity = 0.25 }), T0);
-        Check(Near(tracker.Level(OverlayCalmModule.Members, T0 + Seconds(1)), 0.85), "lit lifts a low opacity to a readable 85%");
-        Check(Near(tracker.Level(OverlayCalmModule.Members, T0 + Seconds(12)), 0.25), "resting never goes below the user's own 25%");
+        // the overall opacity is retired (user 11-12): an old saved 25% no longer fades calm display
+        Check(Near(tracker.Level(OverlayCalmModule.Members, T0 + Seconds(1)), 1), "lit is full whatever overall opacity was saved");
+        Check(Near(tracker.Level(OverlayCalmModule.Members, T0 + Seconds(12)), 0.35), "resting uses the default 35%, not the old saved value");
         var custom = new OverlayCalmModulesTracker();
         custom.Configure(OverlayCalmDisplayLevels.Resolve(OverlayDisplaySettings.Default with { CalmIdleOpacity = 0.5, CalmLitOpacity = 0.7 }), T0);
         Check(Near(custom.Level(OverlayCalmModule.Chat, T0 + Seconds(1)), 0.7) &&

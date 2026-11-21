@@ -8,7 +8,7 @@ internal sealed partial class CommunityClient
     {
         var targetRef = Text(body, "targetRef", 32); var shipRef = Text(body, "shipRef", 32);
         if (!LowerHex(targetRef, 32) || !LowerHex(shipRef, 32)) throw Invalid();
-        var matches = _officialShipDisplayReferences.Values.Where(row => row.Reference == shipRef && row.Expires > clock.GetUtcNow() &&
+        var matches = _officialShipDisplayReferences.Values.Where(row => row.Reference == shipRef && row.Expires > _targetClock.GetUtcNow() &&
             row.Image is { } image && image.AccountScope == accountScope + "|" + image.SourceRef && image.TargetRef == targetRef).Take(2).ToArray();
         if (matches.Length != 1 || matches[0].Image is not { } bound) throw new AccountBridgeHostException("communities.refreshRequired");
         return ResolveOfficialShipImage(body, bound.SourceRef, bound.AccountScope, clock, report);
@@ -17,7 +17,7 @@ internal sealed partial class CommunityClient
     {
         var targetRef = Text(body, "targetRef", 32); var shipRef = Text(body, "shipRef", 32);
         RequireOfficialFleetTarget(body, source, scope);
-        var matches = _officialShipDisplayReferences.Values.Where(row => row.Reference == shipRef && row.Expires > clock.GetUtcNow() &&
+        var matches = _officialShipDisplayReferences.Values.Where(row => row.Reference == shipRef && row.Expires > _targetClock.GetUtcNow() &&
             row.Image is { } image && image.AccountScope == scope && image.SourceRef == source && image.TargetRef == targetRef).Take(2).ToArray();
         if (matches.Length != 1 || matches[0].Image is not { } bound || bound.MemberId <= 0 || bound.Version is null ||
             !bound.Read || report && !bound.Report) throw new AccountBridgeHostException("communities.refreshRequired");
@@ -55,11 +55,14 @@ internal sealed partial class CommunityClient
             Text(raw, "sourceRef", 64) != source || Text(raw, "shipId", 64) != bound.ShipId ||
             !raw.GetProperty("identityObservedAtUtc").TryGetDateTimeOffset(out var observed) ||
             !raw.GetProperty("identityValidUntilUtc").TryGetDateTimeOffset(out var expires) || observed.Offset != TimeSpan.Zero || expires.Offset != TimeSpan.Zero ||
-            observed > clock.GetUtcNow().AddSeconds(1) || expires <= observed || expires > observed.AddSeconds(5) || clock.GetUtcNow() >= expires)
+            expires <= observed || expires > observed.AddSeconds(5))
             throw new AccountBridgeHostException("communities.identityUnavailable");
+        if (OfficialFleet.OfficialFleetServerClock.IsFuture(observed, clock.GetUtcNow()) ||
+            OfficialFleet.OfficialFleetServerClock.IsExpired(expires, clock.GetUtcNow()))
+            throw OfficialFleet.OfficialFleetServerClock.ErrorFor(clock);
         var result = ProjectImageChunk(raw, reference, shipRef, offset, bound.Version);
         current(); token.ThrowIfCancellationRequested();
-        if (clock.GetUtcNow() >= expires) throw new AccountBridgeHostException("communities.identityUnavailable");
+        if (OfficialFleet.OfficialFleetServerClock.IsExpired(expires, clock.GetUtcNow())) throw OfficialFleet.OfficialFleetServerClock.ErrorFor(clock);
         return result;
     });
 }

@@ -441,3 +441,13 @@ String _visitorAffiliationKey(PersonalProfileProjection projection) =>
         'unavailable' => 'profile.visitor.affiliationUnreadable',
         _ => 'profile.visitor.affiliationUnavailable',
       };
+
+/// What an empty organization list says, shared with the Steam-style rail.
+String personalProfileAffiliationEmptyKey(
+  PersonalProfileProjection projection, {
+  required bool isSelf,
+}) => !isSelf
+    ? _visitorAffiliationKey(projection)
+    : projection.local?.remoteAvailable == false
+    ? 'profile.local.unknown'
+    : 'profile.affiliation.empty';

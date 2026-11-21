@@ -44,7 +44,8 @@ internal static class FullProfilePresentationImportTests
             Check(saved.Revision == 2 && saved.Content!.CallSign == "Old" && saved.Content.Introduction == "Old" &&
                 saved.Content.AvatarStyle == 1 && saved.Content.WallpaperId == "stanton-orbit" &&
                 saved.Content.Modules.Single().IsVisible == false && saved.Content.Schedule!.Windows.Count == 1 &&
-                saved.Content.PlayStyle!.Roles!.Single() == "historic role" && saved.Content.PreserveEmptyFields,
+                saved.Content.PlayStyle!.Roles!.Single() == "historic role" && saved.Content.PreserveEmptyFields &&
+                saved.Content.Showcases is null && saved.Content.AchievementShowcase is null,
                 "All presentation fields are inherited without default recovery");
             var journal = Directory.GetFiles(store.ImportJournalDirectory, "*.dat").Single();
             Check(!System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(journal)).Contains("Edited"), "Backup is encrypted");
@@ -80,7 +81,10 @@ internal static class FullProfilePresentationImportTests
     private static async Task Wire(LegacyProfileMigrationView view)
     {
         var summary = new LegacyProfileMigrationSummary("Synthetic", "", 1, 0, null);
-        using var handler = new WireHandler(view with { Source = summary, Target = summary });
+        using var handler = new WireHandler(view with { Source = summary, Target = summary,
+            Presentation = view.Presentation! with { Content = view.Presentation.Content with {
+                Showcases = [new("achievements", true)], AchievementShowcase = ["journey-area18"],
+                FavoriteShowcaseExtra = [new string('d', 32)] } } });
         var endpoint = new Uri("http://127.0.0.1:9/");
         var oauth = new OAuthPkceClient(new ScmHttpClient(handler), new Vault(),
             new ScmOAuthOptions("test", endpoint, endpoint, endpoint, "test", "test", "openid profile.read", "/callback"));
@@ -88,7 +92,7 @@ internal static class FullProfilePresentationImportTests
         var selection = new LegacyProfileImportSelection([], [], false, ReplaceAllDisplayContent: true);
         var preview = await oauth.ExecuteLegacyProfileMigrationAsync(read, "preview", null, false, default, selection: selection);
         Check(System.Text.Json.JsonSerializer.Serialize(preview.View.Presentation) ==
-            System.Text.Json.JsonSerializer.Serialize(handler.View.Presentation), "Full presentation crosses real transport");
+            System.Text.Json.JsonSerializer.Serialize(view.Presentation), "Legacy presentation leaves additive showcase fields absent");
         var write = read with { AccessToken = "write-fixture", Capabilities = ["profile.read", "profile.write"] };
         try { await oauth.ExecuteLegacyProfileMigrationAsync(write, "confirm", view.PreviewId, false, default, presentationConfirm: true);
             throw new InvalidOperationException("Missing full consent accepted"); }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/design_system/interaction/starbridge_action_row.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_dialog.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_idea_form.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_detail.dart';
@@ -12,10 +13,74 @@ import '../../features/friends/social_layout_test.dart' show loadFonts, size;
 import 'interaction_batch3eo_test.dart'
     show IdeasProbe, CatalogProbe, activate, key;
 import 'interaction_batch3i_test.dart' show scopedApp;
+import 'interaction_batch3aa_test.dart' show reader;
+
+Future<void> _openFirstEntry(WidgetTester t, String source) async {
+  // Three catalog groups enable the directory overview, which only lists recent
+  // unlocks and active goals. Browse the locked entry through its owning group.
+  for (final name in [
+    'achievement-group-bridge:journey',
+    'achievement-entry-first-entry',
+  ]) {
+    final target = key(name);
+    await t.ensureVisible(target);
+    // Scrolling rebuilds the exposed semantics tree on the following frame.
+    await t.pumpAndSettle();
+    if (source == 'reader' && name == 'achievement-entry-first-entry') {
+      // The entry key wraps artwork/layout; use the row's exposed accessible
+      // name rather than asking the wrapper for its ancestor's semantics.
+      final row = t.widget<StarBridgeActionRow>(
+        find.descendant(of: target, matching: find.byType(StarBridgeActionRow)),
+      );
+      reader(t, row.semanticLabel!);
+      await t.pump();
+    } else {
+      await activate(t, target, source);
+    }
+    await t.pumpAndSettle();
+  }
+}
 
 void main() {
   setUpAll(loadFonts);
   for (final suite in InteractionSuite.values) {
+    for (final source in ['pointer', 'keyboard', 'reader']) {
+      testWidgets(
+        '$suite locked entry is reachable through directory $source',
+        (t) async {
+          size(t, const Size(1100, 950));
+          final semantics = t.ensureSemantics();
+          final account = ValueNotifier(achievementTestAccount(7));
+          final port = CatalogProbe();
+          try {
+            await t.pumpWidget(
+              scopedApp(AchievementsPage(account: account, port: port), suite),
+            );
+            await t.pumpAndSettle();
+            expect(key('achievement-group-bridge:contract'), findsOneWidget);
+            expect(key('achievement-group-control'), findsNothing);
+            expect(key('achievement-entry-first-entry'), findsNothing);
+            // Scrolling the overview cannot reveal an entry outside its recent
+            // unlocks/goals; this is not a lazily built offscreen grid item.
+            await t.drag(
+              key('achievement-collection-scroll'),
+              const Offset(0, -1000),
+            );
+            await t.pumpAndSettle();
+            expect(key('achievement-entry-first-entry'), findsNothing);
+            await _openFirstEntry(t, source);
+            await t.pumpAndSettle();
+            expect(find.byType(AchievementDetail), findsOneWidget);
+            expect(port.reads, 1);
+            expect(t.takeException(), isNull);
+          } finally {
+            await t.pumpWidget(const SizedBox());
+            account.dispose();
+            semantics.dispose();
+          }
+        },
+      );
+    }
     for (final closing in [false, true]) {
       testWidgets(
         '$suite account invalidation keeps unrelated top route closing=$closing',
@@ -98,7 +163,7 @@ void main() {
               ),
             );
             await t.pumpAndSettle();
-            await activate(t, key('achievement-entry-first-entry'), 'pointer');
+            await _openFirstEntry(t, 'pointer');
             await t.pumpAndSettle();
             final route =
                 ModalRoute.of(t.element(find.byType(AchievementDetail)))!
@@ -164,11 +229,7 @@ void main() {
                 );
                 await activate(t, key('achievement-idea-close'), 'pointer');
               } else {
-                await activate(
-                  t,
-                  key('achievement-entry-first-entry'),
-                  'pointer',
-                );
+                await _openFirstEntry(t, 'pointer');
               }
               await t.pumpAndSettle();
               if (closing) {
@@ -210,7 +271,7 @@ void main() {
             scopedApp(AchievementsPage(account: account, port: port), suite),
           );
           await t.pumpAndSettle();
-          await activate(t, key('achievement-entry-first-entry'), 'pointer');
+          await _openFirstEntry(t, 'pointer');
           await t.pumpAndSettle();
           await activate(t, key('achievement-detail-close'), 'pointer');
           await t.pump(const Duration(milliseconds: 25));

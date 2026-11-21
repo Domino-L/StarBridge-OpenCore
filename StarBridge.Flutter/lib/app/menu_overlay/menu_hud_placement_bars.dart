@@ -1,8 +1,10 @@
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 
 import '../../design_system/icons/menu_hud_drag_handle_icon.dart';
 import '../../features/overlay_settings/overlay_workspace_layout_item.dart';
 import 'menu_bridge_style.dart';
+import 'menu_hud_placement_paint.dart';
 
 /// Small text button used on the placement toolbars.
 class MenuHudBarButton extends StatelessWidget {
@@ -105,9 +107,16 @@ class MenuHudPlacementToolbar extends StatelessWidget {
     required this.onShow,
     required this.onCancel,
     required this.onDone,
+    this.showGrid = true,
+    this.hintKey = 'menu.hudPlace.hint',
   });
   final String Function(String key, [Map<String, String> args]) text;
   final String presetName;
+
+  /// The visor places blocks by its own snapping (screen edge, its margin,
+  /// other blocks, the game's HUD), not on a grid: no grid toggle there.
+  final bool showGrid;
+  final String hintKey;
   final bool changed, grid, align, canUndo, canRedo, hiddenOpen, busy;
   final Map<String, String> hidden;
   final GestureDragUpdateCallback onDrag;
@@ -182,13 +191,14 @@ class MenuHudPlacementToolbar extends StatelessWidget {
               ),
               _Section(
                 children: [
-                  MenuHudBarButton(
-                    key: const ValueKey('menu-hud-place-grid'),
-                    label: text('menu.hudPlace.grid'),
-                    selected: grid,
-                    toggle: true,
-                    onPressed: onGrid,
-                  ),
+                  if (showGrid)
+                    MenuHudBarButton(
+                      key: const ValueKey('menu-hud-place-grid'),
+                      label: text('menu.hudPlace.grid'),
+                      selected: grid,
+                      toggle: true,
+                      onPressed: onGrid,
+                    ),
                   MenuHudBarButton(
                     key: const ValueKey('menu-hud-place-align'),
                     label: text('menu.hudPlace.align'),
@@ -281,7 +291,7 @@ class MenuHudPlacementToolbar extends StatelessWidget {
         ),
       const SizedBox(height: 6),
       Text(
-        text('menu.hudPlace.hint'),
+        text(hintKey),
         style: const TextStyle(
           fontSize: 12,
           color: BridgeInk.muted,
@@ -305,7 +315,13 @@ class MenuHudModuleTools extends StatelessWidget {
     required this.onOpacity,
     required this.onReset,
     required this.onHide,
+    this.canHide = true,
+    this.canReset = false,
   });
+
+  /// The visor's DM badge has no switch of its own: it can go back to its
+  /// default spot ([canReset]) but not be hidden.
+  final bool canHide, canReset;
   final String Function(String key, [Map<String, String> args]) text;
   final String moduleKey;
   final OverlayWorkspaceLayoutItem? item;
@@ -360,11 +376,18 @@ class MenuHudModuleTools extends StatelessWidget {
                   onPressed: item.isLocked ? null : onReset,
                 ),
               ],
-              MenuHudBarButton(
-                key: const ValueKey('menu-hud-place-hide'),
-                label: text('menu.hudPlace.hide'),
-                onPressed: onHide,
-              ),
+              if (item == null && canReset)
+                MenuHudBarButton(
+                  key: const ValueKey('menu-hud-place-reset'),
+                  label: text('menu.hudPlace.reset'),
+                  onPressed: onReset,
+                ),
+              if (canHide)
+                MenuHudBarButton(
+                  key: const ValueKey('menu-hud-place-hide'),
+                  label: text('menu.hudPlace.hide'),
+                  onPressed: onHide,
+                ),
             ],
           ),
         ),
@@ -414,6 +437,188 @@ class MenuHudModuleTools extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The confirmation or failure note above the game while placing.
+class MenuHudPlacementToast extends StatelessWidget {
+  const MenuHudPlacementToast({
+    super.key,
+    required this.text,
+    required this.saved,
+  });
+  final String text;
+  final bool saved;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    left: 0,
+    right: 0,
+    bottom: 150,
+    child: Center(
+      child: Container(
+        key: const ValueKey('menu-hud-place-toast'),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+        decoration: BoxDecoration(
+          color: BridgeInk.window,
+          border: Border(
+            top: BorderSide(color: saved ? BridgeInk.green : BridgeInk.amber),
+          ),
+        ),
+        child: Text(text, style: const TextStyle(fontSize: 15)),
+      ),
+    ),
+  );
+}
+
+/// A module's name above (or below, at the screen top) its outline.
+class MenuHudModuleTag extends StatelessWidget {
+  const MenuHudModuleTag({super.key, required this.text, required this.below});
+  final String text;
+  final bool below;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    left: -1,
+    top: below ? null : -26,
+    bottom: below ? -26 : null,
+    child: Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: BridgeInk.placementLabel,
+        border: Border(top: BorderSide(color: BridgeInk.blue)),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 13)),
+    ),
+  );
+}
+
+/// The resize corner of a freely sized module (not on the visor).
+class MenuHudResizeGrip extends StatelessWidget {
+  const MenuHudResizeGrip({
+    super.key,
+    required this.moduleKey,
+    required this.label,
+    required this.onStart,
+    required this.onUpdate,
+    required this.onEnd,
+  });
+  final String moduleKey, label;
+  final VoidCallback onEnd;
+  final GestureDragUpdateCallback onUpdate;
+
+  /// Where the resize starts on screen (global).
+  final ValueChanged<Offset> onStart;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    right: -10,
+    bottom: -10,
+    child: MouseRegion(
+      cursor: SystemMouseCursors.resizeDownRight,
+      child: GestureDetector(
+        key: ValueKey('menu-hud-place-grip-$moduleKey'),
+        behavior: HitTestBehavior.opaque,
+        dragStartBehavior: DragStartBehavior.down,
+        onPanStart: (details) => onStart(details.globalPosition),
+        onPanUpdate: onUpdate,
+        onPanEnd: (_) => onEnd(),
+        onPanCancel: onEnd,
+        // A 32 px target; the drawn grip keeps its size and place.
+        child: Semantics(
+          label: label,
+          child: const SizedBox.square(
+            dimension: 32,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: SizedBox.square(
+                dimension: 24,
+                child: CustomPaint(painter: MenuHudGrip()),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// The main bar dragged by [delta]: from [current], or centred at [top] in
+/// the layer of [size] on the first drag; kept on screen.
+Offset menuHudToolbarOffset(
+  Offset? current,
+  Size? size,
+  double top,
+  Offset delta,
+  Size surface,
+) {
+  final base =
+      current ?? Offset(((size?.width ?? surface.width) - 760) / 2, top);
+  return Offset(
+    (base.dx + delta.dx).clamp(0, surface.width - 200),
+    (base.dy + delta.dy).clamp(0, surface.height - 60),
+  );
+}
+
+/// The position readout beside the module being dragged. On the visor
+/// (11-11) blocks have no size of their own here and the rally only docks.
+class MenuHudPlacementReadout extends StatelessWidget {
+  const MenuHudPlacementReadout({
+    super.key,
+    required this.moduleKey,
+    required this.rect,
+    required this.surface,
+    required this.visor,
+    required this.eventsLeft,
+    required this.text,
+  });
+  final String moduleKey;
+  final Rect rect;
+  final Size surface;
+  final bool visor, eventsLeft;
+  final String Function(String key, [Map<String, String> args]) text;
+
+  String get _label {
+    String dock(bool top) =>
+        text(top ? 'menu.hudPlace.dockTop' : 'menu.hudPlace.dockBottom');
+    final at = 'X ${rect.left.round()} · Y ${rect.top.round()}';
+    final size = '${rect.width.round()} × ${rect.height.round()}';
+    return switch (moduleKey) {
+      'Notice' when visor => dock(rect.center.dy < surface.height / 2),
+      'Notice' => '${dock(rect.top <= 0.5)} · X ${rect.left.round()} · $size',
+      'Events' =>
+        '${text(eventsLeft ? 'menu.hudPlace.left' : 'menu.hudPlace.right')} · Y ${rect.top.round()}',
+      _ when visor => at,
+      _ => '$at · $size',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final below = rect.bottom + 40 < surface.height;
+    return Positioned(
+      left: rect.left.clamp(4, surface.width - 320),
+      top: below ? rect.bottom + 10 : rect.top - 34,
+      child: IgnorePointer(
+        child: Container(
+          key: const ValueKey('menu-hud-place-readout'),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: BridgeInk.placementReadout,
+            border: Border.all(color: menuHudGuide),
+          ),
+          child: Text(
+            _label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

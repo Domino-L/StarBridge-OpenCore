@@ -19,6 +19,9 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
             interactionStyle: initial.interactionStyle,
             applicationBehavior: initial.applicationBehavior,
             holidayAppearance: initial.holidayAppearance,
+            performanceMode: initial.performanceMode,
+            readOwnHealth: initial.readOwnHealth,
+            readOwnHealthInBackground: initial.readOwnHealthInBackground,
           ),
           revision: 0,
           phase: AppPreferencesPhase.ready,
@@ -75,6 +78,26 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
     return true;
   }
 
+  @override
+  Future<bool> setPerformanceMode(bool enabled) async {
+    _set(_projection.value.effective.copyWith(performanceMode: enabled));
+    return true;
+  }
+
+  @override
+  Future<bool> setReadOwnHealth(bool enabled) async {
+    _set(_projection.value.effective.copyWith(readOwnHealth: enabled));
+    return true;
+  }
+
+  @override
+  Future<bool> setReadOwnHealthInBackground(bool enabled) async {
+    _set(
+      _projection.value.effective.copyWith(readOwnHealthInBackground: enabled),
+    );
+    return true;
+  }
+
   void _set(AppPreferences effective) {
     final current = _projection.value;
     _projection.value = AppPreferencesProjection(
@@ -86,6 +109,9 @@ final class InMemoryAppPreferences implements AppPreferencesPort {
         interactionStyle: effective.interactionStyle,
         applicationBehavior: effective.applicationBehavior,
         holidayAppearance: effective.holidayAppearance,
+        performanceMode: effective.performanceMode,
+        readOwnHealth: effective.readOwnHealth,
+        readOwnHealthInBackground: effective.readOwnHealthInBackground,
       ),
       revision: (current.revision ?? 0) + 1,
       phase: AppPreferencesPhase.ready,

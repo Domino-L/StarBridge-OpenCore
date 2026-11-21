@@ -6,6 +6,7 @@ internal static class FirstUseCompletionStoreTests
 {
     internal static void Run()
     {
+        FirstUseRollbackTests.Run();
         var root = Path.Combine(Path.GetTempPath(), "starbridge-completion-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -13,6 +14,13 @@ internal static class FirstUseCompletionStoreTests
             var directory = Path.Combine(root, "first-use-completion-v1");
             var path = Path.Combine(directory, "state.bin");
             var store = new FirstUseCompletionStore(root);
+            Expect("firstUse.invalid_state", () => LocalFirstUseValidation.Check(LocalFirstUseSnapshot.Empty with { LogDeferred = true }));
+            var emptyLocal = new LocalFirstUseStore(Path.Combine(root, "empty-local"));
+            var deferred = emptyLocal.DeferLog(0, Op(), () => true);
+            emptyLocal.SetDeferredStatistics(deferred.Revision, Op(), false, () => true);
+            Check(emptyLocal.Read() is { LogDeferred: true, DeferredStatisticsAllowed: false, ActiveProfileId: null, SelectedSourceKey: null } &&
+                emptyLocal.Read().Sources.Count == 0 && emptyLocal.Read().Profiles.Count == 0,
+                "A fresh empty device saves no-log choices without creating sources or profiles");
             Check(store.Read() is null && !Directory.Exists(directory), "Missing receipt is not completed and read creates no data");
             var profile = Guid.NewGuid().ToString("N");
             Expect("firstUse.context_changed", () => store.Save(null, Op(), "local", profile, "synthetic-source-0001", () => false));
@@ -20,6 +28,16 @@ internal static class FirstUseCompletionStoreTests
             var local = store.Save(null, Op(), "local", profile, "synthetic-source-0001", () => true);
             Check(new FirstUseCompletionStore(root).Read() == local, "Local completion survives process reopen");
             var original = File.ReadAllBytes(path);
+            // A real schema-1 payload predates the optional no-log marker.
+            var legacy = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new {
+                schemaVersion = 1, value = new { revision = local.Revision, operationId = local.OperationId,
+                    completedAt = local.CompletedAt, mode = local.Mode, profileId = local.ProfileId, sourceKey = local.SourceKey }
+            });
+            File.WriteAllBytes(path, ProtectedData.Protect(legacy, Encoding.UTF8.GetBytes("StarBridge.first-use-completion.v1"), DataProtectionScope.CurrentUser));
+            Check(store.Read() == local, "Schema-1 completion without the new marker remains readable");
+            File.WriteAllBytes(path, original);
+            Expect("firstUse.invalid_request", () => store.Save(local, Op(), "online", null, null, () => true, logDeferred: true));
+            Expect("firstUse.invalid_request", () => store.Save(local, Op(), "local", profile, null, () => true, logDeferred: true));
             Check(!Encoding.UTF8.GetString(original).Contains(profile), "Receipt stays protected and contains no Handle filename");
             Check(new FirstUseStartupReader(root, () => new("update", "0.7.2")).Read().Reason == "completedSetup", "Completed setup is not reopened by update");
             Check(new LocalFirstUseStore(root).Read().ActiveProfileId is null && new FirstUseModeStore(root).Read().Phase == "unchosen",

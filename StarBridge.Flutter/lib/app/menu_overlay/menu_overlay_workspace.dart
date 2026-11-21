@@ -137,31 +137,40 @@ class MenuOverlayWorkspace extends StatelessWidget {
           listenable: controller,
           builder: (context, _) {
             LoadingMetrics.current?.menuDragBuilt();
+            // Later panels paint on top. One lying over another open panel
+            // stays opaque, so the one below never shows through it.
+            final placed = [
+              for (final lease in controller.openPanels)
+                if (panels[lease.id] case final panel?)
+                  (lease, panel, controller.boundsFor(lease.id, size)),
+            ];
             return Stack(
               clipBehavior: Clip.hardEdge,
               children: [
-                for (final lease in controller.openPanels)
-                  if (panels[lease.id] case final panel?)
-                    Positioned.fromRect(
-                      key: ObjectKey(lease),
-                      rect: controller.boundsFor(lease.id, size),
-                      child: MenuPanelIdle(
+                for (final (index, (lease, panel, rect)) in placed.indexed)
+                  Positioned.fromRect(
+                    key: ObjectKey(lease),
+                    rect: rect,
+                    child: MenuPanelIdle(
+                      shown: controller.panelsVisible,
+                      coversPanel: placed
+                          .take(index)
+                          .any((below) => below.$3.overlaps(rect)),
+                      child: _PanelWindow(
+                        controller: controller,
+                        lease: lease,
+                        panel: panel,
+                        viewport: size,
+                        compact: false,
+                        active: controller.activeId == lease.id,
                         shown: controller.panelsVisible,
-                        child: _PanelWindow(
-                          controller: controller,
-                          lease: lease,
-                          panel: panel,
-                          viewport: size,
-                          compact: false,
-                          active: controller.activeId == lease.id,
-                          shown: controller.panelsVisible,
-                          closeLabel: closeLabel,
-                          moveLabel: moveLabel,
-                          resizeLabel: resizeLabel,
-                          bridgeStyle: bridgeStyle,
-                        ),
+                        closeLabel: closeLabel,
+                        moveLabel: moveLabel,
+                        resizeLabel: resizeLabel,
+                        bridgeStyle: bridgeStyle,
                       ),
                     ),
+                  ),
               ],
             );
           },

@@ -66,6 +66,9 @@
     <EmbeddedResource Include="../StarBridge.Desktop/Data/location-names-zh.txt"
                       LogicalName="StarBridge.LocationCompatibilityNames.txt"
                       Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/location-names-zh.txt')" />
+    <EmbeddedResource Include="../StarBridge.Desktop/Data/KeyBindingDefaults/key-binding-defaults.json"
+                      LogicalName="StarBridge.KeyBindingDefaults.json"
+                      Condition="'$(StarBridgeIncludeRestrictedGameData)' == 'true' and Exists('../StarBridge.Desktop/Data/KeyBindingDefaults/key-binding-defaults.json')" />
     <!-- Private local test assets, never an official redistribution grant. -->
     <EmbeddedResource Include="../StarBridge.Flutter/assets/ships/catalog-manifest.json"
                       LogicalName="StarBridge.ShipMedia.json"

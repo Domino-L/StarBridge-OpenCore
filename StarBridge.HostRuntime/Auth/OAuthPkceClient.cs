@@ -172,7 +172,12 @@ public sealed record ScmBootstrapSnapshot(
 
 public sealed record ScmBootstrapResult(
     ScmBootstrapSnapshot Snapshot,
-    ScmOAuthSession ActiveSession);
+    ScmOAuthSession ActiveSession)
+{
+    // Local provenance of the response, before metadata publication can return
+    // a newer installed session. Never serialized into a bridge or store.
+    internal Guid ResponseCredentialVersion { get; init; }
+}
 
 public sealed record ScmProfileResult(
     ScmSelfProfileContract Profile,
@@ -502,6 +507,7 @@ public sealed partial class OAuthPkceClient(
                 throw new ScmRefreshTemporarilyUnavailableException("Original credential changed before refresh capture.");
             var accountKey = tokenVault is WindowsTokenVault
                 ? restoreCredential?.AccountKey : tokenVault.LoadActiveAccountKey();
+            SelectRestoreBackoffAccount(accountKey);
             if (string.IsNullOrWhiteSpace(accountKey) || !accountKey.StartsWith(options.AuthorityId + ":", StringComparison.Ordinal))
             {
                 // A retired sign-in asks to sign in again rather than looking like
@@ -541,6 +547,19 @@ public sealed partial class OAuthPkceClient(
 
             LastSessionRestoreOutcome = ScmSessionRestoreOutcome.CredentialTemporarilyUnavailable;
             CaptureOfflineDisplayOwner(restoreCredential, cancellationToken, drained, displayOwnerCancellation);
+            ThrowIfRestoreBackoff(correlationId);
+            // Only a failed server/network call starts or extends the backoff
+            // window. Local credential races keep their immediate retry.
+            var remoteFailure = false;
+            async Task<T> Remote<T>(Task<T> call)
+            {
+                try { return await call; }
+                catch (Exception error) when (error is HttpRequestException or OperationCanceledException or TimeoutException)
+                {
+                    remoteFailure = true;
+                    throw;
+                }
+            }
             try
             {
                 // Expiry can discard a retained access response, but cannot
@@ -557,7 +576,7 @@ public sealed partial class OAuthPkceClient(
                 }
                 else
                 {
-                    tokenResponse = await RefreshTokenAsync(correlationId, refreshToken, cancellationToken);
+                    tokenResponse = await Remote(RefreshTokenAsync(correlationId, refreshToken, cancellationToken));
                     var receivedAt = SessionNow;
                     cancellationToken.ThrowIfCancellationRequested();
                     var vaultSaveStopwatch = ScmAuthDiagnostics.Start(correlationId, "refresh-token-vault-rotate");
@@ -592,7 +611,7 @@ public sealed partial class OAuthPkceClient(
                     ScmAuthDiagnostics.Completed(correlationId, "refresh-token-vault-rotate", vaultSaveStopwatch);
                     RetainRefresh(accountKey, tokenResponse, receivedAt, restoreCredential?.Version, lineage);
                 }
-                var identity = await LoadIdentityAsync(correlationId, tokenResponse.AccessToken, cancellationToken);
+                var identity = await Remote(LoadIdentityAsync(correlationId, tokenResponse.AccessToken, cancellationToken));
                 if (string.IsNullOrWhiteSpace(identity.Subject) || !AccountKey(identity.Subject).Equals(accountKey, StringComparison.Ordinal))
                 {
                     _retainedRefresh = null;
@@ -615,8 +634,8 @@ public sealed partial class OAuthPkceClient(
                 { CredentialVersion = _retainedRefresh!.CredentialVersion };
                 if (deviceIdProvider is not null)
                 {
-                    var deviceStatus = await GetDesktopDeviceStatusAsync(
-                        restoredSession, deviceIdProvider(), cancellationToken);
+                    var deviceStatus = await Remote(GetDesktopDeviceStatusAsync(
+                        restoredSession, deviceIdProvider(), cancellationToken));
                     if (!deviceStatus.Trusted)
                     {
                         _retainedRefresh = null;
@@ -635,8 +654,8 @@ public sealed partial class OAuthPkceClient(
                     }
                 }
 
-                restoredSession = await RefreshOverlayQualificationAsync(
-                    restoredSession, previousSession, cancellationToken);
+                restoredSession = await Remote(RefreshOverlayQualificationAsync(
+                    restoredSession, previousSession, cancellationToken));
                 if (tokenVault is WindowsTokenVault currentVault &&
                     (restoreCredential is null || !currentVault.IsRetirementCurrent(restoreCredential.Version)))
                     throw new HttpRequestException("Stored session changed during restoration.");
@@ -671,6 +690,7 @@ public sealed partial class OAuthPkceClient(
             }
             catch (ScmApiAuthenticationException)
             {
+                RecordRestoreFailure();
                 // /me, bootstrap and device-status are resources too. Their 401
                 // cannot reject the newly committed refresh credential.
                 if (_currentSession is { } current)
@@ -692,6 +712,13 @@ public sealed partial class OAuthPkceClient(
                     restoreStopwatch,
                     "outcome=authentication-rejected credentialDeleted=true");
                 return null;
+            }
+            catch (Exception error) when (remoteFailure && error is HttpRequestException or OperationCanceledException or TimeoutException)
+            {
+                // Keep the original exception: callers classify HttpRequestException,
+                // cancellation and timeouts differently (offline display, retry).
+                RecordRestoreFailure();
+                throw;
             }
         }
         catch (Exception exception)
@@ -976,7 +1003,9 @@ public sealed partial class OAuthPkceClient(
                                      activeSession.GameIdentityVerifiedAt,
             OverlayEntitlements = overlayEntitlements
         });
-        return new ScmBootstrapResult(snapshot, projectedSession);
+        return new ScmBootstrapResult(snapshot, projectedSession) {
+            ResponseCredentialVersion = activeSession.CredentialVersion
+        };
     }
 
     private static ScmOverlayEntitlementSnapshot? ValidateOverlayEntitlements(
@@ -1005,11 +1034,12 @@ public sealed partial class OAuthPkceClient(
         string BusinessSubjectId, string[] Scopes);
 
     internal async Task<(string BusinessSubjectId, ScmOAuthSession ActiveSession)> LoadBusinessIdentityAsync(
-        ScmOAuthSession session, CancellationToken cancellationToken)
+        ScmOAuthSession session, CancellationToken cancellationToken, Action? current = null)
     {
         var (identity, active) = await ReadAccountResourceAsync<BusinessIdentityProjection>(session,
             new Uri(options.ResourceServerBaseUri, "app-api/starbridge/v1/business-identity"),
-            ScmAuthDiagnostics.NewCorrelationId(), "business-identity-read", cancellationToken);
+            ScmAuthDiagnostics.NewCorrelationId(), "business-identity-read", cancellationToken,
+            sessionReady: _ => current?.Invoke(), current: current);
         ValidateBusinessIdentity(identity, active.Subject);
         return (identity.BusinessSubjectId, active);
     }
@@ -1120,7 +1150,7 @@ public sealed partial class OAuthPkceClient(
                     Header: StarBridge.HostRuntime.Account.PersonalProfilePublicHeader.Parse(json.RootElement, null)); }
                 catch (JsonException) { throw new ScmApiProtocolException("个人页面公开头部无效。"); }
             }
-            var profile = json.RootElement.Deserialize<PersonalProfileDocumentContract>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var profile = ReadVisitorProfile(json.RootElement);
             if (profile is null || profile.SchemaVersion != PersonalProfileContractPolicy.CurrentSchemaVersion ||
                 profile.Revision < 0 || string.IsNullOrWhiteSpace(profile.PublicId) || profile.Identity is null || profile.Content is null)
                 throw new ScmApiProtocolException("个人页面响应无效。");
@@ -1703,7 +1733,7 @@ public sealed partial class OAuthPkceClient(
         string correlationId,
         string step,
         CancellationToken cancellationToken,
-        int? maximumResponseBytes = null, Action<ScmOAuthSession>? sessionReady = null)
+        int? maximumResponseBytes = null, Action<ScmOAuthSession>? sessionReady = null, Action? current = null)
     {
         // One finite budget covers session recovery, HTTP and decoding together.
         // Only these GETs use this policy; writes keep their existing deadlines.
@@ -1723,6 +1753,7 @@ public sealed partial class OAuthPkceClient(
                     using var response = await scmHttpClient.SendAsync(request, currentSession.AccessToken, token,
                         requestTimeout: ResourceRequestTimeout,
                         completionOption: maximumResponseBytes is null ? HttpCompletionOption.ResponseContentRead : HttpCompletionOption.ResponseHeadersRead);
+                    current?.Invoke();
                     if (maximumResponseBytes is { } maximum)
                     {
                         await ScmHttpClient.EnsureSuccessAsync(response, step, token);

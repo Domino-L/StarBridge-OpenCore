@@ -5,6 +5,16 @@ namespace StarBridge.HostRuntime.Account;
 
 internal sealed partial class ScmAccountBridgeHost : IAchievementRemote
 {
+    public Task<TsgSwiftLeaderboard> ReadLeaderboardAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
+        WithAchievementSession(owner, generation, (session, ready) => _oauth.ReadLeaderboardAsync(session, token, ready), token);
+    public Task<LeaderboardConsent> ReadLeaderboardConsentAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
+        WithAchievementSession(owner, generation, (session, ready) => _oauth.ReadLeaderboardConsentAsync(session, token, ready), token);
+    public Task<LeaderboardConsent> WriteLeaderboardConsentAsync(BridgeAccountContext owner, long generation, bool optIn, CancellationToken token) =>
+        WithAchievementSession(owner, generation, (session, ready) => _oauth.WriteLeaderboardConsentAsync(session, optIn, token, ready), token);
+    public async Task<AchievementRarity?> ReadRarityAsync(BridgeAccountContext owner, long generation, CancellationToken token) =>
+        await WithAchievementSession(owner, generation, (session, ready) => _oauth.ReadAchievementRarityAsync(session, token, ready), token);
+    public Task<ContractAchievementReceipt> ObserveContractAsync(BridgeAccountContext owner, long generation, ContractObservation observation, CancellationToken token) =>
+        WithAchievementSession(owner, generation, (session, ready) => _oauth.ObserveContractAsync(session, observation, token, ready), token);
     public async Task TriggerScmAchievementsAsync(BridgeAccountContext owner, CancellationToken token) =>
         _ = await WithAchievementSession(owner, Generation, (session, ready) => _oauth.TriggerScmAchievementsAsync(session, token, ready), token);
     public Task<ScmAchievementCatalog> ReadScmAchievementsAsync(BridgeAccountContext owner, CancellationToken token) =>

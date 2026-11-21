@@ -6,6 +6,7 @@ using System.Threading.Channels;
 using StarBridge.HostRuntime;
 using StarBridge.HostRuntime.Account;
 using StarBridge.HostRuntime.Auth;
+using StarBridge.HostRuntime.Marketplace;
 using StarBridge.NativeBridge;
 
 // CX-T04: real dispatcher + real OAuth writer + fail-closed in-memory SCM.
@@ -20,7 +21,7 @@ internal static partial class MarketplaceWriteTests
         const string listing = "marketplace.trade_rejected";
         yield return new("listings", "create", "POST", "sc/orders/create",
             """{"itemId":17,"side":"sell","quantity":2,"price":12.5,"expiryDays":7,"visible":true,"location":"31"}""",
-            """{"creatorType":1,"locationId":31,"remainingQuantity":2,"status":1,"expireTimeType":0,"items":[{"itemId":17,"quantity":2,"price":12.5,"qualityData":null}],"exchangeItemsList":null,"manifestId":null}""", listing);
+            """{"creatorType":1,"locationId":31,"remainingQuantity":2,"status":1,"expireTimeType":0,"items":[{"itemId":17,"quantity":1,"price":12.5,"qualityData":null}],"exchangeItemsList":null,"manifestId":null}""", listing);
         yield return new("listings", "update", "PUT", "sc/orders/update",
             """{"id":"O1","quantity":3,"price":14.5,"expiryDays":14,"visible":false}""",
             """{"orderNumber":"O1","unitPrice":14.5,"remainingQuantity":3,"status":0,"expireTimeType":1,"qualityData":null}""", listing);
@@ -58,7 +59,8 @@ internal static partial class MarketplaceWriteTests
         foreach (var op in new[] { "quit", "start", "complete" })
             yield return new("contracts", op, "POST", "trade/contract/" + op + "?contractId=7", """{"id":7}""", null, trade);
         yield return new("contracts", "cancel", "POST", "trade/contract/cancel?contractId=7&reason=A%26B", """{"id":7,"reason":"A&B"}""", null, trade);
-        yield return new("contracts", "review", "POST", "trade/contract/review", """{"participantId":8,"rating":5,"comment":"Good"}""",
+        // Reviews name the participant by the opaque reference a detail read handed out (C, OT2).
+        yield return new("contracts", "review", "POST", "trade/contract/review", """{"id":7,"rating":5,"comment":"Good"}""",
             """{"participantId":8,"rating":5,"comment":"Good"}""", trade);
         yield return new("contracts", "dispute", "POST", "trade/contract/dispute/create?contractId=7&reason=A%26B&evidence=C%20D",
             """{"id":7,"reason":"A&B","evidence":"C D"}""", null, trade);
@@ -123,7 +125,7 @@ internal static partial class MarketplaceWriteTests
                 mode == "noScope" ? ["trade.read"] : ["trade.read", "trade.write"]);
             var reference = client.ChatPeerReference("fixture\nopaque", 909, 31);
             var input = BridgePayload.From(mode == "focus" ? (object)new { operation = "focus", @ref = reference }
-                : new { operation = "send", @ref = reference, content = " Hello ", orderId = 7, clientMessageId = "cxt04-message" });
+                : new { operation = "send", @ref = reference, content = " Hello ", orderNumber = "SO7", clientMessageId = "cxt04-message" });
             var requestedConnection = 0;
             try
             {
@@ -164,7 +166,7 @@ internal static partial class MarketplaceWriteTests
             Check(frame["type"]!.GetValue<string>() == "chat-send", "unexpected socket frame");
             Writes++;
             // The recipient is an explicit SCM-required field, never the viewer's identity.
-            Check(JsonNode.DeepEquals(body, JsonNode.Parse("""{"clientMessageId":"cxt04-message","toUserId":909,"content":"Hello","quoteType":"order","quoteId":"7"}""")), "socket exact body whitelist");
+            Check(JsonNode.DeepEquals(body, JsonNode.Parse("""{"clientMessageId":"cxt04-message","toUserId":909,"content":"Hello","quoteType":"order","quoteId":"SO7"}""")), "socket exact body whitelist");
             if (mode == "network") throw new HttpRequestException("synthetic socket failure");
             if (mode != "timeout") replies.Writer.TryWrite(JsonSerializer.Serialize(new
             {
@@ -178,6 +180,17 @@ internal static partial class MarketplaceWriteTests
         }
         public async Task<string?> ReceiveAsync(CancellationToken token) => await replies.Reader.ReadAsync(token);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // The reference a contract detail read would hand out. Kept in the test assembly (m99 review P2):
+    // production code has no way to mint a reference for an arbitrary participant.
+    private static string ContractReference(OAuthPkceClient client, string owner, long contract, long participant)
+    {
+        var table = (MarketplaceContractReferences)typeof(OAuthPkceClient)
+            .GetField("_contractRefs", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(client)!;
+        table.Touch(owner);
+        return table.Reference(owner, contract, participant);
     }
 
     private static async Task Verify(Case c, string mode)
@@ -196,6 +209,7 @@ internal static partial class MarketplaceWriteTests
         if (c.Area != "profile") input["operation"] = c.Op;
         if (c.Area == "trade" && c.Op != "create") input["transactionNumber"] = "T1";
         if (c.Area == "records") input["ref"] = client.BlockReference("fixture\nopaque", 909);
+        if (c.Area == "contracts" && c.Op == "review") input["participantRef"] = ContractReference(client, "fixture\nopaque", 7, 8);
         if (c.Area == "chat" && c.Op != "openOrder") input["ref"] = client.ChatPeerReference("fixture\nopaque", 909, 31);
         // Inject untrusted identity fields where the contract tolerates extra fields. Exact
         // recursive body comparison below proves they do not cross the SCM boundary.
@@ -311,9 +325,12 @@ internal static partial class MarketplaceWriteTests
                         deliveryStatus = c.Op == "approve" ? 0 : c.Op == "receive" ? 2 : c.Op is "review" or "report" ? 3 : 1,
                         transactionStatus = c.Op is "review" or "report" ? 2 : 1,
                         tradingerId = 909, orderOwnerId = 808,
+                        // Reports are refused after 8 whole days (TR3): a fresh trade.
+                        createTime = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds(),
                     },
-                    "/app-api/sc/orders/get?orderNumber=O1&language=CN" => new { displayType = 1 },
-                    "/app-api/sc/orders/get?orderNumber=O1" => new { orderOwnerId = 909 },
+                    // Update refuses an order whose side is unknown (buy-order tag R5), so the fixture is a sell order.
+                    "/app-api/sc/orders/get?orderNumber=O1&language=CN" => new { displayType = 1, creatorType = 1 },
+                    "/app-api/sc/orders/get?orderNumber=O1" => new { orderNumber = "O1", orderOwnerId = 909 },
                     "/app-api/member/user/get" => new { id = 12345, email = "must-not-forward", tradeTime = "[1,1,1,1,1,1,1]",
                         tradeStartTime = "18:00", tradeEndTime = "22:00", timezoneId = 1, userMobile = "fixture-contact" },
                     _ => throw new Exception("Unexpected preflight route"),

@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
+import 'panel_dialog_scope.dart';
 import 'starbridge_activation_origin.dart';
 import 'starbridge_dialog_surface.dart';
 import 'starbridge_interaction_theme.dart';
@@ -103,7 +104,10 @@ Future<T?> showStarBridgeDialog<T>(
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
   );
   onRouteCreated?.call(route);
-  return Navigator.of(context, rootNavigator: useRootNavigator).push(route);
+  return Navigator.of(
+    context,
+    rootNavigator: useRootNavigator && PanelDialogScope.allowsRoot(context),
+  ).push(route);
 }
 
 void dismissStarBridgeDialog<T>(

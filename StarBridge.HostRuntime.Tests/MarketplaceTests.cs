@@ -110,6 +110,7 @@ internal static class MarketplaceTests
         await MarketplaceSupplementBudgetTests.Run();
         VerifyDefaultMarketAuthorization();
         await MarketplaceTradeTests.Run();
+        await VerifyFullOrder();
         await VerifyDispatch();
         await VerifyReadDiagnostics();
         using (var browse = new ScmMarketplaceReader(new("https://catalog.invalid/"), new BrowseHandler()))
@@ -189,6 +190,7 @@ internal static class MarketplaceTests
         Check(!item.TryGetProperty("secret", out _), "unselected properties excluded");
         var quotes = BridgePayload.From(await reader.ReadAsync("offers", 17, "", 0, 1, 1, default))
             .GetProperty("data").GetProperty("rows")[0];
+        Check(!quotes.TryGetProperty("itemsComplete", out _), "list reads never claim full contents");
         Check(quotes.GetProperty("seller").GetString() == "F*****e", "seller stays masked");
         Check(quotes.GetProperty("tradeTime").GetString() == "[1,0,1,0,1,0,0]", "weekday array projection");
         Check(quotes.GetProperty("presence").GetString() == "offline", "stealth projected offline");
@@ -210,8 +212,15 @@ internal static class MarketplaceTests
             offerQuery.Contains("sortType=price") && offerQuery.Contains("sortOrder=desc"), "offer filters forwarded with fixed scope: " + offerQuery);
         Check(ScmMarketplaceReader.OfferQuery(17, 0, 1, "CN", default).Contains("sortOrder=desc") &&
             ScmMarketplaceReader.OfferQuery(17, 1, 1, "CN", default).Contains("sortOrder=asc"), "default price direction follows side");
-        foreach (var field in new[] { "creatorType", "displayType", "minPrice", "sortType", "keyword" })
+        foreach (var field in new[] { "creatorType", "minPrice", "sortType", "keyword" })
             await Throws<ArgumentException>(() => Task.FromResult(ScmMarketplaceReader.OfferQuery(17, 1, 1, "CN", BridgePayload.From(new Dictionary<string, string> { [field] = "1" }))));
+        // The item page's 单件 / 清单 switch (user 2026-11-11): checklist orders that contain the item; barter never.
+        Check(ScmMarketplaceReader.OfferQuery(17, 1, 1, "CN", default).Contains("displayType=1"), "offers default to single-item orders");
+        var checklistQuery = ScmMarketplaceReader.OfferQuery(17, 0, 1, "CN", BridgePayload.From(new Dictionary<string, string> { ["displayType"] = "2" }));
+        Check(checklistQuery.Contains("displayType=2") && !checklistQuery.Contains("displayType=1") && checklistQuery.Contains("productId=17") &&
+            checklistQuery.Contains("creatorType=0"), "checklist offers keep the item and side: " + checklistQuery);
+        foreach (var type in new[] { "3", "0", "12", "all" })
+            await Throws<ArgumentException>(() => Task.FromResult(ScmMarketplaceReader.OfferQuery(17, 1, 1, "CN", BridgePayload.From(new Dictionary<string, string> { ["displayType"] = type }))));
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         await Throws<OperationCanceledException>(() => reader.ReadAsync("item", 17, "", 0, 1, 1, cancelled.Token));
         transport.Malformed = true;
@@ -369,6 +378,68 @@ internal static class MarketplaceTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 { Content = new StringContent("{\"code\":0,\"data\":{\"list\":[],\"total\":0}}") });
         }
+    }
+    private sealed class FullOrderHandler : HttpMessageHandler
+    {
+        internal readonly List<string> Paths = [];
+        internal string Data = """
+            {"orderNumber":"SO1","displayType":2,"creatorId":91,"userMobile":"excluded",
+             "contact":"excluded","avatar":"https://invalid.invalid/avatar.png",
+             "itemDetails":[{"itemId":1},{"itemId":2},{"itemId":3},{"itemId":4}],
+             "wantedItems":[{"itemId":5},{"itemId":6}]}
+            """;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Paths.Add(request.RequestUri!.PathAndQuery);
+            Check(request.Method == HttpMethod.Get && request.Headers.Authorization is null, "public order read");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent("{\"code\":0,\"data\":" + Data + "}") });
+        }
+    }
+
+    private static async Task VerifyFullOrder()
+    {
+        foreach (var display in new[] { 2, 3 })
+        {
+            var handler = new FullOrderHandler();
+            handler.Data = handler.Data.Replace("\"displayType\":2", "\"displayType\":" + display);
+            using var reader = new ScmMarketplaceReader(new("https://catalog.invalid/"), handler);
+            var data = BridgePayload.From(await reader.ReadAsync("order", 0, "SO1", 0, 1, 1, default,
+                traderReference: _ => "public-reference")).GetProperty("data");
+            Check(data.GetProperty("items").GetArrayLength() == 4, "full order keeps all four items");
+            Check(data.GetProperty("wantedItems").GetArrayLength() == 2, "full order keeps wanted items");
+            Check(data.GetProperty("itemsComplete").GetBoolean(), "only full order marks contents complete");
+            Check(data.GetProperty("traderRef").GetString() == "public-reference", "full order retains trader reference");
+            Check(!data.TryGetProperty("creatorId", out _) && !data.TryGetProperty("userMobile", out _) &&
+                !data.TryGetProperty("contact", out _) && data.GetProperty("avatar").ValueKind == JsonValueKind.Null,
+                "full order reuses privacy and avatar projection");
+            Check(handler.Paths.SequenceEqual(new[] { "/app-api/sc/orders/get?orderNumber=SO1&language=CN" }),
+                "exactly one full order path");
+        }
+        var invalid = new FullOrderHandler();
+        using (var reader = new ScmMarketplaceReader(new("https://catalog.invalid/"), invalid))
+        {
+            foreach (var number in new[] { "a/b", "a b", "", new string('a', 65) })
+                await Throws<ArgumentException>(() => reader.ReadAsync("order", 0, number, 0, 1, 1, default));
+            Check(invalid.Paths.Count == 0, "invalid order numbers never reach transport");
+            // SCM matches order numbers with LIKE, so a near match must be refused.
+            foreach (var data in new[] { "null", "[]", "1", "{\"orderNumber\":\"SO12\",\"itemDetails\":[]}", "{\"itemDetails\":[]}" })
+            {
+                invalid.Data = data;
+                await Throws<JsonException>(() => reader.ReadAsync("order", 0, "SO1", 0, 1, 1, default));
+            }
+        }
+        var host = DispatchProxy.Create<IAccountBridgeHost, MarketHost>();
+        using var runtime = new AccountBridgeRuntime(host);
+        var bridgeHandler = new FullOrderHandler();
+        typeof(AccountBridgeRuntime).GetField("_marketplace", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(runtime, new ScmMarketplaceReader(new("https://catalog.invalid/"), bridgeHandler));
+        var empty = await runtime.DispatchAsync(BridgeEnvelope.Request("marketplace.read", Guid.NewGuid().ToString("N"), 1,
+            new { schemaVersion = 1, operation = "order", keyword = "" }));
+        Check(empty.Response.Status != "ok" && bridgeHandler.Paths.Count == 0, "bridge rejects empty order number");
+        var accepted = await runtime.DispatchAsync(BridgeEnvelope.Request("marketplace.read", Guid.NewGuid().ToString("N"), 1,
+            new { schemaVersion = 1, operation = "order", keyword = "SO1" }));
+        Check(accepted.Response.Status == "ok" && bridgeHandler.Paths.Count == 1, "bridge allows public order read without id");
     }
     private static async Task VerifyDispatch()
     {

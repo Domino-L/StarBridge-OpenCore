@@ -10,7 +10,27 @@ public sealed record DesktopNotification(Guid Id, bool Test, int Invitations, in
     GameStartupHintContent? GameStartupHint = null, TradeNotificationContent? Trade = null)
 {
     public Action<string>? Diagnostic { get; init; }
+    // 0.7.3 social cards (user: "windows提醒默认是需要都开的，无视免打扰也是"): Windows do-not-disturb and
+    // quiet time do not hold this card back; lock, presentation and unknown states still do.
+    public bool ShowDuringQuiet { get; init; }
+    // Set by the native runtime while the game is the foreground window: clicks pass through the card.
+    public bool InGameClickThrough { get; init; }
+    public bool IsSocial => ContinuousPlay is null && Trade is null && ExecHangar is null && Activity is null && GameStartupHint is null;
+    // Host-written quiet-time summary text; never text supplied by Flutter.
+    public ReminderNotificationContent? Reminder { get; init; }
+    public ContinuousPlayNotificationContent? ContinuousPlay { get; init; }
     public DateTimeOffset? PresentUntil { get; init; }
+    public Func<CancellationToken, Task<bool>>? RevalidateBeforePresent { get; init; }
+    // Both initial native presentation and a deferred queue drain use this seam.
+    // Never hold the native Dispatcher or a settings lock during the read.
+    public async Task<bool> CanPresentAsync(CancellationToken token)
+    {
+        try {
+            if (token.IsCancellationRequested || !IsCurrent()) return false;
+            return (RevalidateBeforePresent == null || await RevalidateBeforePresent(token).WaitAsync(token)) &&
+                !token.IsCancellationRequested && IsCurrent();
+        } catch { return false; }
+    }
     public void ReportDiagnostic(string outcome)
     {
         try { Diagnostic?.Invoke(outcome); } catch { /* Diagnostics cannot affect delivery. */ }
@@ -28,7 +48,8 @@ public sealed record TradeNotificationContent(string Title, string Body, string 
 
 public enum OrganizationNotificationSourceKind { Community, OfficialFleet }
 public sealed record CommunityNotificationContent(string Name, string Callsign, string Text, bool Management,
-    OrganizationNotificationSourceKind SourceKind = OrganizationNotificationSourceKind.Community);
+    OrganizationNotificationSourceKind SourceKind = OrganizationNotificationSourceKind.Community, bool Announcement = false,
+    int AnnouncementSummaryCount = 0);
 public sealed record GameStartupHintContent(string Binding, int ProcessId);
 public sealed record ExecHangarNotificationContent(bool Opening, bool AtOpen, DateTimeOffset Boundary,
     StarBridge.Core.Tools.ExecHangarConfig? Config = null, DateTimeOffset? MonitoringEndsAt = null, Action? Mute = null,
@@ -37,12 +58,22 @@ public sealed record ExecHangarNotificationContent(bool Opening, bool AtOpen, Da
     public bool Compact { get; init; }
 }
 
+/// <summary>Label is the summary card's small source line ("免打扰期间").</summary>
+public sealed record ReminderNotificationContent(string Label, string Title, string Body);
+
 public sealed record DirectMessageNotificationContent(string Callsign, string Text, int Conversations,
     string? AvatarImageData = null);
 
 public sealed record PlayerActivityNotificationContent(string Callsign, string GameId,
     string Kind, string Audience, string? AvatarImageData = null,
-    string? MemberKey = null, string[]? Sources = null);
+    string? MemberKey = null, string[]? Sources = null)
+{
+    // 0.7.3 grouped card (user 11-06: "合成一张"): set when several members came online or went
+    // offline together; the single-member fields above are then empty.
+    public string[]? GroupNames { get; init; }
+    public int OnlineNow { get; init; }
+    public int Tracked { get; init; }
+}
 
 public interface IDesktopNotificationSink : IDisposable
 {

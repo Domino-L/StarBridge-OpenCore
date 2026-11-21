@@ -132,6 +132,10 @@ abstract final class ProfileCollaboration {
   static List<String> ids(List<PersonalProfileTagValue> tags, String group) =>
       {for (final tag in tags) _id(tag, group)}.toList();
 
+  /// The stored id of one tag (the same one [ids] writes).
+  static String idOf(PersonalProfileTagValue tag, String group) =>
+      _id(tag, group);
+
   static String _id(PersonalProfileTagValue tag, String group) {
     if (tag.labelKey.isEmpty && tag.displayLabel != null) {
       return tag.displayLabel!;

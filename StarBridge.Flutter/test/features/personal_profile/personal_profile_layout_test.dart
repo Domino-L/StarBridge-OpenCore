@@ -1,10 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_layout.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_models.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_showcases.dart';
 
 void main() {
   test('normalizes the WPF-compatible three by three profile grid', () {
-    final normalized = PersonalProfileLayout.normalize(_defaultLayout());
+    // Grid rules concern `modules`; showcase-only items are checked apart.
+    final normalized = PersonalProfileShowcases.modulesOf(
+      PersonalProfileLayout.normalize(_defaultLayout()),
+    );
 
     expect(normalized.where((item) => item.isVisible), hasLength(3));
     expect(
@@ -51,17 +55,12 @@ void main() {
       _item(moved.layout, PersonalProfileModuleIds.favoriteShips).position,
       6,
     );
-    expect(PersonalProfileLayout.occupiedCells(moved.layout), [
-      true,
-      true,
-      false,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-    ]);
+    expect(
+      PersonalProfileLayout.occupiedCells(
+        PersonalProfileShowcases.modulesOf(moved.layout),
+      ),
+      [true, true, false, true, true, true, true, true, true],
+    );
   });
 
   test('size selection is constrained per module and remains placeable', () {

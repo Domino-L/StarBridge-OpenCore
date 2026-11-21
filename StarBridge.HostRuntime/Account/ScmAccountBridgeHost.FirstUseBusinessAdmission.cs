@@ -44,6 +44,8 @@ internal sealed partial class ScmAccountBridgeHost
         internal BridgeAccountContext StorageOwner => _facts.StorageOwner;
         internal bool IsActive => Volatile.Read(ref _state) == 1 && !_work.IsClosed &&
             ReferenceEquals(Volatile.Read(ref _owner._firstUseBusinessAdmission), this) && _facts.IsInstalledOwnerCurrent;
+        internal bool CanRenewLocalDataOwner => Volatile.Read(ref _state) == 1 && !_work.IsClosed &&
+            ReferenceEquals(Volatile.Read(ref _owner._firstUseBusinessAdmission), this) && _facts.IsInstalledIdentityCurrent;
         internal bool HasExited => Volatile.Read(ref _exit)?.IsCompletedSuccessfully == true;
 
         internal bool TryActivate()

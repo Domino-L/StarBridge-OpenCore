@@ -46,7 +46,7 @@ const simplifiedSettingsCapabilityStrings = <String, String>{
       '选择要提醒的玩家、状态变化与显示位置。',
   'settings.capability.playReminders.title': '连续游玩提醒',
   'settings.capability.playReminders.description':
-      '保留首次提醒与后续间隔，提醒休息和补水，不改变游戏或房间状态。',
+      '保留首次提醒与后续间隔，到点提醒你已经连续玩了多久，不改变游戏或房间状态。',
   'settings.capability.sourceRules.title': '来源提醒规则',
   'settings.capability.sourceRules.description':
       '舰队、社区、房间与行动分别保存正常、仅关键变化或免打扰，默认正常提醒。',
@@ -120,7 +120,7 @@ const traditionalSettingsCapabilityStrings = <String, String>{
       '選擇要提醒的玩家、狀態變化與顯示位置。',
   'settings.capability.playReminders.title': '連續遊玩提醒',
   'settings.capability.playReminders.description':
-      '保留首次提醒與後續間隔，提醒休息和補水，不改變遊戲或房間狀態。',
+      '保留首次提醒與後續間隔，到點提醒你已經連續玩了多久，不改變遊戲或房間狀態。',
   'settings.capability.sourceRules.title': '來源提醒規則',
   'settings.capability.sourceRules.description':
       '艦隊、社群、房間與行動分別儲存正常、僅關鍵變化或勿擾，預設正常提醒。',
@@ -181,7 +181,7 @@ const englishSettingsCapabilityStrings = <String, String>{
   'settings.capability.playerActivity.title': 'Player activity alerts',
   'settings.capability.playerActivity.description': 'Choose players, status changes and where alerts appear.',
   'settings.capability.playReminders.title': 'Continuous play reminders',
-  'settings.capability.playReminders.description': 'Keeps first and repeat intervals for rest and hydration without changing game or room state.',
+  'settings.capability.playReminders.description': "Keeps the first and repeat intervals and tells you how long you've been playing, without changing game or room state.",
   'settings.capability.sourceRules.title': 'Source notification rules',
   'settings.capability.sourceRules.description': 'Stores Normal, Important only, or Do not disturb independently for fleets, communities, rooms and operations. Normal is the default.',
   'settings.capability.previewPrivacy.title': 'External notification previews',

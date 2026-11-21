@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../shared/ships/catalog_vehicle_icon.dart';
+import '../../shared/ships/ship_vehicle_icon.dart';
 import 'community_ships_port.dart';
 
 /// The Host resolves an exact local catalog key after authorization. Broad
@@ -12,9 +13,12 @@ class CommunityShipVehicleIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ExcludeSemantics(
-      child: CatalogVehicleIcon.supportsKey(ship.displayIcon ?? '')
-          ? CatalogVehicleIcon.byKey(iconKey: ship.displayIcon!)
-          : const SizedBox.square(dimension: 28),
+      child: ShipVehicleIcon(
+        names: [ship.code, ship.englishName, ship.displayName],
+        fallback: CatalogVehicleIcon.supportsKey(ship.displayIcon ?? '')
+            ? CatalogVehicleIcon.byKey(iconKey: ship.displayIcon!)
+            : const SizedBox.square(dimension: 28),
+      ),
     );
   }
 }

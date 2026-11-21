@@ -434,7 +434,7 @@ void main() {
         },
       );
 
-      for (final failure in ['capacity', 'space']) {
+      for (final failure in ['space']) {
         testWidgets(
           'actual grid $failure failure preserves layout $suite $source',
           (t) async {

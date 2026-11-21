@@ -280,13 +280,14 @@ void main() {
     // Readers still hear the full amount.
     expect(find.bySemanticsLabel(RegExp('¤ 125,000,000')), findsWidgets);
 
-    // 类型 options: two even rows of two, edges aligned.
+    // 类型 options (after 方向, whose 全部 comes first): two even rows of
+    // two, edges aligned.
     final rects = [
-      for (final label in ['全部', '出售', '求购', '以物易物'])
+      for (final (label, at) in [('全部', 1), ('单件', 0), ('清单', 0), ('以物易物', 0)])
         tester.getRect(
           find
               .ancestor(
-                of: find.text(label).first,
+                of: find.text(label).at(at),
                 matching: find.byType(MarketToggle),
               )
               .first,
@@ -298,6 +299,21 @@ void main() {
     expect(rects[0].left, rects[2].left);
     expect(rects[1].right, rects[3].right);
     expect(rects[0].width, closeTo(rects[3].width, .5));
+    // 方向 options: one even row of three.
+    final side = [
+      for (final label in ['全部', '出售', '求购'])
+        tester.getRect(
+          find
+              .ancestor(
+                of: find.text(label).first,
+                matching: find.byType(MarketToggle),
+              )
+              .first,
+        ),
+    ];
+    expect(side.map((r) => r.top).toSet(), hasLength(1));
+    expect(side[0].width, closeTo(side[2].width, .5));
+    expect(side[2].right, rects[3].right);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

@@ -57,7 +57,49 @@ class ExpiringSendPort extends ExpiringPort implements DirectMessageSender {
   }
 }
 
+class RateLimitedSendPort extends ExpiringPort implements DirectMessageSender {
+  final sentRefs = <String>[];
+  @override
+  bool get supportsSending => true;
+  @override
+  Future<DirectSendResult> send(
+    String ref,
+    String text,
+    String clientMessageId,
+  ) async {
+    sentRefs.add(ref);
+    return const DirectSendResult('rejected', error: 'rate_limited');
+  }
+}
+
 void main() {
+  test(
+    'a read renewal also moves an earlier failed bubble to the renewed target',
+    () async {
+      // 11-19 review P2-4: a failed message kept the old reference after a
+      // read-side renewal, so the user's retry went to the expired target.
+      final port = RateLimitedSendPort();
+      final module = DirectMessagesModule(port);
+      addTearDown(module.dispose);
+      await module.refresh();
+      await module.open(module.rows.single);
+      module.editDraft('kept for retry');
+      await module.send();
+      await pumpEventQueue();
+      expect(module.outgoing.single.state, DirectOutgoingState.failed);
+      expect(module.outgoing.single.ref, 'old');
+      port.expired = true;
+      await module.receive();
+      expect(module.selected!.ref, 'renewed');
+      expect(module.outgoing.single.ref, 'renewed');
+      expect(module.outgoing.single.text, 'kept for retry');
+      expect(module.outgoing.single.state, DirectOutgoingState.failed);
+      module.retrySend(module.outgoing.single.id);
+      await pumpEventQueue();
+      expect(port.sentRefs, ['old', 'renewed']);
+    },
+  );
+
   test(
     'explicit stale send renews only the same scoped target and keeps draft',
     () async {

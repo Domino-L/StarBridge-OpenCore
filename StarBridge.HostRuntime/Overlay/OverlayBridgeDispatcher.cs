@@ -8,7 +8,7 @@ using StarBridge.NativeBridge;
 public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } =
-        ["hotkeys.temporary", "overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing", "overlay.presetInspection", "overlay.appearancePreview", "overlay.appearanceProgress", RuntimeEventsCapability];
+        ["hotkeys.temporary", "overlay.settings", "overlay.workspace", "overlay.runtime", "overlay.presetSharing", "overlay.presetInspection", "overlay.appearancePreview", "overlay.appearanceProgress", RuntimeEventsCapability, EditorPreviewCapability];
 
     private readonly IOverlaySettingsStore _store;
     private readonly IOverlayWorkspaceStore _workspaceStore;
@@ -30,7 +30,8 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         Func<(string? OwnerKey, long Generation)>? sourceScope = null)
         : this(
             new OverlaySettingsStore(dataRoot),
-            new OverlayWorkspaceStore(dataRoot, Path.Combine(AppContext.BaseDirectory, "config"), OverlaySourcePresetBuild.Enabled),
+            new OverlayWorkspaceStore(dataRoot, Path.Combine(AppContext.BaseDirectory, "config"), OverlaySourcePresetBuild.Enabled,
+                OverlayWorkspaceStore.V2Folder, OverlayScreenProbe.AutoVisorSize),
             generation,
             currentSession,
             runtime, presetTrigger, sourceScope) { }
@@ -78,6 +79,9 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
         // A bounded account read must not hold the local workspace/write gate.
         if (request.Name == OverlayRequestNames.AppearanceProgressRead)
             return await DispatchAppearanceProgressAsync(request, cancellationToken);
+        // a render must not hold the workspace gate (it takes it only to read the draft)
+        if (request.Name == OverlayRequestNames.EditorPreviewContent)
+            return await DispatchEditorPreviewAsync(request, cancellationToken);
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -98,6 +102,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
                     request, InformationOverlayRuntimeCommand.Retry, cancellationToken),
                 OverlayRequestNames.AppearancePreviewOpen => await OpenAppearancePreviewAsync(request, cancellationToken),
                 OverlayRequestNames.AppearancePreviewClose => await CloseAppearancePreviewAsync(request, cancellationToken),
+                OverlayRequestNames.VisorNoticeDismiss => DismissVisorNotice(request),
                 OverlayRequestNames.Preview => throw new BridgeProtocolException(
                     BridgeErrorCodes.CapabilityUnavailable,
                     "Game overlay window is unavailable."),
@@ -148,6 +153,14 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
     {
         RejectUnknown(request.Payload, "schemaVersion");
         return Response(request, Current());
+    }
+
+    // 0.7.3: the settings page showed "可以在外观里换回" once; the Host stops reporting it.
+    private BridgeEnvelope DismissVisorNotice(BridgeEnvelope request)
+    {
+        RejectUnknown(request.Payload, "schemaVersion");
+        if (_workspaceStore is OverlayWorkspaceStore store) store.DismissVisorNotice();
+        return BridgeEnvelope.Response(request, new { schemaVersion = 1, dismissed = true });
     }
 
     private BridgeEnvelope ReadWorkspace(BridgeEnvelope request)
@@ -402,6 +415,7 @@ public sealed partial class OverlayBridgeDispatcher : IBridgeRequestDispatcher
             renderMode = workspace.RenderMode,
             sourcePresetsEnabled = workspace.SourcePresetsEnabled,
             removedOrganizationBindings = workspace.RemovedOrganizationBindings,
+            visorSwitchNotice = workspace.VisorSwitchNotice,
             appearances = appearances.Select(appearance => new
             {
                 id = appearance.Id,

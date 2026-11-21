@@ -8,18 +8,18 @@ import 'marketplace_trades_controller.dart' show marketplaceAppBinding;
 
 /// A message this client sent and is still waiting on, or one SCM refused or
 /// never answered. Never resent automatically; the user decides.
-/// An order to send along with the next message (交易单「私信对方」, or the
+/// An order number to send along with the next message (订单详情, or the
 /// composer's 附上订单); the receiver sees SCM's order card.
 class MarketChatAttachment {
-  const MarketChatAttachment(this.orderId, this.label);
-  final int orderId;
+  const MarketChatAttachment(this.orderNumber, this.label);
+  final String orderNumber;
   final String label;
 }
 
 class MarketChatOutgoing {
-  MarketChatOutgoing(this.content, {this.orderId}) : clientMessageId = _newId();
+  MarketChatOutgoing(this.content, {this.orderNumber}) : clientMessageId = _newId();
   final String content;
-  final int? orderId;
+  final String? orderNumber;
 
   /// SCM's key for this one message: a manual resend keeps it, so SCM
   /// stores the message once however often it is sent (SCM spec §6.2).
@@ -130,11 +130,26 @@ class MarketplaceChatController extends ChangeNotifier
   String? error;
 
   String? openRef;
-  MarketChatAttachment? attachment;
+  /// The order to attach, bound to the conversation it was picked for; it
+  /// never rides along to another one (CX-HALL-FIX2-REVIEW P2).
+  MarketChatAttachment? _attachment;
+  String? _attachmentRef;
+  // Its own conversation, or the one waiting to open (a detached window
+  // reads the pending request's order before opening it).
+  MarketChatAttachment? get attachment => _attachmentRef == null ||
+          _attachmentRef == openRef ||
+          _attachmentRef == pendingRef
+      ? _attachment
+      : null;
+  set attachment(MarketChatAttachment? value) {
+    _attachment = value;
+    _attachmentRef = value == null ? null : openRef;
+  }
 
-  /// Set by the trading hall: recent trades for 附上订单, and 在 SCM 打开.
+  /// Set by the trading hall: recently opened orders for 附上订单, and 在 SCM 打开.
   List<MarketChatAttachment> Function()? recentOrders;
   VoidCallback? openScm;
+  Future<void> Function(BuildContext, String)? openOrderDetail;
 
   /// A conversation another surface asked to show (交易单「私信对方」,
   /// 订单详情「联系卖家」). The messages page switches to 交易消息 when this
@@ -194,7 +209,13 @@ class MarketplaceChatController extends ChangeNotifier
   void _merge(String reference, MarketRow message, Object? name) {
     final id = _id(message);
     final open = reference == openRef;
-    if (open && thread.any((m) => _id(m) == id && id > 0)) return;
+    if (open && thread.any((m) => _id(m) == id && id > 0)) {
+      if (message['attachmentMissing'] == true) {
+        thread = [for (final row in thread)
+          if (_id(row) == id) {...row, 'attachmentMissing': true} else row];
+      }
+      return;
+    }
     if (!_remember(id)) return;
     final mine = message['mine'] == true;
     if (open) {
@@ -361,6 +382,9 @@ class MarketplaceChatController extends ChangeNotifier
   /// Opens a thread: newest page, SCM read mark, and live focus so SCM marks
   /// further messages from this member read while it stays open.
   Future<void> open(String reference) async {
+    if (_attachmentRef != null && _attachmentRef != reference) {
+      attachment = null;
+    }
     _threadGeneration++;
     threadLoading = false;
     _catchUpQueued = false;
@@ -392,6 +416,9 @@ class MarketplaceChatController extends ChangeNotifier
 
   Future<void> close() async {
     if (openRef == null) return;
+    // Only the closing conversation's own order; one already picked for a
+    // pending conversation (交易单「私信对方」) survives.
+    if (_attachmentRef == openRef) attachment = null;
     _threadGeneration++;
     threadLoading = false;
     _catchUpQueued = false;
@@ -511,7 +538,12 @@ class MarketplaceChatController extends ChangeNotifier
   /// already attached to the composer.
   void requestOpen(String reference, {MarketChatAttachment? attach}) {
     pendingRef = reference;
-    if (attach != null) attachment = attach;
+    if (attach != null) {
+      _attachment = attach;
+      _attachmentRef = reference;
+    } else {
+      attachment = null;
+    }
     requests.value++;
   }
 
@@ -521,14 +553,33 @@ class MarketplaceChatController extends ChangeNotifier
     String orderNumber, {
     MarketChatAttachment? attach,
   }) async {
+    final epoch = _epoch;
     try {
       final row = await port.chat('openOrder', {'orderNumber': orderNumber});
       final reference = row['ref'];
-      if (_disposed || reference is! String) return false;
+      if (_disposed || epoch != _epoch || reference is! String) return false;
       if (!conversations.any((c) => c['ref'] == reference)) {
         conversations = [row, ...conversations];
         _notify();
       }
+      requestOpen(reference, attach: attach);
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Ensure first contact exists before asking the messages view to open it.
+  Future<bool> openCounterparty(String reference, {MarketChatAttachment? attach}) async {
+    final epoch = _epoch;
+    try {
+      if (!conversations.any((row) => row['ref'] == reference)) {
+        final row = await port.chat('open', {'ref': reference});
+        if (_disposed || epoch != _epoch || row['ref'] != reference) return false;
+        conversations = [row, ...conversations.where((r) => r['ref'] != reference)];
+        _notify();
+      }
+      if (_disposed || epoch != _epoch) return false;
       requestOpen(reference, attach: attach);
       return true;
     } on Object {
@@ -547,17 +598,17 @@ class MarketplaceChatController extends ChangeNotifier
     return reference;
   }
 
-  Future<void> send(String text, {int? orderId}) async {
+  Future<void> send(String text, {String? orderNumber}) async {
     final reference = openRef;
     final content = text.trim();
     if (reference == null || content.isEmpty || content.length > maxLength) {
       return;
     }
-    if (orderId == null && attachment != null) {
-      orderId = attachment!.orderId;
+    if (orderNumber == null && _attachment != null && _attachmentRef == reference) {
+      orderNumber = _attachment!.orderNumber;
       attachment = null;
     }
-    final pending = MarketChatOutgoing(content, orderId: orderId);
+    final pending = MarketChatOutgoing(content, orderNumber: orderNumber);
     outgoing.add(pending);
     await _deliver(reference, pending);
   }
@@ -577,13 +628,14 @@ class MarketplaceChatController extends ChangeNotifier
   }
 
   Future<void> _deliver(String reference, MarketChatOutgoing pending) async {
+    final epoch = _epoch;
     _notify();
     MarketRow? data;
     try {
       data = await port.chat('send', {
         'ref': reference,
         'content': pending.content,
-        'orderId': ?pending.orderId,
+        'orderNumber': ?pending.orderNumber,
         'clientMessageId': pending.clientMessageId,
       });
       pending
@@ -596,12 +648,17 @@ class MarketplaceChatController extends ChangeNotifier
     } on Object {
       pending.status = 'uncertain';
     }
-    if (_disposed) return;
+    if (_disposed || epoch != _epoch) return;
     if (pending.status == 'sent') {
       outgoing.remove(pending);
       final message = data?['message'];
       if (message is Map) {
-        _merge(reference, message.cast<String, Object?>(), null);
+        _merge(reference, {
+          ...message.cast<String, Object?>(),
+          if (pending.orderNumber != null &&
+              (message['quote'] is! Map || (message['quote'] as Map)['type'] != 'order'))
+            'attachmentMissing': true,
+        }, null);
       }
     }
     _notify();
@@ -610,6 +667,9 @@ class MarketplaceChatController extends ChangeNotifier
   void dismiss(MarketChatOutgoing message) {
     if (outgoing.remove(message)) _notify();
   }
+
+  /// Pushes stopped for a while (the menu was hidden): read what was missed.
+  Future<void> catchUp() => _refresh();
 
   /// A resync repairs only the open thread. Closed threads retain their anchor
   /// and catch up on their next explicit open, without background history reads.

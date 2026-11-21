@@ -16,7 +16,7 @@ import 'package:starbridge_flutter/features/official_fleet/official_fleet_ships_
 import 'package:starbridge_flutter/features/official_fleet/official_fleet_ships_toolbar.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_page.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_ship_row.dart';
-import 'package:starbridge_flutter/features/hangar/local_hangar_ship_card.dart';
+import 'package:starbridge_flutter/features/hangar/local_hangar_wall_card.dart';
 import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_flutter/features/notifications/notification_inbox_page.dart';
 
@@ -546,8 +546,8 @@ void main() {
             .value,
         'name',
       );
-      final cards = t.widgetList<LocalHangarShipCard>(
-        find.byType(LocalHangarShipCard),
+      final cards = t.widgetList<LocalHangarWallCard>(
+        find.byType(LocalHangarWallCard),
       );
       expect(cards.map((c) => c.item.ship.id).toList(), ['a', 'z']);
       await t.tap(find.byKey(const Key('hangar-list')));
@@ -559,7 +559,7 @@ void main() {
       expect(port.snapshot.ships.map((s) => s.id).toList(), ['z', 'a']);
       expect(port.saves, 0);
       expect(port.reads, 1);
-      expect(t.getSize(find.byKey(const Key('hangar-sort'))).width, 200);
+      expect(t.getSize(find.byKey(const Key('hangar-sort'))).width, 130);
       await t.pumpWidget(const SizedBox());
       expect(t.takeException(), isNull);
     });

@@ -1,24 +1,20 @@
+import 'marketplace_item_favorite.dart';
+import 'marketplace_display_rules.dart';
+import 'marketplace_display_copy.dart';
 import 'dart:async';
 import 'marketplace_hall_helpers.dart';
-
 import '../../design_system/icons/marketplace_icon.dart';
 import 'marketplace_item_components.dart';
 import '../../design_system/styles/marketplace_palette.dart';
-import 'marketplace_trade_copy.dart';
-import 'marketplace_prefetch.dart';
-import 'marketplace_trade_confirm.dart';
-import 'marketplace_order_sheet.dart';
 import 'marketplace_surfaces.dart';
 import 'marketplace_unified.dart';
 import 'marketplace_details.dart';
-import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/interaction/starbridge_choice_navigation.dart';
 import '../../design_system/interaction/starbridge_native_icon_action.dart';
 
 import 'package:flutter/material.dart';
 
 import '../../design_system/tokens/starbridge_tokens.dart';
-import '../../design_system/icons/favorite_icon.dart';
 import 'bridge_marketplace_listings_port.dart';
 import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
@@ -26,315 +22,30 @@ import 'marketplace_hall_mine.dart';
 import 'marketplace_item_quality.dart';
 import 'marketplace_quality_copy.dart';
 import 'marketplace_publish_entry.dart';
+import 'marketplace_item_offers.dart';
 import 'marketplace_port.dart';
-import 'marketplace_trend.dart';
 import 'marketplace_widgets.dart';
-import '../../design_system/interaction/starbridge_timed_snack_bar.dart';
+
 
 class MarketplaceItemPage extends StatelessWidget {
   const MarketplaceItemPage(this.c, {super.key});
   final MarketplaceController c;
 
-  Widget _section(BuildContext context) {
-    final key = ['sell', 'buy', 'trend', 'acquisition'][c.itemTab];
-    final read = c.blocks[key];
-    void retry() => c.load(
-      key,
-      key == 'sell' || key == 'buy' ? 'offers' : key,
-      id: c.itemId!,
-      side: key == 'buy' ? 0 : 1,
-    );
-    if (c.failures.contains(key) && read == null) {
-      return MarketNotice(
-        marketText(context, key == 'trend' ? 'trendFailed' : 'unavailable'),
-        retry: retry,
-      );
-    }
-    if (read == null) return const MarketSkeleton(kind: 'quotes');
-    if (key == 'trend') {
-      return SingleChildScrollView(child: MarketplaceTrend(read.rows));
-    }
-    if (read.rows.isEmpty) {
-      return MarketNotice(
-        marketText(
-          context,
-          key == 'acquisition'
-              ? 'noAcquisition'
-              : key == 'sell'
-              ? 'emptySell'
-              : 'emptyBuy',
-        ),
-      );
-    }
-    if (key == 'acquisition') {
-      return ListView.builder(
-        key: ValueKey((c.itemId, key)),
-        itemCount: read.rows.length,
-        itemBuilder: (context, index) {
-          final row = read.rows[index];
-          final hant = marketLocale(context) == 'hant';
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  (row[hant ? 'titleHant' : 'title'] ?? '').toString(),
-                  style: TextStyle(
-                    fontWeight: context.tokens.typography.emphasisWeight,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(
-                  (row[hant ? 'descriptionHant' : 'description'] ?? '')
-                      .toString(),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    }
-    final qualityColumn = read.rows.any((row) => marketQuality(row) != null);
-    final sorted = c.sortedOffers(read.rows);
-    // Every quality at once, in price order: grouped by tier (2026-10-23).
-    final entries = marketOfferEntries(
-      sorted,
-      group:
-          key == 'sell' &&
-          qualityColumn &&
-          c.offerTier == null &&
-          c.offerSortField == 'price',
-    );
-    final bestValue = qualityColumn
-        ? marketBestValueOrders(read.rows)
-        : const <Object?>{};
-
-    return MarketPrefetch(
-      read: read,
-      loading: c.loading.contains(key),
-      failed: c.failures.contains(key),
-      load: () => c.moreOffers(key == 'buy'),
-      child: ListView.builder(
-        key: PageStorageKey((c.itemId, key)),
-        itemCount: entries.length + 1,
-        itemBuilder: (context, index) {
-          if (index == entries.length) {
-            return MarketPageStatus(
-              read: read,
-              loading: c.loading.contains(key),
-              failed: c.failures.contains(key),
-              load: () => c.moreOffers(key == 'buy'),
-            );
-          }
-          if (entries[index].header case final tier?) {
-            return MarketTierGroupHeader(
-              tier,
-              quote: c.qualityTiers.of(c.itemId ?? 0)?.of(tier),
-            );
-          }
-          final row = entries[index].row!;
-          return StarBridgeActionRow(
-            inheritContentStyle: true,
-            controlKey: ValueKey((
-              'market-offer-row',
-              row['orderNumber'] ?? index,
-            )),
-            baseRadius: 0,
-            onActivate: (_, _) => showMarketOrder(context, c, row),
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 56),
-              margin: const EdgeInsets.only(bottom: 1),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: context.tokens.surfaces.panel.fill,
-                border: Border(
-                  bottom: BorderSide(color: marketLine(context)),
-                  // Side colour on the left edge, as on every hall listing.
-                  left: BorderSide(
-                    color: marketSideColor(context, key == 'sell' ? 'sell' : 'buy'),
-                    width: 3,
-                  ),
-                ),
-              ),
-              child: ItemOfferColumns(
-                quality: qualityColumn,
-                action: c.trades.supported,
-                cells: [
-                  ItemTraderCell(row),
-                  MarketTrader(row),
-                  Text(
-                    marketLocation(context, row),
-                    maxLines: 1,
-                    overflow: TextOverflow.fade,
-                    softWrap: false,
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                  Text(
-                    marketTradeTime(context, row),
-                    maxLines: 1,
-                    overflow: TextOverflow.fade,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.tokens.colors.textSecondary,
-                    ),
-                  ),
-                  MarketQualityBadge(row),
-                  Text(
-                    row['availableQuantity']?.toString() ??
-                        row['remainingQuantity']?.toString() ??
-                        '—',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontFamily: context.tokens.typography.monoFamily,
-                      fontSize: 12.5,
-                      color: context.tokens.colors.textSecondary,
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      MarketGoldPrice(row['unitPrice']),
-                      if (qualityColumn)
-                        MarketOfferPerPoint(
-                          row,
-                          best: bestValue.contains(row['orderNumber']),
-                        ),
-                      MarketPublished(row['createTime']),
-                    ],
-                  ),
-                  marketButtonAction(
-                    OutlinedButton(
-                      // Your own listing is never offered for trade.
-                      onPressed: marketIsMine(row)
-                          ? null
-                          : () => confirmMarketTrade(context, c, row),
-                      style: OutlinedButton.styleFrom(
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        foregroundColor: context.tokens.colors.textPrimary,
-                        side: BorderSide(
-                          color: context.tokens.surfaces.panel.border,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        textStyle: Theme.of(context).textTheme.labelLarge
-                            ?.copyWith(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      child: Text(
-                        marketIsMine(row)
-                            ? marketText(context, 'mineListing')
-                            : key == 'sell'
-                            ? tradeText(context, '购买')
-                            : tradeText(context, '出售给他'),
-                      ),
-                    ),
-                    key: ValueKey((
-                      'market-quote-confirm',
-                      row['orderNumber'] ?? index,
-                    )),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final item = c.blocks['item']?.data;
-    final sell = c.blocks['sell']?.rows;
-    final buy = c.blocks['buy']?.rows;
-    final lowest = sell?.isNotEmpty == true
-        ? marketNumber(sell!.first['unitPrice'])
-        : null;
-    final highest = buy?.isNotEmpty == true
-        ? marketNumber(buy!.first['unitPrice'])
-        : null;
+    final id = c.itemId!;
+    // The page's own figures, not card decoration: no first-screen wait.
+    unawaited(c.ensureBestPrices([(id, 1), (id, 0)], urgent: true));
+    final lowest = c.bestPrice(id, 1), highest = c.bestPrice(id, 0);
+    // An unfiltered single-item list that came back empty also says nobody
+    // is selling (or buying), without waiting for the best-price read.
+    bool emptyList(String key) =>
+        c.offerFilters.isEmpty && c.blocks[key]?.rows.isEmpty == true;
+    final noSell = c.bestPriceNone(id, 1) || emptyList('sell'),
+        noBuy = c.bestPriceNone(id, 0) || emptyList('buy');
     final change = marketSevenDaySellChange(
       c.blocks['trend']?.rows ?? const [],
-    );
-    final following = c.favorites.contains(c.itemId);
-    // A followed item reads in red (user 2026-10-20); following confirms with
-    // a way to the 关注 tab, unfollowing with an undo (G3, 0.7.2).
-    Widget favorite() => OutlinedButton.icon(
-      key: const Key('market-item-follow'),
-      style: OutlinedButton.styleFrom(
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
-        foregroundColor: following
-            ? MarketplacePalette.heart
-            : context.tokens.colors.textPrimary,
-        side: BorderSide(
-          color: following
-              ? MarketplacePalette.heart
-              : context.tokens.surfaces.panel.border,
-        ),
-        shape: const RoundedRectangleBorder(),
-        textStyle: Theme.of(context).textTheme.labelLarge
-            ?.copyWith(fontSize: 12.5, fontWeight: FontWeight.w600),
-      ),
-      icon: FavoriteIcon(
-        selected: following,
-        size: 16,
-        color: following ? MarketplacePalette.heart : null,
-      ),
-      onPressed: c.savingPreferences || c.preferencesFailed
-          ? null
-          : () async {
-              final id = c.itemId!;
-              final name = item == null
-                  ? marketText(context, 'thisItem')
-                  : marketName(item, marketLocale(context));
-              final snapshot = c.watchSnapshot(id);
-              final messenger = ScaffoldMessenger.of(context);
-              final added = marketTextN(context, 'watchAdded', name);
-              final removed = marketTextN(context, 'watchRemoved', name);
-              final view = marketText(context, 'watchView');
-              final undo = marketText(context, 'watchUndo');
-              final limit = marketText(context, 'watchLimit');
-              await c.toggleFavorite(id);
-              if (!context.mounted) return;
-              if (c.favoriteLimitReached) {
-                messenger.showOnly(starBridgeTimedSnackBar(content: Text(limit)));
-                return;
-              }
-              final now = c.favorites.contains(id);
-              messenger.showOnly(
-                // QualityPass ②: 2.5 s, paused while pointed at so 撤销 stays reachable.
-                starBridgeTimedSnackBar(
-                  content: Text(now ? added : removed),
-                  action: SnackBarAction(
-                    label: now ? view : undo,
-                    onPressed: now
-                        ? () => c.tab(5)
-                        : () => unawaited(
-                            c.toggleFavorite(id, snapshot: snapshot),
-                          ),
-                  ),
-                ),
-              );
-            },
-      label: Text(
-        marketText(
-          context,
-          c.savingPreferences
-              ? 'saving'
-              : following
-              ? 'unfollow'
-              : 'follow',
-        ),
-      ),
     );
     // 我也要卖 / 我也要收: the publish wizard opens on step 3 with this item and
     // side filled in, carrying the live best prices as its reference.
@@ -442,7 +153,7 @@ class MarketplaceItemPage extends StatelessWidget {
             itemKv(
               context,
               marketText(context, 'sellBuy'),
-              '${c.blocks['sell']?.total ?? '—'} / ${c.blocks['buy']?.total ?? '—'}',
+              '${marketItemOrderCount(item, buy: false) ?? '—'} / ${marketItemOrderCount(item, buy: true) ?? '—'}',
             ),
             const SizedBox(height: 12),
             Align(
@@ -450,7 +161,7 @@ class MarketplaceItemPage extends StatelessWidget {
               child: Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: [favorite(), ...publishHere(item)],
+                children: [marketItemFavorite(context, c, item), ...publishHere(item)],
               ),
             ),
             const SizedBox(height: 14),
@@ -495,7 +206,8 @@ class MarketplaceItemPage extends StatelessWidget {
                     lowest == null
                         ? marketText(
                             context,
-                            sell?.isEmpty == true ? 'noSell' : 'unavailable',
+                            noSell ? 'noSell'
+                                : c.hasBestPrice(id, 1) ? 'unavailable' : 'priceLoading',
                           )
                         : '¤ ${marketPrice(context, lowest)}',
                     color: lowest == null ? null : MarketplacePalette.gold,
@@ -506,17 +218,23 @@ class MarketplaceItemPage extends StatelessWidget {
                     highest == null
                         ? marketText(
                             context,
-                            buy?.isEmpty == true ? 'noBuy' : 'unavailable',
+                            noBuy ? 'noBuy'
+                                : c.hasBestPrice(id, 0) ? 'unavailable' : 'priceLoading',
                           )
                         : '¤ ${marketPrice(context, highest)}',
                     color: highest == null ? null : MarketplacePalette.buyer,
                     mono: highest != null,
                   ),
-                  if (lowest != null && highest != null)
-                    MarketStat(
-                      marketText(context, 'spread'),
-                      '¤ ${marketPrice(context, lowest - highest)}',
-                    ),
+                  MarketStat(
+                    marketText(context, 'spread'),
+                    lowest != null && highest != null
+                        ? '¤ ${marketPrice(context, lowest - highest)}'
+                        : noSell || noBuy
+                        ? '—'
+                        : marketText(context,
+                            c.hasBestPrice(id, 1) && c.hasBestPrice(id, 0)
+                                ? 'unavailable' : 'priceLoading'),
+                  ),
                   MarketStat(
                     marketText(context, 'sevenDays'),
                     change == null
@@ -565,14 +283,18 @@ class MarketplaceItemPage extends StatelessWidget {
                   ['sell', 'buy', 'trend', 'acquisition'][i],
                 ),
                 child: Text(
-                  '${marketText(context, ['sell', 'buy', 'trend', 'acquisition'][i])}${i < 2 && c.blocks[i == 0 ? 'sell' : 'buy']?.total != null ? ' ${c.blocks[i == 0 ? 'sell' : 'buy']!.total}' : ''}',
+                  '${marketText(context, ['sell', 'buy', 'trend', 'acquisition'][i])}${i < 2 && c.blocks[c.offerKey(i == 1)]?.total != null ? ' ${c.blocks[c.offerKey(i == 1)]!.total}' : ''}',
                 ),
               ),
           ],
         ),
         if (c.itemTab < 2) ItemOfferFilters(c),
-        if (c.itemTab == 0) MarketItemTierSection(c),
-        if (c.itemTab < 2 &&
+        if (c.itemTab < 2 && c.offerChecklist)
+          Text(marketDisplayText(context, 'loadedBundleSort')),
+        if (c.itemTab == 1 && c.offerFilters['minQuality'] != null)
+          Text('${marketDisplayText(context, 'buyCeiling', n: c.offerFilters['minQuality'])} · ${marketDisplayText(context, 'loadedOnly')}'),
+        if (c.itemTab < 2 && !c.offerChecklist) MarketItemTierSection(c),
+        if (c.itemTab < 2 && !c.offerChecklist &&
             (c.blocks[c.itemTab == 0 ? 'sell' : 'buy']?.rows.isNotEmpty ??
                 false))
           Padding(
@@ -589,6 +311,7 @@ class MarketplaceItemPage extends StatelessWidget {
                   quality:
                       (c.blocks[c.itemTab == 0 ? 'sell' : 'buy']?.rows ?? [])
                           .any((row) => marketQuality(row) != null),
+                  buy: c.itemTab == 1,
                   action: c.trades.supported,
                   cells: [
                     const SizedBox(),
@@ -601,6 +324,7 @@ class MarketplaceItemPage extends StatelessWidget {
                       ('price', 'price', true),
                     ])
                       if (field == 'price' &&
+                          c.itemTab == 0 &&
                           (c.blocks[c.itemTab == 0 ? 'sell' : 'buy']?.rows ??
                                   [])
                               .any((row) => marketQuality(row) != null))
@@ -648,33 +372,23 @@ class MarketplaceItemPage extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 8),
-        if (c.failures.contains(
-              ['sell', 'buy', 'trend', 'acquisition'][c.itemTab],
-            ) &&
-            c.blocks[['sell', 'buy', 'trend', 'acquisition'][c.itemTab]] !=
-                null)
+        // Offers retry with the current filters (single or checklist).
+        if (c.failures.contains(c.itemTabKey) &&
+            c.blocks[c.itemTabKey] != null)
           MarketStale(
-            c
-                .blocks[['sell', 'buy', 'trend', 'acquisition'][c.itemTab]]!
-                .readAt,
-            retry: () {
-              final key = ['sell', 'buy', 'trend', 'acquisition'][c.itemTab];
-              c.load(
-                key,
-                c.itemTab < 2 ? 'offers' : key,
-                id: c.itemId!,
-                side: c.itemTab == 1 ? 0 : 1,
-              );
-            },
+            c.blocks[c.itemTabKey]!.readAt,
+            retry: c.itemTab < 2
+                ? () => c.reloadOffer(c.itemTab == 1)
+                : () => c.load(c.itemTabKey, c.itemTabKey, id: c.itemId!, side: 1),
           ),
         Expanded(
           child: MarketSurface(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: MarketRefilter(
-                active: c.itemTab < 2 && c.refiltering.contains(c.itemTab == 1 ? 'buy' : 'sell'),
-                onCancel: () => c.cancelRefilter(c.itemTab == 1 ? 'buy' : 'sell'),
-                child: _section(context),
+                active: c.itemTab < 2 && c.refiltering.contains(c.offerKey(c.itemTab == 1)),
+                onCancel: () => c.cancelRefilter(c.offerKey(c.itemTab == 1)),
+                child: offerSection(context),
               ),
             ),
           ),
@@ -722,7 +436,9 @@ class MarketplaceItemPage extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text(
+                                if (item == null && c.failures.contains('item'))
+                                  MarketNotice(marketText(context, 'unavailable'), retry: () => c.load('item', 'item', id: c.itemId!))
+                                else Text(
                                   item == null
                                       ? marketText(context, 'loading')
                                       : marketName(item, marketLocale(context)),
@@ -747,7 +463,7 @@ class MarketplaceItemPage extends StatelessWidget {
                                 itemKv(
                                   context,
                                   marketText(context, 'sellBuy'),
-                                  '${c.blocks['sell']?.total ?? '—'} / ${c.blocks['buy']?.total ?? '—'}',
+                                  '${marketItemOrderCount(item, buy: false) ?? '—'} / ${marketItemOrderCount(item, buy: true) ?? '—'}',
                                 ),
                                 const SizedBox(height: 8),
                                 if (item != null)
@@ -757,7 +473,7 @@ class MarketplaceItemPage extends StatelessWidget {
                                     crossAxisAlignment:
                                         WrapCrossAlignment.center,
                                     children: [
-                                      favorite(),
+                                      marketItemFavorite(context, c, item),
                                       ...publishHere(item),
                                       for (final (icon, label, onTap)
                                           in related(item))

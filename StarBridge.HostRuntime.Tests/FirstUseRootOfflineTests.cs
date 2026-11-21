@@ -182,7 +182,7 @@ internal static partial class FirstUseModeTests
         await using var native = new NativeAccountRuntimeBinding(f.Runtime);
         var op = Op(); var task = mode.ApplyRootOfflineAsync(0, op, generation, native);
         Require(ReferenceEquals(task, mode.ApplyRootOfflineAsync(0, op, generation, native)), "One physical ordinary transition");
-        Require(await task.WaitAsync(TimeSpan.FromSeconds(5)) is { State: "offline", Revision: 2, PublicationSuspended: true } &&
+        Require(await task.WaitAsync(FirstUseTestWait.Bound) is { State: "offline", Revision: 2, PublicationSuspended: true } &&
             mode.Current.State == "offline" && mode.LocalMode().Active &&
             native.Read(owner => ReferenceEquals(owner, f.Runtime), false) &&
             f.Runtime.HasCurrentFirstUseLocalSources(mode.LocalMode().Generation), "Both actual owners must be restored before acknowledgement");
@@ -214,7 +214,7 @@ internal static partial class FirstUseModeTests
         Task? closing = null;
         try
         {
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await cancelled.Task.WaitAsync(FirstUseTestWait.Bound);
             Require(!work.IsCompleted && !read.IsCompleted && f.Vault.Deletions == 0 &&
                 new FirstUseModeStore(f.Root).Read().Phase == "offlinePending", "Intent precedes actual physical exit");
             if (close) closing = native.DisposeAsync().AsTask();
@@ -224,7 +224,7 @@ internal static partial class FirstUseModeTests
         finally { release.TrySetResult(); await Cancelled(read); }
         if (close)
         {
-            await closing!.WaitAsync(TimeSpan.FromSeconds(5));
+            await closing!.WaitAsync(FirstUseTestWait.Bound);
             Require((await work).State == "recoveryRequired" && new FirstUseModeStore(f.Root).Read().Phase == "offlinePending",
                 "Close cannot commit offline readiness");
         }
@@ -238,11 +238,11 @@ internal static partial class FirstUseModeTests
         using var f = new LocalAccountStopTests.Fixture(sampling: true); var mode = await RootMode(f);
         await using var native = new NativeAccountRuntimeBinding(f.Runtime);
         f.Transport.HoldProfile = true; var read = native.DispatchAsync(Request(f)).AsTask();
-        await f.Transport.ProfileStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await f.Transport.ProfileStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         var work = mode.ApplyRootOfflineAsync(0, Op(), f.Host.Generation, native);
         try
         {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
             while (!f.Transport.ProfileToken.IsCancellationRequested) await Task.Delay(10, deadline.Token);
             Require(!work.IsCompleted && f.Vault.Deletions == 0, "Physical account transport exit precedes offline acknowledgement");
         }
@@ -256,16 +256,16 @@ internal static partial class FirstUseModeTests
         using var f = new LocalAccountStopTests.Fixture(sampling: true); var mode = await RootMode(f);
         await using var native = new NativeAccountRuntimeBinding(f.Runtime);
         f.Transport.HoldTicket = true; await f.Host.GetCurrentAsync(default);
-        await f.Transport.TicketStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await f.Transport.TicketStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         var work = mode.ApplyRootOfflineAsync(0, Op(), f.Host.Generation, native);
         try
         {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
             while (!f.Transport.TicketToken.IsCancellationRequested) await Task.Delay(10, deadline.Token);
             Require(!work.IsCompleted && f.Vault.Deletions == 0, "SCM loop's actual ignored-cancellation transport remains owned");
         }
         finally { f.Transport.TicketRelease.TrySetResult(); }
-        Require((await work.WaitAsync(TimeSpan.FromSeconds(5))).State == "offline" && f.Vault.Loads == 0 && f.Vault.Deletions == 0,
+        Require((await work.WaitAsync(FirstUseTestWait.Bound)).State == "offline" && f.Vault.Loads == 0 && f.Vault.Deletions == 0,
             "Original loop drain is not credential retirement");
     }
 
@@ -291,16 +291,20 @@ internal static partial class FirstUseModeTests
         var work = mode.ApplyRootOfflineAsync(0, Op(), f.Host.Generation, native);
         try
         {
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await cancelled.Task.WaitAsync(FirstUseTestWait.Bound);
             using var writer = new FileStream(ModePath(f.Root) + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             release.TrySetResult(); await Cancelled(read);
-            Require((await work.WaitAsync(TimeSpan.FromSeconds(5))).State == "recoveryRequired" &&
+            Require((await work.WaitAsync(FirstUseTestWait.Bound)).State == "recoveryRequired" &&
                 mode.Current.State == "recoveryRequired" && !mode.LocalMode().Active && native.Generation == -1 && f.Vault.Deletions == 0,
                 "Physical exit without durable completion cannot acknowledge local readiness");
         }
         finally { release.TrySetResult(); try { await read; } catch (OperationCanceledException) { } }
         using var cold = await AccountBridgeRuntime.CreateWithFirstUseModeAsync(f.Root, NoOnline);
         Require(cold.FirstUseMode!.Current.State == "recoveryRequired", "Cold pending choice never reconnects automatically");
+        var traffic = f.Transport.AllRequests;
+        Require((await mode.RecoverLocalSelectionAsync(mode.Current.Revision, Op(), native, default)).State == "offline" &&
+            mode.LocalMode().Active && native.Read(owner => ReferenceEquals(owner, f.Runtime), false) && f.Vault.Deletions == 0 &&
+            f.Transport.AllRequests == traffic, "Explicit recovery finishes the original exited root transition without installation replay or new network work");
     }
 
     private static async Task RootOfflineGeneration()
@@ -308,7 +312,7 @@ internal static partial class FirstUseModeTests
         using var f = new LocalAccountStopTests.Fixture(sampling: true); var mode = await RootMode(f);
         var native = new NativeAccountRuntimeBinding(f.Runtime);
         f.Transport.HoldTicket = true; await f.Host.GetCurrentAsync(default);
-        await f.Transport.TicketStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await f.Transport.TicketStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         var release = RootSignal(); var cancelled = RootSignal();
         var read = native.ReadAsync(async (_, token) =>
         {
@@ -323,14 +327,14 @@ internal static partial class FirstUseModeTests
         var work = mode.ApplyRootOfflineAsync(0, Op(), f.Host.Generation, native);
         try
         {
-            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await cancelled.Task.WaitAsync(FirstUseTestWait.Bound);
             release.TrySetResult(); await Cancelled(read);
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
             while (!f.Transport.TicketToken.IsCancellationRequested) await Task.Delay(10, deadline.Token);
             Require(!work.IsCompleted, "Changed generation cannot abandon the original held SCM loop");
         }
         finally { release.TrySetResult(); f.Transport.TicketRelease.TrySetResult(); await Cancelled(read); }
-        Require((await work.WaitAsync(TimeSpan.FromSeconds(5))).State == "recoveryRequired" && !mode.LocalMode().Active &&
+        Require((await work.WaitAsync(FirstUseTestWait.Bound)).State == "recoveryRequired" && !mode.LocalMode().Active &&
             f.Vault.Deletions == 0 && native.Generation == -1, "Another account generation cannot become offline under an older proof");
         try { await native.DisposeAsync(); throw new Exception("Stale identity exit must remain failed at total close"); }
         catch (InvalidOperationException error) when (error.Message == "The installed first-use candidate did not confirm complete exit.") { }
@@ -348,7 +352,7 @@ internal static partial class FirstUseModeTests
         using var f = new LocalAccountStopTests.Fixture(sampling: true); var mode = await RootMode(f);
         await using var native = new NativeAccountRuntimeBinding(f.Runtime);
         f.Transport.HoldTicket = true; await f.Host.GetCurrentAsync(default);
-        await f.Transport.TicketStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await f.Transport.TicketStarted.Task.WaitAsync(FirstUseTestWait.Bound);
         var queue = new RootCommitQueue(); var previous = SynchronizationContext.Current;
         Task<FirstUseModeObservation> work;
         SynchronizationContext.SetSynchronizationContext(queue);
@@ -359,15 +363,15 @@ internal static partial class FirstUseModeTests
         var continued = queue.Start();
         try
         {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var deadline = new CancellationTokenSource(FirstUseTestWait.Bound);
             while (!f.Transport.TicketToken.IsCancellationRequested) await Task.Delay(10, deadline.Token);
             Require(!work.IsCompleted && !closing.IsCompleted && !disposal.IsCompleted && f.Vault.Deletions == 0,
                 "Close before intent owns every actual physical loop exit, even though durable offline cannot commit");
         }
         finally { f.Transport.TicketRelease.TrySetResult(); await continued; }
-        Require((await work.WaitAsync(TimeSpan.FromSeconds(5))).State == "recoveryRequired" && await closing && f.Vault.Deletions == 0,
+        Require((await work.WaitAsync(FirstUseTestWait.Bound)).State == "recoveryRequired" && await closing && f.Vault.Deletions == 0,
             "Close drains but cannot acknowledge obsolete offline mode or sign out");
-        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposal.WaitAsync(FirstUseTestWait.Bound);
     }
 
     private static async Task RootOfflineGuards()

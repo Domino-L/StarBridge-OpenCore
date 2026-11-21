@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../features/account/account_models.dart';
+import '../../features/account/account_relay_features.dart';
 import '../../features/communities/bridge_communities.dart';
 import '../../features/onboarding/connection_mode_port.dart';
 import '../../platform/bridge/bridge_client_session.dart';
@@ -13,6 +14,7 @@ BridgeCommunities composeCommunityBridge(
 ) => BridgeCommunities(
   session,
   connectionMode: mode,
+  scmOnly: () => relayAccountFeaturesBlocked(account),
   retainedSelectionChanges: account,
   retainedPreviousReadId: () => account.value.retainedPreviousReadId,
   retainedReadId: () {

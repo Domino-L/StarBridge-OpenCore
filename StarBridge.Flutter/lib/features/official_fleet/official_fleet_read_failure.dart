@@ -2,10 +2,12 @@ import 'dart:async';
 
 import '../../platform/bridge/bridge_client_session.dart';
 import '../../platform/bridge/bridge_envelope.dart';
+import '../../platform/bridge/bridge_account_access.dart';
 
 bool fleetReadIsTransient(Object error) =>
     error is TimeoutException ||
     error is BridgeDisconnectedException ||
+    isCredentialTemporarilyUnavailable(error) ||
     error is BridgeClientException &&
         (error.code == 'bridge.timeout' ||
             error.code == 'official_fleet.read_transient' && error.retryable);
@@ -31,6 +33,9 @@ String fleetReadFailureKey(Object error, {bool members = false}) {
       'account.reauthorization_required' =>
         'officialFleet.error.reauthorizationRequired',
       'official_fleet.read_forbidden' => 'officialFleet.error.forbidden',
+      'official_fleet.identity_clock_skew' => 'officialFleet.error.clockSkew',
+      'official_fleet.identity_time_invalid' =>
+        'officialFleet.error.identityTimeInvalid',
       'official_fleet.data_invalid' ||
       'bridge.invalid_envelope' ||
       'bridge.protocol_incompatible' => 'officialFleet.error.invalidResponse',

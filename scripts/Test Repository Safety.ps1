@@ -135,6 +135,8 @@ try {
             }
             foreach ($match in [regex]::Matches($emailText, $emailPattern)) {
                 $email = $match.Value.ToLowerInvariant()
+                # 11-17 用户确认团队联系邮箱可公开: exactly this one address, no domain-wide allowance.
+                if ($email -ceq 'scstarbridge.app@gmail.com') { continue }
                 if ($email -notmatch '@example\.(?:com|org|net)$' -and
                     $email -notmatch '@example\.(?:invalid|test)$') {
                     $findings.Add("$relativePath [non-example email]")

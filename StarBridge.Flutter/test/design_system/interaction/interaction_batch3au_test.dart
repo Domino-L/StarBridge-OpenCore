@@ -26,6 +26,7 @@ import 'interaction_batch3ac_test.dart' show LiveState;
 import 'interaction_batch3ae_test.dart' show mount, action;
 import 'interaction_batch3at_test.dart' show icon;
 import 'interaction_batch3at_test.dart' as module_grid show Grid, GridState, a;
+import 'package:starbridge_flutter/shared/ships/ship_art_ratio.dart';
 import 'interaction_batch3ar_test.dart' show Profile;
 import '../../features/friends/social_layout_test.dart' show loadFonts;
 import '../../features/communities/community_image_test_support.dart'
@@ -455,7 +456,7 @@ void main() {
         expect(find.byKey(const Key('profile-ship-data-name')), findsOneWidget);
         expect(identical(route(t), current), true);
         final hero = t.getRect(find.byKey(const Key('profile-ship-data-hero')));
-        expect(hero.width / hero.height, closeTo(1200 / 420, .01));
+        expect(hero.width / hero.height, closeTo(shipArtCardAspectRatio, .01));
         t.view.physicalSize = const Size(1280, 1000);
         await settleCommunityImages(t);
         expect(identical(route(t), current), true);
@@ -494,7 +495,7 @@ void main() {
           final hero = t.getRect(
             find.byKey(const Key('profile-ship-data-hero')),
           );
-          expect(hero.width / hero.height, closeTo(1200 / 420, .01));
+          expect(hero.width / hero.height, closeTo(shipArtCardAspectRatio, .01));
           expect(hero.center.dx, closeTo(t.getRect(detail).center.dx, 1));
           expect(
             t.getRect(find.byKey(const Key('profile-ship-data-facts'))).top,

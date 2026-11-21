@@ -14,6 +14,7 @@ Map<String, Object?> encodeWindowPresentation(AppPreferences preferences) => {
   'locale': preferences.locale.toLanguageTag(),
   'reduceMotion': preferences.motionPreference == MotionPreference.reduce,
   'interactionStyle': preferences.interactionStyle.name,
+  'performanceMode': preferences.performanceMode,
 };
 
 class WindowPresentation {
@@ -22,10 +23,14 @@ class WindowPresentation {
       WindowPresentation(value is Map ? value : const {});
   final Map values;
   bool get reduceMotion => values['reduceMotion'] == true;
+
+  /// The user's performance mode (off unless the main window says on).
+  bool get performanceMode => values['performanceMode'] == true;
+  // No style yet (the main window has not sent one) means the 0.7.3 default.
   InteractionSuite get interactionSuite => interactionSuiteFromName(
     values['interactionStyle'] is String
         ? values['interactionStyle'] as String
-        : null,
+        : InteractionStyle.scan.name,
   );
   Locale get locale => switch (values['locale']) {
     'en-US' || 'en' => const Locale('en', 'US'),

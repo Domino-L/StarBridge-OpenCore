@@ -1,3 +1,5 @@
+import '../common/last_online_days.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -107,6 +109,7 @@ final class CommunityWorkspaceMember {
           : (throw const FormatException()),
       arrivalPendingConfirmation = _flag(m, 'arrivalPendingConfirmation'),
       arrivalTargetCode = _optional(m, 'arrivalTargetCode'),
+      lastOnlineDays = readLastOnlineDays(m['lastOnlineDays']),
       joinedAt = _date(m, 'joinedAt'),
       lastUpdated = _date(m, 'lastUpdated') {
     if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(memberRef) ||
@@ -126,6 +129,7 @@ final class CommunityWorkspaceMember {
       locationHiddenReason,
       serverRegion,
       arrivalTargetCode;
+  final int? lastOnlineDays;
   final DateTime? joinedAt, lastUpdated;
   final Map<String, String> shipLabels, locationLabels, arrivalTargetLabels;
   String get displayName => callsign.isEmpty ? gameName : callsign;

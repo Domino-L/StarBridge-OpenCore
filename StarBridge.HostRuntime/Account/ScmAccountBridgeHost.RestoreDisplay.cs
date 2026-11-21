@@ -36,7 +36,12 @@ internal sealed partial class ScmAccountBridgeHost
     private void PublishRestoredSession(ScmOAuthSession session, AccountRestoreDisplayScope? scope)
     {
         lock (_realtimeGate)
+        {
             PublishSessionState(session, false, null, false, null, null, null, null, scope);
+            // Every later publish (sign-in, account change, resume) takes a new
+            // generation, so this marks exactly the session restored at startup.
+            Interlocked.Exchange(ref _restoredSessionGeneration, Generation);
+        }
     }
     private AccountRestoreDisplayScope? ObserveRestoreDisplay(ScmRestoreDisplayRead read)
     {

@@ -22,7 +22,9 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
     Func<Func<bool>, bool>? playRally = null, TimeProvider? time = null,
     ISafeHotkeyRuntime? hotkeys = null, Func<long, string, object, BridgeEnvelope>? hostEvent = null,
     IInformationOverlayDirectUnreadSink? directUnread = null,
-    Func<string>? tradeSuppressionReason = null, Func<bool, Func<bool>, bool>? playTrade = null) : IBridgeRequestDispatcher
+    Func<string>? tradeSuppressionReason = null, Func<bool, Func<bool>, bool>? playTrade = null,
+    // Continuous play: the system part of the trade rule only (no app-foreground or game-state gate); null uses the trade rule.
+    Func<string>? continuousPlaySuppressionReason = null) : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> AdvertisedCapabilities { get; } = ["notificationSettings.read", "notificationSettings.save",
         "notificationSettings.presentDesktop", "notificationSettings.testDesktop", "notificationSettings.clearDesktop", "notificationSettings.consumeActivation",
@@ -45,7 +47,7 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
     private long _reminderEpoch;
     private string[] _activeIds = [];
     public event Action<BridgeEnvelope>? EventReady;
-    internal void Reset() { lock (_gate) { ResetRallies(); Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); ResetIdentityNotifications(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } }
+    internal void Reset() { lock (_gate) { ResetQuietSummary(); ResetRallies(); Interlocked.Increment(ref _directEpoch); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); ResetIdentityNotifications(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } }
     private void InvalidateReminder() {
         Interlocked.Increment(ref _reminderEpoch);
         _activeIds = [];
@@ -205,13 +207,14 @@ public sealed partial class NotificationSettingsBridgeDispatcher(string dataRoot
             var payload = response.Payload.Deserialize<Dictionary<string, JsonElement>>()!;
             var metadata = new Dictionary<string, object> { ["schemaVersion"] = 1, ["revision"] = settings.Revision,
                 ["invitations"] = invitations, ["applications"] = applications,
-                ["desktopEligible"] = !handled && settings.WindowsEnabled && (canNotifyDesktop?.Invoke() ?? false) };
+                // 0.7.3: a room invite or join request is a reminder card even when the overlay showed it
+                // (the overlay line is the in-game mark), so the card no longer depends on the overlay.
+                ["desktopEligible"] = settings.WindowsEnabled && CanNotifySocial("roomInvite") };
             if (handled) metadata["overlayHandled"] = true;
-            if (handled) _desktopTicket = null;
-            else if (_desktopTicket != null) metadata["desktopTicket"] = _desktopTicket.Id.ToString("N");
+            if (_desktopTicket != null) metadata["desktopTicket"] = _desktopTicket.Id.ToString("N");
             payload["localReminder"] = BridgePayload.From(metadata);
             return response with { Payload = BridgePayload.From(payload) };
         }
     }
-    public void Dispose() { lock (_gate) { _disposed = true; ResetRallies(); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } UnsubscribeRallyHotkeys(); desktop?.Dispose(); }
+    public void Dispose() { lock (_gate) { _disposed = true; ResetQuietSummary(); ResetRallies(); _rooms.Reset(); _direct.Reset(); _friends.Reset(); ResetTrade(); InvalidateReminder(); PublishDirectUnread(null, reset: true); } UnsubscribeRallyHotkeys(); desktop?.Dispose(); }
 }

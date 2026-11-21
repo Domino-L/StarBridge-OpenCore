@@ -30,7 +30,7 @@ internal static class FirstUseColdOnlineRecoveryTests
         start.ArgumentList.Add("--first-use-online-recovery-child"); start.ArgumentList.Add(exited.Root);
         using (var child = Process.Start(start)!)
         {
-            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            await child.WaitForExitAsync().WaitAsync(FirstUseTestWait.Bound);
             Check(child.ExitCode == 0, "Synthetic original owner child must complete");
         }
         using var recovered = await AccountBridgeRuntime.CreateWithFirstUseModeAsync(exited.Root, NoOnline,

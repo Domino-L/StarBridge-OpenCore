@@ -207,6 +207,15 @@ final class RemoteImageLoader extends ChangeNotifier
     await _settleCacheWork();
   }
 
+  /// Completes when work already cancelled has really exited. Pauses nothing.
+  Future<void> exited() async {
+    await Future.wait([
+      ..._pending.toList().map((f) => f.then<void>((_) {}, onError: (_) {})),
+      ..._children.toList().map((child) => child.exited()),
+    ]);
+    await _settleCacheWork();
+  }
+
   Future<void> retireAsync() {
     final previous = _retirement;
     if (previous != null) return previous;

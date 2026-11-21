@@ -20,6 +20,8 @@ LocalHangarShip profileHangarShip(Map value, String id) {
     imageAsset: p['imageAsset'] as String?,
     thumbnailAsset: p['thumbnailAsset'] as String?,
     display: ShipReviewedDisplay.parse(p['display']),
+    // 0.7.2's importedAt fell back to the import moment when RSI showed no
+    // date (ShipDatabase.cs), so it is never shown as the official date.
     addedAt: DateTime.tryParse(value['importedAt'] as String? ?? ''),
   );
 }

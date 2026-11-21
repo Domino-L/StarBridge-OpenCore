@@ -400,7 +400,10 @@ void main() {
   testWidgets(
     'profile keeps account detail separate from local total; visibility hides metric',
     (tester) async {
-      final h = support.Harness()..seconds = 3600;
+      final h = support.Harness()
+        ..seconds = 3600
+        ..accountTotalState = 'available'
+        ..accountTotalSeconds = 7200;
       final profile = createPersonalProfileModule(
         InMemoryPersonalProfileAdapter.forReview(signedIn: true),
       );
@@ -418,10 +421,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Total on this PC'), findsOneWidget);
-      expect(
-        find.text('Account total: ${minutes ~/ 60} h ${minutes % 60} min'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('账号累计 2 小时'), findsOneWidget);
       expect(find.text('1 h 0 min'), findsOneWidget);
       expect(profile.projection.value.gameplayMinutes, minutes);
       expect(find.byType(Switch), findsNothing);
@@ -440,7 +440,7 @@ void main() {
   for (final locale in AppStrings.supportedLocales) {
     for (final width in [360.0, 1100.0]) {
       testWidgets(
-        'remote unavailable profile retains readonly local metric $locale/$width',
+        'remote unavailable owner shows retry without editable/default metrics $locale/$width',
         (tester) async {
           final h = support.Harness()..seconds = 3600;
           final saved = local.Harness()..remote.available = false;
@@ -463,16 +463,18 @@ void main() {
           await tester.pumpAndSettle();
           final strings = AppStrings.resolve(locale);
           expect(
-            find.byKey(const Key('profile-local-remote-unavailable')),
+            find.text(strings.text('profile.error.ownerReadFailed')),
             findsOneWidget,
           );
+          expect(find.byKey(const Key('profile-retry')), findsOneWidget);
+          expect(find.byKey(const Key('profile-edit')), findsNothing);
           expect(
             find.textContaining(strings.text('gameplay.localTotal')),
-            findsOneWidget,
+            findsNothing,
           );
           expect(
             find.textContaining(strings.text('gameplay.remoteUnavailable')),
-            findsOneWidget,
+            findsNothing,
           );
           expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);
           expect(tester.takeException(), isNull);

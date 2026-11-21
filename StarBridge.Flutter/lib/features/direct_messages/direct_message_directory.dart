@@ -1,3 +1,4 @@
+import '../common/last_online_days.dart';
 import '../../shared/guide/guide_empty_state.dart';
 import '../../app/routing/open_destination_intent.dart';
 
@@ -153,7 +154,13 @@ class DirectMessageDirectory extends StatelessWidget {
                   ),
                   if (conversationPresence(row.state, row.presence)
                       case final presence?)
-                    directMessagePresenceLabel(context, presence),
+                    directMessagePresenceLabel(
+                      context,
+                      presence,
+                      lastOnlineDays: row.lastOnlineDays,
+                    )
+                  else if (row.state == 'friend' && row.lastOnlineDays != null)
+                    directMessageLastOnlineLabel(context, row.lastOnlineDays!),
                 ],
               ),
             ),
@@ -164,28 +171,56 @@ class DirectMessageDirectory extends StatelessWidget {
   }
 }
 
-Widget directMessagePresenceLabel(BuildContext context, String presence) =>
-    Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: presenceColor(context.tokens.colors, 'presence.$presence'),
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            AppStrings.of(context).text('direct.presence.$presence'),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontSize: 11,
-              color: presenceColor(context.tokens.colors, 'presence.$presence'),
-            ),
-          ),
-        ],
+/// A friend whose current presence is unknown (no fresh observation) still
+/// shows when they were last online, the same as the friends list.
+Widget directMessageLastOnlineLabel(BuildContext context, int days) => Padding(
+  padding: const EdgeInsets.only(top: 3),
+  child: Text(
+    lastOnlineDaysText(days, AppStrings.of(context).locale, prefix: true),
+    maxLines: 1,
+    overflow: TextOverflow.fade,
+    softWrap: false,
+    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+      fontSize: 11,
+      color: presenceColor(context.tokens.colors, 'presence.offline'),
+    ),
+  ),
+);
+
+Widget directMessagePresenceLabel(
+  BuildContext context,
+  String presence, {
+  int? lastOnlineDays,
+}) => Padding(
+  padding: const EdgeInsets.only(top: 3),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: presenceColor(context.tokens.colors, 'presence.$presence'),
+        ),
       ),
-    );
+      const SizedBox(width: 5),
+      Flexible(
+        child: Text(
+          offlineWithLastOnline(
+            AppStrings.of(context).text('direct.presence.$presence'),
+            presence == 'offline' ? lastOnlineDays : null,
+            AppStrings.of(context).locale,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.fade,
+          softWrap: false,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontSize: 11,
+            color: presenceColor(context.tokens.colors, 'presence.$presence'),
+          ),
+        ),
+      ),
+    ],
+  ),
+);

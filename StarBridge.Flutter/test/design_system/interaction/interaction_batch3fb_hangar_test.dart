@@ -12,6 +12,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../features/friends/social_layout_test.dart' show loadFonts, size;
+import '../../_support/hangar_test_actions.dart';
 import 'interaction_batch3i_test.dart' show scopedApp;
 
 Finder hangarKey(String value) => find.byKey(Key(value));
@@ -164,26 +165,7 @@ Future<void> activateHangar(WidgetTester t, Finder target, String input) async {
   await t.ensureVisible(target);
   await settleHangarMotion(t);
   if (input == 'keyboard') {
-    final widget = t.widget(target);
-    final node = switch (widget) {
-      ButtonStyleButton button => button.focusNode!,
-      IconButton button => button.focusNode!,
-      ChoiceChip chip => chip.focusNode!,
-      FilterChip chip => chip.focusNode!,
-      SuitePressable pressable => pressable.focusNode!,
-      SuiteChoiceChip chip => chip.focusNode!,
-      _ =>
-        t
-            .widget<FocusableActionDetector>(
-              find
-                  .descendant(
-                    of: target,
-                    matching: find.byType(FocusableActionDetector),
-                  )
-                  .first,
-            )
-            .focusNode!,
-    };
+    final node = hangarControlFocus(t, target);
     for (var i = 0; !node.hasPrimaryFocus && i < 100; i++) {
       await t.sendKeyEvent(LogicalKeyboardKey.tab);
       await t.pump();
@@ -191,14 +173,7 @@ Future<void> activateHangar(WidgetTester t, Finder target, String input) async {
     expect(node.hasPrimaryFocus, isTrue);
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
   } else if (input == 'reader') {
-    // SuiteChoiceChip's key is above its actual semantic press target. Reading
-    // there reaches the route; activate the real child, not an ancestor node.
-    final semanticTarget = t.widget(target) is SuiteChoiceChip
-        ? find
-              .descendant(of: target, matching: find.byType(SuitePressable))
-              .first
-        : target;
-    final node = t.getSemantics(semanticTarget);
+    final node = t.getSemantics(target);
     expect(
       node.getSemanticsData().hasAction(ui.SemanticsAction.tap),
       isTrue,
@@ -241,6 +216,9 @@ void main() {
           final semantics = t.ensureSemantics();
           try {
             final p = await mountHangar(t, suite);
+            expect(hangarChoice(t, 'hangar-current').selected, isTrue);
+            expect(hangarChoice(t, 'hangar-current').label, '当前拥有 3');
+            expect(hangarChoice(t, 'hangar-favorites').label, '收藏 1');
             expect(
               t.getSemantics(summaryHeader()).getSemanticsData().label,
               contains('历史目录参考价'),
@@ -252,6 +230,12 @@ void main() {
                   ? InteractionSource.pointer
                   : InteractionSource.keyboard,
             ]);
+            await activateHangar(t, hangarKey('hangar-compact'), input);
+            expect(hangarChoice(t, 'hangar-compact').selected, isTrue);
+            await activateHangar(t, hangarKey('hangar-by-maker'), input);
+            expect(hangarChoice(t, 'hangar-by-maker').selected, isTrue);
+            await activateHangar(t, hangarKey('hangar-by-size'), input);
+            expect(hangarChoice(t, 'hangar-by-size').selected, isTrue);
             await activateHangar(t, hangarKey('hangar-list'), input);
             await activateHangar(t, hangarKey('hangar-role-combat'), input);
             expect(hangarKey('local-hangar-ship-beta'), findsNothing);

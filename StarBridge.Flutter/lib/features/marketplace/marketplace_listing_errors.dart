@@ -4,6 +4,7 @@ import 'marketplace_listing_copy.dart';
 import 'marketplace_trades_controller.dart';
 import 'marketplace_trade_copy.dart';
 import 'marketplace_port.dart';
+import 'marketplace_recovery.dart';
 
 String listingErrorText(BuildContext context, String? code, String fallback) {
   final values = listingErrors[code];
@@ -11,11 +12,19 @@ String listingErrorText(BuildContext context, String? code, String fallback) {
     final locale = marketLocale(context);
     return values[locale == 'en' ? 2 : locale == 'hant' ? 1 : 0];
   }
-  if (code != null) return tradeText(context, tradeError(MarketplaceTradeError(code)));
+  if (code != null) {
+    final message = tradeError(MarketplaceTradeError(code), writing: true);
+    if (marketplaceRecoveryCopy.containsKey(message)) return recoveryText(context, message);
+    if (message == '操作已发出，但没有收到结果。请先刷新交易单确认，不要重复提交。') {
+      return recoveryText(context, '写入未确认，请刷新挂单后核对');
+    }
+    return tradeText(context, message);
+  }
   return listingText(context, fallback);
 }
 
 const listingErrors = <String, List<String>>{
+  'marketplace.sign_in_required': ['请先登录 SCM', '請先登入 SCM', 'Sign in to SCM first'],
   'marketplace.forbidden': ['SCM 拒绝了这次操作；一直这样请联系支持。', 'SCM 拒絕了這次操作；一直這樣請聯絡支援。', 'SCM refused this action. If it keeps happening, contact support.'],
   'marketplace.listing_limit': ['挂单已满，请先删除不需要的挂单。', '掛單已滿，請先刪除不需要的掛單。', 'Listing limit reached. Delete listings you no longer need.'],
   'marketplace.listing_same_item_limit': ['同一物品最多发布 3 条挂单。', '同一物品最多發布 3 條掛單。', 'You can publish up to 3 listings for the same item.'],

@@ -23,7 +23,7 @@ final List<IconSpec> navigationIconsV2 = [
     },
     note: '组织旗帜：悬挂旗 + 星芒徽记',
   ),
-  IconSpec('officialFleet', '主舰队', iconGroups[0], ['SB.officialFleet'], (g) {
+  IconSpec('officialFleet', '主舰队', iconGroups[0], ['SB.officialFleet', 'Menu.fleet'], (g) {
     g.spark(12, 10.5, 3.8, ry: 5.2, waist: 0.9);
     for (final s in [-1.0, 1.0]) {
       double x(double v) => 12 + s * v;
@@ -91,7 +91,7 @@ final List<IconSpec> navigationIconsV2 = [
     ], close: true);
     if (g.fine) g.l(12, 7.5, 12, 10.5);
   }, note: '俯视舰影，替换火箭'),
-  IconSpec('marketplace', '交易', iconGroups[0], ['SB.marketplace'], (g) {
+  IconSpec('marketplace', '交易', iconGroups[0], ['SB.marketplace', 'Menu.market'], (g) {
     g.p([
       12,
       3,

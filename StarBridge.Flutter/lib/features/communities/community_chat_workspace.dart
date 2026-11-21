@@ -21,6 +21,7 @@ import 'community_workspace_image.dart';
 import 'community_workspace_copy.dart';
 import 'community_visible_refresh.dart';
 import 'community_avatar_cache.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 class CommunityChatWorkspace extends StatefulWidget {
   const CommunityChatWorkspace({
@@ -333,7 +334,7 @@ class _OnlineMembersState extends State<CommunityOnlineMembersPane>
                                       child: Text(
                                         member.displayName,
                                         maxLines: 1,
-                                        overflow: TextOverflow.fade,
+                                        overflow: fadeOverflow(context),
                                         softWrap: false,
                                       ),
                                     ),

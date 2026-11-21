@@ -6,6 +6,7 @@ internal static class AchievementCelebrationPlaybackTests
 {
     private sealed class Surface : IAchievementCelebrationSurface
     {
+        public double EntryMilliseconds { get; init; } = 760;
         public double LifetimeMilliseconds => 5980;
         public bool IsVisible { get; private set; }
         internal double Elapsed;
@@ -58,8 +59,69 @@ internal static class AchievementCelebrationPlaybackTests
         SerialAndFailure();
         SeriesQueue();
         FailureOwnership();
+        GlassCompletion();
         Placement();
         Console.WriteLine("PASS achievement playback: desktop race, locked entrance/hold, suspend and account expiry");
+    }
+    private static void GlassCompletion()
+    {
+        var at = DateTimeOffset.UnixEpoch;
+        foreach (var (rarity, entry) in new[] { ((string?)null, 760), ("COMMON", 760), ("RARE", 820), ("EPIC", 1100) })
+        foreach (var reduced in new[] { false, true })
+        {
+            var allowed = true;
+            var presented = 0;
+            var surface = new GlassSurface(reduced ? 0 : entry, reduced ? 4500 : entry + 4800);
+            using var playback = new AchievementCelebrationPlayback(_ => surface, () => allowed, check => check(), () => { });
+            playback.Submit(new("scm-1", at, 1, () => true, DisplayName: "SCM fixture")
+                { RarityTier = rarity, Presented = () => presented++ });
+            playback.Advance(0);
+            void Tick(double duration)
+            {
+                while (duration > 0)
+                {
+                    var step = Math.Min(duration, 100);
+                    playback.Advance(step);
+                    duration -= step;
+                }
+            }
+            void LockAndResume()
+            {
+                allowed = false; playback.Advance(20);
+                allowed = true; playback.Advance(20);
+            }
+
+            if (!reduced)
+            {
+                Tick(entry - 1);
+                LockAndResume();
+                Require(surface.Elapsed == 0 && presented == 0, $"Interrupted {rarity} entry restarts before its own threshold");
+            }
+            Tick(reduced ? 300 : entry);
+            LockAndResume();
+            Require(surface.Elapsed == (reduced ? 300 : entry), "A settled card resumes without resetting visible time");
+            Tick(surface.LifetimeMilliseconds - surface.Elapsed - 1);
+            LockAndResume();
+            Require(surface.IsVisible && presented == 0, "Interrupted exit or reduced-motion hold cannot acknowledge early");
+            Tick(1);
+            Require(!surface.IsVisible && presented == 1, "Acknowledgement happens at the end of the complete visible timeline");
+            playback.Clear();
+            Require(presented == 1, "Clear never acknowledges a second time");
+        }
+        Console.WriteLine("PASS G1 playback: exact entry, pause, hold and exit-completion boundaries in eight configurations");
+    }
+
+    private sealed class GlassSurface(double entry, double lifetime) : IAchievementCelebrationSurface
+    {
+        public double EntryMilliseconds => entry;
+        public double LifetimeMilliseconds => lifetime;
+        public bool IsVisible { get; private set; }
+        internal double Elapsed { get; private set; }
+        public void Show() => IsVisible = true;
+        public void Hide() => IsVisible = false;
+        public void Advance(double elapsed, int remaining) => Elapsed = elapsed;
+        public void UpdatePosition() { }
+        public void Dispose() => Hide();
     }
     private static void FailureOwnership()
     {
@@ -155,13 +217,21 @@ internal static class AchievementCelebrationPlaybackTests
         foreach (var dpi in new uint[] { 96, 120, 144, 192, 288 })
         {
             var placement = AchievementCelebrationPlacement.ForWorkArea(work, dpi);
-            Require(work.Contains(placement.Bounds) && placement.Margin == 0 && placement.Bounds.Right == work.Right &&
-                placement.Bounds.Bottom == work.Bottom,
+            Require(work.Contains(placement.Bounds) && placement.Bounds.Contains(placement.CardBounds) &&
+                placement.CardBounds.Right == work.Right && placement.CardBounds.Bottom == work.Bottom &&
+                placement.Bounds.Right == work.Right && placement.Bounds.Bottom == work.Bottom,
                 "Every DPI and negative-coordinate monitor anchors the whole card within its work area");
         }
         var standard = AchievementCelebrationPlacement.ForWorkArea(new(0, 0, 1920, 1040), 144);
-        Require(standard.Bounds.Width == 504 && standard.Bounds.Height == 156 && standard.Margin == 0,
-            "150 percent monitor retains physical dimensions while flush to the work-area edges");
+        Require(standard.Bounds.Size == new System.Drawing.Size(582, 198) && standard.CardBounds.Size == new System.Drawing.Size(546, 162) &&
+            standard.CardBounds.Left - standard.Bounds.Left == 36 && standard.CardBounds.Top - standard.Bounds.Top == 36,
+            "150 percent scaling adds exactly 36 pixels of bleed to the left and top");
+        var plate = standard.CardBounds;
+        Require(!standard.ContainsCard(standard.Bounds.Location) &&
+            !standard.ContainsCard(plate.Location) && !standard.ContainsCard(new(plate.Left, plate.Bottom - 1)) &&
+            standard.ContainsCard(new(plate.Right - 1, plate.Top)) &&
+            standard.ContainsCard(new(plate.Right - 1, plate.Bottom - 1)),
+            "Hover excludes bleed and transparent left cuts while including both square right corners");
         Console.WriteLine("PASS achievement placement: 15 work-area/DPI cases, whole-card fitting and flush right/taskbar edges");
     }
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

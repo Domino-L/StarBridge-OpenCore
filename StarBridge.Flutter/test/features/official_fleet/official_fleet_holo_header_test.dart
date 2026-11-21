@@ -8,8 +8,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starbridge_flutter/app/runtime/frame_governor.dart';
 import 'package:starbridge_flutter/features/official_fleet/official_fleet_wheel_gate.dart';
 import 'package:starbridge_flutter/features/official_fleet/official_fleet_screen_switch.dart';
+import 'package:starbridge_flutter/features/official_fleet/official_fleet_holo_layers.dart';
 import 'package:starbridge_flutter/features/common/organization_workspace_frame.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_interaction_theme.dart';
@@ -134,7 +136,9 @@ Future<List<int>> _png(Color top, Color bottom, int width, int height) async {
 
 Future<Map<String, List<int>>> _images() async {
   // Captures use the preview assets; tests use generated images.
-  final previews = developmentFixturePath('StarBridge-DesignPreviews/MainFleetBanner');
+  final previews = developmentFixturePath(
+    'StarBridge-DesignPreviews/MainFleetBanner',
+  );
   if (_capture && File('$previews/assets/banner-custom.png').existsSync()) {
     return {
       'banner.png': File('$previews/assets/banner-custom.png')
@@ -574,6 +578,31 @@ void main() {
     expect(glass.single.filter, ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8));
   });
 
+  // C-lite (in-game test 11-08, user "都按推荐"): while a game runs the title
+  // glass is the dense tint, with no backdrop blur; closing the game frosts
+  // it back.
+  testWidgets('while a game runs the title glass drops its blur', (
+    tester,
+  ) async {
+    final light = ValueNotifier(true);
+    debugLightVisualsOverride = light;
+    addTearDown(() => debugLightVisualsOverride = null);
+    await _pump(tester, window: const Size(2364, 1336));
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(
+      tester.layers.whereType<BackdropFilterLayer>(),
+      isEmpty,
+      reason: 'no backdrop pass while a game runs',
+    );
+    light.value = false;
+    await tester.pumpAndSettle();
+    final glass = tester.widgetList<BackdropFilter>(
+      find.byType(BackdropFilter),
+    );
+    expect(glass, hasLength(1));
+    expect(glass.single.filter, ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8));
+  });
+
   testWidgets('settled screens keep only the title glass blur', (tester) async {
     Map<String, int> count() {
       final layers = tester.layers;
@@ -600,6 +629,48 @@ void main() {
     expect(lower['backdrop'], 0, reason: 'lower: $lower');
     expect(lower['imageFilter'], 0, reason: 'lower: $lower');
     expect(lower['shaderMask'], lessThanOrEqualTo(1), reason: 'lower: $lower');
+  });
+
+  // User report 2026-11-07 ("1卡，在组织页面，滚动", then "上半" with a game
+  // open): the wheel on the upper screen runs the switch, and its frames
+  // recomputed a blur over the whole banner. No switch frame may need an
+  // image filter, and the fades stay inside their masks and images.
+  testWidgets('no switch frame recomputes an image filter', (tester) async {
+    Map<String, int> count() {
+      final layers = tester.layers;
+      return {
+        'backdrop': layers.whereType<BackdropFilterLayer>().length,
+        'imageFilter': layers.whereType<ImageFilterLayer>().length,
+        'shaderMask': layers.whereType<ShaderMaskLayer>().length,
+      };
+    }
+
+    for (final banner in [true, false]) {
+      await _pump(tester, window: const Size(2364, 1336), banner: banner);
+      await tester.tap(find.byKey(const Key('official-fleet-tab-members')));
+      await tester.pump();
+      var softSeen = false;
+      for (var step = 1; step < 10; step++) {
+        await tester.pump(OfficialFleetScreenSwitch.duration ~/ 10);
+        final layers = count();
+        final at = 'banner $banner, step $step: $layers';
+        expect(layers['backdrop'], 0, reason: at);
+        expect(layers['imageFilter'], 0, reason: at);
+        // Header mirror, the reflection under the bar, the moving one.
+        expect(layers['shaderMask'], lessThanOrEqualTo(3), reason: at);
+        softSeen |= find
+            .byType(OfficialFleetHoloSoftBanner)
+            .evaluate()
+            .isNotEmpty;
+      }
+      expect(softSeen, isTrue, reason: 'banner $banner');
+      // The softness follows the banner's width like the 8-pixel blur did.
+      expect(OfficialFleetHoloSoftBanner.decodeWidth(1600), 64);
+      expect(OfficialFleetHoloSoftBanner.decodeWidth(2560), 112);
+      await tester.pumpAndSettle();
+      expect(find.byType(OfficialFleetHoloSoftBanner), findsNothing);
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('only a screen tall enough grows the rail into preview tiles', (
@@ -726,6 +797,42 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  // Review pictures only (STARBRIDGE_CAPTURE_HOLO=1): the settled header with
+  // and without the game-time light visuals (C-lite, 11-08).
+  testWidgets('light visuals frames', (tester) async {
+    if (!_capture) return;
+    final light = ValueNotifier(false);
+    debugLightVisualsOverride = light;
+    addTearDown(() => debugLightVisualsOverride = null);
+    for (final dark in [true, false]) {
+      for (final on in [false, true]) {
+        light.value = on;
+        await _pump(tester, window: const Size(1600, 900), light: !dark);
+        await _shot(tester, 'clite-${dark ? 'dark' : 'light'}-${on ? 'game' : 'normal'}');
+        await tester.pumpWidget(const SizedBox());
+      }
+    }
+  });
+
+  // Review pictures only (STARBRIDGE_CAPTURE_HOLO=1): the screen switch at
+  // fixed moments, for before/after comparisons of its look.
+  testWidgets('screen switch frames', (tester) async {
+    if (!_capture) return;
+    for (final banner in [true, false]) {
+      await _pump(tester, window: const Size(1600, 900), banner: banner);
+      await tester.tap(find.byKey(const Key('official-fleet-tab-members')));
+      await tester.pump();
+      var elapsed = 0;
+      for (final at in const [104, 208, 312, 416]) {
+        await tester.pump(Duration(milliseconds: at - elapsed));
+        elapsed = at;
+        await _shot(tester, 'switch-${banner ? 'banner' : 'default'}-$at');
+      }
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
 
   testWidgets('entry animation frames', (tester) async {
     if (!_capture) return;

@@ -14,6 +14,21 @@ class HangarReaderCopy {
   String get hangar => pick('个人机库', '個人機庫', 'Personal hangar');
   String get back => pick('返回个人机库', '返回個人機庫', 'Back to hangar');
   String get open => pick('打开 RSI 机库', '開啟 RSI 機庫', 'Open RSI hangar');
+  String get clearData =>
+      pick('退出 RSI 登录并清除数据', '登出 RSI 並清除資料', 'Sign out of RSI and clear data');
+  String get clearConfirmation => pick(
+    '这会退出机库读取里的 RSI 登录，并删除这台电脑上机库读取保存的浏览器数据（登录状态、Cookie、缓存）。已保存到本机的舰船不受影响。',
+    '這會登出機庫讀取裡的 RSI，並刪除這台電腦上機庫讀取儲存的瀏覽器資料（登入狀態、Cookie、快取）。已儲存到本機的艦船不受影響。',
+    'This signs you out of RSI in the hangar reader and deletes the browser data it stores on this computer (sign-in state, cookies and cache). Ships already saved on this device are unaffected.',
+  );
+  String get keepData => pick('取消', '取消', 'Cancel');
+  String get acknowledge => pick('知道了', '知道了', 'OK');
+  String get clearFailedTitle => pick('未能清除', '未能清除', "Couldn't clear");
+  String get clearSuccess => pick(
+    '已退出 RSI 登录，并清除了本机保存的 RSI 登录数据。下次读取机库时需要重新登录 RSI。',
+    '已登出 RSI，並清除了本機儲存的 RSI 登入資料。下次讀取機庫時需要重新登入 RSI。',
+    "Signed out of RSI and cleared the RSI sign-in data saved on this device. You'll need to sign in to RSI again the next time you read your hangar.",
+  );
   String get start => pick('开始读取', '開始讀取', 'Start reading');
   String get resume => pick('继续读取', '繼續讀取', 'Continue reading');
   String get retry => pick('重新打开', '重新開啟', 'Reopen');
@@ -37,10 +52,38 @@ class HangarReaderCopy {
     '開啟機庫後，在網頁中登入 RSI，點擊頭像展開帳號資訊，然後開始讀取。',
     'Open the hangar, sign in to RSI, open your account menu, then start reading.',
   );
-  String get safety => pick(
-    '登录状态保留在本机；过期时需重新登录。读取不会购买、赠送或回收物品。',
-    '登入狀態保留在本機；過期時需重新登入。讀取不會購買、贈送或回收物品。',
-    'Sign-in is kept on this device until it expires. Reading does not buy, gift or reclaim items.',
+  String safety(bool remember) => remember
+      ? pick(
+          '登录状态保留在本机；过期时需重新登录。读取不会购买、赠送或回收物品。',
+          '登入狀態保留在本機；過期時需重新登入。讀取不會購買、贈送或回收物品。',
+          'Sign-in is kept on this device until it expires. Reading does not buy, gift or reclaim items.',
+        )
+      : pick(
+          '不记住的话，读完会自动清除，下次要重新登录。读取不会购买、赠送或回收物品。',
+          '不記住的話，讀完會自動清除，下次要重新登入。讀取不會購買、贈送或回收物品。',
+          "If you don't, it is cleared after reading and you sign in again next time. Reading does not buy, gift or reclaim items.",
+        );
+  String get remember => pick(
+    '在这台电脑上记住 RSI 登录',
+    '在這台電腦上記住 RSI 登入',
+    'Remember my RSI sign-in on this computer',
+  );
+  String get uncleared => pick(
+    '上次没能清除 RSI 登录数据（可能正被占用）。可以点“退出 RSI 登录并清除数据”再试一次，或者重启星桥。',
+    '上次沒能清除 RSI 登入資料（可能正被佔用）。可以點「登出 RSI 並清除資料」再試一次，或者重新啟動星橋。',
+    'The RSI sign-in data could not be cleared last time (it may be in use). Use Sign out of RSI and clear data to try again, or restart StarBridge.',
+  );
+  String get unknownChoice => pick(
+    '没能读取“记住 RSI 登录”这个设置，这次不会自动清除登录。可以重新勾选一次，或者点“退出 RSI 登录并清除数据”。',
+    '沒能讀取「記住 RSI 登入」這個設定，這次不會自動清除登入。可以重新勾選一次，或者點「登出 RSI 並清除資料」。',
+    "The Remember RSI sign-in setting couldn't be read, so sign-in is not cleared automatically this time. Set it again, or use Sign out of RSI and clear data.",
+  );
+  String get rememberLocked =>
+      pick('读取中不能更改。', '讀取中不能變更。', "Can't be changed while reading.");
+  String get rememberReopens => pick(
+    '更改后网页会重新打开，需要重新登录一次。',
+    '變更後網頁會重新開啟，需要重新登入一次。',
+    'Changing it reopens the page; you sign in once more.',
   );
   String get account => pick('应用内 Handle', '應用程式內 Handle', 'App Handle');
   String get preview => pick('读取结果', '讀取結果', 'Reading results');
@@ -64,6 +107,37 @@ class HangarReaderCopy {
   String get previewLimit =>
       pick('此处最多展示 200 艘。', '此處最多展示 200 艘。', 'Showing up to 200 ships.');
   String status(String phase) => switch (phase) {
+    'clearing' => pick(
+      '正在退出并清除…',
+      '正在登出並清除…',
+      'Signing out and clearing data…',
+    ),
+    'cleared' => pick('已退出并清除', '已登出並清除', 'Signed out and data cleared'),
+    'forgotten' => pick(
+      '已清除 RSI 登录。下次读取需要重新登录。',
+      '已清除 RSI 登入。下次讀取需要重新登入。',
+      'RSI sign-in cleared. Sign in again next time you read.',
+    ),
+    'choice_failed' => pick(
+      '没能保存这个选择，请重试。',
+      '沒能儲存這個選擇，請重試。',
+      "This choice couldn't be saved. Try again.",
+    ),
+    'clear_busy' => pick(
+      '浏览器数据仍被占用或暂时无法访问，未能完成清除。请稍后重试。',
+      '瀏覽器資料仍被佔用或暫時無法存取，未能完成清除。請稍後重試。',
+      'Browser data is still in use or temporarily inaccessible. Clearing did not finish. Try again shortly.',
+    ),
+    'clear_unsafe' => pick(
+      '浏览器数据目录或其父目录是链接，为保护其他文件已停止清除。请检查目录后重试。',
+      '瀏覽器資料目錄或其父目錄是連結，為保護其他檔案已停止清除。請檢查目錄後重試。',
+      'The browser data folder or its parent is a link. Clearing stopped to protect other files. Check the folders and retry.',
+    ),
+    'clear_failed' => pick(
+      '无法完成浏览器数据清除，尚未确认退出。请重试；若仍失败，请检查目录访问权限。',
+      '無法完成瀏覽器資料清除，尚未確認登出。請重試；若仍失敗，請檢查目錄存取權限。',
+      'Browser data could not be fully cleared; sign-out is not confirmed. Retry, or check folder permissions if it keeps failing.',
+    ),
     'idle' => intro,
     'opening' => pick('正在打开 RSI 机库…', '正在開啟 RSI 機庫…', 'Opening RSI hangar…'),
     'ready' => instructions,

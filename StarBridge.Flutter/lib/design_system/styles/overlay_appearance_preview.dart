@@ -57,7 +57,11 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
     'Default': 'assets/overlay-appearances/Default.png',
     'NightShadow': 'assets/overlay-appearances/NightShadow.png',
     'Verdict': 'assets/overlay-appearances/Verdict.png',
+    // 0.7.3 visor: one still drawn by the shipping visor renderer
+    // (OverlayVisorTests.Catalog); it has no motion clips.
+    'Visor': 'assets/overlay-appearances/Visor.png',
   };
+  static const _stillOnly = {'Visor'};
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +70,8 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
     final asset = widget.previewableIds.contains(appearanceId)
         ? _assets[appearanceId]
         : null;
-    final hasMotion = asset != null && motionAllowed;
+    final hasMotion =
+        asset != null && motionAllowed && !_stillOnly.contains(appearanceId);
     final poster = widget.previewableIds.contains(appearanceId)
         ? widget.nativePoster
         : null;
@@ -128,7 +133,7 @@ class _OverlayAppearancePreviewState extends State<OverlayAppearancePreview>
                         ),
                       ),
                     ),
-                  if (asset != null)
+                  if (asset != null && !_stillOnly.contains(appearanceId))
                     Positioned(
                       left: 4,
                       bottom: 0,

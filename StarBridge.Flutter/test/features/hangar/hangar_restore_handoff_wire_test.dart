@@ -1,3 +1,7 @@
+import '../../_support/hangar_test_actions.dart';
+
+import 'package:starbridge_flutter/features/common/organization_holo_choice.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -180,18 +184,21 @@ void main() {
           expect(find.text('Cached Ship 0'), findsOneWidget);
           final original = tester.element(find.byType(LocalHangarPage));
           await tester.enterText(
-            find.byKey(const Key('local-hangar-search')),
+            find.byKey(const Key('local-hangar-search'), skipOffstage: false),
             'Ship',
           );
           await tester.tap(find.byKey(const Key('hangar-list')));
           await tester.pump();
-          final viewport = find.byType(CustomScrollView).first;
+          final viewport = find
+              .byType(CustomScrollView, skipOffstage: false)
+              .first;
           await tester.drag(viewport, const Offset(0, -300));
           await tester.pumpAndSettle();
           await tester.ensureVisible(
             find.byKey(const ValueKey('local-hangar-ship-ship-0')),
           );
-          await tester.tap(
+          await openHangarDetails(
+            tester,
             find.byKey(const ValueKey('local-hangar-ship-ship-0')),
           );
           await tester.pumpAndSettle();
@@ -210,7 +217,12 @@ void main() {
           expect(tester.element(find.byType(LocalHangarPage)), same(original));
           expect(
             tester
-                .widget<TextField>(find.byKey(const Key('local-hangar-search')))
+                .widget<TextField>(
+                  find.byKey(
+                    const Key('local-hangar-search'),
+                    skipOffstage: false,
+                  ),
+                )
                 .controller!
                 .text,
             'Ship',
@@ -277,12 +289,15 @@ void main() {
           expect(tester.element(find.byType(LocalHangarPage)), same(original));
           expect(
             find.descendant(
-              of: find.byKey(const ValueKey('local-hangar-ship-ship-0')),
-              matching: find.text('Fresh Ship 0'),
+              of: find.byKey(
+                const ValueKey('local-hangar-ship-ship-0'),
+                skipOffstage: false,
+              ),
+              matching: find.text('Fresh Ship 0', skipOffstage: false),
             ),
             findsOneWidget,
           );
-          expect(find.text('Cached Ship 0'), findsNothing);
+          expect(find.text('Cached Ship 0', skipOffstage: false), findsNothing);
           expect(
             tester.widget<CustomScrollView>(viewport).controller!.offset,
             position,
@@ -311,8 +326,9 @@ void main() {
           );
           Navigator.of(tester.element(find.byType(LocalHangarDetail))).pop();
           await tester.pumpAndSettle();
-          // Closing the inspector restores input focus and can reveal the search
-          // field. Navigation must preserve the actual position when leaving.
+          // Closing details returns to the stage. Return to the wall before scrolling.
+          await backToHangarWall(tester);
+          // Navigation must preserve the actual wall position when leaving.
           await tester.drag(viewport, const Offset(0, -240));
           await tester.pumpAndSettle();
           final leavingPosition = tester
@@ -345,10 +361,19 @@ void main() {
           );
           expect(
             tester
-                .widget<IconButton>(
-                  find.byKey(const Key('hangar-list'), skipOffstage: false),
+                .widget<OrganizationHoloChoice>(
+                  find.ancestor(
+                    of: find.byKey(
+                      const Key('hangar-list'),
+                      skipOffstage: false,
+                    ),
+                    matching: find.byType(
+                      OrganizationHoloChoice,
+                      skipOffstage: false,
+                    ),
+                  ),
                 )
-                .isSelected,
+                .selected,
             isTrue,
           );
           expect(requests.length, readCount);

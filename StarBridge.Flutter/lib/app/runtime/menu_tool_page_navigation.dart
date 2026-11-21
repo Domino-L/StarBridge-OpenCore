@@ -10,7 +10,20 @@ VoidCallback bindMenuToolPages(
   MenuWindowLifetime lifetime,
   ValueNotifier<OpenDestinationIntent?> navigation,
 ) {
+  final pages = lifetime.toolPages;
   void hudSettings() => navigation.value = OpenDestinationIntent('/overlay');
-  lifetime.toolPages.hudSettings.addListener(hudSettings);
-  return () => lifetime.toolPages.hudSettings.removeListener(hudSettings);
+  // The main fleet and organization pages, from "do this in the client".
+  void requested() {
+    final (route, _) = pages.requested.value ?? ('', 0);
+    if (route == '/fleet' || route == '/communities') {
+      navigation.value = OpenDestinationIntent(route);
+    }
+  }
+
+  pages.hudSettings.addListener(hudSettings);
+  pages.requested.addListener(requested);
+  return () {
+    pages.hudSettings.removeListener(hudSettings);
+    pages.requested.removeListener(requested);
+  };
 }

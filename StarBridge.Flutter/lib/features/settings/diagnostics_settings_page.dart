@@ -2,6 +2,7 @@ import '../../design_system/icons/standard_icon.dart';
 
 import 'package:flutter/material.dart';
 
+import '../../app/diagnostics/frame_pace_recorder.dart';
 import '../../app/localization/app_strings.dart';
 import '../../design_system/icons/starbridge_icon.dart';
 import '../../design_system/icons/icon_semantic.dart';
@@ -15,6 +16,7 @@ import 'application_support_module.dart';
 import 'application_support_page.dart';
 import 'diagnostics_maintenance_panel.dart';
 import 'flutter_installation_panel.dart';
+import 'frame_pace_panel.dart';
 import 'runtime_status_controller.dart';
 import 'runtime_status_dialog.dart';
 import 'local_event_clear.dart';
@@ -150,6 +152,10 @@ class _DiagnosticsSettingsPageState extends State<DiagnosticsSettingsPage> {
               ),
               SizedBox(height: tokens.space.sm),
               FlutterInstallationPanel(session: widget.session),
+              if (FramePaceScope.maybeOf(context) case final framePace?) ...[
+                SizedBox(height: tokens.space.sm),
+                FramePacePanel(recorder: framePace),
+              ],
             ],
           ),
         ),

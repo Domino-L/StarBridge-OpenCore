@@ -47,8 +47,11 @@
     <Resource Include="../StarBridge.Flutter/assets/brand/scm_market_crate.png" Condition="Exists('../StarBridge.Flutter/assets/brand/scm_market_crate.png')" Link="Assets/Brand/scm_market_crate.png" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/first-entry-earned.png" Condition="Exists('../StarBridge.Flutter/assets/achievements/first-entry-earned.png')" Link="Assets/Achievements/first-entry-earned.png" />
     <Content Include="../StarBridge.Flutter/assets/achievements/scm-holiday-*-512.webp" Link="Assets/Achievements/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../StarBridge.Flutter/assets/achievements/overlay/scm-daily-*-512.webp;../StarBridge.Flutter/assets/achievements/overlay/scm-event-*-512.webp" Link="Assets/Achievements/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/first-entry-locked.png" Condition="Exists('../StarBridge.Flutter/assets/achievements/first-entry-locked.png')" Link="Assets/Achievements/first-entry-locked.png" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/journey-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/contract-tsg-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
+    <Resource Include="../StarBridge.Flutter/assets/achievements/contract-first-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/home-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/collection-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />
     <Resource Include="../StarBridge.Flutter/assets/achievements/paths-*.png" Link="Assets/Achievements/%(Filename)%(Extension)" />

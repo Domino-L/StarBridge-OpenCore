@@ -38,6 +38,10 @@ internal static class ShipSpecificationApprovedMappingTests
             "explicit module selection wins over a conflicting old alias and remains isolated in cache");
         Check((await reader.ReadAsync("Argo Mole Carbon Edition", false, default)).PaintBaseModel == "MOLE",
             "cosmetic parameter origin remains explicit on a cache hit");
+        Check((await reader.ReadAsync("Argo Mole Carbon Edition", false, default)).ThumbnailUrl is null &&
+            (await reader.ReadAsync("Carrack w/C8X", false, default)).ThumbnailUrl is null &&
+            (await reader.ReadAsync("MOLE", false, default)).ThumbnailUrl == "https://img.flowcld.com/model.png",
+            "paint and bundle parameter aliases never borrow base artwork");
         Check(StarBridge.NativeBridge.BridgePayload.From(await reader.ReadAsync("Argo Mole Carbon Edition", false, default))
             .GetProperty("paintBaseModel").GetString() == "MOLE", "wire preserves cosmetic parameter provenance");
         Check((await reader.ReadAsync("MOLE", false, default)).PaintBaseModel is null,
@@ -132,6 +136,7 @@ internal static class ShipSpecificationApprovedMappingTests
                 var id = long.Parse(uri.Query.Split("id=")[1]);
                 var item = _items.Single(i => i.Id == id);
                 data = new { id, itemType = 1, itemNameEn = item.Name, keyWord = item.Runtime,
+                    thumbnailUrl = "https://img.flowcld.com/model.png",
                     extendedAttrs = new { mass = id, cargo = item.Cargo,
                         originalName = item.Runtime.StartsWith("VNCL_") && !WrongReplicaName ? "Esperia " + item.Runtime[5..] : item.Name.Replace("Esperia", "Vanduul"),
                         role = id == 54812 && WrongExplorerRole ? "Luxury Touring" : item.Role, career = "Exploration" } };

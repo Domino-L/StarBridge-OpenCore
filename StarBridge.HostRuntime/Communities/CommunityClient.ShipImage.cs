@@ -17,13 +17,13 @@ internal sealed partial class CommunityClient
         var version = Optional(body, "version", 64);
         if (offset % (192 * 1024) != 0 || offset > 0 && version is null || version is not null && !ShipHash(version)) throw Invalid();
         if (!_shipTargets.TryGetValue(shipRef, out var ship) || ship.Scope != scope || ship.Code != target.Code ||
-            ship.Expires <= DateTimeOffset.UtcNow) throw new AccountBridgeHostException("communities.refreshRequired");
+            ship.Expires <= _targetClock.GetUtcNow()) throw new AccountBridgeHostException("communities.refreshRequired");
         var root = await WorkspaceJson(bearer, $"/api/fleets/ships/image?code={Uri.EscapeDataString(target.Code)}&shipId={ship.Id}&offset={offset}"
             + (version is null ? "" : "&version=" + version), token, 280 * 1024);
         current(); token.ThrowIfCancellationRequested();
         if (Resolve(reference, scope).Code != target.Code || !_shipTargets.TryGetValue(shipRef, out var stillCurrent) ||
             stillCurrent.Id != ship.Id || stillCurrent.Code != ship.Code || stillCurrent.Scope != scope ||
-            stillCurrent.Expires <= DateTimeOffset.UtcNow) throw new AccountBridgeHostException("communities.refreshRequired");
+            stillCurrent.Expires <= _targetClock.GetUtcNow()) throw new AccountBridgeHostException("communities.refreshRequired");
         if (Text(root, "code", 256) != target.Code || Text(root, "shipId", 64) != ship.Id) throw Invalid();
         var result = ProjectImageChunk(root, reference, shipRef, offset, version);
         RenewTarget(reference, target, token);

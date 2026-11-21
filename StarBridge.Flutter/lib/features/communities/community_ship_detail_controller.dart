@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'communities_module.dart';
+import 'community_ships_locate.dart';
 import 'community_ships_port.dart';
 import 'community_ship_image_port.dart';
 import 'community_ship_report_port.dart';
@@ -10,12 +11,27 @@ import '../common/organization_ship_image_features.dart';
 
 /// Reauthorizes the selected page before presenting a shared instance's details.
 final class CommunityShipDetailController extends ChangeNotifier {
-  CommunityShipDetailController(this.port, this.page, this.shipRef) {
+  CommunityShipDetailController(
+    this.port,
+    CommunityShipsPage page,
+    String shipRef, {
+    this.onRelocated,
+  }) : _page = page,
+       _shipRef = shipRef {
     _subscription = port.invalidations.listen((_) => invalidate());
   }
   final CommunityShipsPort port;
-  final CommunityShipsPage page;
-  final String shipRef;
+
+  /// The page the ship was last read from; it moves when the ship had to be
+  /// found again on another page or revision.
+  CommunityShipsPage get page => _page;
+  String get shipRef => _shipRef;
+  CommunityShipsPage _page;
+  final String _shipRef;
+
+  /// The list the ship was picked from is out of date: the ship was found on
+  /// another page or revision. The owner may read it again.
+  final VoidCallback? onRelocated;
   late final StreamSubscription<void> _subscription;
   CommunitySharedShip? ship;
   CommunityShipImage? image;
@@ -74,37 +90,68 @@ final class CommunityShipDetailController extends ChangeNotifier {
     }
 
     try {
-      Future<CommunitySharedShip> readSelected() async {
+      Future<CommunitySharedShip> readSelected(
+        CommunityShipsPage from,
+        String reference,
+      ) async {
+        // The first page needs no pinned revision: a changed list answers with
+        // its new one instead of refusing (user report 2026-11-15).
+        final pinned = from.offset == 0 ? null : from.revision;
         final result = await port.readShips(
-          page.targetRef,
-          offset: page.offset,
-          revision: page.revision,
-          query: page.query,
+          from.targetRef,
+          offset: from.offset,
+          revision: pinned,
+          query: from.query,
         );
         current();
-        if (result.targetRef != page.targetRef ||
-            result.offset != page.offset ||
-            result.query != page.query ||
-            result.revision != page.revision) {
+        if (result.targetRef != from.targetRef ||
+            result.offset != from.offset ||
+            result.query != from.query ||
+            pinned != null && result.revision != pinned) {
           throw const CommunityFailure('dataInvalid');
         }
         final selected = result.ships
-            .where((s) => s.shipRef == shipRef)
+            .where((s) => s.shipRef == reference)
             .firstOrNull;
         if (selected == null) throw const CommunityFailure('shipsChanged');
         _imageFeatures = result.imageFeatures;
         return selected;
       }
 
+      // The list's revision may have moved (owners' presence still moves the
+      // Relay's until r50), or the ship moved to another page: read the list
+      // again once from the top and read the ship on the page that holds it.
+      // Only a second failure says the library changed.
+      Future<CommunitySharedShip> readOrRelocate() async {
+        try {
+          return await readSelected(_page, _shipRef);
+        } on CommunityFailure catch (e) {
+          if (e.code != 'shipsChanged') rethrow;
+          final found = await relocateCommunityShip(
+            port,
+            _page,
+            _shipRef,
+            checkCurrent: current,
+          );
+          if (found == null) rethrow;
+          final selected = await readSelected(found, _shipRef);
+          _page = found;
+          onRelocated?.call();
+          return selected;
+        }
+      }
+
       // Legacy community metadata does not opt into custom-image display.
       // Only the official negotiated page plus an actual image port can do so.
       if (fromPage) {
-        final held = page.ships.where((s) => s.shipRef == shipRef).firstOrNull;
+        final held = _page.ships
+            .where((s) => s.shipRef == _shipRef)
+            .firstOrNull;
         if (held == null) throw const CommunityFailure('shipsChanged');
-        _imageFeatures = page.imageFeatures;
+        _imageFeatures = _page.imageFeatures;
         ship = held;
       } else {
-        ship = await readSelected();
+        ship = await readOrRelocate();
       }
       if (!canReadImage) {
         image = null;
@@ -117,8 +164,8 @@ final class CommunityShipDetailController extends ChangeNotifier {
         try {
           final loaded = await assembleCommunityShipImage(
             port as CommunityShipImagePort,
-            page.targetRef,
-            shipRef,
+            _page.targetRef,
+            _shipRef,
             checkCurrent: current,
             expectedVersion: ship!.imageVersion,
           );

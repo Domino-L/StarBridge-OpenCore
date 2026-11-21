@@ -51,6 +51,7 @@ public static class SelectedLocalProfileImport
             FavoriteShipIds = selection.Modules.Contains("favorite-ships", StringComparer.Ordinal) &&
                 current.FavoriteShipIds is null ? [] : current.FavoriteShipIds
         };
+        result = result with { MainRole = LocalPersonalProfileStore.KeptMainRole(result.MainRole, result.PlayStyle) };
         LocalPersonalProfileStore.Validate(result);
         return result;
     }

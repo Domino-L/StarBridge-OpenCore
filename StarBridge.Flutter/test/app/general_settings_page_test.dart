@@ -131,6 +131,19 @@ void main() {
     await tester.pump();
     expect(preferences.projection.value.effective.holidayAppearance, isFalse);
 
+    // 性能模式默认关（用户 11-10），打开后立刻生效。
+    expect(preferences.projection.value.effective.performanceMode, isFalse);
+    expect(find.text('性能模式'), findsOneWidget);
+    final performance = find.byKey(const Key('general-performance-mode'));
+    await tester.ensureVisible(performance);
+    await tester.pumpAndSettle();
+    await tester.tap(performance);
+    await tester.pump();
+    expect(preferences.projection.value.effective.performanceMode, isTrue);
+
+    // 读取自己的血量在"屏幕读取"分类里（screen_reading_settings_page_test），通用设置里不再出现。
+    expect(find.byKey(const Key('general-read-own-health')), findsNothing);
+
     final launch = find.byKey(const Key('general-launch-at-startup'));
     await tester.ensureVisible(launch);
     await tester.pumpAndSettle();

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show listEquals;
+
 /// Local presentation only. Tool visibility never grants or revokes authority.
 final class MenuToolbarPreferences {
   const MenuToolbarPreferences({
@@ -17,7 +19,13 @@ final class MenuToolbarPreferences {
     'image',
     'browser',
     'execHangar',
+    'marketplace',
+    'officialFleet',
   ];
+
+  /// Tools added after a saved order was written, oldest first; the missing
+  /// ones are always the newest, and they join at its end.
+  static const _addedLater = ['execHangar', 'marketplace', 'officialFleet'];
   final List<String> order, hidden;
   final String density, labels;
   final bool showUnreadBadges;
@@ -47,9 +55,15 @@ final class MenuToolbarPreferences {
       return null;
     }
     final order = raw['order'] as List, hidden = raw['hidden'] as List;
-    final legacy =
-        order.length == ids.length - 1 && !order.contains('execHangar');
-    if ((!legacy && order.length != ids.length) ||
+    final added = [
+      for (final id in _addedLater)
+        if (!order.contains(id)) id,
+    ];
+    if (order.length + added.length != ids.length ||
+        !listEquals(
+          added,
+          _addedLater.sublist(_addedLater.length - added.length),
+        ) ||
         order.toSet().length != order.length ||
         order.any((id) => !ids.contains(id)) ||
         hidden.length >= ids.length ||
@@ -58,7 +72,7 @@ final class MenuToolbarPreferences {
       return null;
     }
     return MenuToolbarPreferences(
-      order: List<String>.unmodifiable([...order, if (legacy) 'execHangar']),
+      order: List<String>.unmodifiable([...order, ...added]),
       hidden: List<String>.unmodifiable(hidden),
       density: raw['density'] as String,
       labels: raw['labels'] as String,

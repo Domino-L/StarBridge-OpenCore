@@ -24,6 +24,7 @@ import 'community_roles_port.dart';
 import 'community_roles_copy.dart';
 import 'community_editor_surface.dart';
 import '../common/social_read_activity.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 class CommunityRolesDialog extends StatefulWidget {
   const CommunityRolesDialog({
@@ -238,7 +239,7 @@ class CommunityRolesDialogState extends State<CommunityRolesDialog>
                 role.name,
                 style: Theme.of(context).textTheme.bodyMedium,
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
               ),
               subtitle: Text(

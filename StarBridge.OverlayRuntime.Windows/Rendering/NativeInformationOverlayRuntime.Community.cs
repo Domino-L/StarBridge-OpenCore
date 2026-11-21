@@ -66,13 +66,18 @@ public sealed partial class NativeInformationOverlayRuntime
         {
             var parts = chatContents.Select(content => Project(OverlaySourceModule.Chat, content)).ToArray();
             var zh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-            const string channel = "multi-chat";
+            const string channel = OverlayViewModel.MultiChatChannel;
+            // 11-13 user (请你定 1): rooms only read "room chat", organizations only "organization chat"; only a
+            // mix of both keeps the plain "chat"
+            var rooms = chatContents.Count(content => content.Source.Mode == OverlaySourceMode.Room);
+            var mixed = rooms > 0 && rooms < chatContents.Count;
             chat = chat with
             {
                 Scene = localDisplay is not null
                     ? new([], false, OverlaySceneContext.Local(OverlayScenePreference.Fleet))
-                    : new([], parts.Any(p => p.Available), new(OverlayScenePreference.Auto, OverlaySceneKind.Community,
-                        zh ? "聊天" : "CHAT", false, ChatChannelId: channel, ChatChannelTitle: zh ? "聊天" : "CHAT")),
+                    : new([], parts.Any(p => p.Available), new(OverlayScenePreference.Auto,
+                        rooms > 0 && !mixed ? OverlaySceneKind.PartyRoom : OverlaySceneKind.Community,
+                        zh ? "聊天" : "CHAT", false, ChatChannelId: channel, ChatChannelTitle: mixed ? zh ? "聊天" : "CHAT" : null)),
                 Chat = parts.SelectMany(p => p.Chat).Select(message => message with { ChannelId = channel }).ToArray(),
                 // Stable aggregate identity; individual membership incarnations
                 // govern queued messages and watermarks, not the whole module.
@@ -139,7 +144,7 @@ public sealed partial class NativeInformationOverlayRuntime
             {
                 var kind = source.Kind == InformationOverlaySourceKind.Community ? OverlaySceneKind.Community : OverlaySceneKind.PartyRoom;
                 var zhSource = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
-                var sourceTitle = kind == OverlaySceneKind.Community ? zhSource ? "组织概况" : "ORGANIZATION OVERVIEW" : zhSource ? "房间概况" : "PARTY OVERVIEW";
+                var sourceTitle = kind == OverlaySceneKind.Community ? zhSource ? "组织概况" : "ORGANIZATION OVERVIEW" : zhSource ? "房间概况" : "ROOM OVERVIEW";
                 var unavailable = kind == OverlaySceneKind.Community ? zhSource ? "组织信息暂不可用" : "Organization information unavailable" : zhSource ? "房间信息暂不可用" : "Room information unavailable";
                 return (new([], false, new(preference, kind, "", true)), BuildCommandState(language) with { NoticeTitle = sourceTitle, NoticeText = unavailable }, []);
             }
@@ -173,6 +178,7 @@ public sealed partial class NativeInformationOverlayRuntime
                 ChatChannelId: "organization:" + community.Code, ChatChannelTitle: community.Name)
             {
                 SharedFieldsOnly = community.SharedFieldsOnly,
+                RealtimeUnknown = community.Members.Count > 0 && community.Members.All(member => member.Presence == "Unknown"),
                 LocalOwnPlace = community.SharedFieldsOnly && localPresence == StarBridge.Core.Presence.PlayerPresenceKind.InGame &&
                     localSession?.Location.State is "confirmed" or "likely" or "possible"
                     ? (zh ? localSession.Location.ChineseName : localSession.Location.EnglishName) ?? localSession.Location.EnglishName

@@ -24,6 +24,8 @@ class _SummaryState extends State<TradeProfileSummary> {
   String? error;
   bool loading = true;
   late final revision = widget.market.contextRevision;
+  // A read started before a confirmed save never overwrites it.
+  int _sequence = 0;
   @override
   void initState() {
     super.initState();
@@ -37,10 +39,15 @@ class _SummaryState extends State<TradeProfileSummary> {
       loading = true;
       error = null;
     });
+    final sequence = ++_sequence;
     try {
       final value = await port.tradeProfile();
-      if (mounted && revision == widget.market.contextRevision) {
+      if (mounted && revision == widget.market.contextRevision &&
+          sequence == _sequence) {
         setState(() => profile = value);
+        // One source: the hall banner and drawers read the same profile
+        // (CX-HALL-FIX3-REVIEW P2).
+        widget.market.applyTradeProfile(value);
       }
     } catch (e) {
       if (mounted && revision == widget.market.contextRevision) {
@@ -62,10 +69,11 @@ class _SummaryState extends State<TradeProfileSummary> {
       return const SizedBox.shrink();
     }
     String text(String key) => tradeProfileText(context, key);
-    final row = profile;
+    final row = profile ?? c.tradeProfile;
     Future<void> edit() async {
       final result = await editTradeProfile(context, c);
       if (mounted && revision == c.contextRevision && result != null) {
+        _sequence++;
         setState(() => profile = result);
       }
     }
@@ -83,12 +91,13 @@ class _SummaryState extends State<TradeProfileSummary> {
             const SizedBox(width: 80, child: LinearProgressIndicator()),
           if (row != null) ...[
             Text(marketTradeTime(context, row)),
-            Text('${row['userMobile'] ?? ''}'),
+            if (!c.profileEditedInClient)
+              Text('${row['userMobile'] ?? ''}'),
             Text('${text('limit')}: ${row['orderLimit'] ?? '—'}'),
           ],
           if (error != null)
             Text(tradeProfileErrorText(context, error!, reading: true)),
-          marketTextAction(
+          if (!c.profileEditedInClient) marketTextAction(
             key: const Key('market-trade-profile-summary-edit'),
             onPressed: loading ? null : edit,
             child: Text(text('edit')),
@@ -159,7 +168,7 @@ class _SummaryState extends State<TradeProfileSummary> {
                   ),
                 ),
               ),
-              marketTextAction(
+              if (!widget.market.profileEditedInClient) marketTextAction(
                 key: const Key('market-trade-profile-summary-edit'),
                 onPressed: loading ? null : edit,
                 // Short on the card; readers still hear the full action.
@@ -174,7 +183,8 @@ class _SummaryState extends State<TradeProfileSummary> {
           if (loading) const LinearProgressIndicator(),
           if (row != null) ...[
             pair(text('hours'), marketTradeTime(context, row)),
-            pair(text('contact'), '${row['userMobile'] ?? '—'}'),
+            if (!widget.market.profileEditedInClient)
+              pair(text('contact'), '${row['userMobile'] ?? '—'}'),
             pair(text('limit'), '${row['orderLimit'] ?? '—'}', mono: true),
           ],
           if (error != null) ...[

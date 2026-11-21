@@ -34,7 +34,7 @@ public sealed record GameplayHistoryProgress(string Phase, int ProcessedFiles, i
 /// gameplay.history_empty (no attributable duration), gameplay.history_unavailable
 /// (filesystem unavailable), gameplay.history_limit (regex timeout only).
 /// </remarks>
-public static class GameplayHistoryScanner
+public static partial class GameplayHistoryScanner
 {
     private static readonly TimeSpan MaximumSessionLength = TimeSpan.FromHours(24);
     private static readonly UTF8Encoding Utf8 = new(false, false);
@@ -79,33 +79,9 @@ public static class GameplayHistoryScanner
 
         try
         {
-            using var liveGuard = PinnedDirectories.Open(Path.GetDirectoryName(path)!, budget.Check);
-            CheckTree(path, directory: false, budget);
-            using (OpenChecked(path, directory: false, readContent: false)) { }
-            var backups = Path.Combine(Path.GetDirectoryName(path)!, "logbackups");
-            try { CheckTree(backups, directory: true, budget); }
-            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
-            { throw Error("empty"); }
-            using var backupGuard = PinnedDirectories.Open(backups, budget.Check);
-
-            var files = new List<(string Path, long Length)>();
-            long totalBytes = 0;
-            budget.Report(new("discovering", 0, 0, 0, 0));
-            var options = new EnumerationOptions
-            {
-                RecurseSubdirectories = false, IgnoreInaccessible = false,
-                AttributesToSkip = 0, MatchType = MatchType.Simple,
-                MatchCasing = MatchCasing.CaseInsensitive, ReturnSpecialDirectories = false
-            };
-            foreach (var file in Directory.EnumerateFiles(backups, "*.log", options))
-            {
-                budget.Check();
-                CheckTree(file, directory: false, budget);
-                var length = new FileInfo(file).Length;
-                totalBytes = checked(totalBytes + length);
-                files.Add((file, length));
-                budget.Report(new("discovering", 0, files.Count, 0, totalBytes));
-            }
+            using var archives = DiscoverArchives(path, budget);
+            var files = archives.Files;
+            var totalBytes = archives.TotalBytes;
 
             var block = new byte[16 * 1024];
             var line = new byte[64 * 1024];
@@ -165,6 +141,14 @@ public static class GameplayHistoryScanner
     private static Interval? ReadInterval(string path, long expectedLength, string handle,
         DateTimeOffset cutoff, DateTimeOffset now, ScanBudget budget, byte[] block, ref byte[] line)
     {
+        var state = new Session(handle, cutoff, now);
+        ReadArchiveLines(path, expectedLength, budget, block, ref line, state.Observe);
+        return state.Finish();
+    }
+
+    private static void ReadArchiveLines(string path, long expectedLength, ScanBudget budget,
+        byte[] block, ref byte[] line, Action<string> consume)
+    {
         CheckTree(path, directory: false, budget);
         using var fileHandle = OpenChecked(path, directory: false, readContent: true);
         using var stream = new FileStream(fileHandle, FileAccess.Read, block.Length);
@@ -172,7 +156,6 @@ public static class GameplayHistoryScanner
         var length = stream.Length;
         if (length != expectedLength) throw new IOException();
 
-        var state = new Session(handle, cutoff, now);
         var used = 0;
         var firstLine = true;
         var afterCr = false;
@@ -192,7 +175,7 @@ public static class GameplayHistoryScanner
                 if (value is (byte)'\r' or (byte)'\n')
                 {
                     budget.Check();
-                    ConsumeLine(state, line.AsSpan(0, used), firstLine);
+                    ConsumeLine(consume, line.AsSpan(0, used), firstLine);
                     firstLine = false;
                     used = 0;
                     afterCr = value == (byte)'\r';
@@ -209,28 +192,25 @@ public static class GameplayHistoryScanner
         if (used > 0)
         {
             budget.Check();
-            ConsumeLine(state, line.AsSpan(0, used), firstLine);
+            ConsumeLine(consume, line.AsSpan(0, used), firstLine);
         }
         budget.Check();
         // Appends after the initial length are intentionally not followed.
         if (stream.Length < length) throw new IOException();
         CheckTree(path, directory: false, budget);
-        return state.Finish();
     }
 
-    private static void ConsumeLine(Session state, ReadOnlySpan<byte> bytes, bool firstLine)
+    private static void ConsumeLine(Action<string> consume, ReadOnlySpan<byte> bytes, bool firstLine)
     {
         if (firstLine && bytes.StartsWith("\uFEFF"u8)) bytes = bytes[3..];
-        state.Observe(Utf8.GetString(bytes));
+        consume(Utf8.GetString(bytes));
     }
 
     private sealed class Session(string handle, DateTimeOffset cutoff, DateTimeOffset now)
     {
         private DateTimeOffset? _first;
         private DateTimeOffset? _last;
-        private string? _identity;
-        private string? _geid;
-        private bool _matchedBeforeCutoff;
+        private readonly ArchiveIdentity _identity = new(handle);
         private bool _invalid;
         private bool _cleanExit;
 
@@ -248,19 +228,7 @@ public static class GameplayHistoryScanner
                 _first ??= timestamp;
                 _last = timestamp;
             }
-            foreach (Match match in Identity.Matches(line))
-            {
-                var player = match.Groups["player"].Value;
-                var geid = match.Groups["playerId"].Value;
-                if ((_identity is not null && !player.Equals(_identity, StringComparison.OrdinalIgnoreCase)) ||
-                    (_geid is not null && geid.Length > 0 && geid != _geid))
-                    _invalid = true;
-                _identity ??= player;
-                if (geid.Length > 0) _geid ??= geid;
-                if (player.Equals(handle, StringComparison.OrdinalIgnoreCase) &&
-                    stamp is { } observed && observed <= cutoff)
-                    _matchedBeforeCutoff = true;
-            }
+            _identity.Observe(line, stamp, cutoff);
             if (stamp is { } quitAt && quitAt <= cutoff &&
                 line.Contains("<SystemQuit>", StringComparison.OrdinalIgnoreCase) &&
                 line.Contains("CSystem::Quit", StringComparison.OrdinalIgnoreCase))
@@ -269,7 +237,7 @@ public static class GameplayHistoryScanner
 
         internal Interval? Finish()
         {
-            if (_invalid || !_matchedBeforeCutoff || _first is not { } first || _last is not { } last ||
+            if (_invalid || !_identity.Valid || _first is not { } first || _last is not { } last ||
                 last <= first || last - first > MaximumSessionLength)
                 return null;
             var end = last > cutoff ? cutoff : last;

@@ -33,6 +33,12 @@ public sealed partial class NativeInformationOverlayRuntime :
 
     private readonly Func<GameLogSessionSnapshot> _sessionProvider;
     private readonly IInformationOverlayLocalSource? _localSource;
+    /// <summary>The local player's ship as the game log identifies it (confirmed, likely or possible), or null.</summary>
+    internal static string? CurrentShip(GameLogSessionSnapshot? session) =>
+        session?.Ship is { State: "confirmed" or "likely" or "possible" } ship
+            ? ship.Key ?? ship.EnglishName
+            : null;
+
     private InformationOverlayLocalSourceFrame? ReadLocalSource()
     {
         try { return _localSource?.Capture(); }
@@ -252,10 +258,11 @@ public sealed partial class NativeInformationOverlayRuntime :
         UpdateFollowGameState(); RevokeReminderPreview(); SyncDirectUnread();
         if (_window is { IsVisible: true })
         {
+            OverlayVisorRefreshCounts.Forced();
             RefreshWindow(force: true);
         }
 
-        var resolution = OverlaySkinCatalog.Resolve(
+        var resolution = OverlaySkinCatalog.ResolveForDrawing(
             workspace.Settings,
             SafeReadEntitlements());
         _snapshot = _snapshot with
@@ -302,13 +309,14 @@ public sealed partial class NativeInformationOverlayRuntime :
         }
         else if (_window is { IsVisible: true })
         {
+            OverlayVisorRefreshCounts.Forced();
             RefreshWindow(force: true);
             return SetHealthySnapshot("open", isVisible: true);
         }
 
         if (_openingCancellation is not null) return _snapshot;
         var entitlements = SafeReadEntitlements();
-        var resolution = OverlaySkinCatalog.Resolve(workspace.Settings, entitlements);
+        var resolution = OverlaySkinCatalog.ResolveForDrawing(workspace.Settings, entitlements);
         var settings = OverlayStartupTransitionPolicy.ResolveForOpen(
             resolution.Settings,
             StarCitizenProcessProbe.IsForeground());
@@ -330,6 +338,8 @@ public sealed partial class NativeInformationOverlayRuntime :
         if (!workspace.UsesModuleSources && prepared && sourceMode == "community" && community is null)
             return _snapshot = FailedSnapshot(workspace, "overlay.runtime_unavailable", retryable: true);
         var localSession = SafeReadSession();
+        // the palette of the current ship, when the user asked for it (it was only ever done in the old main window)
+        settings = OverlaySkinCatalog.WithShipTheme(settings, CurrentShip(localSession));
         var localPresence = ReadLocalDisplayPresence();
         // Opening a new window starts the sync window for sources re-read after a lapse.
         StartModuleSync(DateTimeOffset.UtcNow);
@@ -355,6 +365,9 @@ public sealed partial class NativeInformationOverlayRuntime :
             OverlayStartupTransitionContext.ForLanguage(workspace.Language),
             content.Scene.Context, targetDpiScale, modules);
         overlay.Closed += OverlayClosed;
+        // the local player's health, if a reader has reported one (it survives closing and opening the overlay)
+        var vitals = Volatile.Read(ref _localVitals);
+        overlay.SetLocalVitals(vitals.Vitals, vitals.Health);
         _window = overlay;
         PrepareInstalledAppearanceWindow(overlay);
         overlay.SetMenuAbove(_menuWindow);
@@ -491,8 +504,9 @@ public sealed partial class NativeInformationOverlayRuntime :
         var localPresence = ReadLocalDisplayPresence();
         _workspace = _workspace with { Session = session };
         var entitlements = SafeReadEntitlements();
-        var resolution = OverlaySkinCatalog.Resolve(_workspace.Settings, entitlements);
-        var settings = resolution.Settings;
+        var resolution = OverlaySkinCatalog.ResolveForDrawing(_workspace.Settings, entitlements);
+        // a ship change arrives as a new session, which redraws (Equals(_lastRenderedSession, session) below)
+        var settings = OverlaySkinCatalog.WithShipTheme(resolution.Settings, CurrentShip(session));
         var bounds = ResolveTargetSurfaceBounds(out var targetDpiScale);
         var rosterPreferences = SafeReadRosterPreferences();
         var rosterSettings = OverlayRosterSelectionSettings.FromHostPreferences(rosterPreferences);
@@ -556,7 +570,8 @@ public sealed partial class NativeInformationOverlayRuntime :
         if (modules is not null) ModulesPresented?.Invoke(modules, window.ObserveModules());
     }
 
-    private void EvaluateGameWindowRules(bool initialSync = false)
+    // fromTimer: called by the game-window timer (diagnostics only: refresh.timer vs refresh.sync)
+    private void EvaluateGameWindowRules(bool initialSync = false, bool fromTimer = false)
     {
         SampleOverlayUsage(); SyncNoticeSafety(); if (_livePreviewSurface is not null) { ValidateLivePreviewScope(); return; }
         if (ValidateMenuInformationLayer()) return;
@@ -596,6 +611,9 @@ public sealed partial class NativeInformationOverlayRuntime :
 
         if (_window is { IsVisible: true })
         {
+            // 11-15 diagnostics: the game-window timer (750 ms) rebuilds the members scene each time while the HUD is up;
+            // a sync takes the same path (review CX-HUD-RINGFLICKER-073-R3 P2)
+            if (fromTimer) OverlayVisorRefreshCounts.Timer(); else OverlayVisorRefreshCounts.Sync();
             RefreshWindow();
         }
         else if (FinishPreparedOpenIfReady()) return;
@@ -706,6 +724,28 @@ public sealed partial class NativeInformationOverlayRuntime :
     }
 
     public bool IsVisible => !_disposed && Volatile.Read(ref _snapshot).IsVisible;
+
+    private sealed record LocalVitals(OverlayVisorVitals Vitals, float Health);
+    private LocalVitals _localVitals = new(OverlayVisorVitals.Unknown, 0);
+
+    /// <summary>
+    /// The local player's own health for the visor's own row (user, 11-10: "连自己的血量一起做"; never shared): 0..1 while
+    /// alive; <see cref="OverlayVisorVitals.Unknown"/> when there is no fresh reading. Any thread; only a change redraws.
+    /// </summary>
+    internal void ReportLocalVitals(OverlayVisorVitals vitals, float health)
+    {
+        var next = new LocalVitals(vitals, vitals == OverlayVisorVitals.Alive ? Math.Clamp(float.IsFinite(health) ? health : 0, 0, 1) : 0);
+        if (Volatile.Read(ref _localVitals) == next) return;
+        Volatile.Write(ref _localVitals, next);
+        var dispatcher = _dispatcher;
+        if (_disposed || dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(() =>
+        {
+            if (_disposed) return;
+            var latest = Volatile.Read(ref _localVitals);
+            _window?.SetLocalVitals(latest.Vitals, latest.Health);
+        });
+    }
     public bool HasDisplayDemand => !_disposed && Volatile.Read(ref _snapshot).WindowState is "open" or "suppressed";
     public InformationOverlayModuleDemand? ModuleDemand => Volatile.Read(ref _moduleDemand);
 
@@ -721,7 +761,7 @@ public sealed partial class NativeInformationOverlayRuntime :
                 Interlocked.Exchange(ref _contentRefreshQueued, 0);
                 if (!_disposed && !FinishPreparedOpenIfReady() && HasDisplayDemand)
                 {
-                    if (!ValidateMenuInformationLayer()) RefreshWindow();
+                    if (!ValidateMenuInformationLayer()) { OverlayVisorRefreshCounts.Push(); RefreshWindow(); }
                 }
             }, DispatcherPriority.DataBind);
         }
@@ -826,7 +866,7 @@ public sealed partial class NativeInformationOverlayRuntime :
                     try
                     {
                         RetryGlobalHotkeyRegistration();
-                        EvaluateGameWindowRules();
+                        EvaluateGameWindowRules(fromTimer: true);
                         ObserveInstalledAppearanceRuntime();
                     }
                     catch (Exception exception)
@@ -928,7 +968,7 @@ public sealed partial class NativeInformationOverlayRuntime :
     private InformationOverlayRuntimeSnapshot SetHealthySnapshot(string state, bool isVisible)
     {
         var workspace = _workspace;
-        var resolution = OverlaySkinCatalog.Resolve(
+        var resolution = OverlaySkinCatalog.ResolveForDrawing(
             workspace?.Settings ?? InformationOverlayDefaults.DefaultSettings,
             SafeReadEntitlements());
         _snapshot = new InformationOverlayRuntimeSnapshot(

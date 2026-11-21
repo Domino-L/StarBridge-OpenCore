@@ -22,6 +22,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
     // One receipt per active channel; the app-run record of shown announcements
     // (hashes only; no text survives a permission clear) is checked as well.
     // Empty/transient snapshots do not create a new notice.
+    /// <summary>The chat channel of chat picked from several sources (NativeInformationOverlayRuntime.ProjectModules).</summary>
+    internal const string MultiChatChannel = "multi-chat";
     private string? _communityNoticeChannel;
     private string? _communityNoticeReceipt;
     private OverlayAppearanceActivity _noticeAppearanceActivity;
@@ -42,7 +44,12 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
     private readonly OverlayRosterRotationCursor _rosterRotationCursor = new();
     private readonly DispatcherTimer _eventNotificationTimer = new(DispatcherPriority.Render) { Interval = EventNotificationIdleInterval };
     private readonly Queue<PendingOverlayEventNotification> _pendingEventNotifications = new();
+    // Visor overlay: teammate changes (server, ship, place) go through flood control.
+    private readonly OverlayMemberChangeFlood _memberChangeFlood = new();
+    private bool _memberChangeFloodEnabled;
     private const int MaximumPendingEventNotifications = 128;
+    // where each member was when an arrival they were seen starting began waiting, and when (11-13; review R3)
+    private readonly Dictionary<string, (string? Before, DateTimeOffset Since)> _locationBeforeArrival = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan PendingEventLifetime = TimeSpan.FromMinutes(2);
     private bool _showEventNotifications = true;
     private OverlayEventNotificationTypes _enabledEventTypes = OverlayEventNotificationTypes.All;
@@ -332,6 +339,14 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         get => _overviewFacts;
         private set => SetProperty(ref _overviewFacts, value);
     }
+
+    /// <summary>Every member's realtime state is unknown (the read went stale); the visor says "实时状态未知" too.</summary>
+    internal bool RealtimeStatusUnknown
+    {
+        get => _realtimeStatusUnknown;
+        private set => SetProperty(ref _realtimeStatusUnknown, value);
+    }
+    private bool _realtimeStatusUnknown;
 
     public IReadOnlyList<OverlayOverviewLocationCount> OverviewVisibleLocations
     {
@@ -811,6 +826,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                 _gameEventSnapshotInitialized = false;
                 _gameEventSnapshotSceneKind = null;
                 _gameEventPlayerStates.Clear();
+                _memberChangeFlood.Reset();
                 _gameEventFleetState = OverlayGameEventFleetState.Empty;
                 _lastGameEventLocalShard = "";
             }
@@ -960,7 +976,10 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                 { FleetNoticeTitle = ""; FleetNotice = ""; _noticeSecondsRemaining = 0; }
             }
             _lastCommandNoticeSignature = nextNoticeSignature;
-            if (!string.IsNullOrWhiteSpace(nextNoticeText) && (!communityNotice || validCommunityNotice))
+            // 0.7.3 (user): an ordinary announcement is a reminder card only; the overlay top keeps
+            // rallies and live reminders. Urgent announcements will return here once the service
+            // marks them; nothing is guessed to be urgent.
+            if (OverlayShowsAnnouncements && !string.IsNullOrWhiteSpace(nextNoticeText) && (!communityNotice || validCommunityNotice))
             {
                 var receipt = communityNotice ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                     System.Text.Encoding.UTF8.GetBytes(nextNoticeSignature))) : null;
@@ -973,17 +992,31 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         }
 
         SquadsTitle = overviewContext.Kind == OverlaySceneKind.PartyRoom
-            ? zh ? "房间概况" : "PARTY OVERVIEW"
+            ? zh ? "房间概况" : "ROOM OVERVIEW"
             : overviewContext.Kind == OverlaySceneKind.Community
             ? zh ? "组织概况" : "ORGANIZATION OVERVIEW"
             : zh ? "舰队总览" : "FLEET OVERVIEW";
-        MembersTitle = memberContext.Kind == OverlaySceneKind.PartyRoom
-            ? zh ? "房间成员" : "PARTY MEMBERS"
-            : memberContext.Kind == OverlaySceneKind.Community
-            ? zh ? "组织成员" : "ORGANIZATION MEMBERS"
-            : zh ? "成员状态" : "FLEET MEMBERS";
+        // the visor shows this title: Traditional for zh-TW too (11-12 "三语都要对上")
+        var tw = language.Contains("TW", StringComparison.OrdinalIgnoreCase) || language.Contains("Hant", StringComparison.OrdinalIgnoreCase);
+        MembersTitle = MembersSourceTitle(memberContext, zh, tw);
         HotkeyToggleLabel = zh ? "热键切换" : "HOTKEY TOGGLE";
         OnChanged(nameof(NotificationVisibility));
+    }
+
+    /// <summary>
+    /// The members title names the source (11-13 user, B: "成员模块也该显示当前信息来源"): the organization's name, "房间："
+    /// and the room's name, or plain "成员" without a source. A long name scrolls on the visor (OverlayVisorDraw.Team).
+    /// </summary>
+    internal static string MembersSourceTitle(OverlaySceneContext context, bool zh, bool traditional)
+    {
+        string T(string simplified, string trad, string english) => !zh ? english : traditional ? trad : simplified;
+        if (context.Kind == OverlaySceneKind.PartyRoom)
+            return string.IsNullOrWhiteSpace(context.RoomTitle)
+                ? T("房间成员", "房間成員", "ROOM MEMBERS")
+                : T("房间：", "房間：", "ROOM: ") + context.RoomTitle.Trim();
+        if (context.Kind == OverlaySceneKind.Community && !string.IsNullOrWhiteSpace(context.DisplayName))
+            return context.DisplayName.Trim();
+        return T("成员", "成員", "MEMBERS");
     }
 
     private void RefreshMembersFromAuthorizedRoster()
@@ -1034,7 +1067,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                 Key = key,
                 Presence = player.RealtimeStateUnknown ? null : player.SharedPresence,
                 Group = index < projection.Groups.Count ? projection.Groups[index] : null,
-                CueStartedAtUtc = _memberPaging.CueStartedAt(key, now)
+                CueStartedAtUtc = _memberPaging.CueStartedAt(key, now),
+                IsSelf = player.IsSelf,
             });
         }
 
@@ -1104,6 +1138,9 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
     }
 
     private Guid? _liveCommunicationEvent;
+
+    /// <summary>A live reminder (room invite / join request) holds the notice slot right now.</summary>
+    internal bool LiveReminderActive => _liveCommunicationEvent is not null;
 
     internal bool TryShowLiveCommunicationEvent(Guid id, string title, string detail, int minimumSeconds = 0)
     {
@@ -1198,11 +1235,16 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         _chatDurationSeconds = OverlayDisplaySettings.NormalizeChatDuration(settings.ChatDurationSeconds);
         _chatSettings = settings;
         _chatZh = zh;
+        // the visor names it chat in the overlay's language (11-12: "公告/通讯事件也该统一说法为当前实际")
+        var traditional = _rosterLanguage.Contains("TW", StringComparison.OrdinalIgnoreCase) ||
+                          _rosterLanguage.Contains("Hant", StringComparison.OrdinalIgnoreCase);
+        // 11-13 user (请你定 1): always "organization chat" or "room chat", never the organization's own
+        // name; only chat picked from organizations and rooms together keeps the plain "chat"
         ChatTitle = sceneContext.Kind == OverlaySceneKind.PartyRoom
-            ? zh ? "房间通讯" : "PARTY COMMS"
-            : string.IsNullOrWhiteSpace(sceneContext.ChatChannelTitle)
-                ? zh ? "组织通讯" : "ORGANIZATION COMMS"
-                : sceneContext.ChatChannelTitle;
+            ? zh ? traditional ? "房間聊天" : "房间聊天" : "ROOM CHAT"
+            : sceneContext.ChatChannelId == MultiChatChannel && !string.IsNullOrWhiteSpace(sceneContext.ChatChannelTitle)
+                ? sceneContext.ChatChannelTitle
+                : zh ? traditional ? "組織聊天" : "组织聊天" : "ORGANIZATION CHAT";
         OnChanged(nameof(ChatDisplayMode));
         OnChanged(nameof(ChatSide));
 
@@ -1453,7 +1495,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         }
         return settings.ChatShowSender
             ? sender
-            : message.SourceLabel ?? (zh ? "通讯消息" : "COMMS MESSAGE");
+            : message.SourceLabel ?? (zh ? "聊天消息" : "CHAT MESSAGE");
     }
 
     private static string FormatChatSender(OverlayChatMessage message)
@@ -1502,6 +1544,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         _gameEventSnapshotInitialized = false;
         _gameEventSnapshotSceneKind = null;
         _gameEventPlayerStates.Clear();
+        _locationBeforeArrival.Clear();
+        _memberChangeFlood.Reset();
         _gameEventFleetState = OverlayGameEventFleetState.Empty;
         _lastGameEventLocalShard = "";
         _authorizedRoster = new([]);
@@ -1586,6 +1630,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         _eventNotificationSide = settings.EventNotificationSide;
         _eventNotificationAnimationScale = OverlayDisplaySettings.ResolveEventNotificationAnimationScale(settings.EventNotificationAnimationSpeed);
         var eventAppearance = OverlaySkinCatalog.Get(settings.Skin);
+        _memberChangeFloodEnabled = eventAppearance.RenderKind == OverlaySkinRenderKind.Visor;
         _eventEnterDurationMs = eventAppearance.EventEnterDurationMs;
         _eventExitDurationMs = eventAppearance.EventExitDurationMs;
         _eventNotificationDurations = settings.EventNotificationDurations;
@@ -1600,16 +1645,23 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         CompleteEventNotificationMotionWhenDisabled(DateTimeOffset.Now);
         PromotePendingEventNotifications(DateTimeOffset.Now);
         var nextPlayerStates = BuildGameEventPlayerStates(players, settings.MemberNameMode, localShard, sceneContext.SharedFieldsOnly);
-        var nextFleetState = BuildGameEventFleetState(nextPlayerStates, previousDominantRegion: null);
+        var memberTotal = players.Select(ResolvePlayerEventKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var nextFleetState = BuildGameEventFleetState(nextPlayerStates, previousDominantRegion: null, memberTotal);
         var sceneKind = sceneContext.Kind;
         var sceneChanged = _gameEventSnapshotSceneKind.HasValue &&
                            _gameEventSnapshotSceneKind.Value != sceneKind;
         _gameEventSnapshotSceneKind = sceneKind;
 
-        if (players.Any(player => player.RealtimeStateUnknown))
+        if (OverlayOverviewProjection.AllRealtimeUnknown(players, sceneContext))
         {
             // Freshness expiry is not an offline/game-exit event. Rebaseline
             // on recovery rather than fabricating transitions from unknown.
+            // One member the room does not know keeps its last known state instead
+            // (BuildGameEventPlayerStates), so the others' events still run. The
+            // states from before the read went stale are dropped here: a member
+            // that comes back later starts fresh, never compared with them
+            // (review CX-VISOR-UNKNOWN-073-R1).
+            _gameEventPlayerStates.Clear();
             _gameEventSnapshotInitialized = false;
             return;
         }
@@ -1656,7 +1708,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         // Only diff what is known: a refresh that briefly lacks server data
         // must not read as a leave followed by a rejoin.
         nextPlayerStates = CarryKnownServerState(nextPlayerStates, localShard);
-        nextFleetState = BuildGameEventFleetState(nextPlayerStates, _gameEventFleetState.DominantServerRegion);
+        nextFleetState = BuildGameEventFleetState(nextPlayerStates, _gameEventFleetState.DominantServerRegion, memberTotal);
 
         if (sceneContext.IsLocalOnly)
         {
@@ -1670,7 +1722,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                 }
             }
 
-            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
+            ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard, diffed: true);
             return;
         }
 
@@ -1689,7 +1741,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             QueuePlayerGameEvents(previousState, nextState, eventTypes, zh);
         }
 
-        ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard);
+        ReplaceGameEventSnapshot(nextPlayerStates, nextFleetState, localShard, diffed: true);
     }
 
     private Dictionary<string, OverlayGameEventPlayerState> BuildGameEventPlayerStates(
@@ -1703,18 +1755,34 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         foreach (var player in players)
         {
             var key = ResolvePlayerEventKey(player);
+            if (player.RealtimeStateUnknown)
+            {
+                // a member whose state is not known fires nothing: its last known state stands, and a member never known
+                // is left out until it is (11-14, a room member the relay does not know)
+                if (_gameEventPlayerStates.TryGetValue(key, out var known)) states[key] = known;
+                continue;
+            }
+            var serverRegion = TryGetOverlayPlayerServerRegion(player, localShard, sharedFieldsOnly);
             states[key] = new OverlayGameEventPlayerState(
                 key,
                 FormatMemberName(player, memberNameMode),
                 IsGamePresence(player),
-                TryGetOverlayPlayerServerRegion(player, localShard, sharedFieldsOnly),
+                serverRegion,
                 hasLocalShard && IsPlayerOnLocalServer(player, localShard),
                 player.IsSelf,
                 IsSyncPausedLiveStatus(player.LiveStatus),
                 NormalizeGameEventShip(player),
                 NormalizeGameEventLocation(player),
-                player.ArrivalPendingConfirmation || IsUnconfirmedLocation(player.LocationConfidence),
-                player.SharedEventTypes);
+                // only a quantum arrival waiting for confirmation is unconfirmed; an older piece of evidence (the location
+                // score decaying between log lines) is not, and fires nothing (11-13 user: "现在我的地点一直是待确认")
+                player.ArrivalPendingConfirmation,
+                player.SharedEventTypes)
+            {
+                // The shard is shown only where the server itself may be shown.
+                ServerShard = serverRegion is null || player.IsSelf || !PublicShardId.IsValid(player.ServerShard) ? null : player.ServerShard!.Trim(),
+                Pinned = OverlayRosterPreferenceIdentity.Resolve(player) is { } preferenceKey &&
+                    (_rosterSelectionSettings.PinnedAccountIds ?? []).Contains(preferenceKey, StringComparer.OrdinalIgnoreCase),
+            };
         }
 
         return states;
@@ -1722,7 +1790,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
 
     private static OverlayGameEventFleetState BuildGameEventFleetState(
         IReadOnlyDictionary<string, OverlayGameEventPlayerState> states,
-        string? previousDominantRegion)
+        string? previousDominantRegion,
+        int memberTotal)
     {
         var groups = states.Values
             .Where(state => state.Online && !string.IsNullOrWhiteSpace(state.ServerRegion))
@@ -1749,7 +1818,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
 
         return new OverlayGameEventFleetState(
             states.Values.Count(state => state.Online),
-            states.Count,
+            // every authorized member, also one whose state was never known (left out of the compared states)
+            memberTotal,
             dominant);
     }
 
@@ -1788,8 +1858,13 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
     private void ReplaceGameEventSnapshot(
         Dictionary<string, OverlayGameEventPlayerState> playerStates,
         OverlayGameEventFleetState fleetState,
-        string localShard)
+        string localShard,
+        bool diffed = false)
     {
+        // a jump's starting place counts only when it was seen in a compared refresh of the same members (review R3)
+        if (!diffed) _locationBeforeArrival.Clear();
+        else foreach (var gone in _locationBeforeArrival.Keys.Where(key => !playerStates.ContainsKey(key)).ToList())
+            _locationBeforeArrival.Remove(gone);
         _gameEventPlayerStates.Clear();
         foreach (var (key, state) in playerStates)
         {
@@ -1907,6 +1982,30 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                 MutedBrush);
         }
 
+        // One member moved from one shard to another, neither of them yours (joining or leaving your
+        // shard has its own notice below).
+        if (previous.Online &&
+            next.Online &&
+            !next.IsSelf &&
+            previous.SameServer == next.SameServer &&
+            !next.SameServer &&
+            previous.ServerShard is not null &&
+            next.ServerShard is not null &&
+            !previous.ServerShard.Equals(next.ServerShard, StringComparison.OrdinalIgnoreCase) &&
+            AllowsSharedEvent(next, PlayerSharedEventTypes.Server) &&
+            ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.MemberServer))
+        {
+            var label = OverlayShardPresentation.Label(next.ServerShard, zh) ?? GameServerRegionPresentation.ResolveRegion(next.ServerRegion, zh);
+            var detail = zh ? $"{next.DisplayName} 换到 {label}" : $"{next.DisplayName} moved to {label}";
+            if (!TryQueueMemberChange(next, OverlayEventNotificationTypes.MemberServer, OverlayMemberChangeKind.Server,
+                    zh ? $"换服 {label}" : $"server {label}", detail, zh))
+                QueueEventNotification(
+                    OverlayEventNotificationTypes.MemberServer,
+                    zh ? "换服" : "Changed server",
+                    detail,
+                    TitleBrush);
+        }
+
         if (!previous.SameServer &&
             next.SameServer &&
             next.Online &&
@@ -1942,14 +2041,34 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             AllowsSharedEvent(next, PlayerSharedEventTypes.Ship) &&
             ShouldNotifyEvent(eventTypes, OverlayEventNotificationTypes.ShipChange))
         {
-            QueueEventNotification(
-                OverlayEventNotificationTypes.ShipChange,
-                zh ? "飞船变化" : "Ship changed",
-                OverlayEventShipPresentation.FormatShipChange(next.DisplayName, next.Ship, zh),
-                TitleBrush);
+            var shipDetail = OverlayEventShipPresentation.FormatShipChange(next.DisplayName, next.Ship, zh);
+            if (!TryQueueMemberChange(next, OverlayEventNotificationTypes.ShipChange, OverlayMemberChangeKind.Ship,
+                    zh ? $"换船 {OverlayEventShipPresentation.ShipName(next.Ship, zh)}" : $"ship {OverlayEventShipPresentation.ShipName(next.Ship, zh)}", shipDetail, zh))
+                QueueEventNotification(
+                    OverlayEventNotificationTypes.ShipChange,
+                    zh ? "飞船变化" : "Ship changed",
+                    shipDetail,
+                    TitleBrush);
         }
 
-        if (previous.Online &&
+        // the place a member was at before a quantum arrival started waiting for confirmation (11-13 user: "为什么我没有改变
+        // 位置还是会弹地点更新和量子抵达事件")
+        if (!previous.LocationUnconfirmed && next.LocationUnconfirmed)
+            _locationBeforeArrival[next.Key] = (previous.Location, DateTimeOffset.Now);
+        if (previous.LocationUnconfirmed && !next.LocationUnconfirmed &&
+            _locationBeforeArrival.Remove(next.Key, out var jump) &&
+            !string.IsNullOrWhiteSpace(jump.Before) && string.Equals(jump.Before, next.Location, StringComparison.OrdinalIgnoreCase))
+        {
+            // confirmed where they were before the jump: nothing changed, so no card and nothing kept in the events list;
+            // only this jump's provisional "quantum arrival" card goes, never an earlier confirmed one (review R3)
+            var mergeKey = $"location:{next.Key}";
+            RemoveEventNotifications(
+                row => mergeKey.Equals(row.MergeKey, StringComparison.OrdinalIgnoreCase) &&
+                    row.MergePhase == OverlayLocationMergePhase.Provisional && row.MergeUpdatedAt >= jump.Since,
+                pending => mergeKey.Equals(pending.MergeKey, StringComparison.OrdinalIgnoreCase) &&
+                    pending.MergePhase == OverlayLocationMergePhase.Provisional && pending.CreatedAt >= jump.Since);
+        }
+        else if (previous.Online &&
             next.Online &&
             (!string.IsNullOrWhiteSpace(previous.Location) || previous.LocationUnconfirmed) &&
             (!string.IsNullOrWhiteSpace(next.Location) || next.LocationUnconfirmed) &&
@@ -1984,11 +2103,14 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             }
             else
             {
-                QueueEventNotification(
-                    OverlayEventNotificationTypes.LocationChange,
-                    zh ? "地点变化" : "Location changed",
-                    zh ? $"{next.DisplayName} 位置：{displayLocation}" : $"{next.DisplayName} location: {displayLocation}",
-                    TitleBrush);
+                var placeDetail = zh ? $"{next.DisplayName} 位置：{displayLocation}" : $"{next.DisplayName} location: {displayLocation}";
+                if (!TryQueueMemberChange(next, OverlayEventNotificationTypes.LocationChange, OverlayMemberChangeKind.Place,
+                        zh ? $"到达 {displayLocation}" : $"at {displayLocation}", placeDetail, zh))
+                    QueueEventNotification(
+                        OverlayEventNotificationTypes.LocationChange,
+                        zh ? "地点变化" : "Location changed",
+                        placeDetail,
+                        TitleBrush);
             }
         }
 
@@ -2113,16 +2235,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
                text.Equals("未连接", StringComparison.OrdinalIgnoreCase) ||
                text.Equals("等待确认", StringComparison.OrdinalIgnoreCase) ||
                text.Equals("仅游戏中显示", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("未知", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsUnconfirmedLocation(string? confidence)
-    {
-        return confidence is not null &&
-               (confidence.Equals("Medium", StringComparison.OrdinalIgnoreCase) ||
-                confidence.Equals("中", StringComparison.OrdinalIgnoreCase) ||
-                confidence.Equals("Low", StringComparison.OrdinalIgnoreCase) ||
-                confidence.Equals("低", StringComparison.OrdinalIgnoreCase));
+               text.Contains("未知", StringComparison.OrdinalIgnoreCase) ||
+               OverlayPlaceholderText.Is(text);
     }
 
     private static bool ShouldNotifyEvent(
@@ -2187,7 +2301,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         bool important = false,
         Func<bool>? isCurrent = null,
         Func<IReadOnlyList<PlayerRow>, string>? currentDetail = null,
-        bool isDeviceLocal = false)
+        bool isDeviceLocal = false,
+        bool negative = false)
     {
         QueueOrShowEventNotification(new PendingOverlayEventNotification(
             title,
@@ -2198,7 +2313,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             important,
             MergeKey: null,
             OverlayLocationMergePhase.None,
-            DateTimeOffset.Now, isCurrent, currentDetail, isDeviceLocal));
+            DateTimeOffset.Now, isCurrent, currentDetail, isDeviceLocal, negative));
     }
 
     private void QueueMergeableLocationEventNotification(
@@ -2235,12 +2350,67 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             title,
             detail,
             positive ? OnlineBrush : AlertBrush,
-            important, isCurrent, currentDetail, isDeviceLocal);
+            important, isCurrent, currentDetail, isDeviceLocal, negative: !positive);
+    }
+
+    /// <summary>
+    /// Visor overlay only: one teammate change through flood control. Returns false when flood control
+    /// is off, so the caller queues the ordinary notice.
+    /// </summary>
+    private bool TryQueueMemberChange(
+        OverlayGameEventPlayerState next,
+        OverlayEventNotificationTypes eventType,
+        OverlayMemberChangeKind kind,
+        string part,
+        string detail,
+        bool zh)
+    {
+        if (!_memberChangeFloodEnabled) return false;
+        if (!CanQueueEventType(eventType)) return true;
+        var now = DateTimeOffset.Now;
+        var line = _memberChangeFlood.Add(now, next.Key, next.DisplayName, next.Pinned, next.SameServer, kind, part, detail, zh);
+        if (line.Update && TryRewriteEventLine(line, eventType, now)) return true;
+        QueueOrShowEventNotification(new PendingOverlayEventNotification(
+            line.Title,
+            line.Detail,
+            now.LocalDateTime.ToString("HH:mm", CultureInfo.InvariantCulture),
+            TitleBrush,
+            eventType,
+            Important: false,
+            MergeKey: line.Key,
+            OverlayLocationMergePhase.None,
+            now));
+        return true;
+    }
+
+    /// <summary>Rewrites a shown or waiting line in place; false when it is already gone.</summary>
+    private bool TryRewriteEventLine(OverlayMemberChangeLine line, OverlayEventNotificationTypes eventType, DateTimeOffset now)
+    {
+        var timestamp = now.LocalDateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var visible = EventNotifications.LastOrDefault(row => !row.IsExiting && line.Key.Equals(row.MergeKey, StringComparison.OrdinalIgnoreCase));
+        if (visible is not null)
+        {
+            visible.MergeContent(line.Title, line.Detail, timestamp, TitleBrush, OverlayLocationMergePhase.None, now,
+                now.AddSeconds(ResolveEventNotificationDuration(eventType)));
+            EventNotificationPulse++;
+            OnChanged(nameof(EventNotificationVisibility));
+            RefreshEventNotificationTimer();
+            return true;
+        }
+        var pending = _pendingEventNotifications.ToArray();
+        var index = Array.FindLastIndex(pending, row => line.Key.Equals(row.MergeKey, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return false;
+        pending[index] = pending[index] with { Title = line.Title, Detail = line.Detail, Timestamp = timestamp };
+        _pendingEventNotifications.Clear();
+        foreach (var row in pending) _pendingEventNotifications.Enqueue(row);
+        return true;
     }
 
     private void QueueOrShowEventNotification(PendingOverlayEventNotification notification)
     {
         if (!CanQueueEventType(notification.EventType) || notification.IsCurrent?.Invoke() == false) return;
+        if (!notification.IsDeviceLocal && notification.EventType != OverlayEventNotificationTypes.None &&
+            (notification.EventType & ~CardOnlyEventTypes) == 0) return;
         PrunePendingEventNotifications(DateTimeOffset.Now);
         if (TryMergeEventNotification(notification))
         {
@@ -2283,6 +2453,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         row.ConfigureMerge(notification.MergeKey, notification.MergePhase, notification.CreatedAt);
         row.CurrentDetail = notification.CurrentDetail;
         row.IsDeviceLocal = notification.IsDeviceLocal;
+        row.Negative = notification.Negative;
         if (notification.IsCurrent is not null) _eventValidity.Add(row, notification.IsCurrent);
         if (_animationFrameRate != OverlayAnimationFrameRate.Off)
         {
@@ -2295,8 +2466,23 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         RefreshEventNotificationTimer();
     }
 
-    private bool CanQueueEventType(OverlayEventNotificationTypes type) => _showEventNotifications &&
+    // continuous play never enters either event box, not even as a device-local line (11-14)
+    private bool CanQueueEventType(OverlayEventNotificationTypes type) => type != OverlayEventNotificationTypes.LocalPlayReminder && _showEventNotifications &&
         (type == OverlayEventNotificationTypes.None || _enabledEventTypes.HasFlag(type));
+
+    /// <summary>
+    /// 0.7.3, user: "上线这种事完全没有必要在浮层的事件里出现了，他只在windows提醒卡片出现就可以了".
+    /// Teammates' online/offline and the online-count summary are reminder cards only, in every overlay
+    /// appearance; the saved event switches are kept so the cards can inherit an explicit off. The
+    /// player's own device-local events (own game start/stop) still show.
+    /// </summary>
+    // Tests of the announcement-once machinery (kept for urgent announcements later) turn it on.
+    internal static bool OverlayShowsAnnouncements { get; set; }
+
+    internal const OverlayEventNotificationTypes CardOnlyEventTypes =
+        OverlayEventNotificationTypes.MemberPresence | OverlayEventNotificationTypes.OnlineSummary |
+        // 11-14: continuous play is a small card only (user: "不要，只走小卡片")
+        OverlayEventNotificationTypes.LocalPlayReminder;
 
     private bool TryMergeEventNotification(PendingOverlayEventNotification notification)
     {
@@ -2424,7 +2610,12 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         string? Ship,
         string? Location,
         bool LocationUnconfirmed,
-        int SharedEventTypes);
+        int SharedEventTypes)
+    {
+        public string? ServerShard { get; init; }
+
+        public bool Pinned { get; init; }
+    }
 
     private sealed record OverlayGameEventFleetState(
         int OnlineCount,
@@ -2654,7 +2845,8 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
         DateTimeOffset CreatedAt,
         Func<bool>? IsCurrent = null,
         Func<IReadOnlyList<PlayerRow>, string>? CurrentDetail = null,
-        bool IsDeviceLocal = false);
+        bool IsDeviceLocal = false,
+        bool Negative = false);
 
     // ShownKey/Receipt mark an announcement; it counts as shown only once it reaches the slot.
     private sealed record PendingCommunicationEvent(string Title, string Detail, OverlayAppearanceActivity AppearanceActivity,
@@ -3047,6 +3239,7 @@ public sealed partial class OverlayViewModel : System.ComponentModel.INotifyProp
             : Visibility.Collapsed;
         PartyOverviewVisibility = Visibility.Collapsed;
         OverviewTopLocations = overview.TopLocations;
+        RealtimeStatusUnknown = overview.RealtimeStatusUnknown;
         OverviewFacts = overview.Facts;
         ApplyOverviewPanelLayout(
             settings.SquadStatusDisplayMode,
@@ -3286,6 +3479,8 @@ public sealed record OverlayMemberRow(
     internal PlayerPresenceKind? Presence { get; init; }
     internal OverlayRosterGroup? Group { get; init; }
     internal DateTimeOffset? CueStartedAtUtc { get; init; }
+    /// <summary>The local player's own row (the visor draws the local health on it).</summary>
+    internal bool IsSelf { get; init; }
 }
 
 internal enum OverlayLocationMergePhase
@@ -3370,6 +3565,8 @@ public sealed class OverlayEventNotificationRow : System.ComponentModel.INotifyP
 
     public OverlayEventNotificationTypes EventType { get; }
     internal bool IsDeviceLocal { get; set; }
+    /// <summary>A loss (death, downed) rather than a gain: the visor colours its title red (11-12).</summary>
+    internal bool Negative { get; set; }
 
     public DateTimeOffset ExpiresAt { get; set; }
 

@@ -45,6 +45,17 @@ OnboardingCheckpoint checkpoint() => const OnboardingCheckpoint(
 );
 
 void main() {
+  test('unfinished log setup is a Host fact tied to confirmed identity', () {
+    final value = wire();
+    final raw = value['facts']! as Map<String, Object?>;
+    expect(OnboardingWire.parse(value).$2.facts.logSetupPending, false);
+    raw.addAll({'localIdentityConfirmed': true, 'logSetupPending': true});
+    expect(OnboardingWire.parse(value).$2.facts.logSetupPending, true);
+    raw['localIdentityConfirmed'] = false;
+    expect(() => OnboardingWire.parse(value), throwsFormatException);
+    raw['logSetupPending'] = 'true';
+    expect(() => OnboardingWire.parse(value), throwsFormatException);
+  });
   test(
     'device exceptions are exact; other business calls still need an account',
     () {
@@ -256,7 +267,8 @@ void main() {
   test('Native generation handoff preserves the guide observation without granting an account', () async {
     final fixture = Fixture();
     addTearDown(fixture.close);
-    fixture.onRequest = (request) => fixture.respond(request, payload: {...wire(), 'controlGeneration': 5});
+    fixture.onRequest = (request) =>
+        fixture.respond(request, payload: {...wire(), 'controlGeneration': 5});
     final reply = await fixture.adapter.read();
     expect(fixture.session.activeGeneration, 5);
     expect(reply.facts.signedIn, false);
@@ -264,14 +276,20 @@ void main() {
     expect(fixture.requests.last.sessionGeneration, 5);
     expect(fixture.requests.last.accountContext, isNull);
   });
-  test('invalid generation cannot replace the current guide observation', () async {
-    final fixture = Fixture();
-    addTearDown(fixture.close);
-    fixture.onRequest = (request) => fixture.respond(request, payload: {...wire(), 'controlGeneration': 2});
-    await expectLater(fixture.adapter.read(), throwsFormatException);
-    expect(fixture.session.activeGeneration, 3);
-    expect(() => fixture.adapter.save(checkpoint()), throwsStateError);
-  });
+  test(
+    'invalid generation cannot replace the current guide observation',
+    () async {
+      final fixture = Fixture();
+      addTearDown(fixture.close);
+      fixture.onRequest = (request) => fixture.respond(
+        request,
+        payload: {...wire(), 'controlGeneration': 2},
+      );
+      await expectLater(fixture.adapter.read(), throwsFormatException);
+      expect(fixture.session.activeGeneration, 3);
+      expect(() => fixture.adapter.save(checkpoint()), throwsStateError);
+    },
+  );
 }
 
 class Fixture {

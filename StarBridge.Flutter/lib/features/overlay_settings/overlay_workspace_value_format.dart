@@ -14,6 +14,10 @@ String overlayWorkspaceFormatValue(
     OverlayWorkspaceUnit.pixels => '$number px',
     OverlayWorkspaceUnit.count =>
       '$number ${strings.text('overlay.workspace.unit.count')}',
+    OverlayWorkspaceUnit.degrees => '$number°',
+    // visor design units at 2560x1440 and medium size (1440 / 1080 x 0.53)
+    OverlayWorkspaceUnit.visorPixels =>
+      '${(value * 1440 / 1080 * 0.53).round()} px',
     OverlayWorkspaceUnit.none => number,
   };
 }

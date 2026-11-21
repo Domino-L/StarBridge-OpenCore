@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -240,6 +239,11 @@ void main() {
       final port = FakeRecognitionPort(parseRecognitionCheck(_wire()));
       final (controller, check) = await _pump(tester, port, size: size);
       expect(find.byKey(Key('onboarding-progress-$kind')), findsOneWidget);
+      if (kind == 'bar') {
+        // The total changes with the chosen mode, so only the position shows.
+        expect(find.textContaining(RegExp(r'^第 \d+ 步 · ')), findsOneWidget);
+        expect(find.textContaining(RegExp(r'共 \d+ 步')), findsNothing);
+      }
       expect(find.byKey(const Key('recognition-banner-ready')), findsOneWidget);
       expect(find.text('18区'), findsOneWidget);
       expect(_next(tester), '继续');

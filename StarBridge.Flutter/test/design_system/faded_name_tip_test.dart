@@ -1,8 +1,12 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/design_system/interaction/faded_name_tip.dart';
+import 'package:starbridge_flutter/app/runtime/frame_governor.dart';
+import 'package:starbridge_flutter/design_system/surfaces/light_visual_shadow_scope.dart';
+import 'package:starbridge_flutter/design_system/surfaces/light_visual_text.dart';
 
 const _longName = '很长很长很长很长很长很长很长很长的舰船名称';
 const _tip = Key('faded-name-tip');
@@ -117,5 +121,85 @@ void main() {
     await tester.pump();
     expect(taps, 1);
     semantics.dispose();
+  });
+
+  // Regression (user report 2026-11-07): the tip at the window root hid every
+  // tap from the app's TapRegionSurface, so a focused text field never lost
+  // focus on a click elsewhere.
+  testWidgets(
+    '点输入框外面仍能让输入框失去焦点',
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    (tester) async {
+      final focus = FocusNode();
+      addTearDown(focus.dispose);
+      var outside = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => FadedNameTip(child: child!),
+          home: Scaffold(
+            body: Column(
+              children: [
+                SizedBox(width: 200, child: TextField(focusNode: focus)),
+                TapRegion(
+                  onTapOutside: (_) => outside++,
+                  child: const SizedBox(width: 40, height: 40),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(TextField), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+      await tester.tapAt(const Offset(600, 500), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(focus.hasFocus, isFalse);
+      expect(outside, 2, reason: 'other tap regions hear outside taps too');
+    },
+  );
+
+  group('游戏运行时（轻量画面）', () {
+    late ValueNotifier<bool> light;
+    setUp(() {
+      light = ValueNotifier(true);
+      debugLightVisualsOverride = light;
+    });
+    tearDown(() {
+      debugLightVisualsOverride = null;
+      light.dispose();
+    });
+
+    testWidgets('页面里改成省略号的名字仍然停留后显示全名', (tester) async {
+      await _pumpLabel(
+        tester,
+        LightVisualShadowScope(
+          child: Builder(
+            builder: (context) => Text(
+              _longName,
+              maxLines: 1,
+              softWrap: false,
+              overflow: fadeOverflow(context),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        tester.renderObject<RenderParagraph>(find.text(_longName)).overflow,
+        TextOverflow.ellipsis,
+      );
+      await _rest(tester, const Offset(20, 10));
+      expect(find.byKey(_tip), findsOneWidget);
+    });
+
+    testWidgets('省略号的多行正文仍然不显示', (tester) async {
+      await _pumpLabel(
+        tester,
+        const Text(_longName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      );
+      await _rest(tester, const Offset(20, 10));
+      expect(find.byKey(_tip), findsNothing);
+    });
   });
 }

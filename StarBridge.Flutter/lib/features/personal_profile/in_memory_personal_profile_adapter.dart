@@ -1,4 +1,5 @@
 import 'personal_profile_models.dart';
+import 'personal_profile_showcases.dart';
 import 'personal_profile_port.dart';
 
 final class InMemoryPersonalProfileAdapter implements PersonalProfilePort {
@@ -220,6 +221,11 @@ final class InMemoryPersonalProfileAdapter implements PersonalProfilePort {
       favoriteShips: _snapshot.favoriteShips,
       hangarSummary: _snapshot.hangarSummary,
       moduleLayout: List.unmodifiable(edit.moduleLayout),
+      showcaseData: PersonalProfileShowcaseData(
+        achievementShowcase:
+            edit.achievementShowcase ??
+            _snapshot.showcaseData.achievementShowcase,
+      ),
     );
     return const PersonalProfileActionResult(
       PersonalProfileActionOutcome.completed,

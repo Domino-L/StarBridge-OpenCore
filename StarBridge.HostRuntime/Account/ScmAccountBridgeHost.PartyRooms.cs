@@ -100,7 +100,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _partyRooms ?? throw new AccountBridgeHostException("party_rooms.command_unavailable");
         (RoomCommandView Result, RelayRequestSession ActiveSession) result;
@@ -167,7 +169,9 @@ internal sealed partial class ScmAccountBridgeHost
     {
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var reader = _partyRooms ?? throw new AccountBridgeHostException("party_rooms.read_unavailable");
         var sequence = Interlocked.Increment(ref _playerActivitySequence);

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/feature_registry.dart';
+import '../../app/routing/open_destination_intent.dart';
 import '../../design_system/icons/marketplace_icon.dart';
 import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
@@ -105,8 +106,7 @@ class MarketplaceAttention extends ChangeNotifier
     build: (context, open) => MarketplaceAttentionCard(
       this,
       open: () {
-        market.activityTab = 0;
-        market.tab(3);
+        market.openMyTrades();
         open();
       },
     ),
@@ -161,7 +161,22 @@ class MarketplaceAttentionCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           for (final (key, count) in rows)
-            Container(
+            StarBridgeActionRow(
+              controlKey: ValueKey(('market-attention-row', key)),
+              inheritContentStyle: true,
+              onActivate: (_, _) {
+                if (key == 'messages') {
+                  a.chat?.requestShow();
+                  if (Actions.maybeFind<OpenDestinationIntent>(context) != null) {
+                    Actions.maybeInvoke(context, const OpenDestinationIntent('/messages'));
+                  } else {
+                    a.market.openDestination?.call('/messages');
+                  }
+                } else {
+                  open();
+                }
+              },
+              child: Container(
               padding: const EdgeInsets.symmetric(vertical: 6),
               decoration: BoxDecoration(
                 border: Border(
@@ -193,6 +208,7 @@ class MarketplaceAttentionCard extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
             ),
           const SizedBox(height: 6),
           StarBridgeActionRow(

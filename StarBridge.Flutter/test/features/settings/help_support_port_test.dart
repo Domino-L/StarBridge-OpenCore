@@ -11,6 +11,8 @@ void main() {
     'helpSupport.stats',
     'helpSupport.feedback',
     'helpSupport.openScm',
+    'helpSupport.openGitHub',
+    'helpSupport.openWebsite',
   ]) {
     test('$name reaches the host without account context', () async {
       final pair = InMemoryBridgeConnection.createPair();

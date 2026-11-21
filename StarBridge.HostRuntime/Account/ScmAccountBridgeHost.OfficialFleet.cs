@@ -20,9 +20,10 @@ internal sealed partial class ScmAccountBridgeHost
     }
 
     public Task<object> GetOfficialFleetMembersAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token) =>
-        ObserveOfficialMembers("official-members", context, payload, () => GetOfficialFleetMembersCoreAsync(context, payload, token));
+        ObserveOfficialMembers("official-members", context, payload, () => WithFleetNavigationFailureAsync(context, Generation,
+            use => GetOfficialFleetMembersCoreAsync(context, payload, use, token)));
 
-    private async Task<object> GetOfficialFleetMembersCoreAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token)
+    private async Task<object> GetOfficialFleetMembersCoreAsync(BridgeAccountContext context, JsonElement payload, FleetNavigationRead use, CancellationToken token)
     {
         try {
             if (payload.EnumerateObject().Any(item => item.Name is not ("schemaVersion" or "sourceRef" or "search" or "filter" or "pageNumber" or "pageSize")))
@@ -35,19 +36,22 @@ internal sealed partial class ScmAccountBridgeHost
                 page is < 1 or > 100000 || size is not (25 or 50 or 100) || payload.GetProperty("filter").GetString() != "all")
                 throw OfficialFleetReadModel.Invalid();
             var generation = Generation;
-            using var data = await ReadOfficialFleetMemberPageSourceAsync(context, generation, sourceRef, search, page, size, token);
+            using var data = await ReadOfficialFleetMemberPageSourceAsync(context, generation, sourceRef, search, page, size, use, token);
             var ids = data.RootElement.GetProperty("list").EnumerateArray()
                 .Select(row => OfficialFleetPublicId.Read(row.GetProperty("userId"))).ToArray();
-            var identities = await ReadFleetIdentitiesAsync(context, generation, sourceRef, ids, token);
+            var identities = await ReadFleetIdentitiesAsync(context, generation, sourceRef, ids, token,
+                () => RequireFleetNavigationCurrent(context, generation, use));
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-            RequireFleetReadOwner(context, generation);
+            RequireFleetNavigationCurrent(context, generation, use);
             RememberFleetProfileTargets(context, generation, sourceRef, identities);
-            var self = await FindOfficialFleetSelfAsync(context, generation, identities, token);
+            var self = await FindOfficialFleetSelfAsync(context, generation, identities, use, token);
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-            RequireFleetReadOwner(context, generation);
+            RequireFleetNavigationCurrent(context, generation, use);
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.Materialize);
-            return OfficialFleetReadModel.Members(data.RootElement, sourceRef, page, size, search,
+            var result = OfficialFleetReadModel.Members(data.RootElement, sourceRef, page, size, search,
                 id => OfficialFleetMemberReference(generation, sourceRef, id), identities, self);
+            RequireFleetNavigationCurrent(context, generation, use);
+            return result;
         }
         catch (OperationCanceledException error) when (token.IsCancellationRequested) { Privacy.OfficialMemberReadObservation.Failure(error); throw; }
         catch (AccountBridgeHostException) { throw; }
@@ -63,21 +67,12 @@ internal sealed partial class ScmAccountBridgeHost
     }
 
     private async Task<JsonDocument> ReadOfficialFleetMemberPageSourceAsync(BridgeAccountContext context, long generation,
-        string sourceRef, string search, int page, int size, CancellationToken token)
+        string sourceRef, string search, int page, int size, FleetNavigationRead use, CancellationToken token)
     {
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-            var session = RequireSession(context);
             RequireFleetReadOwner(context, generation);
-            AccountReadTiming.Checkpoint(MemberReadCheckpoint.Bootstrap);
-            var bootstrap = await _oauth.LoadBootstrapAsync(session, token);
-            AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-            RequireFleetReadOwner(context, generation);
-            RequireSameSession(session, bootstrap.ActiveSession);
-            _session = bootstrap.ActiveSession;
-            AccountReadTiming.Checkpoint(MemberReadCheckpoint.Bootstrap);
-            var fleet = ProjectOfficialFleet(bootstrap.Snapshot, DateTimeOffset.UtcNow).Fleet;
-            FleetMembershipObserved?.Invoke(context, generation, fleet?.SourceRef);
-            if (fleet is null || fleet.SourceRef != sourceRef) throw OfficialFleetReadModel.Invalid();
+            var fleet = await ReadFleetNavigationAsync(context, generation, sourceRef, use, token);
+            RequireFleetNavigationOwner(context, generation, fleet);
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.RegisteredPage);
             var data = await _oauth.ReadPublicOrganizationAsync(
                 $"member/page?organizationSid={Uri.EscapeDataString(fleet.Sid)}&keyword={Uri.EscapeDataString(search)}" +
@@ -85,7 +80,7 @@ internal sealed partial class ScmAccountBridgeHost
                 "&orderBy=join_time&orderDirection=asc", token);
             try {
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-            RequireFleetReadOwner(context, generation);
+            RequireFleetNavigationOwner(context, generation, fleet);
             // Validate the public page before sending any source IDs to the
             // authenticated Java identity/visibility authority.
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.Materialize);
@@ -101,6 +96,9 @@ internal sealed partial class ScmAccountBridgeHost
 
     private void RequireFleetReadOwner(BridgeAccountContext context, long generation)
     {
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired && !_disposed &&
+            Generation == generation && CurrentContext == context)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
         if (_disposed || Generation != generation || CurrentContext != context ||
             _credentialTemporarilyUnavailable || _reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);

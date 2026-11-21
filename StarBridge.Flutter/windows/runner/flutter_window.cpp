@@ -12,6 +12,8 @@
 #include "hangar_browser_bridge.h"
 #include "overlay_editor_window.h"
 #include "friends_window_bridge.h"
+#include "rsi_tool_notice_receipt.h"
+#include "game_activity_probe.h"
 #ifdef STARBRIDGE_ENABLE_MENU_OVERLAY
 #include "menu_overlay_bridge.h"
 #endif
@@ -91,6 +93,8 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  frame_pressure_channel_ = std::make_unique<frame_pressure::Channel>(
+      flutter_controller_->engine()->messenger());
   friends_window_bridge_ = std::make_unique<FriendsWindowBridge>(
       GetHandle(), flutter_controller_->engine()->messenger());
   messages_window_bridge_ = std::make_unique<FriendsWindowBridge>(
@@ -139,6 +143,18 @@ bool FlutterWindow::OnCreate() {
           result->Success(flutter::EncodableValue(
               IsZoomed(GetHandle()) != FALSE));
           return;
+        } else if (method == "readGameActivity") {
+          // Opt-in frame pace diagnostics only; presence, never names.
+          const auto activity = game_activity::Read();
+          result->Success(flutter::EncodableValue(flutter::EncodableMap{
+              {flutter::EncodableValue("maximized"),
+               flutter::EncodableValue(IsZoomed(GetHandle()) != FALSE)},
+              {flutter::EncodableValue("starCitizen"),
+               flutter::EncodableValue(activity.star_citizen)},
+              {flutter::EncodableValue("otherFullscreen"),
+               flutter::EncodableValue(activity.other_fullscreen)},
+          }));
+          return;
         } else if (method == "close") {
           PostMessage(GetHandle(), WM_CLOSE, 0, 0);
         } else {
@@ -147,6 +163,8 @@ bool FlutterWindow::OnCreate() {
         }
         result->Success();
       });
+  rsi_tool_notice_receipt_ = std::make_unique<RsiToolNoticeReceipt>(
+      flutter_controller_->engine()->messenger());
   gameplay_files_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(),
@@ -259,6 +277,8 @@ void FlutterWindow::OnDestroy() {
     gameplay_files_channel_.reset();
   }
   window_chrome_channel_.reset();
+  frame_pressure_channel_.reset();
+  rsi_tool_notice_receipt_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

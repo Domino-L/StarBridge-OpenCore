@@ -10,10 +10,13 @@ import 'account_models.dart';
 import 'account_module.dart';
 import 'account_session_views.dart';
 import 'account_signed_in_view.dart';
+import 'account_migration_controller.dart';
 import 'game_identity_verification.dart';
 import 'account_view_components.dart';
 import 'account_operation_motion.dart';
 import 'account_visible_reads.dart';
+import '../../design_system/interaction/starbridge_action_button.dart';
+import '../settings/usage_mode_copy.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({
@@ -22,6 +25,9 @@ class AccountPage extends StatefulWidget {
     this.localStatus,
     this.localRecognition,
     this.gameIdentity,
+    this.migration,
+    this.openUsageMode,
+    this.usageModeEntry,
     super.key,
   });
 
@@ -30,6 +36,9 @@ class AccountPage extends StatefulWidget {
   final Widget? localStatus;
   final Widget? localRecognition;
   final GameIdentityVerificationPort? gameIdentity;
+  final AccountMigrationController? migration;
+  final Future<void> Function(BuildContext)? openUsageMode;
+  final Widget? usageModeEntry;
 
   @override
   State<AccountPage> createState() => _AccountPageState();
@@ -122,6 +131,19 @@ class _AccountPageState extends State<AccountPage> {
                             : null,
                       ),
                       SizedBox(height: tokens.space.md),
+                      if (failure.code == 'account.local_mode' &&
+                          widget.openUsageMode != null)
+                        StarBridgeActionButton(
+                          controlKey: const Key('account-local-mode-online'),
+                          onActivate: (_) =>
+                              unawaited(widget.openUsageMode!(context)),
+                          child: Text(
+                            usageModeText(
+                              Localizations.localeOf(context),
+                              'toOnline',
+                            ),
+                          ),
+                        ),
                     ] else if (projection.notice case final notice?) ...[
                       AccountMessagePanel(
                         kind: notice.kind,
@@ -156,6 +178,7 @@ class _AccountPageState extends State<AccountPage> {
                         localStatus: widget.localStatus,
                         localRecognition: widget.localRecognition,
                         gameIdentity: widget.gameIdentity,
+                        migration: widget.migration,
                       ),
                       AccountSessionState.legacySignedIn ||
                       AccountSessionState.legacyUnavailable =>
@@ -198,6 +221,7 @@ class _AccountPageState extends State<AccountPage> {
                         },
                       ),
                     ],
+                    ?widget.usageModeEntry,
                     if (widget.footer case final footer?) ...[
                       SizedBox(height: tokens.space.md),
                       footer,

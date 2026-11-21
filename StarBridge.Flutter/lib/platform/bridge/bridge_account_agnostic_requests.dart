@@ -12,6 +12,17 @@ const accountAgnosticRequests = <String>{
   'account.getCurrent',
   // Public market reads and local preferences derive their current owner in Host; generation checks still fence every result and local write.
   'marketplace.read',
+  // Anonymous catalogue reads and fixed website intents; Host still fences generation and offline mode.
+  'missions.page', 'missions.filters', 'missions.detail',
+  'blueprints.page',
+  'blueprints.filters',
+  'blueprints.detail',
+  'blueprints.missions',
+  'catalog.openScm',
+  // Local record RPCs can return signed-out/local-mode gate reasons with no
+  // context. Signed-in callers send the Host-resolved owner; Host validates it.
+  'missionRecords.summary', 'missionRecords.importStart',
+  'missionRecords.importRead', 'missionRecords.importCancel',
   'marketplace.preferences',
   // Exact read-only route; Host validates its short-lived selection, not a caller account ID.
   'account.offlineData.read',
@@ -54,6 +65,8 @@ const accountAgnosticRequests = <String>{
   'playerActivity.save',
   'playerActivity.test',
   'playReminder.read',
+  'keyBindings.read',
+  'keyBindings.saveView',
   'execHangar.read',
   'execHangar.refresh',
   'execHangar.save',
@@ -90,6 +103,8 @@ const accountAgnosticRequests = <String>{
   // Installed, content-free native previews are device-local presentation only.
   'overlay.appearancePreview.open',
   'overlay.appearancePreview.close',
+  // Device-local one-time hint after the 0.7.3 visor switch.
+  'overlay.visorNotice.dismiss',
   // Host checks the current owner and generation; preview sends no credentials.
   'overlay.appearanceLivePreview.open',
   'overlay.appearanceLivePreview.update',
@@ -100,6 +115,9 @@ const accountAgnosticRequests = <String>{
   // The Host derives the authenticated owner; Flutter cannot select one.
   // This finite query reads receipts only, never usage or saved placement.
   'overlay.appearanceProgress.read',
+  // The visor drawn off screen for the layout editor: the draft plus the
+  // device's own fleet view; nothing is saved or sent anywhere.
+  'overlay.editorPreview.content',
   'overlay.preview',
   'overlay.update',
   'diagnostics.getSafeSummary',
@@ -117,6 +135,7 @@ const accountAgnosticRequests = <String>{
   'legal.readTestBuildNotice',
   'legal.acceptTestBuildNotice',
   'applicationUpdates.check',
+  'applicationUpdates.heroRead',
   // Device-scoped installation; Host still validates nonce and each request.
   'applicationUpdates.firstFrameReady',
   'applicationUpdates.prepare',
@@ -127,6 +146,8 @@ const accountAgnosticRequests = <String>{
   'helpSupport.openScm',
   'helpSupport.openRsiOrganization',
   'helpSupport.openRsiProfileSettings',
+  'helpSupport.openGitHub',
+  'helpSupport.openWebsite',
   'onboarding.recognition.read',
   'guide.state.read',
   'guide.state.update',

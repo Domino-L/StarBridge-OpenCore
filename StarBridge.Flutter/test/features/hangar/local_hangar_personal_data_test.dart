@@ -1,3 +1,5 @@
+import '../../_support/hangar_test_actions.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -263,7 +265,10 @@ void main() {
     final port = _Port();
     await t.pumpWidget(_app(LocalHangarPage(port: port, onRead: () {})));
     await t.pumpAndSettle();
-    await t.tap(find.byKey(const ValueKey('hangar-open-instance-a')));
+    await openHangarDetails(
+      t,
+      find.byKey(const ValueKey('hangar-open-instance-a')),
+    );
     await t.pumpAndSettle();
     await t.ensureVisible(find.byKey(const Key('hangar-edit-personal-data')));
     await t.tap(find.byKey(const Key('hangar-edit-personal-data')));
@@ -275,6 +280,7 @@ void main() {
     expect(find.text('启明星'), findsWidgets);
     await t.tap(find.byKey(const Key('hangar-detail-close')));
     await t.pumpAndSettle();
+    await backToHangarWall(t);
     for (final query in ['启明星', '深空计划', 'Carrack']) {
       await t.enterText(find.byKey(const Key('local-hangar-search')), query);
       await t.pumpAndSettle();
@@ -362,7 +368,10 @@ void main() {
     final port = _Port()..gate = Completer<void>();
     await t.pumpWidget(_app(LocalHangarPage(port: port, onRead: () {})));
     await t.pumpAndSettle();
-    await t.tap(find.byKey(const ValueKey('hangar-open-instance-a')));
+    await openHangarDetails(
+      t,
+      find.byKey(const ValueKey('hangar-open-instance-a')),
+    );
     await t.pumpAndSettle();
     await t.ensureVisible(find.byKey(const Key('hangar-edit-personal-data')));
     await t.tap(find.byKey(const Key('hangar-edit-personal-data')));

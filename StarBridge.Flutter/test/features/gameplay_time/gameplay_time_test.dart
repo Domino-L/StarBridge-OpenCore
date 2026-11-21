@@ -9,6 +9,7 @@ import 'package:starbridge_flutter/design_system/styles/future_restraint_style.d
 import 'package:starbridge_flutter/design_system/theme/theme_builder.dart';
 import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/account/account_models.dart';
+import 'package:starbridge_flutter/features/gameplay_time/gameplay_identity_notice.dart';
 import 'package:starbridge_flutter/features/gameplay_time/gameplay_time_controller.dart';
 import 'package:starbridge_flutter/features/gameplay_time/gameplay_time_panel.dart';
 import 'package:starbridge_flutter/features/personal_profile/in_memory_personal_profile_adapter.dart';
@@ -65,7 +66,10 @@ class Harness {
   late final GameplayTimeController controller;
   final requests = <BridgeEnvelope>[];
   String subject = 'synthetic-a';
+  String accountTotalState = 'unavailable';
+  int? accountTotalSeconds;
   String consent;
+  String? consentPending;
   bool showOnProfile;
   String historyState;
   final bool oldProjection;
@@ -76,6 +80,8 @@ class Harness {
   final holdNames = <String>{};
   final wrongContext = <String, String>{};
   String? error;
+  String? pauseReason;
+  bool accountTotalStale = false;
   String? remoteError;
   int seconds = 0;
   bool hold = false;
@@ -166,9 +172,14 @@ class Harness {
                   'consent': consent,
                   'seconds': seconds,
                   'savedSeconds': seconds,
+                  'accountTotalState': accountTotalState,
+                  if (consentPending != null) 'consentPending': consentPending,
+                  'accountTotalSeconds': accountTotalSeconds,
                   'gameState': 'running',
                   'recording': error == null && consent == 'allowed',
                   'error': error,
+                  if (pauseReason != null) 'pauseReason': pauseReason,
+                  'accountTotalStale': accountTotalStale,
                   if (!oldProjection) ...{
                     'showOnProfile': showOnProfile,
                     'historyState': historyState,
@@ -623,6 +634,113 @@ void main() {
       await h.close(tester);
       await tester.binding.setSurfaceSize(null);
     });
+    testWidgets(
+      'an unconfirmed identity offers the identity review in $locale',
+      (tester) async {
+        for (final wired in [true, false]) {
+          final h = Harness();
+          var opened = 0;
+          await tester.pump();
+          await tester.binding.setSurfaceSize(const Size(1100, 900));
+          await tester.pumpWidget(
+            app(
+              SizedBox(
+                height: 850,
+                child: GeneralSettingsPage(
+                  preferences: InMemoryAppPreferences(),
+                  gameplayTime: h.controller,
+                  openUsageMode: wired ? (_) async => opened++ : null,
+                ),
+              ),
+              locale: locale,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final copy = AppStrings.resolve(locale);
+          final button = find.byKey(
+            const Key('gameplay-time-confirm-identity'),
+          );
+          expect(
+            copy.text('gameplay.confirmIdentity'),
+            isNot('gameplay.confirmIdentity'),
+          );
+          expect(button, findsNothing);
+          h.remoteError = 'gameplay.account_changed';
+          await tester.pump(const Duration(seconds: 5));
+          await tester.pumpAndSettle();
+          expect(
+            find.text(copy.text('gameplay.identityError')),
+            findsOneWidget,
+          );
+          expect(button, wired ? findsOneWidget : findsNothing);
+          if (wired) {
+            expect(
+              find.text(copy.text('gameplay.confirmIdentity')),
+              findsOneWidget,
+            );
+            await tester.ensureVisible(button);
+            await tester.tap(button);
+            await tester.pumpAndSettle();
+            expect(opened, 1);
+          }
+          // Any other refusal is not an identity review.
+          h.remoteError = 'gameplay.read_failed';
+          await tester.pump(const Duration(seconds: 5));
+          await tester.pumpAndSettle();
+          expect(button, findsNothing);
+          expect(tester.takeException(), isNull);
+          h.remoteError = null;
+          await tester.pumpWidget(const SizedBox());
+          await h.close(tester);
+          await tester.binding.setSurfaceSize(null);
+        }
+      },
+    );
+    testWidgets(
+      'recognition shows the identity notice even with recording off in $locale',
+      (tester) async {
+        final h = Harness(consent: 'declined');
+        var opened = 0;
+        await tester.pump();
+        await tester.binding.setSurfaceSize(const Size(1100, 900));
+        await tester.pumpWidget(
+          app(
+            SizedBox(
+              height: 850,
+              child: GameplayIdentityNotice(
+                controller: h.controller,
+                onConfirmIdentity: (_) async => opened++,
+              ),
+            ),
+            locale: locale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final copy = AppStrings.resolve(locale);
+        final notice = find.byKey(const Key('gameplay-identity-notice'));
+        expect(notice, findsNothing);
+        h.remoteError = 'gameplay.account_changed';
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(h.controller.value.consent, 'declined');
+        expect(notice, findsOneWidget);
+        expect(find.text(copy.text('gameplay.identityError')), findsOneWidget);
+        await tester.tap(
+          find.byKey(const Key('gameplay-identity-notice-confirm')),
+        );
+        await tester.pumpAndSettle();
+        expect(opened, 1);
+        h.remoteError = 'gameplay.read_failed';
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(notice, findsNothing);
+        expect(tester.takeException(), isNull);
+        h.remoteError = null;
+        await tester.pumpWidget(const SizedBox());
+        await h.close(tester);
+        await tester.binding.setSurfaceSize(null);
+      },
+    );
     for (final width in [360.0, 1100.0]) {
       testWidgets(
         'recording panel respects $locale at width $width and enlarged text',
@@ -649,11 +767,12 @@ void main() {
           final recording = find.byKey(
             const Key('gameplay-time-record-switch'),
           );
-          final visibility = find.byKey(
-            const Key('gameplay-time-profile-switch'),
+          // User 11-08: no separate "show on my profile" switch.
+          expect(
+            find.byKey(const Key('gameplay-time-profile-switch')),
+            findsNothing,
           );
           expect(tester.widget<Switch>(recording).value, isTrue);
-          expect(tester.widget<Switch>(visibility).value, isTrue);
           expect(tester.takeException(), isNull);
           await tester.ensureVisible(recording);
           await tester.pumpAndSettle();
@@ -694,7 +813,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);
-      expect(find.text('本机累计'), findsOneWidget);
+      // User 11-11: the rail shows the account total to everyone, the owner
+      // included; this PC's own count stays in the gameplay settings.
+      expect(find.textContaining('本机累计'), findsNothing);
+      expect(find.text('账号汇总'), findsOneWidget);
       await tester.tap(find.text('预览访客视角'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('gameplay-time-panel')), findsNothing);

@@ -14,16 +14,21 @@ import '../../design_system/tokens/color_tokens.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
+import 'personal_profile_main_role.dart';
 import 'personal_profile_editor.dart';
 import '../gameplay_time/gameplay_time_controller.dart';
-import 'personal_profile_identity_header.dart';
+import '../gameplay_time/gameplay_account_total.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_read_status.dart';
 import 'personal_profile_draft.dart';
 import 'personal_profile_public_facts.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_trade_strip.dart';
 import 'personal_profile_module_grid.dart';
 import 'personal_profile_summary.dart';
+import 'personal_profile_showcase_frame.dart';
+import 'personal_profile_side_rail.dart';
+import 'personal_profile_steam_header.dart';
 
 /// The available profile: banners, the identity card, the section heading
 /// and the module grid. Split from personal_profile_page.dart (2026-10-20)
@@ -39,10 +44,12 @@ class PersonalProfileView extends StatelessWidget {
     required this.onVisibility,
     required this.projection,
     this.presence,
+    this.ownerFacts,
     this.gameplayTime,
     required this.visitorPreview,
     this.isVisitor = false,
     this.offline = false,
+    this.readOnlyOwnerImportPending = false,
     required this.editing,
     required this.layout,
     required this.onPreview,
@@ -55,6 +62,8 @@ class PersonalProfileView extends StatelessWidget {
     required this.onRefresh,
     required this.onLayoutChanged,
     required this.onWallpaperChanged,
+    this.achievementPicks,
+    this.onAchievementPicksChanged,
   });
 
   final PersonalProfileEditorDraft? initialDraft;
@@ -62,12 +71,14 @@ class PersonalProfileView extends StatelessWidget {
   final int readPhase;
   final bool? ownerRequiresReload;
   final PersonalProfileProjection projection;
+  final PersonalProfilePublicFacts? ownerFacts;
   final VoidCallback? onVisibility;
   final GameplayTimeController? gameplayTime;
   final ValueListenable<ShellChromeProjection>? presence;
   final bool visitorPreview;
   final bool isVisitor;
   final bool offline;
+  final bool readOnlyOwnerImportPending;
   final bool editing;
   final List<PersonalProfileModuleLayoutItem> layout;
   final VoidCallback onPreview;
@@ -82,6 +93,11 @@ class PersonalProfileView extends StatelessWidget {
   onSave;
   final ValueChanged<List<PersonalProfileModuleLayoutItem>> onLayoutChanged;
   final ValueChanged<String> onWallpaperChanged;
+
+  /// The owner's achievement picks shown on the page (the draft while
+  /// editing).
+  final List<String>? achievementPicks;
+  final ValueChanged<List<String>>? onAchievementPicksChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -143,42 +159,71 @@ class PersonalProfileView extends StatelessWidget {
         // Outside the visibility the page no longer goes blank: the
         // always-public header (avatar, name, trade days and window) stays
         // and only the content below is shielded (user rule, 2026-10-20).
-        if (projection.restricted || visitorPreview && !projection.isPublic) ...[
-          PersonalProfileIdentityHeader(
-            projection: projection,
-            isSelf: !isVisitor,
-            publicOnly: true,
-            // A real visitor gets the window from the profile service; the
-            // owner's preview reads it from the trading hall as usual.
-            // No synced window may only mean the owner never opened
-            // StarBridge since setting it on SCM: show nothing rather than
-            // claim "not set" (user decision 2026-10-21, conservative).
-            trade: projection.restricted
-                ? switch ((projection.publicFacts, projection.publicTradeWindow)) {
-                    (final facts?, final window) =>
-                      PersonalProfilePublicFactsBlock(
-                        facts: facts,
-                        window: window?.toStripData(),
+        if (projection.restricted || visitorPreview && !projection.isPublic)
+          PersonalProfileSteamColumn(
+            header: PersonalProfileSteamHeader(
+              projection: projection,
+              isSelf: !isVisitor,
+              publicOnly: true,
+            ),
+            main: PersonalProfileShield(
+              visibility: projection.visibility,
+              // Nobody chose this scope: naming one would say they had.
+              showScope: !projection.defaultedPage,
+            ),
+            rail: PersonalProfileSideRail(
+              projection: projection,
+              isSelf: false,
+              publicOnly: true,
+              // A real visitor gets the window from the profile service; the
+              // owner's preview reads it from the trading hall as usual.
+              // No synced window may only mean the owner never opened
+              // StarBridge since setting it on SCM: show nothing rather than
+              // claim "not set" (user decision 2026-10-21, conservative).
+              trade: projection.restricted
+                  ? switch ((
+                      projection.publicFacts,
+                      projection.publicTradeWindow,
+                    )) {
+                      // The same strip, numbers and account order as the
+                      // owner's own page (user 11-08).
+                      (final facts?, final window) =>
+                        personalProfileTradeThenAccount(
+                          context,
+                          trade: window == null
+                              ? null
+                              : ProfileTradeStrip(
+                                  data: window.toStripData(),
+                                  isSelf: false,
+                                ),
+                          account: PersonalProfilePublicFactsBlock(
+                            facts: facts,
+                          ),
+                        ),
+                      (null, final window?) => ProfileTradeStrip(
+                        data: window.toStripData(),
+                        isSelf: false,
                       ),
-                    (null, final window?) => ProfileTradeStrip(
-                      data: window.toStripData(),
-                      isSelf: false,
+                      (null, null) => null,
+                    }
+                  : projection.defaultedPage && ownerFacts != null
+                  ? Column(
+                      children: [
+                        ?ProfileTradeStripScope.build(
+                          context,
+                          ProfileTradeStripView.restrictedVisitor,
+                        ),
+                        PersonalProfilePublicFactsBlock(facts: ownerFacts!),
+                      ],
+                    )
+                  : ProfileTradeStripScope.build(
+                      context,
+                      ProfileTradeStripView.restrictedVisitor,
                     ),
-                    (null, null) => null,
-                  }
-                : ProfileTradeStripScope.build(
-                    context,
-                    ProfileTradeStripView.restrictedVisitor,
-                  ),
-          ),
-          SizedBox(height: tokens.space.xl),
-          PersonalProfileShield(
-            visibility: projection.visibility,
-            // Nobody chose this scope: naming one would say they had.
-            showScope: !projection.defaultedPage,
-          ),
-        ] else ...[
-          if (editing)
+            ),
+          )
+        else ...[
+          if (editing) ...[
             PersonalProfileEditorPanel(
               key: editorKey,
               initialDraft: initialDraft,
@@ -188,119 +233,206 @@ class PersonalProfileView extends StatelessWidget {
               onCancel: onCancelEdit,
               onSaved: onSaved,
               moduleLayout: layout,
+              achievementShowcase: achievementPicks,
               onWallpaperChanged: onWallpaperChanged,
-            )
-          else
-            PersonalProfileIdentityHeader(
-              projection: projection,
-              isSelf: !isVisitor,
-              presence: visitorPreview || isVisitor ? null : presence,
-              trade: isVisitor
-                  ? null
-                  : ProfileTradeStripScope.build(
-                      context,
-                      visitorPreview
-                          ? ProfileTradeStripView.visitor
-                          : ProfileTradeStripView.owner,
-                    ),
             ),
-          SizedBox(height: tokens.space.xl),
-          PersonalProfileSectionHeading(
-            projection: projection,
-            showOwnerActions:
-                !offline && !visitorPreview && !isVisitor && !editing,
-            onPreview: onPreview,
-            onEdit: onEdit,
-            onRefresh: onRefresh,
-            onVisibility: onVisibility,
-          ),
-          if (!projection.allowEditing && !visitorPreview && !isVisitor) ...[
-            SizedBox(height: tokens.space.sm),
-            Row(
-              children: [
-                StarBridgeIcon(
-                  StarBridgeIconSemantic.privacy,
-                  size: tokens.icons.small,
-                  color: tokens.colors.textSecondary,
-                ),
-                SizedBox(width: tokens.space.xs),
-                Expanded(
-                  child: Text(
-                    AppStrings.of(context).text(
-                      offline
-                          ? 'profile.offline.notice'
-                          : 'profile.readOnly.notice',
-                    ),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: tokens.colors.textSecondary),
-                  ),
-                ),
-              ],
-            ),
+            SizedBox(height: tokens.space.md),
           ],
-          if (!projection.isPublic &&
-              !visitorPreview &&
-              !isVisitor &&
-              !editing &&
-              !offline) ...[
-            SizedBox(height: tokens.space.sm),
-            PersonalProfilePublicHeaderNote(visibility: projection.visibility),
-          ],
-          if (offline &&
-              projection.local?.remoteAvailable == true &&
-              projection.local?.savedAt != null)
-            Text(
-              AppStrings.of(context)
-                  .text('profile.offline.confirmedAt')
-                  .replaceAll(
-                    '{time}',
-                    projection.local!.savedAt!.toLocal().toString(),
-                  ),
-              key: const Key('profile-offline-confirmed-at'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          SizedBox(height: tokens.space.md),
-          if (projection.local?.needsCreation == true && !editing) ...[
-            Text(
-              AppStrings.of(context).text('profile.local.firstSteps'),
-              key: const Key('profile-local-first-steps'),
-            ),
-            SizedBox(height: tokens.space.sm),
-          ],
-          if (projection.local?.remoteAvailable == false)
-            Text(
-              AppStrings.of(context).text('profile.local.remoteUnavailable'),
-              key: const Key('profile-local-remote-unavailable'),
-            ),
-          PersonalProfileSummaryStrip(
-            projection: projection,
-            gameplayTime: isVisitor ? null : gameplayTime,
-            includeLocalTime: !visitorPreview && !isVisitor,
-          ),
-          SizedBox(height: tokens.space.md),
-          ExcludeFocus(
-            excluding: projection.operation != PersonalProfileOperation.none,
-            child: AbsorbPointer(
-              absorbing: projection.operation != PersonalProfileOperation.none,
-              child: PersonalProfileModuleGrid(
+          ..._notices(context),
+          PersonalProfileSteamColumn(
+            header: _withOwnerHours(
+              (hours) => PersonalProfileSteamHeader(
                 projection: projection,
-                visitorView: visitorPreview || isVisitor,
-                editing: editing,
-                layout: layout,
-                onLayoutChanged: onLayoutChanged,
-                onEditPositions:
-                    projection.canEdit &&
-                        editing &&
-                        !visitorPreview &&
-                        projection.local != null
-                    ? onEditPositions
+                isSelf: !isVisitor,
+                presence: visitorPreview || isVisitor ? null : presence,
+                gameplayHours: hours,
+                accountFacts: !isVisitor && !offline
+                    ? ownerFacts
+                    : projection.accountFacts,
+                showAchievementCount: !isVisitor && !visitorPreview,
+                showMainRoleHint:
+                    !isVisitor &&
+                    !visitorPreview &&
+                    !offline &&
+                    !editing &&
+                    projection.allowEditing &&
+                    ProfileMainRole.editable(projection),
+                actions: !offline && !visitorPreview && !isVisitor && !editing
+                    ? PersonalProfileSectionHeading(
+                        projection: projection,
+                        showOwnerActions: true,
+                        showTitle: false,
+                        onPreview: onPreview,
+                        onEdit: onEdit,
+                        onRefresh: onRefresh,
+                        onVisibility: onVisibility,
+                      )
                     : null,
+              ),
+            ),
+            main: ExcludeFocus(
+              excluding: projection.operation != PersonalProfileOperation.none,
+              child: AbsorbPointer(
+                absorbing:
+                    projection.operation != PersonalProfileOperation.none,
+                child: PersonalProfileModuleGrid(
+                  projection: projection,
+                  visitorView: visitorPreview || isVisitor,
+                  editing: editing,
+                  layout: layout,
+                  onLayoutChanged: onLayoutChanged,
+                  onEditPositions:
+                      projection.canEdit &&
+                          editing &&
+                          !visitorPreview &&
+                          projection.local != null
+                      ? onEditPositions
+                      : null,
+                  isVisitor: isVisitor,
+                  includeLocalTime: !visitorPreview && !isVisitor,
+                  gameplayTime: isVisitor ? null : gameplayTime,
+                  achievementPicks: achievementPicks,
+                  onAchievementPicksChanged: editing
+                      ? onAchievementPicksChanged
+                      : null,
+                ),
+              ),
+            ),
+            rail: _withOwnerHours(
+              (hours) => PersonalProfileSideRail(
+                projection: projection,
+                isSelf: !isVisitor && !visitorPreview,
+                ownerFacts: !isVisitor && !offline ? ownerFacts : null,
+                tradeIncludesFacts: !isVisitor,
+                presence: visitorPreview || isVisitor ? null : presence,
+                gameplayHours: hours,
+                trade: isVisitor
+                    ? switch (projection.publicTradeWindow) {
+                        final window? => ProfileTradeStrip(
+                          data: window.toStripData(),
+                          isSelf: false,
+                        ),
+                        null => null,
+                      }
+                    : ProfileTradeStripScope.build(
+                        context,
+                        visitorPreview
+                            ? ProfileTradeStripView.visitor
+                            : ProfileTradeStripView.owner,
+                      ),
               ),
             ),
           ),
         ],
       ],
     );
+  }
+
+  int? get _documentMinutes => projection.local?.remoteAvailable == false
+      ? null
+      : projection.gameplayMinutes;
+
+  /// The rail's playtime hours, the same kind for the owner and visitors
+  /// (user 11-11): the account total only, never this PC's own count.
+  /// Visitors read the page's total; the owner's follow the account total the
+  /// gameplay controller read ([ownerAccountMinutes]), else the document.
+  Widget _withOwnerHours(Widget Function(int? hours) build) {
+    int? hours(int? minutes) => minutes == null ? null : minutes ~/ 60;
+    if (isVisitor || visitorPreview) return build(hours(_documentMinutes));
+    final controller = gameplayTime;
+    if (controller == null) {
+      return build(hours(ownerAccountMinutes(null, _documentMinutes)));
+    }
+    return ValueListenableBuilder<GameplayTimeView>(
+      valueListenable: controller,
+      builder: (context, state, _) =>
+          build(hours(ownerAccountMinutes(state, _documentMinutes))),
+    );
+  }
+
+  /// Owner notices that sit between the editor and the page column.
+  List<Widget> _notices(BuildContext context) {
+    final tokens = context.tokens;
+    return [
+      if (projection.defaultedPage && !isVisitor && !visitorPreview)
+        Text(
+          AppStrings.of(context).text('profile.ownerRead.neverSaved'),
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      if (!visitorPreview &&
+          !offline &&
+          (readOnlyOwnerImportPending ||
+              !isVisitor && projection.local?.autoImportPending == true)) ...[
+        Text(
+          AppStrings.of(context).text('profile.local.autoImportPending'),
+          key: const Key('profile-auto-import-pending'),
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: tokens.colors.textSecondary),
+        ),
+        SizedBox(height: tokens.space.sm),
+      ],
+      if (!projection.allowEditing && !visitorPreview && !isVisitor) ...[
+        Row(
+          children: [
+            StarBridgeIcon(
+              StarBridgeIconSemantic.privacy,
+              size: tokens.icons.small,
+              color: tokens.colors.textSecondary,
+            ),
+            SizedBox(width: tokens.space.xs),
+            Expanded(
+              child: Text(
+                AppStrings.of(context).text(
+                  offline
+                      ? 'profile.offline.notice'
+                      : 'profile.readOnly.notice',
+                ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: tokens.colors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: tokens.space.sm),
+      ],
+      if (!projection.isPublic &&
+          !visitorPreview &&
+          !isVisitor &&
+          !editing &&
+          !offline) ...[
+        PersonalProfilePublicHeaderNote(visibility: projection.visibility),
+        SizedBox(height: tokens.space.sm),
+      ],
+      if (offline &&
+          projection.local?.remoteAvailable == true &&
+          projection.local?.savedAt != null) ...[
+        Text(
+          AppStrings.of(context)
+              .text('profile.offline.confirmedAt')
+              .replaceAll(
+                '{time}',
+                projection.local!.savedAt!.toLocal().toString(),
+              ),
+          key: const Key('profile-offline-confirmed-at'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        SizedBox(height: tokens.space.sm),
+      ],
+      if (projection.local?.needsCreation == true && !editing) ...[
+        Text(
+          AppStrings.of(context).text('profile.local.firstSteps'),
+          key: const Key('profile-local-first-steps'),
+        ),
+        SizedBox(height: tokens.space.sm),
+      ],
+      if (projection.local?.remoteAvailable == false) ...[
+        Text(
+          AppStrings.of(context).text('profile.local.remoteUnavailable'),
+          key: const Key('profile-local-remote-unavailable'),
+        ),
+        SizedBox(height: tokens.space.sm),
+      ],
+    ];
   }
 }
 

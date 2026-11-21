@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'marketplace_numbers.dart';
 import '../../design_system/interaction/starbridge_activation_origin.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 
@@ -11,11 +12,22 @@ import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_details.dart';
 import 'marketplace_listing_copy.dart';
 import 'marketplace_listing_errors.dart';
+import 'marketplace_recovery.dart';
+import 'marketplace_time.dart';
 import 'marketplace_listings_controller.dart';
 import 'marketplace_port.dart';
 import 'marketplace_trade_style.dart';
 import 'marketplace_trade_feedback.dart';
 import 'marketplace_widgets.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
+
+int listingExpiryDays(Object? expiry, {DateTime? now}) {
+  // 0 = permanent: no expiry, or SCM's 9999-12-31 marker. Never turn a
+  // permanent listing into a dated one.
+  if (expiry == null || '$expiry'.trim().isEmpty || scmPermanent(expiry)) return 0;
+  final end = scmInstant(expiry);
+  return end != null && end.difference(now ?? DateTime.now()) > const Duration(days: 7) ? 14 : 7;
+}
 
 Future<void> editListing(
   BuildContext context,
@@ -38,9 +50,15 @@ class _EditListingState extends State<_EditListingDialog> {
   late final price = TextEditingController(text: '${row['price'] ?? ''}'),
       quantity = TextEditingController(text: '${row['quantity'] ?? ''}');
   late bool visible = row['visible'] == true;
-  int days = 7;
+  late int days = listingExpiryDays(row['expiry']);
   String? error;
   void update(VoidCallback change) => setState(change);
+
+  @override
+  void initState() {
+    super.initState();
+    c.ensureListingPrices([row]);
+  }
 
   @override
   void dispose() {
@@ -54,7 +72,7 @@ class _EditListingState extends State<_EditListingDialog> {
     listenable: c,
     builder: (ctx, _) {
       final t = ctx.tokens;
-      final ongoing = row['ongoing'] as int? ?? 0;
+      final ongoing = row['hasOngoingTransactions'] == true;
       Future<void> remove() async {
         final confirmed = await tradeMotionDialog<bool>(
           ctx,
@@ -91,7 +109,7 @@ class _EditListingState extends State<_EditListingDialog> {
       }
 
       Future<void> save() async {
-        final amount = num.tryParse(price.text),
+        final amount = row['side'] == 'barter' ? 0 : num.tryParse(price.text),
             count = int.tryParse(quantity.text);
         if (amount == null ||
             !amount.isFinite ||
@@ -105,7 +123,7 @@ class _EditListingState extends State<_EditListingDialog> {
         }
         if (await c.write('update', {
               'id': row['id'],
-              'price': amount,
+              'price': row['checklist'] == true ? row['price'] : amount,
               'quantity': count,
               'expiryDays': days,
               'visible': visible,
@@ -165,22 +183,25 @@ class _EditListingState extends State<_EditListingDialog> {
                 ),
                 const SizedBox(height: 10),
                 _ItemCard(row),
-                if (ongoing > 0) ...[
+                if (ongoing) ...[
                   const SizedBox(height: 10),
                   TradeNoticeBox(
-                    listingText(context, 'editOngoing', {'n': '$ongoing'}),
+                    listingText(context, 'editOngoing'),
                   ),
                 ],
                 const SizedBox(height: 14),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
+                    if (row['side'] != 'barter') Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _Label(listingText(context, '单价（UEC）')),
-                          TextField(
+                          _Label(listingText(context, row['checklist'] == true ? '每套价格' : '单价（UEC）')),
+                          if (row['checklist'] == true) ...[
+                            Text(marketMoney(row['price'])),
+                            Text(listingText(context, '由清单物品决定'), style: const TextStyle(fontSize: 12)),
+                          ] else TextField(
                             autofocus: true,
                             controller: price,
                             keyboardType: TextInputType.number,
@@ -191,7 +212,8 @@ class _EditListingState extends State<_EditListingDialog> {
                             decoration: _field(ctx),
                             onChanged: (_) => update(() {}),
                           ),
-                          ?_priceHint(context, row, price.text),
+                          if (row['checklist'] != true)
+                            ?_priceHint(context, row, price.text, c.listingBestPrice(row)),
                         ],
                       ),
                     ),
@@ -273,6 +295,7 @@ class _EditListingState extends State<_EditListingDialog> {
                     onChanged: (v) => update(() => days = v),
                   ),
                 ),
+                Text(recoveryText(context, '保存后有效期从现在重新计算'), style: const TextStyle(fontSize: 11)),
                 const SizedBox(height: 10),
                 StarBridgeCheckboxTile(
                   controlKey: const Key('market-listing-visible'),
@@ -284,6 +307,8 @@ class _EditListingState extends State<_EditListingDialog> {
                     children: [control, Text(listingText(context, '上架'))],
                   ),
                 ),
+                if (marketplaceNeedsLogin(c.errorCode)) MarketplaceAuthNotice(c.errorCode, login: c.login),
+                if (c.writeUncertain) marketTextAction(onPressed: c.inspectUncertainWrite, child: Text(recoveryText(context, '刷新核对'))),
                 if (error != null || c.error != null) ...[
                   const SizedBox(height: 8),
                   TradeNoticeBox(
@@ -298,7 +323,7 @@ class _EditListingState extends State<_EditListingDialog> {
                       style: TextButton.styleFrom(
                         foregroundColor: t.colors.danger,
                       ),
-                      onPressed: c.pending ? null : remove,
+                      onPressed: c.pending || c.writeUncertain ? null : remove,
                       child: Text(listingText(context, '删除挂单')),
                     )),
                     const Spacer(),
@@ -315,7 +340,7 @@ class _EditListingState extends State<_EditListingDialog> {
                     const SizedBox(width: 8),
                     marketButtonAction(key: const Key('market-listing-save'), FilledButton(
                       style: tradePrimaryStyle(ctx),
-                      onPressed: c.pending ? null : save,
+                      onPressed: c.pending || c.writeUncertain ? null : save,
                       child: Text(
                         c.pending
                             ? listingText(context, '保存中…')
@@ -334,10 +359,9 @@ class _EditListingState extends State<_EditListingDialog> {
 }
 
 /// Live hint: would this price become the best offer on its side?
-Widget? _priceHint(BuildContext context, MarketRow row, String text) {
+Widget? _priceHint(BuildContext context, MarketRow row, String text, num? best) {
   final price = num.tryParse(text.replaceAll(',', ''));
-  final best = marketNumber(row['best']);
-  if (price == null || best == null || row['side'] == 'barter') return null;
+  if (price == null || best == null || !marketSingleListing(row)) return null;
   final buy = row['side'] == 'buy';
   final ok = buy ? price >= best : price <= best;
   return Padding(
@@ -415,7 +439,7 @@ class _ItemCard extends StatelessWidget {
           SizedBox.square(
             dimension: 40,
             child: MarketArt(
-              row['thumbnailUrl'] as String?,
+              marketListingImage(row),
               category: marketCategoryOf(row),
             ),
           ),
@@ -427,7 +451,7 @@ class _ItemCard extends StatelessWidget {
                 Text(
                   '${row['name'] ?? ''}',
                   maxLines: 1,
-                  overflow: TextOverflow.fade,
+                  overflow: fadeOverflow(context),
                   softWrap: false,
                   style: const TextStyle(
                     fontSize: 13,
@@ -453,13 +477,8 @@ class _ItemCard extends StatelessWidget {
                         style: TextStyle(fontSize: 11, color: color),
                       ),
                     ),
-                    if (row['quality'] != null)
-                      MarketQualityBadge({
-                        'qualityData': {
-                          'type': 'material',
-                          'quality': row['quality'],
-                        },
-                      }, prefixed: true),
+                    if (row['checklist'] != true && marketQuality(row) != null)
+                      MarketQualityBadge(row, prefixed: true),
                   ],
                 ),
               ],

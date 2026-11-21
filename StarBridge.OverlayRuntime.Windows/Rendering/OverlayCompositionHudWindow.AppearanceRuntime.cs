@@ -35,6 +35,7 @@ internal sealed partial class OverlayCompositionHudWindow
 #if STARBRIDGE_VERDICT_NEXT
         if (TryBeginVerdictNextStartup(ref started, ref durationMs)) return;
 #endif
+        if (TryBeginVisorIntro(ref started, ref durationMs)) return;
         TryBeginExtendedAppearanceStartup(ref started, ref durationMs);
     }
 
@@ -59,6 +60,7 @@ internal sealed partial class OverlayCompositionHudWindow
         // adapter, which may replace its own animation flags. Optional methods
         // erase from ordinary builds; this never changes catalog eligibility.
         TryReadInstalledAppearanceAnimationState(ref state);
+        ReadVisorAnimationState(ref state);
         return state;
     }
 
@@ -90,6 +92,7 @@ internal sealed partial class OverlayCompositionHudWindow
         DisposeVerdictNextResources();
 #endif
         DisposeExtendedAppearanceResources();
+        DisposeVisorResources();
         DisposeInstalledAppearanceResources();
     }
 

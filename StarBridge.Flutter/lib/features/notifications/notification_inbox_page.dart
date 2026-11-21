@@ -429,6 +429,17 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
                 ),
               ),
             ),
+          // The Host reads only the latest 50 SCM station messages (round-2 OT10).
+          if (visible.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Text(
+                  t('SCM 站内信只显示最近 50 条', 'SCM 站內信只顯示最近 50 條', 'Only the latest 50 SCM messages are shown'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ),
         ],
       );
       return LoadingContentProbe(

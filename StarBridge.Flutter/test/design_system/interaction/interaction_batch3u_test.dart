@@ -26,7 +26,7 @@ import '../../features/overlay_settings/overlay_appearance_configuration_test.da
 import '../../features/overlay_settings/overlay_appearance_center_entry_test.dart'
     show EntryPort;
 import '../../features/overlay_settings/overlay_appearance_preview_page_test.dart'
-    show Workspace;
+    show Workspace, appearance;
 import 'interaction_batch3i_test.dart' show scopedApp;
 import 'interaction_batch3m_test.dart' show activate;
 import 'interaction_batch3b_test.dart' show semanticTap, exposedNodes;
@@ -311,7 +311,13 @@ void main() {
         (t) async {
           size(t, const Size(1280, 900));
           final handle = t.ensureSemantics();
-          final base = EntryPort(configurations: []);
+          // 0.7.3 overlay v2: the earlier appearances are put away and not
+          // offered to try on; the visor and a fixture-only appearance give the
+          // menu something to switch to.
+          final base = EntryPort(
+            configurations: [],
+            extraAppearances: [appearance('Visor'), appearance('FutureTrial')],
+          );
           final port = ProtectedPort(base);
           final module = OverlayWorkspaceModule(base);
           await module.initialize();
@@ -324,7 +330,7 @@ void main() {
                 OverlayAppearancePreviewPage(
                   module: module,
                   port: port,
-                  appearanceId: 'Verdict',
+                  appearanceId: 'Visor',
                 ),
                 suite,
               ),
@@ -333,7 +339,10 @@ void main() {
             await target(t, const Key('appearance-preview-skin'), source);
             await t.pumpAndSettle();
             final row = find.byKey(
-              const ValueKey<Object>(('appearance-preview-skin', 'Default')),
+              const ValueKey<Object>((
+                'appearance-preview-skin',
+                'FutureTrial',
+              )),
             );
             final rect = t.getRect(row);
             final area = base.live.protections.last.firstWhere(
@@ -341,11 +350,14 @@ void main() {
             );
             expect(rect.left, greaterThanOrEqualTo(area.x * 1280));
             expect(rect.right, lessThanOrEqualTo((area.x + area.width) * 1280));
-            await choice(t, '舰队标准', source);
+            await choice(t, 'FutureTrial', source);
             await t.pumpAndSettle();
-            expect(base.live.updates.last.appearanceId, 'Default');
+            expect(base.live.updates.last.appearanceId, 'FutureTrial');
             expect(module.projection.value.settings!.toMap(), before);
             expect(base.storage.mutations, hasLength(1)); // only the setup edits
+            // the visor's own settings above it push the section below a 900-high window
+            await t.ensureVisible(find.byKey(const Key('appearance-preview-crosshair')));
+            await t.pumpAndSettle();
             await t.tap(find.byKey(const Key('appearance-preview-crosshair')));
             await t.pumpAndSettle();
             port.holdFullProtection = Completer<void>();
@@ -450,6 +462,9 @@ void main() {
               suite,
             ),
           );
+          await t.pumpAndSettle();
+          // the visor's own settings above it push the section below a 900-high window
+          await t.ensureVisible(find.byKey(const Key('appearance-preview-crosshair')));
           await t.pumpAndSettle();
           await t.tap(find.byKey(const Key('appearance-preview-crosshair')));
           await t.pumpAndSettle();

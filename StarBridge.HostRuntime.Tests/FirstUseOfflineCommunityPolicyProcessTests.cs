@@ -44,14 +44,14 @@ internal static partial class FirstUseModeTests
             using var worker = Process.Start(start) ?? throw new Exception("Worker did not start");
             try
             {
-                Require(await worker.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)) == "READY", "Independent process holds a real read lease");
+                Require(await worker.StandardOutput.ReadLineAsync().WaitAsync(FirstUseTestWait.Bound) == "READY", "Independent process holds a real read lease");
                 var late = store.BeginOrganizationRead(owner, () => true)!;
                 var path = Path.Combine(f.Root, "offline-account-v1", "organizations-policy.bin");
                 using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     await worker.StandardInput.WriteLineAsync(command);
                     worker.StandardInput.Close();
-                    await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    await worker.WaitForExitAsync().WaitAsync(FirstUseTestWait.Bound);
                     Require(worker.ExitCode == 0, "Isolated worker completed without a visible client");
                 }
                 store.ObserveOrganizations(owner, 1, null, null, [new("late", "Late response", null, true)], () => true, late);
@@ -68,7 +68,7 @@ internal static partial class FirstUseModeTests
                 if (!worker.HasExited)
                 {
                     worker.StandardInput.Close();
-                    try { await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    try { await worker.WaitForExitAsync().WaitAsync(FirstUseTestWait.Bound); }
                     catch (TimeoutException) { worker.Kill(entireProcessTree: true); await worker.WaitForExitAsync(); }
                 }
             }

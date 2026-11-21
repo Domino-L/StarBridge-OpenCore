@@ -172,10 +172,14 @@ internal sealed partial class OverlayCompositionHudWindow
         public string? NoticeUnread { get; init; }
         public OverlayMemberPagingFrame MemberPaging { get; init; } = OverlayMemberPagingFrame.Single;
         public OverlayOverviewFacts? OverviewFacts { get; init; }
+        /// <summary>Every member's realtime state is unknown (the read went stale).</summary>
+        public bool RealtimeStatusUnknown { get; init; }
         public bool NightShadowStyle => RenderKind == OverlaySkinRenderKind.NightShadow;
 
 
         public bool VerdictStyle => RenderKind == OverlaySkinRenderKind.Verdict;
+
+        public bool VisorStyle => RenderKind == OverlaySkinRenderKind.Visor;
     }
 
     private sealed record OverlayCompositionMemberRow(
@@ -187,7 +191,8 @@ internal sealed partial class OverlayCompositionHudWindow
         string? Key = null,
         OverlayRosterGroup? Group = null,
         DateTimeOffset? CueStartedAtUtc = null,
-        StarBridge.Core.Presence.PlayerPresenceKind? Presence = null);
+        StarBridge.Core.Presence.PlayerPresenceKind? Presence = null,
+        bool IsSelf = false);
 
     private sealed record OverlayCompositionEventRow(
         string Title,
@@ -205,6 +210,11 @@ internal sealed partial class OverlayCompositionHudWindow
         HudColor AccentColor)
     {
         public OverlayAppearanceActivity AppearanceActivity { get; init; }
+        /// <summary>The view model's own row this snapshot was taken from: one event across frames, even when two events read the same.</summary>
+        public object? Source { get; init; }
+        /// <summary>The event kind and whether it is a loss: the visor colours the title by them (11-12).</summary>
+        public StarBridge.Core.Overlay.OverlayEventNotificationTypes EventType { get; init; }
+        public bool Negative { get; init; }
     }
 
     private readonly record struct NightShadowStartupReveal(

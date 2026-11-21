@@ -9,14 +9,34 @@ namespace StarBridge.HostRuntime.Updates;
 public static class FlutterReleaseUpdateSource
 {
     public const string MetadataKey = "StarBridgeFlutterInstallerManifestUrl";
+    public const string MetadataKeyV2 = "StarBridgeFlutterInstallerManifestUrlsV2";
     public static bool InstallationEnabled(Assembly assembly) => assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
         .Where(a => a.Key == "StarBridgeEnableInstalledUpdates").Select(a => a.Value).SequenceEqual(new[] { "true" });
 
-    public static IApplicationUpdateSource FromRelease(Assembly releaseAssembly, string? currentVersion, string platform)
+    public static IApplicationUpdateSource FromRelease(Assembly releaseAssembly, string? currentVersion, string platform,
+        string? dataRoot = null)
     {
         var urls = releaseAssembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .Where(a => a.Key == MetadataKey).Select(a => a.Value).ToArray();
-        return Create(urls.Length == 1 ? urls[0] : urls.Length == 0 ? null : "invalid", currentVersion, platform);
+        var v1 = urls.Length == 1 ? urls[0] : urls.Length == 0 ? null : "invalid";
+        var v2 = releaseAssembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Where(a => a.Key == MetadataKeyV2).Select(a => a.Value).ToArray();
+        var mirrors = FlutterUpdateMirror.ParseMetadata(v2.Length == 1 ? v2[0] : null);
+        if (mirrors.Length == 0) return Create(v1, currentVersion, platform);
+        try
+        {
+            Uri? fallback = null;
+            if (!string.IsNullOrWhiteSpace(v1))
+            {
+                fallback = FlutterUpdateManifestVerifier.RequireHttps(v1);
+                if (fallback.IsLoopback) throw new InvalidDataException();
+            }
+            return new FlutterInstallerUpdateSource(fallback, mirrors, platform, currentVersion!, ReadTrustedKeys(),
+                new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false },
+                () => dataRoot is null ? null : Auth.ScmRegionRouter.ReadCachedClassification(
+                    Path.Combine(dataRoot, "scm-region-cache.json"), DateTimeOffset.UtcNow));
+        }
+        catch { return new FixedSource("configuration-invalid"); }
     }
 
     internal static IApplicationUpdateSource Create(string? url, string? currentVersion, string platform)

@@ -570,7 +570,7 @@ final class AppComposition {
         communities: communities,
         session: nativeHost?.session,
       ),
-      menuPresence: () => manualPresence?.source.controller,
+      menuPresence: () => manualPresence,
       menuGame: () => gameLog?.value ?? const GameLogView(),
       menuLabels: () => composeMenuLabels(preferences),
     );

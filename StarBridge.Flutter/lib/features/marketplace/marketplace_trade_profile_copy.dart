@@ -43,6 +43,11 @@ const tradeProfileCopy = <String, List<String>>{
     'Select an available time zone for the preview',
   ],
   'contact': ['联系方式', '聯絡方式', 'Contact details'],
+  'editInClient': [
+    '交易资料和联系方式请在客户端里修改。',
+    '交易資料和聯絡方式請在用戶端裡修改。',
+    'Edit your trade profile and contact details in the client.',
+  ],
   'public': [
     '会在 SCM 公开显示',
     '會在 SCM 公開顯示',

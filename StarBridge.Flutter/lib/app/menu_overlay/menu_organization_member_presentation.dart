@@ -65,6 +65,7 @@ organizationMemberPresentation(
           ? ''
           : member.roleColor,
       'presence': presence,
+      'lastOnlineDays': member.lastOnlineDays,
       'isSelf': member.isSelf,
       'avatar': avatar,
       'profileKey': profileKey,
@@ -77,9 +78,15 @@ organizationMemberPresentation(
       'server': MenuOverlayComputed(
         (strings) => localizedRuntime(strings).server.text,
       ),
-      'serverTextKey': semantic.server.isPlaceholder ? fieldKey(semantic.server.text) : '',
-      'shipTextKey': semantic.ship.isPlaceholder ? fieldKey(semantic.ship.text) : '',
-      'locationTextKey': semantic.location.isPlaceholder ? fieldKey(semantic.location.text) : '',
+      'serverTextKey': semantic.server.isPlaceholder
+          ? fieldKey(semantic.server.text)
+          : '',
+      'shipTextKey': semantic.ship.isPlaceholder
+          ? fieldKey(semantic.ship.text)
+          : '',
+      'locationTextKey': semantic.location.isPlaceholder
+          ? fieldKey(semantic.location.text)
+          : '',
       'shipKind': runtime.ship.isPlaceholder ? 'placeholder' : 'value',
       'locationKind': runtime.location.isPlaceholder ? 'placeholder' : 'value',
       'serverKind': runtime.server.isPlaceholder ? 'placeholder' : 'value',

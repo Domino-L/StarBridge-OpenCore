@@ -94,7 +94,8 @@ mixin CommunityBridgeManagement on CommunityBridgeTransport
   bool get disbandAvailable =>
       !isClosed &&
       session.hostCapabilities.contains('communities.disbandPreview') &&
-      session.hostCapabilities.contains('communities.disband');
+      session.hostCapabilities.contains('communities.disband') &&
+      scmOnly?.call() != true;
   @override
   Future<CommunityDisbandPreview> readDisband(String targetRef) =>
       workspaceRead(() async {
@@ -104,8 +105,16 @@ mixin CommunityBridgeManagement on CommunityBridgeTransport
           }),
         );
         if (result.targetRef != targetRef) throw const FormatException();
+        // Only the latest preview may confirm; remember whether it needs no password.
+        _scmDisbandConfirmations
+          ..clear()
+          ..addAll([if (result.scmRevalidation) result.confirmationRef]);
         return result;
       });
+
+  /// Confirmations previewed as SCM re-confirmation (a migrated owner): only
+  /// these may be sent without a password. The Host checks the same again.
+  final _scmDisbandConfirmations = <String>{};
   @override
   Future<CommunityDisbandOutcome> disband(
     String targetRef,
@@ -115,7 +124,9 @@ mixin CommunityBridgeManagement on CommunityBridgeTransport
     if (!disbandAvailable) {
       return const CommunityDisbandOutcome('rejected', error: 'unavailable');
     }
-    if (password.trim().isEmpty || password.length > 4096) {
+    final scm = _scmDisbandConfirmations.contains(confirmationRef);
+    if (password.length > 4096 ||
+        (scm ? password.isNotEmpty : password.trim().isEmpty)) {
       return const CommunityDisbandOutcome(
         'rejected',
         error: 'passwordInvalid',

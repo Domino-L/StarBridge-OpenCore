@@ -6,10 +6,12 @@ import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/styles/marketplace_palette.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_controller.dart';
+import 'marketplace_refresh.dart';
 import 'marketplace_copy.dart';
-import 'marketplace_diagonal.dart';
+import 'marketplace_details.dart' show MarketQualityBadge;
 import 'marketplace_port.dart';
 import 'marketplace_records_controller.dart';
+import 'marketplace_recovery.dart';
 import 'marketplace_records_page.dart' show marketRecordTime;
 import 'marketplace_surfaces.dart';
 import 'marketplace_unified.dart';
@@ -53,12 +55,28 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
   Widget build(BuildContext context) {
     final controller = w;
     if (controller == null) return MarketNotice(_t(context, 'needsScm'));
-    return ListenableBuilder(
+    return MarketRefreshBinding(
+      market: widget.market, tab: 4, source: controller,
+      refresh: () async {
+        await Future.wait([controller.loadSpaces(),
+          if (view == 0) controller.loadInventory(),
+          if (view == 1) controller.loadLedger(),
+          if (view == 2) controller.loadEscrow()]);
+      },
+      busy: () => controller.spacesLoading || (view == 0
+          ? controller.inventory.loading : view == 1
+          ? controller.ledger.loading : controller.escrowLoading),
+      child: ListenableBuilder(
       listenable: controller,
       builder: (context, _) => LayoutBuilder(
         builder: (context, box) {
           final right = _right(context, controller);
-          if (box.maxWidth < 760) return right;
+          if (box.maxWidth < 760) {
+            return Column(children: [
+              if (controller.spacesFailed) _spacesFailure(context, controller),
+              Expanded(child: right),
+            ]);
+          }
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -69,7 +87,7 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
           );
         },
       ),
-    );
+    ));
   }
 
   Widget _spaces(BuildContext context, MarketplaceWarehouseController c) {
@@ -132,6 +150,7 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
           ),
           if (c.spacesLoading && c.spaces.isEmpty)
             const LinearProgressIndicator(minHeight: 2),
+          if (c.spacesFailed) _spacesFailure(context, c),
           space(
             null,
             _t(context, 'allSpaces'),
@@ -148,7 +167,7 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
               (row['id'] as num?)?.toInt(),
               '${row['name'] ?? ''}${row['isDefault'] == true ? ' · ${_t(context, 'default')}' : ''}',
               '${row['locationPath'] ?? row['location'] ?? ''}',
-              _t(context, 'kindsAvailable', {
+              _t(context, 'linesAvailable', {
                 'n': '${row['lines'] ?? 0}',
                 'a': '${row['available'] ?? 0}',
               }),
@@ -183,7 +202,7 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
             for (final (i, key, count) in [
               (0, 'assets', c.inventory.total),
               (1, 'ledger', null),
-              (2, 'escrow', c.escrow.length),
+              (2, 'escrow', '${c.escrow.length}${c.escrowMore ? '+' : ''}'),
             ])
               MarketSubTab(
                 _t(context, key),
@@ -337,6 +356,9 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
     String? error,
     required VoidCallback retry,
   }) {
+    if (failed && marketplaceNeedsLogin(error)) {
+      return MarketplaceAuthNotice(error, login: widget.market.login);
+    }
     if (loading) {
       return const Align(
         alignment: Alignment.topCenter,
@@ -364,6 +386,13 @@ class _WarehouseState extends State<MarketplaceWarehousePage> {
             ),
     );
   }
+
+  Widget _spacesFailure(BuildContext context, MarketplaceWarehouseController c) =>
+      marketplaceNeedsLogin(c.spacesError)
+          ? MarketplaceAuthNotice(c.spacesError, login: widget.market.login)
+          : marketTextAction(key: const Key('market-warehouse-spaces-retry'),
+              onPressed: c.spacesLoading ? null : c.loadSpaces,
+              child: Text(recoveryText(context, '暂时读不到仓位，请重试')));
 }
 
 TextStyle _num(BuildContext context, {Color? color}) => TextStyle(
@@ -409,9 +438,6 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final reserved = (r['reserved'] as num?) ?? 0;
-    final quality = RegExp(r'\d+')
-        .firstMatch('${r['quality'] ?? ''}')
-        ?.group(0);
     return Container(
       constraints: const BoxConstraints(minHeight: 58),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -434,12 +460,7 @@ class _ItemRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (quality != null)
-                  MarketSlantTag(
-                    _t(context, 'quality'),
-                    color: MarketplacePalette.gold,
-                    mono: quality,
-                  ),
+                MarketQualityBadge(r, prefixed: true),
               ],
             ),
           ),
@@ -468,7 +489,7 @@ class _ItemRow extends StatelessWidget {
             child: Text(
               '${r['space'] ?? ''}',
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
             ),
@@ -485,7 +506,17 @@ class _LedgerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final delta = (r['deltaOnHand'] as num?) ?? 0;
+    final moved = (r['movedQuantity'] as num?) ?? 0;
+    final reserved = (r['deltaReserved'] as num?) ?? 0;
+    // A transfer is known by its type; SCM may leave either space name empty
+    // and still give movedQuantity (C review P2).
+    final moving = moved > 0 &&
+        ('${r['operationType'] ?? ''}'.toUpperCase().contains('TRANSFER') ||
+            (r['from'] != null && r['to'] != null));
+    final delta = moving ? moved : reserved != 0 ? reserved : (r['deltaOnHand'] as num?) ?? 0;
+    final quantity = moving ? _t(context, 'moved', {'n': '$delta'})
+        : reserved != 0 ? _t(context, 'lockedChange', {'n': delta > 0 ? '+$delta' : '$delta'})
+        : delta > 0 ? '+$delta' : '$delta';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
@@ -514,9 +545,9 @@ class _LedgerRow extends StatelessWidget {
             ),
           ),
           SizedBox(
-            width: 80,
+            width: 130,
             child: Text(
-              delta > 0 ? '+$delta' : '$delta',
+              quantity,
               style: _num(
                 context,
                 color: delta > 0
@@ -537,7 +568,7 @@ class _LedgerRow extends StatelessWidget {
                 if (r['businessNo'] != null) '#${r['businessNo']}',
               ].where((s) => s.isNotEmpty).join(' · '),
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(fontSize: 11.5, color: t.colors.textSecondary),
             ),
@@ -549,6 +580,9 @@ class _LedgerRow extends StatelessWidget {
 
   static String _operation(BuildContext context, Object? type) {
     final text = '${type ?? ''}'.toUpperCase();
+    final exact = const {'RESERVE': 'reserve', 'RELEASE': 'release',
+      'CONSUME': 'consume', 'CONTAINER_TRANSFER': 'containerTransfer'}[text];
+    if (exact != null) return _t(context, exact);
     final key = text.contains('TRANSFER')
         ? 'transfer'
         : text.contains('OUT')
@@ -613,7 +647,7 @@ class _EscrowRow extends StatelessWidget {
                 r['status'],
               ].whereType<Object>().join(' · '),
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(fontSize: 11.5, color: t.colors.textSecondary),
             ),
@@ -625,6 +659,13 @@ class _EscrowRow extends StatelessWidget {
 }
 
 const _copy = <String, List<String>>{
+  'linesAvailable': ['{n} 行 · 可用 {a}', '{n} 行 · 可用 {a}', '{n} rows · {a} available'],
+  'moved': ['移动 {n}', '移動 {n}', 'Moved {n}'],
+  'lockedChange': ['锁定 {n}', '鎖定 {n}', 'Locked {n}'],
+  'reserve': ['库存锁定', '庫存鎖定', 'Reserve stock'],
+  'release': ['释放锁定', '釋放鎖定', 'Release reservation'],
+  'consume': ['交易扣减', '交易扣減', 'Trade consumption'],
+  'containerTransfer': ['容器迁移', '容器遷移', 'Container transfer'],
   'mySpaces': ['我的仓位', '我的倉位', 'My spaces'],
   'allSpaces': ['全部仓位', '全部倉位', 'All spaces'],
   'default': ['默认', '預設', 'default'],
@@ -636,7 +677,7 @@ const _copy = <String, List<String>>{
   'fleetSpaces': ['舰队仓储', '艦隊倉儲', 'Fleet storage'],
   'nextVersion': ['下一版开放', '下一版開放', 'Coming in a later version'],
   'assets': ['资产', '資產', 'Assets'],
-  'ledger': ['账本', '帳本', 'Ledger'],
+  'ledger': ['账本（只显示最近 30 天）', '帳本（只顯示最近 30 天）', 'Ledger (last 30 days only)'],
   'escrow': ['托管', '託管', 'Escrow'],
   'readOnly': [
     '只读：转移、盘点、出库这一版先到 SCM 网站操作。',
@@ -645,13 +686,13 @@ const _copy = <String, List<String>>{
   ],
   'openScm': ['打开 SCM 仓储', '開啟 SCM 倉儲', 'Open SCM storage'],
   'stock': [
-    '在库 {o} · 托管中 {r}',
-    '在庫 {o} · 託管中 {r}',
-    '{o} on hand · {r} in escrow',
+    '在库 {o} · 锁定 {r}',
+    '在庫 {o} · 鎖定 {r}',
+    '{o} on hand · {r} locked',
   ],
   'item': ['物品', '物品', 'Item'],
   'onHand': ['在库', '在庫', 'On hand'],
-  'reserved': ['托管中', '託管中', 'Escrow'],
+  'reserved': ['锁定', '鎖定', 'Locked'],
   'available': ['可用', '可用', 'Available'],
   'where': ['位置', '位置', 'Space'],
   'quality': ['品质', '品質', 'Quality'],

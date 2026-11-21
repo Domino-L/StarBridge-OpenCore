@@ -35,8 +35,12 @@ internal sealed partial class ScmAccountBridgeHost
         if (_session is not null) return new(RequireSession(context));
         if (_legacySession is { } legacy && !_legacyRestoreUnavailable && LegacyContext == context)
             return new(null, legacy);
-        throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
+        throw MissingSessionError();
     }
+
+    private AccountBridgeHostException MissingSessionError() => _credentialTemporarilyUnavailable && !_reauthorizationRequired
+        ? new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true)
+        : new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
 
     private async Task<RelayRequestSession> ReadDirectRelaySessionAsync(BridgeAccountContext context, CancellationToken token)
     {

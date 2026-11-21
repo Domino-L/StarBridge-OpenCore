@@ -1,4 +1,7 @@
+import 'organization_notification_strings.dart';
+
 const simplifiedNotificationSettingsStrings = <String, String>{
+  ...organizationNotificationZhCn,
   'settings.notification.activationUnavailable':
       '暂时无法打开这条提醒。可从通知页刷新查看；未读状态未改变。',
   'settings.notification.desktopReason.disabled': 'Windows 桌面提醒已关闭，请先开启后再测试。',
@@ -91,8 +94,7 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.channels.rally.description':
       '主舰队召集时播放提示音、发 Windows 通知并在任务栏提示，游戏中开着浮层时也会显示。不受“游戏内浮层主动提醒”开关影响。',
   'settings.notification.channels.rally.preview': '试听召集提醒',
-  'settings.notification.channels.rally.previewHint':
-      '播放一次召集提示音和提醒，不会真的发起召集',
+  'settings.notification.channels.rally.previewHint': '播放一次召集提示音和提醒，不会真的发起召集',
   'settings.notification.channels.rally.sampleTitle': '舰队召集（示例）',
   'settings.notification.channels.rally.sampleBody': '「这是一条示例召集」 · 剩余 30 分钟',
   'settings.notification.channels.overlay.title': '游戏内浮层主动提醒',
@@ -142,8 +144,9 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.activity.enabled.title': '启用玩家动态桌面提醒',
   'settings.notification.activity.enabled.description': '所选玩家状态变化时显示桌面通知，默认关闭。',
   'settings.notification.activity.audiences.title': '谁的动态需要提醒',
-  'settings.notification.activity.audiences.description': '选择要关注的玩家。',
-  'settings.notification.activity.audience.officialFleet': 'RSI 官网舰队成员',
+  'settings.notification.activity.audiences.description':
+      '来自好友、社区组织或当前房间；主舰队动态尚未接入。',
+  'settings.notification.activity.audience.officialFleet': '社区组织成员',
   'settings.notification.activity.audience.friends': '好友',
   'settings.notification.activity.audience.room': '当前房间成员',
   'settings.notification.activity.events.title': '哪些变化需要提醒',
@@ -162,8 +165,8 @@ const simplifiedNotificationSettingsStrings = <String, String>{
   'settings.notification.activity.reduceInGame.description':
       '游戏中开启浮层时，暂停玩家动态弹窗。',
   'settings.notification.play.title': '连续游玩提醒',
-  'settings.notification.play.description': '长时间游戏时提醒你休息和补水。',
-  'settings.notification.play.enabled.title': '提醒我休息和补水',
+  'settings.notification.play.description': '到点提醒你已经连续玩了多久。',
+  'settings.notification.play.enabled.title': '到点提醒我已经连续玩了多久',
   'settings.notification.play.enabled.description': '打开后按下面的时间间隔提醒。',
   'settings.notification.play.intervals.title': '提醒间隔',
   'settings.notification.play.first.title': '首次提醒',
@@ -175,6 +178,7 @@ const simplifiedNotificationSettingsStrings = <String, String>{
 };
 
 const traditionalNotificationSettingsStrings = <String, String>{
+  ...organizationNotificationZhTw,
   'settings.notification.activationUnavailable':
       '暫時無法開啟這則提醒。可從通知頁重新整理查看；未讀狀態未改變。',
   'settings.notification.desktopReason.disabled': 'Windows 桌面提醒已關閉，請先開啟後再測試。',
@@ -266,8 +270,7 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.channels.rally.description':
       '主艦隊召集時播放提示音、發送 Windows 通知並在工作列提示，遊戲中開著浮層時也會顯示。不受「遊戲內浮層主動提醒」開關影響。',
   'settings.notification.channels.rally.preview': '試聽召集提醒',
-  'settings.notification.channels.rally.previewHint':
-      '播放一次召集提示音和提醒，不會真的發起召集',
+  'settings.notification.channels.rally.previewHint': '播放一次召集提示音和提醒，不會真的發起召集',
   'settings.notification.channels.rally.sampleTitle': '艦隊召集（範例）',
   'settings.notification.channels.rally.sampleBody': '「這是一則範例召集」 · 剩餘 30 分鐘',
   'settings.notification.channels.overlay.title': '遊戲內浮層主動提醒',
@@ -317,8 +320,9 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.activity.enabled.title': '啟用玩家動態桌面提醒',
   'settings.notification.activity.enabled.description': '所選玩家狀態變化時顯示桌面通知，預設關閉。',
   'settings.notification.activity.audiences.title': '誰的動態需要提醒',
-  'settings.notification.activity.audiences.description': '選擇要關注的玩家。',
-  'settings.notification.activity.audience.officialFleet': 'RSI 官網艦隊成員',
+  'settings.notification.activity.audiences.description':
+      '來自好友、社群組織或目前房間；主艦隊動態尚未接入。',
+  'settings.notification.activity.audience.officialFleet': '社群組織成員',
   'settings.notification.activity.audience.friends': '好友',
   'settings.notification.activity.audience.room': '目前房間成員',
   'settings.notification.activity.events.title': '哪些變化需要提醒',
@@ -337,8 +341,8 @@ const traditionalNotificationSettingsStrings = <String, String>{
   'settings.notification.activity.reduceInGame.description':
       '遊戲中開啟浮層時，暫停玩家動態彈窗。',
   'settings.notification.play.title': '連續遊玩提醒',
-  'settings.notification.play.description': '長時間遊戲時提醒你休息和補充水分。',
-  'settings.notification.play.enabled.title': '提醒我休息和補水',
+  'settings.notification.play.description': '到點提醒你已經連續玩了多久。',
+  'settings.notification.play.enabled.title': '到點提醒我已經連續玩了多久',
   'settings.notification.play.enabled.description': '開啟後按下面的時間間隔提醒。',
   'settings.notification.play.intervals.title': '提醒間隔',
   'settings.notification.play.first.title': '首次提醒',
@@ -350,6 +354,7 @@ const traditionalNotificationSettingsStrings = <String, String>{
 };
 
 const englishNotificationSettingsStrings = <String, String>{
+  ...organizationNotificationEn,
   'settings.notification.activationUnavailable': 'This reminder could not be opened. Refresh the Notifications page to check it. Unread status is unchanged.',
   'settings.notification.desktopReason.disabled':
       'Windows desktop reminders are off. Enable them before testing.',
@@ -452,18 +457,17 @@ const englishNotificationSettingsStrings = <String, String>{
   'settings.notification.channels.directMessage.description': 'With desktop alerts enabled, show new direct messages in the background. Earlier messages will not trigger alerts.',
   'settings.notification.channels.directMessage.defaultOff': 'Off by default',
   'settings.notification.channels.trade.title': 'Trade alerts',
-  'settings.notification.channels.trade.description':
-      'Alert you when someone requests a trade, the other side ships, a trade completes or is cancelled, or a trade message arrives.',
+  'settings.notification.channels.trade.description': 'Alert you when someone requests a trade, the other side ships, a trade completes or is cancelled, or a trade message arrives.',
   'settings.notification.channels.trade.defaultOn': 'On by default',
   'settings.notification.channels.windows.recommended': 'Recommended',
   'settings.notification.channels.rally.title': 'Main fleet rally alerts',
-  'settings.notification.channels.rally.description':
-      'When the main fleet rallies, play a sound, send a Windows notification and mark the taskbar; also shown in the overlay while it is open in game. Independent of the in-game overlay alerts switch.',
+  'settings.notification.channels.rally.description': 'When the main fleet rallies, play a sound, send a Windows notification and mark the taskbar; also shown in the overlay while it is open in game. Independent of the in-game overlay alerts switch.',
   'settings.notification.channels.rally.preview': 'Preview rally alert',
   'settings.notification.channels.rally.previewHint':
       'Plays the rally sound and alert once. No real rally is started.',
   'settings.notification.channels.rally.sampleTitle': 'Fleet rally (sample)',
-  'settings.notification.channels.rally.sampleBody': '“This is a sample rally” · 30 min left',
+  'settings.notification.channels.rally.sampleBody':
+      '“This is a sample rally” · 30 min left',
   'settings.notification.channels.overlay.title':
       'Proactive in-game overlay alerts',
   'settings.notification.channels.overlay.description':
@@ -524,9 +528,9 @@ const englishNotificationSettingsStrings = <String, String>{
   'settings.notification.activity.enabled.description': 'Show desktop alerts when selected players change status. Off by default.',
   'settings.notification.activity.audiences.title':
       'Whose activity should alert you',
-  'settings.notification.activity.audiences.description':
-      'Choose the players you want to follow.',
-  'settings.notification.activity.audience.officialFleet': 'RSI fleet members',
+  'settings.notification.activity.audiences.description': 'Sources are friends, community organizations and the current room. Main fleet activity is not connected yet.',
+  'settings.notification.activity.audience.officialFleet':
+      'Community organization members',
   'settings.notification.activity.audience.friends': 'Friends',
   'settings.notification.activity.audience.room': 'Current room members',
   'settings.notification.activity.events.title':
@@ -550,8 +554,8 @@ const englishNotificationSettingsStrings = <String, String>{
       'Pause player activity pop-ups while the in-game overlay is open.',
   'settings.notification.play.title': 'Continuous play reminders',
   'settings.notification.play.description':
-      'Get rest and hydration reminders during long play sessions.',
-  'settings.notification.play.enabled.title': 'Remind me to rest and hydrate',
+      "Tells you how long you've been playing, at each interval.",
+  'settings.notification.play.enabled.title': "Tell me how long I've been playing",
   'settings.notification.play.enabled.description':
       'When enabled, reminders follow the intervals below.',
   'settings.notification.play.intervals.title': 'Reminder intervals',

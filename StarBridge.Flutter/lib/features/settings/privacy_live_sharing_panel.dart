@@ -70,6 +70,9 @@ class _PrivacyLiveSharingPanelState extends State<PrivacyLiveSharingPanel> {
         controller.publicationSupported &&
         controller.hasSaved &&
         draft.publicationEnabled &&
+        // Reapplying the same out-of-date main fleet choice only fails again;
+        // the main fleet page asks for the explicit confirmation instead.
+        controller.publicationView.errorCode != 'official_fleet.choice_changed' &&
         const {
           'inactive',
           'withdrawn',

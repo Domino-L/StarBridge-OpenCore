@@ -12,6 +12,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_summary.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../_support/visual_output_dir.dart';
+import '../../_support/hangar_test_actions.dart';
 import '../../features/friends/social_layout_test.dart' show loadFonts, size;
 import 'interaction_batch3fb_hangar_test.dart'
     show HangarProbe, HangarProbePort, hangarKey, mountHangar, summaryHeader;
@@ -28,6 +29,16 @@ const _suites = [
   InteractionSuite.glow,
 ];
 const _locales = [Locale('zh', 'CN'), Locale('zh', 'TW'), Locale('en', 'US')];
+const _filterKeys = [
+  'hangar-role-all',
+  'hangar-role-combat',
+  'hangar-status-flyable',
+  'hangar-status-concept',
+  'hangar-size-all',
+  'hangar-size-small',
+  'hangar-size-medium',
+  'hangar-size-large',
+];
 
 // Invoke the original probe builder with this mounted StateSetter. In
 // particular, probe.update still rebuilds the same page, port and frame, rather
@@ -197,10 +208,19 @@ void main() {
             );
             for (final entry in <String, Finder>{
               'toolbar': find.byType(LocalHangarToolbar),
-              'filters': find.byType(LocalHangarFilters),
               'summary': find.byType(LocalHangarOverview),
             }.entries) {
               _withinWidth(t, entry.value, width, '$name ${entry.key}');
+            }
+            // Filters now join the toolbar's wrapping lines. Check every
+            // choice's geometry instead of the retired filter panel's box.
+            for (final key in _filterKeys) {
+              _withinWidth(
+                t,
+                hangarChoiceAncestor(hangarKey(key)),
+                width,
+                '$name $key',
+              );
             }
             await t.ensureVisible(summaryHeader());
             await t.tap(summaryHeader());
@@ -219,7 +239,12 @@ void main() {
               'locale': locale.toLanguageTag(),
               'width': width,
               'toolbar': _rectData(t.getRect(find.byType(LocalHangarToolbar))),
-              'filters': _rectData(t.getRect(find.byType(LocalHangarFilters))),
+              'filters': {
+                for (final key in _filterKeys)
+                  key: _rectData(
+                    t.getRect(hangarChoiceAncestor(hangarKey(key))),
+                  ),
+              },
               'expandedSummary': _rectData(
                 t.getRect(find.byType(LocalHangarSummary)),
               ),

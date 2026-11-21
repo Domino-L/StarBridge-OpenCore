@@ -3,6 +3,7 @@ final class LocalHangarViewState {
   String query = '', sort = 'saved';
   String? size, category, status;
   bool former = false, favoritesOnly = false, grid = true;
+  bool compact = false, byMaker = false;
   double scrollOffset = 0;
 }
 

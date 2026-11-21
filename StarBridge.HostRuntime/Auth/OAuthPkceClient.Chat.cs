@@ -176,7 +176,7 @@ public sealed partial class OAuthPkceClient
         ScmOAuthSession session, JsonElement input, Func<bool> current, Func<ScmChatConnection> connection, CancellationToken token)
     {
         if (input.ValueKind != JsonValueKind.Object || input.GetRawText().Length > 2048 ||
-            input.EnumerateObject().Any(p => p.Name is not ("schemaVersion" or "operation" or "ref" or "before" or "content" or "orderId" or "orderNumber" or "clientMessageId")))
+            input.EnumerateObject().Any(p => p.Name is not ("schemaVersion" or "operation" or "ref" or "before" or "content" or "orderNumber" or "clientMessageId")))
             throw new AccountBridgeHostException("marketplace.invalid_request");
         var op = MarketplaceTradePolicy.Text(input, "operation") ?? "";
         if (op is not ("conversations" or "history" or "openScm" or "open" or "openOrder" or "read" or "unread" or "send" or "focus" or "close"))
@@ -245,8 +245,7 @@ public sealed partial class OAuthPkceClient
                 var (peer, _) = Peer();
                 token.ThrowIfCancellationRequested();
                 if (!current()) throw new AccountBridgeHostException("marketplace.context_changed");
-                OpenScmBrowser(new Uri(Support.HelpSupportBridgeDispatcher.ScmWebsiteRoot,
-                    "message?userId=" + peer.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                OpenScmBrowser(ScmWebsiteRouting.Chat(peer));
                 return (new { confirmed = true }, active);
             }
             case "conversations":
@@ -281,10 +280,12 @@ public sealed partial class OAuthPkceClient
             case "openOrder":
             {
                 // 订单详情「联系卖家」: the seller is found by the Host from the public order.
-                var number = MarketplaceTradePolicy.Text(input, "orderNumber")?.Trim() ?? "";
-                if (number.Length is 0 or > 64 || number.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
+                var number = MarketplaceTradePolicy.Text(input, "orderNumber") ?? "";
+                if (!MarketplaceChat.ValidOrderNumber(number))
                     throw new AccountBridgeHostException("marketplace.invalid_request");
                 var order = await Send(HttpMethod.Get, "sc/orders/get?orderNumber=" + Uri.EscapeDataString(number));
+                if (MarketplaceTradePolicy.Text(order, "orderNumber") != number)
+                    throw new AccountBridgeHostException("marketplace.state_changed");
                 var seller = MarketplaceChat.Id(order, "orderOwnerId") is var orderOwner and > 0 ? orderOwner : MarketplaceChat.Id(order, "creatorId");
                 if (seller <= 0) throw new AccountBridgeHostException("marketplace.state_changed");
                 return (Conversation(await Send(HttpMethod.Post, "member/chat/conversations/create", new { otherUserId = seller })), active);
@@ -319,11 +320,12 @@ public sealed partial class OAuthPkceClient
                 }
                 ScmChatConnection.ValidateClientMessageId(clientMessageId);
                 string? quoteId = null;
-                if (input.TryGetProperty("orderId", out var order))
+                if (input.TryGetProperty("orderNumber", out var order))
                 {
-                    if (order.ValueKind != JsonValueKind.Number || !order.TryGetInt64(out var orderId) || orderId <= 0)
+                    if (order.ValueKind != JsonValueKind.String ||
+                        !MarketplaceChat.ValidOrderNumber(order.GetString()))
                         throw new AccountBridgeHostException("marketplace.invalid_request");
-                    quoteId = orderId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    quoteId = order.GetString();
                 }
                 if (!current()) throw new AccountBridgeHostException("marketplace.context_changed");
                 var result = await connection().SendAsync(peer, content, quoteId is null ? null : "order", quoteId, token, clientMessageId);

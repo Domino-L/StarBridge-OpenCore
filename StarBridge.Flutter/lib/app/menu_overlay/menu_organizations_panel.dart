@@ -19,6 +19,7 @@ import '../../features/communities/community_announcements_copy.dart';
 import '../../features/direct_messages/communication_time_formatter.dart';
 import '../localization/app_strings.dart';
 import '../../shared/ships/catalog_vehicle_icon.dart';
+import '../../shared/ships/ship_vehicle_icon.dart';
 import '../../shared/ships/ship_classification_tag.dart';
 import '../../features/communities/community_ships_copy.dart';
 import '../../shared/ships/ship_category_colors.dart';
@@ -559,9 +560,12 @@ class _MenuOrganizationsPanelState extends State<MenuOrganizationsPanel> {
               label: communityShipDisplayText(context, data.role),
               color: shipCategoryColor(context, data.role),
             ),
-            vehicleIcon: CatalogVehicleIcon.supportsKey(data.iconKey)
-                ? CatalogVehicleIcon.byKey(iconKey: data.iconKey)
-                : const SizedBox.square(dimension: 28),
+            vehicleIcon: ShipVehicleIcon(
+              names: [data.vehicleName],
+              fallback: CatalogVehicleIcon.supportsKey(data.iconKey)
+                  ? CatalogVehicleIcon.byKey(iconKey: data.iconKey)
+                  : const SizedBox.square(dimension: 28),
+            ),
             status: Text(communityShipDisplayText(context, data.status)),
             price: Text(
               data.price,

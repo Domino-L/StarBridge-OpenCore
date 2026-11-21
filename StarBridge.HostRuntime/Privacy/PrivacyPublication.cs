@@ -117,6 +117,7 @@ internal sealed partial class PrivacyPublication : IDisposable
     private DateTimeOffset _retryAfter;
     private long? _retryRevision;
     private PrivacyPublicationInput? _active;
+    private bool _refreshIdentityClear;
     private PrivacyPublicationInput? _wireContractOwner;
     private bool _scopedWireContract;
     private bool _withdrawOnly;
@@ -127,6 +128,9 @@ internal sealed partial class PrivacyPublication : IDisposable
     private PrivacyPublicationInput? _recovery;
     private bool _restoreBlocked;
     private string? _publicationFailure;
+    // The main fleet operation the relay refused as out of date. Only a new
+    // operation from the user's explicit save may be sent again.
+    private string? _blockedOfficialOperation;
     private bool _manualPause;
     private int _unauthorizedFailures;
     private PrivacyPublicationStatus _status = new("inactive");
@@ -138,6 +142,7 @@ internal sealed partial class PrivacyPublication : IDisposable
     private PrivacyPublicationInput? _pendingPause;
     private string? _retryError;
     internal bool ClearPending => _pendingClear is not null;
+    private static readonly TimeSpan IdentityClearRefresh = TimeSpan.FromMinutes(5);
     internal TimeSpan VisibilityTimeout { get; init; } = TimeSpan.FromSeconds(20);
 
     internal PrivacyPublication(LocalPrivacyStore store, Func<PrivacyPublicationInput?> current,
@@ -174,8 +179,10 @@ internal sealed partial class PrivacyPublication : IDisposable
     {
         _unauthorizedFailures = 0;
         _publicationFailure = null;
+        _blockedOfficialOperation = null;
         _manualPause = false;
         _active = null;
+        _refreshIdentityClear = false;
         _visibilitySuspended = null;
         _recovery = null;
         _restoreBlocked = false;
@@ -189,8 +196,10 @@ internal sealed partial class PrivacyPublication : IDisposable
         b is not null && a.Owner == b.Owner && a.Generation == b.Generation && a.Handle == b.Handle;
 
     internal async Task<PrivacyPublicationStatus> ApplyAsync(BridgeAccountContext owner, long generation,
-        long revision, CancellationToken cancellation, bool preservePause = false)
+        long revision, CancellationToken cancellation, bool preservePause = false, bool firstOfficialDefault = false)
     {
+        // Automatic defaults never resume sharing, even if a caller omits preservePause.
+        preservePause |= firstOfficialDefault;
         using var work = _work.Enter(cancellation);
         if (work is null || _disposed) throw new LocalPrivacyException("privacy_publication.account_changed");
         cancellation = work.Token;
@@ -204,27 +213,40 @@ internal sealed partial class PrivacyPublication : IDisposable
             var saved = _store.Read(owner);
             if (saved.Settings is null || saved.Revision != revision)
                 throw new LocalPrivacyException("privacy_publication.refresh_required");
+            var expectedMetadata = preservePause ? _store.ReadPublicationMetadata(owner) : null;
             // An audience choice is not an instruction to resume paused sharing
             // or change visibility. Check under the existing publication gate.
             if (preservePause)
             {
                 var choiceVisibility = ReadVisibility(input);
                 await PersistObservedPauseAsync(input, cancellation).ConfigureAwait(false);
-                if (choiceVisibility.Mode is not (PlayerPresenceVisibilityMode.Online or PlayerPresenceVisibilityMode.InGame))
+                if (IsApplySuspended(input, choiceVisibility))
                     return Set(new("withdrawn", AppliedRevision: revision));
             }
-            if (preservePause && (_manualPause || _store.IsPublicationPaused(owner) || _store.IsPublicationRevoked(owner) ||
-                HasObservedPause(input)))
+            // Organization saves can grant first consent only for the explicit
+            // automatic four-field default. The write lock rechecks this below.
+            var grantFirstDefault = preservePause && expectedMetadata?.ConsentVersion is null;
+            if (grantFirstDefault && (!firstOfficialDefault ||
+                !LocalPrivacyStore.IsFirstOfficialDefault(saved.Settings)))
+                return Set(new("inactive", ErrorCode: "privacy_publication.consent_required"));
+            try
+            {
+                await _store.SetPublicationConsentAsync(owner, revision, saved.Settings.PublicationEnabled,
+                    () => !_disposed && Same(input, _currentOwner()), cancellation, expectedMetadata: expectedMetadata,
+                    firstOfficialDefault: grantFirstDefault, requireFirstDefaultAllowed: grantFirstDefault ? () =>
+                    {
+                        var visibility = ReadVisibility(input);
+                        if (IsApplySuspended(input, visibility))
+                            throw new PositivePublicationSupersededException(visibility);
+                    } : null).ConfigureAwait(false);
+            }
+            catch (PositivePublicationSupersededException) when (grantFirstDefault)
+            {
                 return Set(new("withdrawn", AppliedRevision: revision));
-            // A choice showing only the official four cannot grant global
-            // consent for old ordinary audiences that were never applied.
-            if (preservePause && !_store.HasPublicationConsent(owner) &&
-                (saved.Settings.Fleet.Fields != PlayerSharedStateFields.None ||
-                 saved.Settings.Room.Fields != PlayerSharedStateFields.None ||
-                 saved.Settings.Communities is { Length: > 0 } || saved.Settings.Events is not null))
-                return Set(new("inactive", ErrorCode: "privacy_publication.existing_scope_confirmation_required"));
-            await _store.SetPublicationConsentAsync(owner, revision, saved.Settings.PublicationEnabled,
-                () => !_disposed && Same(input, _currentOwner()), cancellation).ConfigureAwait(false);
+            }
+            // Community or ordinary saves keep a refused main fleet operation
+            // blocked; a withdrawal still goes through the send path below.
+            if (saved.Settings.PublicationEnabled && OfficialReplayBlocked(owner, saved.Settings)) return BlockOfficialReplay();
             if (!preservePause) ResetObservedPause(observationVersion); // Retain newer observations.
             _recovery = null;
             _publicationFailure = null;
@@ -420,6 +442,20 @@ internal sealed partial class PrivacyPublication : IDisposable
                 !HasPublicationEvidence(input, settings) || invisible;
             sendingClear = clear;
             if (clear && ClearRetryDeferred(input)) return;
+            if (!clear && OfficialReplayBlocked(input.Owner, settings)) { BlockOfficialReplay(); return; }
+            // TickCore already matched the active owner/generation/handle. A
+            // successful ordinary identity clear acknowledges only this policy
+            // revision; it is not a lease that needs renewal while identity is
+            // absent. Keep active/consent so identity can recover automatically.
+            // A clear that returned success without taking effect has no other
+            // correction, so it is confirmed again at a slow pace.
+            // Failures, pending withdrawal, visibility suspension, changed policy
+            // and explicit operations must still use their existing paths.
+            if (background && !_refreshIdentityClear && _lane == PrivacyPublicationLane.Ordinary && clear &&
+                !invisible && consent && settings.PublicationEnabled && !HasPublicationEvidence(input, settings) &&
+                _pendingClear is null && acknowledged is { State: "identityRequired", ErrorCode: null, AppliedAt: { } clearedAt } &&
+                acknowledged.AppliedRevision == saved.Revision &&
+                _clock.GetUtcNow() - clearedAt is { Ticks: >= 0 } sinceClear && sinceClear < IdentityClearRefresh) return;
             // Input wakes cannot bypass transport backoff. Authority is checked
             // first; the initial privacy clear is immediate, failed clears use
             // their independent deadline above.
@@ -455,6 +491,7 @@ internal sealed partial class PrivacyPublication : IDisposable
             _unauthorizedFailures = 0;
             if (clear) { _pendingClear = null; ResetClearRetry(); }
             ResetRetry();
+            _refreshIdentityClear = false;
             var state = !clear ? "applied" : _manualPause ? "withdrawn" : visibilityError switch {
                 "privacy_publication.network_unavailable" => "reconnecting",
                 null or "privacy_publication.identity_pending" => "identityRequired",
@@ -491,6 +528,8 @@ internal sealed partial class PrivacyPublication : IDisposable
         catch (Exception error)
         {
             if (_disposed) return;
+            if (error is Account.AccountBridgeHostException { Code: "official_fleet.choice_changed" })
+                RememberRefusedOfficial(input.Owner);
             var identityRequired = RequiresIdentity(error);
             if (Recoverable(error)) ScheduleRetry(saved.Revision, error);
             var retainHeartbeat = false;
@@ -696,7 +735,9 @@ internal sealed partial class PrivacyPublication : IDisposable
             if (resume is not null && Same(input, resume) || _store.HasPublicationConsent(owner))
             {
                 _active = input;
-                if (deferPositive) return true;
+                // Pair completes explicit visibility changes with a later Tick.
+                // That tick still owes a fresh acknowledgement of this action.
+                if (deferPositive) { _refreshIdentityClear = true; return true; }
                 await SendCurrentAsync(input, _store.Read(owner), cancellation).ConfigureAwait(false);
                 return Status.State is "applied" or "withdrawn";
             }
@@ -793,6 +834,16 @@ internal sealed partial class PrivacyPublication : IDisposable
         catch (Exception error)
         {
             ScheduleClearRetry(active);
+            if (error is Account.AccountBridgeHostException { Code: "official_fleet.choice_changed" })
+            {
+                // Replaying this operation cannot repair even a changed target
+                // withdrawal. Stop; any previous server lease will expire.
+                _pendingClear = null;
+                RememberRefusedOfficial(active.Owner);
+                ResetClearRetry();
+                BlockOfficialReplay();
+                return false;
+            }
             var identityRequired = RequiresIdentity(error);
             if (identityRequired)
             {
@@ -850,8 +901,32 @@ internal sealed partial class PrivacyPublication : IDisposable
             try { StatusChanged?.Invoke(); } catch { /* Notification cannot change sharing. */ }
         return status;
     }
+    private void RememberRefusedOfficial(BridgeAccountContext owner)
+    {
+        _blockedOfficialOperation = _officialWireContract?.OperationId;
+        _store.SetRefusedOfficialOperation(owner, _blockedOfficialOperation);
+    }
+    // The block survives a restart through the store's side file. A different
+    // operation can only come from the user's explicit save, which lifts it.
+    private bool OfficialReplayBlocked(BridgeAccountContext owner, LocalPrivacySettings settings)
+    {
+        if (_lane != PrivacyPublicationLane.Official || settings.OfficialFleet?.OperationId is not { } operation) return false;
+        var blocked = _blockedOfficialOperation ??= _store.ReadRefusedOfficialOperation(owner);
+        if (blocked is null) return false;
+        if (blocked == operation) return true;
+        _blockedOfficialOperation = null;
+        _store.SetRefusedOfficialOperation(owner, null);
+        return false;
+    }
+    private PrivacyPublicationStatus BlockOfficialReplay()
+    {
+        _active = _recovery = null;
+        _restoreBlocked = true;
+        _publicationFailure = "official_fleet.choice_changed";
+        return Set(new("failed", ErrorCode: _publicationFailure));
+    }
     private static bool HardFailure(Account.AccountBridgeHostException error) => error.Code is
-        "privacy_publication.account_changed" or "privacy_publication.route_retired";
+        "privacy_publication.account_changed" or "privacy_publication.route_retired" or "official_fleet.choice_changed";
     private static System.Net.HttpStatusCode? HttpStatus(Exception error) => error switch {
         Account.AccountBridgeHostException e => e.HttpStatus,
         HttpRequestException e => e.StatusCode,

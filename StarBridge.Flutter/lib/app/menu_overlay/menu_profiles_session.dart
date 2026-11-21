@@ -58,12 +58,12 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
     entry.reading = true;
     final revision = ++entry.revision;
     try {
-      await entry.releasePort();
-      if (_disposed || !identical(_windows[window], entry)) return;
       final self = entry.target.source == 'self';
+      if (!self) await entry.releasePort();
+      if (_disposed || !identical(_windows[window], entry)) return;
       if (self && createOwnPort == null) throw StateError('unsupported');
       final port = self ? null : (entry.port = createPort());
-      final ownPort = self ? (entry.ownPort = createOwnPort!()) : null;
+      final ownPort = self ? (entry.ownPort ??= createOwnPort!()) : null;
       void revoke() {
         if (identical(_windows[window], entry) &&
             identical(entry.port, port) &&
@@ -72,8 +72,18 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
         }
       }
 
-      entry.subscription = (ownPort?.invalidations ?? port!.invalidations)
+      entry.subscription ??= (ownPort?.invalidations ?? port!.invalidations)
           .listen((_) => revoke(), onDone: revoke);
+      if (ownPort case PersonalProfileContentChanges source) {
+        entry.changes ??= source.changes.listen((_) {
+          if (!identical(_windows[window], entry)) return;
+          if (entry.reading) {
+            entry.refreshPending = true;
+          } else {
+            refresh(window);
+          }
+        });
+      }
       // Polling revalidates authority without unmounting the visible document.
       if (!entry.ready) publish({'window': window, 'state': 'loading'});
       final target = entry.target;
@@ -89,7 +99,10 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
       }
       final snapshot =
           await (ownPort != null
-                  ? ownPort.read()
+                  ? ownPort is PersonalProfileDisplayReader
+                        ? (ownPort as PersonalProfileDisplayReader)
+                              .readForDisplay()
+                        : ownPort.read()
                   : port!.profile(
                       UserTarget(
                         target.source,
@@ -159,6 +172,10 @@ final class MenuProfilesSession implements MenuProfilesReadLease {
     } finally {
       // Successful reads retain their identity-invalidation listener.
       entry.reading = false;
+      if (entry.refreshPending && identical(_windows[window], entry)) {
+        entry.refreshPending = false;
+        refresh(window);
+      }
     }
   }
 
@@ -235,23 +252,27 @@ final class _ProfileRead {
   final MenuProfileTarget target;
   UserInteractionPort? port;
   PersonalProfilePort? ownPort;
-  StreamSubscription<void>? subscription;
+  StreamSubscription<void>? subscription, changes;
   Timer? timer;
   bool reading = false;
   bool ready = false;
+  bool refreshPending = false;
   int revision = 0;
   final MenuProfileImages images;
   Future<void> releasePort() async {
     final old = port, oldSubscription = subscription;
-    final oldOwn = ownPort;
+    final oldOwn = ownPort, oldChanges = changes;
     ownPort = null;
     port = null;
     subscription = null;
+    changes = null;
     // Retire delivery first, but start transport cancellation synchronously.
     final canceled = oldSubscription?.cancel();
+    final changesCanceled = oldChanges?.cancel();
     final closed = old?.close();
     final ownClosed = oldOwn?.close();
     await canceled;
+    await changesCanceled;
     await closed;
     await ownClosed;
   }

@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../app/runtime/frame_governor.dart';
+import 'cached_user_background.dart';
+
 /// 用户自己选的一张图片背景。只支持图片，不提供纯色和渐变。
 ///
 /// 这一版只有数据和绘制，选图片的设置界面以后再做。
@@ -73,7 +76,11 @@ class UserBackgroundLayer extends StatelessWidget {
   final Color scrimColor;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -92,7 +99,23 @@ class UserBackgroundLayer extends StatelessWidget {
             gaplessPlayback: true,
             errorBuilder: (_, _, _) => const SizedBox.shrink(),
           );
-          if (image.blurSigma > 0) {
+          if (image.blurSigma > 0 &&
+              lightOnly &&
+              constraints.hasBoundedWidth &&
+              constraints.hasBoundedHeight) {
+            picture = CachedUserBackground(
+              provider: ResizeImage(
+                FileImage(File(image.path)),
+                width: CachedUserBackground.maxDimension,
+                height: CachedUserBackground.maxDimension,
+                policy: ResizeImagePolicy.fit,
+                allowUpscaling: false,
+              ),
+              logicalSize: constraints.biggest,
+              sigma: image.blurSigma,
+              alignment: image.alignment,
+            );
+          } else if (image.blurSigma > 0 && !lightOnly) {
             picture = ImageFiltered(
               imageFilter: ui.ImageFilter.blur(
                 sigmaX: image.blurSigma,

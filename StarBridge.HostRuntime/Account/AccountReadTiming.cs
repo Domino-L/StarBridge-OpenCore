@@ -118,6 +118,8 @@ internal sealed class AccountReadTiming : IDisposable
                 "official_fleet.read_transient" => "official_fleet.read_transient",
                 "official_fleet.read_forbidden" => "official_fleet.read_forbidden",
                 "official_fleet.data_invalid" => "official_fleet.data_invalid",
+                "official_fleet.identity_clock_skew" => "official_fleet.identity_clock_skew",
+                "official_fleet.identity_time_invalid" => "official_fleet.identity_time_invalid",
                 "official_fleet.identity_unavailable" => "official_fleet.identity_unavailable",
                 "official_fleet.runtime_unavailable" => "official_fleet.runtime_unavailable",
                 "privacy_publication.identity_unavailable" => "privacy_publication.identity_unavailable",

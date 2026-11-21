@@ -205,6 +205,9 @@ OverlayWorkspaceSettings _settings() {
         f.field == 'eventNotificationMaxVisibleCount' ||
                 f.field == 'chatMaxVisibleCount'
             ? f.minimum.round()
+            // the visor's camera as it always was (11-11 viewing distance)
+            : f.field == 'visorViewingDistance'
+            ? 1000.0
             : f.minimum,
       OverlayWorkspaceFieldKind.color => '#FFFFFF',
       OverlayWorkspaceFieldKind.hotkey => '',

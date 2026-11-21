@@ -8,7 +8,7 @@ public sealed class NotificationPolicyBridgeDispatcher(NotificationSettingsBridg
     IBridgeRequestDispatcher account, Func<(BridgeAccountContext? Context, long Generation)> owner) : IBridgeRequestDispatcher
 {
     public static IReadOnlyList<string> Capabilities { get; } = ["notificationPolicies.read", "notificationPolicies.save",
-        "notificationPolicies.readV2", "notificationPolicies.saveV2"];
+        "notificationPolicies.readV2", "notificationPolicies.saveV2", "notificationPolicies.readV3", "notificationPolicies.saveV3"];
     private sealed record Source(string SourceRef, string Kind, string DisplayName, string? LogoImageData,
         string? OrganizationCode = null);
     private bool _disposed;
@@ -22,12 +22,14 @@ public sealed class NotificationPolicyBridgeDispatcher(NotificationSettingsBridg
             bool Current() => !_disposed && !cancellationToken.IsCancellationRequested && owner() == context;
             if (!Current() || context.Context is null || request.AccountContext != context.Context || request.SessionGeneration != context.Generation ||
                 request.MessageType != BridgeMessageTypes.Request || !Capabilities.Contains(request.Name)) return Error("account_changed");
-            var v2 = request.Name.EndsWith("V2", StringComparison.Ordinal);
-            var save = request.Name is "notificationPolicies.save" or "notificationPolicies.saveV2";
+            var v3 = request.Name.EndsWith("V3", StringComparison.Ordinal);
+            var v2 = v3 || request.Name.EndsWith("V2", StringComparison.Ordinal);
+            var version = v3 ? 3 : v2 ? 2 : 1;
+            var save = request.Name.StartsWith("notificationPolicies.save", StringComparison.Ordinal);
             var body = request.Payload;
             LocalPrivacyStore.RejectDuplicates(body);
             string[] fields = save ? ["schemaVersion", "expectedRevision", "operationId", "rules"] : ["schemaVersion"];
-            if (body.GetRawText().Length > 32768 || body.GetProperty("schemaVersion").GetInt32() != (v2 ? 2 : 1) ||
+            if (body.GetRawText().Length > (v3 ? 131072 : 32768) || body.GetProperty("schemaVersion").GetInt32() != version ||
                 body.EnumerateObject().Count() != fields.Length || body.EnumerateObject().Any(p => !fields.Contains(p.Name))) return Error("invalid_request");
             // Reuse the established authenticated membership/logo reader, not a
             // second directory or a client-supplied organization identity.
@@ -51,17 +53,20 @@ public sealed class NotificationPolicyBridgeDispatcher(NotificationSettingsBridg
             var snapshot = settings.ReadPolicies(context.Context);
             if (save) {
                 var input = body.GetProperty("rules");
-                if (input.ValueKind != JsonValueKind.Array || input.GetArrayLength() > 128) return Error("invalid_request");
+                if (input.ValueKind != JsonValueKind.Array || input.GetArrayLength() > 256) return Error("invalid_request");
                 var rules = input.EnumerateArray().Select(row => {
-                    if (row.EnumerateObject().Count() != 2 || row.EnumerateObject().Any(p => p.Name is not ("sourceRef" or "mode"))) throw new JsonException();
+                    NotificationPolicyWire.ValidateRow(row, v3);
                     var key = row.GetProperty("sourceRef").GetString() ?? throw new JsonException();
                     if (!valid.Contains(key)) throw new JsonException();
+                    if (v3 && key is "room" or "friends" or "directMessages" &&
+                        (row.TryGetProperty("typeRules", out _) || row.TryGetProperty("quietHours", out _))) throw new JsonException();
                     return new NotificationPolicyRule(key, row.GetProperty("mode").GetString() switch {
                         "normal" => NotificationSourceMode.Normal,
                         "importantOnly" => NotificationSourceMode.ImportantOnly,
                         "doNotDisturb" => NotificationSourceMode.DoNotDisturb,
                         _ => throw new JsonException()
-                    });
+                    }) { TypeRules = v3 ? NotificationPolicyWire.Types(row) : null,
+                        QuietHours = v3 ? NotificationPolicyWire.Quiet(row) : null };
                 }).ToArray();
                 var expected = body.GetProperty("expectedRevision").GetInt64();
                 var operation = body.GetProperty("operationId").GetString() ?? "";
@@ -76,28 +81,32 @@ public sealed class NotificationPolicyBridgeDispatcher(NotificationSettingsBridg
                 // inactive official preferences as well; these grant no access.
                 rules = [.. rules, .. snapshot.Rules.Where(rule => NotificationPolicyStore.IsOfficialFleetKey(rule.Source) &&
                     (!v2 || !valid.Contains(rule.Source)))];
-                snapshot = settings.SavePolicies(context.Context, expected, operation, rules, Current);
+                snapshot = settings.SavePolicies(context.Context, expected, operation, rules, Current, extended: v3);
             }
             if (!Current()) return Error("account_changed");
             string Mode(string source) => snapshot.For(source) switch {
                 NotificationSourceMode.Normal => "normal", NotificationSourceMode.ImportantOnly => "importantOnly", _ => "doNotDisturb"
             };
             return new(BridgeEnvelope.Response(request, new {
-                schemaVersion = v2 ? 2 : 1, revision = snapshot.Revision, operationId = snapshot.OperationId,
+                schemaVersion = version, revision = snapshot.Revision, operationId = snapshot.OperationId,
                 sources = sources.Select(row => new { sourceRef = row.SourceRef, kind = row.Kind, displayName = row.DisplayName,
-                    organizationCode = v2 && !save ? row.OrganizationCode : null,
-                    logoImageData = row.LogoImageData, mode = Mode(row.SourceRef) }),
+                    organizationCode = v2 && (!save || v3) ? row.OrganizationCode : null,
+                    logoImageData = row.LogoImageData, mode = Mode(row.SourceRef),
+                    typeRules = v3 ? NotificationPolicyWire.TypeOutput(snapshot.Rule(row.SourceRef)) : null,
+                    quietHours = v3 ? NotificationPolicyWire.QuietOutput(snapshot.Rule(row.SourceRef)) : null }),
                 roomMode = Mode("room"), friendMode = Mode("friends"), directMessageMode = Mode("directMessages")
             }), []);
-        } catch (NotificationSettingsConflictException) { return Error("write_conflict"); }
+        } catch (NotificationPolicySaveException) { return Error("save_failed"); }
+        catch (NotificationSettingsConflictException) { return Error("write_conflict"); }
         catch (Account.AccountBridgeHostException) { return Error("sources_unavailable"); }
         catch (HttpRequestException) { return Error("sources_unavailable"); }
         catch (OperationCanceledException) { return Error("account_changed"); }
         catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or
             FormatException or OverflowException or BridgeProtocolException) { return Error("invalid_request"); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return Error("storage_unavailable"); }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException) { return Error("storage_unavailable"); }
         BridgeDispatchBatch Error(string code) => new(BridgeEnvelope.ErrorResponse(request,
-            new("notificationPolicies." + code, "Notification source rules are unavailable.")), []);
+            new("notificationPolicies." + code, code == "save_failed"
+                ? "Notification source rules could not be saved." : "Notification source rules are unavailable.")), []);
     }
     private async Task<Source?> ReadOfficialSource(BridgeAccountContext context, long generation, Func<bool> current, CancellationToken token)
     {

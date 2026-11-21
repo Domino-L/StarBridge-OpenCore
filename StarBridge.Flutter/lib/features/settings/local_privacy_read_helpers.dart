@@ -63,3 +63,112 @@ Future<List<CommunitySharingMember>> readCommunityMemberSnapshot(
   }
   throw const FormatException('Member directory changed.');
 }
+
+bool _sameCode(CommunitySharingScope scope, String code) =>
+    scope.code.toLowerCase() == code.toLowerCase();
+
+CommunitySharingScope? privacyScopeIn(
+  LocalPrivacySettings? settings,
+  String code,
+) => settings?.communities?.where((s) => _sameCode(s, code)).firstOrNull;
+
+List<CommunitySharingScope> privacyScopesReplacing(
+  List<CommunitySharingScope>? scopes,
+  String code,
+  CommunitySharingScope? value,
+) => [
+  for (final scope in scopes ?? const <CommunitySharingScope>[])
+    if (!_sameCode(scope, code)) scope,
+  ?value,
+];
+
+/// An absent record has no consent or grants, regardless of editor suggestions.
+LocalPrivacySettings get emptyPrivacySettings => LocalPrivacySettings(
+  publicationEnabled: false,
+  fleetFields: 0,
+  fleetAdministratorsCanView: false,
+  fleetAllMembersCanView: false,
+  fleetVisibilityGroupIds: const [],
+  roomFields: 0,
+  roomAllMembersCanView: false,
+  communities: const [],
+);
+
+/// Save one organization's choice over the saved (or zero-grant) baseline.
+LocalPrivacySettings scopedPrivacySubmission(
+  LocalPrivacySettings draft,
+  LocalPrivacySettings? saved,
+  String? code,
+) {
+  if (code == null) return draft;
+  final base = saved ?? emptyPrivacySettings;
+  final choice = privacyScopeIn(draft, code);
+  return base.copyWith(
+    communities: privacyScopesReplacing(base.communities, code, choice),
+  );
+}
+
+/// On the first scoped save, replace untouched editor suggestions with the
+/// actual saved baseline. Only values changed by the viewer remain pending.
+/// Once a saved baseline exists, the other draft fields already represent it.
+LocalPrivacySettings rebaseFirstPrivacyEdits(
+  LocalPrivacySettings result,
+  LocalPrivacySettings kept,
+  LocalPrivacySettings? previouslySaved,
+) {
+  if (previouslySaved != null) return kept;
+  Map<String, Object?> keepChanged(
+    Map<String, Object?> actual,
+    Map<String, Object?> edited,
+    Map<String, Object?> baseline,
+  ) => {
+    ...actual,
+    for (final entry in edited.entries)
+      if (entry.value is Map && baseline[entry.key] is Map)
+        entry.key: keepChanged(
+          (actual[entry.key] as Map).cast<String, Object?>(),
+          (entry.value as Map).cast<String, Object?>(),
+          (baseline[entry.key] as Map).cast<String, Object?>(),
+        )
+      else if (jsonEncode(entry.value) != jsonEncode(baseline[entry.key]))
+        entry.key: entry.value,
+  };
+  return LocalPrivacySettings.fromJson(
+    keepChanged(
+      result.toJson(),
+      kept.toJson(),
+      LocalPrivacySettings.editorDefaults.toJson(),
+    ),
+  );
+}
+
+/// After that save: the confirmed organization and only real remaining edits.
+LocalPrivacySettings? keepEdits(
+  LocalPrivacySettings? result,
+  LocalPrivacySettings kept,
+  LocalPrivacySettings? previouslySaved,
+  String? code,
+) {
+  if (code == null || result == null) return result;
+  final rebased = rebaseFirstPrivacyEdits(result, kept, previouslySaved);
+  return rebased.copyWith(
+    communities: privacyScopesReplacing(
+      rebased.communities,
+      code,
+      privacyScopeIn(result, code),
+    ),
+  );
+}
+
+/// Replays names changed while a target read was in flight onto its result.
+CommunitySharingTargets withTargetNames(
+  CommunitySharingTargets targets,
+  Map<String, String> names,
+) => names.entries.fold(
+  targets,
+  (all, name) => all.renamed(name.key, name.value),
+);
+
+bool communityScopesUnavailable(Object error) =>
+    error is BridgeClientException &&
+    error.code == 'privacy_publication.community_scopes_unavailable';

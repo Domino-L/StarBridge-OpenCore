@@ -10,11 +10,14 @@ import '../../design_system/interaction/starbridge_dialog_owner.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 import '../../platform/bridge/bridge_client_session.dart';
 import 'privacy_page_drafts.dart';
+import 'organization_notification_leave_guard.dart';
 
 // Reuse the independently acknowledged draft queue, not privacy permissions.
 final notificationLeaveGuards = Expando<Future<bool> Function()>();
-Future<bool> confirmNotificationLeave(Object owner) async =>
-    await notificationLeaveGuards[owner]?.call() ?? true;
+Future<bool> confirmNotificationLeave(Object owner) async {
+  if (!await confirmOrganizationNotificationLeave()) return false;
+  return await notificationLeaveGuards[owner]?.call() ?? true;
+}
 
 class NotificationDraftScope extends InheritedNotifier<PrivacyPageDrafts> {
   const NotificationDraftScope({

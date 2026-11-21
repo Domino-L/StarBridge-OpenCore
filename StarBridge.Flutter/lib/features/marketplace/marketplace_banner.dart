@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import '../../shared/guide/guide_scope.dart';
+
 import 'package:flutter/material.dart';
+
+import '../../app/runtime/frame_governor.dart';
 import '../../design_system/interaction/starbridge_action_row.dart';
 import '../../design_system/interaction/starbridge_native_icon_action.dart';
 
@@ -21,6 +26,7 @@ import 'marketplace_publish_entry.dart';
 import 'marketplace_states.dart' show marketButtonAction;
 import 'marketplace_price_format.dart' show showMarketDisplaySettings;
 import 'marketplace_trade_style.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 const _scmOrange = MarketplacePalette.scmOrange;
 
@@ -33,24 +39,46 @@ class MarketHallHead extends StatelessWidget {
     this.c, {
     required this.search,
     required this.onRefresh,
+    this.now,
     super.key,
   });
   final MarketplaceController c;
   final Widget search;
   final VoidCallback? onRefresh;
+  final DateTime Function()? now;
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _Banner(c),
+      _Banner(c, now: now),
       _TabsBar(c, search: search, onRefresh: onRefresh),
     ],
   );
 }
 
-class _Banner extends StatelessWidget {
-  const _Banner(this.c);
+class _Banner extends StatefulWidget {
+  const _Banner(this.c, {this.now});
   final MarketplaceController c;
+  final DateTime Function()? now;
+  @override
+  State<_Banner> createState() => _BannerState();
+}
+
+class _BannerState extends State<_Banner> {
+  MarketplaceController get c => widget.c;
+  Timer? _minute;
+  @override
+  void initState() {
+    super.initState();
+    _minute = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+  @override
+  void dispose() {
+    _minute?.cancel();
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -60,15 +88,19 @@ class _Banner extends StatelessWidget {
         final wide = box.maxWidth >= 1000, medium = box.maxWidth >= 720;
         final height = medium ? 104.0 : 84.0;
         final profile = c.tradeProfile;
-        final visible = c.myListings.where((r) => r['visible'] == true).length;
-        final hidden = c.myListings.length - visible;
+        final visible = c.activeSingleListingCount;
+        final hidden = c.myListings.where((r) => r['visible'] != true).length;
         final limit = marketNumber(profile?['orderLimit'])?.toInt();
         // A failed reputation read never shows a stale figure.
         final point = c.failures.contains('reputation')
             ? null
             : c.blocks['reputation']?.data['point'] ?? profile?['point'];
         final done = marketNumber(profile?['completedTransactionCount']);
-        final open = profile == null ? null : marketTradeOpenNow(profile);
+        final zoneId = marketNumber(profile?['timezoneId'])?.toInt();
+        final zonesKnown = c.blocks['timezones'] != null &&
+            !c.failures.contains('timezones') &&
+            (zoneId == null || marketZoneOffsets.containsKey(zoneId));
+        final open = profile == null || !zonesKnown ? null : marketTradeOpenNow(profile, now: widget.now?.call());
         final windowText = profile == null
             ? null
             : marketTradeTime(context, profile);
@@ -76,16 +108,16 @@ class _Banner extends StatelessWidget {
           if (c.trades.supported)
             _Stat(
               label: marketText(context, 'bannerTodo'),
-              value: '${c.trades.todo.length}',
-              valueColor: c.trades.todo.isEmpty
+              value: !c.trades.listLoaded || c.trades.listFailed ? '—' : c.trades.todoCountLabel,
+              valueColor: !c.trades.listLoaded || c.trades.listFailed || c.trades.todo.isEmpty
                   ? null
                   : MarketplaceSurfaceColors.gold,
-              note: marketTextN(context, 'bannerActive', c.activeTradeCount),
+              note: !c.trades.listLoaded || c.trades.listFailed ? null : marketTextN(context, 'bannerActive', c.trades.activeCountLabel),
             ),
           if (c.myListingsSupported)
             _Stat(
               label: marketText(context, 'myListings'),
-              value: c.myListingsLoaded ? '$visible' : '—',
+              value: c.myListingsLoaded && c.myListingsError == null ? '${visible ?? '—'}' : '—',
               suffix: limit == null ? null : ' / $limit',
               note: hidden > 0
                   ? marketTextN(context, 'bannerHidden', hidden)
@@ -112,7 +144,7 @@ class _Banner extends StatelessWidget {
               _Stat(
                 label: marketText(context, 'bannerWindow'),
                 value: open == null
-                    ? marketText(context, 'tradeWindowUnset')
+                    ? (zonesKnown ? marketText(context, 'tradeWindowUnset') : '—')
                     : marketText(
                         context,
                         open ? 'tradeOpenNow' : 'tradeClosedNow',
@@ -131,7 +163,10 @@ class _Banner extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: dark
-                  ? const [MarketplacePalette.bannerTop, MarketplacePalette.bannerBottom]
+                  ? const [
+                      MarketplacePalette.bannerTop,
+                      MarketplacePalette.bannerBottom,
+                    ]
                   : [t.surfaces.raised.fill, t.surfaces.panel.fill],
             ),
             border: Border(bottom: BorderSide(color: t.surfaces.panel.border)),
@@ -151,7 +186,10 @@ class _Banner extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [MarketplacePalette.plateTop, MarketplacePalette.plateBottom],
+                        colors: [
+                          MarketplacePalette.plateTop,
+                          MarketplacePalette.plateBottom,
+                        ],
                       ),
                     ),
                     child: Column(
@@ -184,7 +222,7 @@ class _Banner extends StatelessWidget {
                         Text(
                           marketText(context, 'scmMarket'),
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                           style: const TextStyle(
                             fontSize: 11.5,
@@ -234,30 +272,33 @@ class _Banner extends StatelessWidget {
                       GuideAnchor(
                         id: 'market.publish',
                         child: MarketHoverCard(
-                        lift: false,
-                        alignEnd: true,
-                        drawerWidth: 240,
-                        color: t.colors.textPrimary,
-                        drawerKey: const ValueKey('market-publish-drawer'),
-                        drawer: (drawer) => marketPublishDrawer(drawer, c),
-                        child: marketButtonAction(
-                        key: const ValueKey('market-publish'),
-                        hoverFace: false,
-                        FilledButton.icon(
-                        style: tradePrimaryStyle(context).copyWith(
-                          minimumSize: const WidgetStatePropertyAll(
-                            Size(0, 38),
+                          lift: false,
+                          alignEnd: true,
+                          drawerWidth: 240,
+                          color: t.colors.textPrimary,
+                          drawerKey: const ValueKey('market-publish-drawer'),
+                          drawer: (drawer) => marketPublishDrawer(drawer, c),
+                          child: marketButtonAction(
+                            key: const ValueKey('market-publish'),
+                            hoverFace: false,
+                            FilledButton.icon(
+                              style: tradePrimaryStyle(context).copyWith(
+                                minimumSize: const WidgetStatePropertyAll(
+                                  Size(0, 38),
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () => openMarketPublish(context, c),
+                              icon: const MarketplaceIcon(
+                                MarketplaceGlyph.add,
+                                size: 16,
+                              ),
+                              label: Text(
+                                marketText(context, 'publishListing'),
+                              ),
+                            ),
                           ),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        onPressed: () => openMarketPublish(context, c),
-                        icon: const MarketplaceIcon(
-                          MarketplaceGlyph.add,
-                          size: 16,
-                        ),
-                        label: Text(marketText(context, 'publishListing')),
-                      )),
-                      ),
                       ),
                     if (medium && c.trades.supported) ...[
                       const SizedBox(width: 8),
@@ -269,19 +310,20 @@ class _Banner extends StatelessWidget {
                         drawerKey: const ValueKey('market-trades-drawer'),
                         drawer: (drawer) => marketTradesDrawer(drawer, c),
                         child: marketButtonAction(
-                        key: const Key('market-banner-trades'),
-                        hoverFace: false,
-                        OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 38),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          foregroundColor: t.colors.textPrimary,
-                          side: BorderSide(color: t.surfaces.panel.border),
-                          shape: const RoundedRectangleBorder(),
+                          key: const Key('market-banner-trades'),
+                          hoverFace: false,
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 38),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              foregroundColor: t.colors.textPrimary,
+                              side: BorderSide(color: t.surfaces.panel.border),
+                              shape: const RoundedRectangleBorder(),
+                            ),
+                            onPressed: () => c.tab(3),
+                            child: Text('${marketText(context, 'mine')} →'),
+                          ),
                         ),
-                        onPressed: () => c.tab(3),
-                        child: Text('${marketText(context, 'mine')} →'),
-                      )),
                       ),
                     ],
                   ],
@@ -364,7 +406,7 @@ class _Stat extends StatelessWidget {
             Text(
               note!,
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(
                 fontSize: 11,
@@ -389,7 +431,14 @@ class _TabsBar extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // 关注 (tab index 5) sits after 市场 (G3, 0.7.2); indices of the other
     // tabs are unchanged so existing links (c.tab(3) …) keep working.
-    const keys = [(0, 'hall'), (1, 'market'), (5, 'watchTab'), (2, 'contracts'), (3, 'mine'), (4, 'storage')];
+    const keys = [
+      (0, 'hall'),
+      (1, 'market'),
+      (5, 'watchTab'),
+      (2, 'contracts'),
+      (3, 'mine'),
+      (4, 'storage'),
+    ];
     final changed = c.favorites.isEmpty ? 0 : c.watchChanged;
     final tabs = [
       for (final (n, (i, key)) in keys.indexed) ...[
@@ -397,18 +446,22 @@ class _TabsBar extends StatelessWidget {
         GuideAnchor(
           id: i == 3 ? 'market.trades' : 'market.tab.$i',
           child: _Tab(
-          label: marketText(context, key),
-          leading: i == 5
-              ? const FavoriteIcon(selected: true, size: 13, color: MarketplacePalette.heart)
-              : null,
-          selected: c.mainTab == i,
-          badge: i == 3 && c.trades.todo.isNotEmpty
-              ? c.trades.todo.length
-              : i == 5 && changed > 0
-              ? changed
-              : null,
-          onTap: () => c.tab(i),
-        ),
+            label: marketText(context, key),
+            leading: i == 5
+                ? const FavoriteIcon(
+                    selected: true,
+                    size: 13,
+                    color: MarketplacePalette.heart,
+                  )
+                : null,
+            selected: c.mainTab == i,
+            badge: i == 3 && c.trades.todo.isNotEmpty
+                ? c.trades.todoCountLabel
+                : i == 5 && changed > 0
+                ? changed
+                : null,
+            onTap: () => c.tab(i),
+          ),
         ),
       ],
     ];
@@ -506,7 +559,7 @@ class _Tab extends StatefulWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final int? badge;
+  final Object? badge;
   final Widget? leading;
   @override
   State<_Tab> createState() => _TabState();
@@ -515,9 +568,15 @@ class _Tab extends StatefulWidget {
 class _TabState extends State<_Tab> {
   bool hover = false;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
-    final label = widget.label, selected = widget.selected, badge = widget.badge;
+    final label = widget.label,
+        selected = widget.selected,
+        badge = widget.badge;
     // The tab keeps its own hover (text colour and slanted preview line), so
     // the shared target adds press/focus feedback only.
     return MouseRegion(
@@ -581,23 +640,27 @@ class _TabState extends State<_Tab> {
               ClipPath(
                 clipper: const _SlantTailClipper(),
                 child: AnimatedContainer(
-                duration: t.motion.surfaceExit,
-                height: 2,
-                width: selected ? 26 : hover ? 20 : 0,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? t.colors.accent
-                      : t.colors.textSecondary.withValues(alpha: .6),
-                  boxShadow: selected
-                      ? [
-                          BoxShadow(
-                            color: t.colors.accent.withValues(alpha: .6),
-                            blurRadius: 8,
-                          ),
-                        ]
-                      : null,
+                  duration: lightOnly ? Duration.zero : t.motion.surfaceExit,
+                  height: 2,
+                  width: selected
+                      ? 26
+                      : hover
+                      ? 20
+                      : 0,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? t.colors.accent
+                        : t.colors.textSecondary.withValues(alpha: .6),
+                    boxShadow: selected && !lightOnly
+                        ? [
+                            BoxShadow(
+                              color: t.colors.accent.withValues(alpha: .6),
+                              blurRadius: 8,
+                            ),
+                          ]
+                        : null,
+                  ),
                 ),
-              ),
               ),
             ],
           ),

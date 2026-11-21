@@ -7,7 +7,7 @@ namespace StarBridge.HostRuntime.Onboarding;
 
 // Separate device-local tree; never opens/moves account-owned or legacy files.
 // DPAPI is user protection, not a security boundary against that same OS user.
-internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
+internal sealed partial class LocalFirstUseStore(string root, TimeProvider? time = null)
 {
     private readonly string _directory = Path.Combine(Path.GetFullPath(root), "local-first-use-v1");
     private readonly TimeProvider _time = time ?? TimeProvider.System;
@@ -17,7 +17,7 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { PropertyNameCaseInsensitive = false, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 12 };
     private sealed record Document([property: JsonRequired] int SchemaVersion,
-        [property: JsonRequired] LocalFirstUseSnapshot Value);
+        [property: JsonRequired] LegacySnapshot Value);
 
     internal LocalFirstUseSnapshot Read()
     {
@@ -28,10 +28,13 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             try { file = new(StatePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete); }
             catch (FileNotFoundException) { return LocalFirstUseSnapshot.Empty; }
             catch (DirectoryNotFoundException) { return LocalFirstUseSnapshot.Empty; }
-            using var source = file;
-            if (source.Length is <= 0 or > MaximumBytes) throw new InvalidDataException();
-            var encrypted = new byte[(int)source.Length]; source.ReadExactly(encrypted);
-            if (source.ReadByte() != -1) throw new InvalidDataException();
+            byte[] encrypted;
+            using (var source = file)
+            {
+                if (source.Length is <= 0 or > MaximumBytes) throw new InvalidDataException();
+                encrypted = new byte[(int)source.Length]; source.ReadExactly(encrypted);
+                if (source.ReadByte() != -1) throw new InvalidDataException();
+            }
             var clear = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
             try
             {
@@ -40,8 +43,9 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
                 Unique(json.RootElement);
                 var data = JsonSerializer.Deserialize<Document>(clear, Json);
                 if (data is null || data.SchemaVersion != 3 || data.Value is null) throw new InvalidDataException();
-                LocalFirstUseValidation.Check(data.Value);
-                return data.Value;
+                var value = data.Value.Current();
+                LocalFirstUseValidation.Check(value);
+                return ReadDeferred(value, encrypted);
             }
             finally { CryptographicOperations.ZeroMemory(clear); }
         }
@@ -68,6 +72,7 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             return old with {
                 Profiles = existing is null ? [.. old.Profiles, profile] : old.Profiles,
                 ActiveProfileId = profile.Id,
+                LogSetupPending = true,
                 // Source confirmation and clearing the sticky gate commit together.
                 Sources = source is null ? old.Sources : old.Sources.Select(s => s.SourceKey == source.SourceKey
                     ? s with { NeedsFreshGameEvidence = false, Baseline = null, ConfirmedProfileId = profile.Id,
@@ -89,6 +94,8 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             return old with {
                 Sources = old.Sources.Any(s => s.SourceKey == source.SourceKey) ? old.Sources : [.. old.Sources, source],
                 SelectedSourceKey = source.SourceKey,
+                // The explicit choice remains pending until a real identity is confirmed.
+                LogDeferred = false,
                 // Selecting a version is not confirmation of its current Handle.
                 ActiveProfileId = old.SelectedSourceKey == source.SourceKey ? old.ActiveProfileId : null,
                 Progress = old.SelectedSourceKey == source.SourceKey ? old.Progress : null
@@ -139,13 +146,28 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             if (source is null || old.SelectedSourceKey != sourceKey) throw new LocalFirstUseException("firstUse.source_changed");
             if (enabled && (source.NeedsFreshGameEvidence || source.ConfirmedProfileId is null ||
                 old.ActiveProfileId != source.ConfirmedProfileId)) throw new LocalFirstUseException("firstUse.evidence_required");
-            return old with { Sources = old.Sources.Select(s => s.SourceKey == sourceKey
+            return old with { LogSetupPending = enabled && old.DeferredStatisticsAllowed is null ? false : old.LogSetupPending,
+                Sources = old.Sources.Select(s => s.SourceKey == sourceKey
                 ? s with { ListeningEnabled = enabled } : s).ToArray() };
         });
 
     internal LocalFirstUseSnapshot SaveProgress(long revision, string operationId,
         LocalFirstUseProgress progress, Func<bool> current) =>
         Write(revision, operationId, current, old => old with { Progress = progress });
+
+    internal LocalFirstUseSnapshot DeferLog(long revision, string operationId, Func<bool> current) =>
+        Write(revision, operationId, current, old => old with {
+            SelectedSourceKey = null, ActiveProfileId = null, Progress = new("log", "local", null, null, null),
+            LogDeferred = true, DeferredStatisticsAllowed = null
+        });
+
+    internal LocalFirstUseSnapshot SetDeferredStatistics(long revision, string operationId, bool allowed, Func<bool> current) =>
+        Write(revision, operationId, current, old => old.LogDeferred
+            ? old with { DeferredStatisticsAllowed = allowed }
+            : throw new LocalFirstUseException("firstUse.context_changed"));
+
+    internal LocalFirstUseSnapshot ClearDeferredStatistics(long revision, string operationId, Func<bool> current) =>
+        Write(revision, operationId, current, old => old with { DeferredStatisticsAllowed = null });
 
     internal LocalFirstUseSnapshot ForgetProfile(long revision, string operationId,
         string profileId, Func<bool> current)
@@ -181,11 +203,12 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             // No operation-only replay acceptance: stale/reused requests require re-read.
             if (old.Revision != revision || old.OperationId == operationId)
                 throw new LocalFirstUseException("firstUse.revision_conflict");
+            StabilizeDeferred(old);
             var next = change(old) with {
                 Revision = revision + 1, OperationId = operationId, SavedAt = _time.GetUtcNow()
             };
             LocalFirstUseValidation.Check(next);
-            var clear = JsonSerializer.SerializeToUtf8Bytes(new Document(3, next), Json);
+            var clear = JsonSerializer.SerializeToUtf8Bytes(new Document(3, LegacySnapshot.From(next)), Json);
             byte[] encrypted;
             try
             {
@@ -198,6 +221,9 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write,
                 FileShare.None, 4096, FileOptions.WriteThrough))
             { file.Write(encrypted); file.Flush(true); }
+            // Stage the extension first. Until the exact main ciphertext commits,
+            // its hash cannot match, so an interrupted write cannot grant a choice.
+            WriteDeferred(next, encrypted, current);
             Safe(StatePath); Safe(temporary);
             if (!current()) throw new LocalFirstUseException("firstUse.context_changed");
             // CAS and the commit guard are checked under the single writer lease.
@@ -206,6 +232,7 @@ internal sealed class LocalFirstUseStore(string root, TimeProvider? time = null)
             if (old.Revision == 0) File.Move(temporary, StatePath);
             else if (!StoreFileCommit.ReplaceIfUnchanged(temporary, StatePath, () => { Safe(StatePath); return current(); }, MaximumBytes, "First-use progress commit did not complete."))
                 throw new LocalFirstUseException(current() ? "firstUse.revision_conflict" : "firstUse.context_changed");
+            CommitDeferred();
             return next;
         }
         catch (Exception error) when (StorageError(error))

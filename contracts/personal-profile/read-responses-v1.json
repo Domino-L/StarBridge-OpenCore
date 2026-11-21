@@ -194,7 +194,8 @@
       "historyImportState": "imported"
     },
     "isGameplayStatisticsPublic": true,
-    "fleetAffiliationStatus": "shown"
+    "fleetAffiliationStatus": "shown",
+    "achievementCount": 0
   },
   "restrictedVisitor": {
     "schemaVersion": 1,

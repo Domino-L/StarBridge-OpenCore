@@ -10,6 +10,15 @@ internal sealed partial class CommunityClient
     private sealed record ShipTarget(string Id, string Code, string Scope, DateTimeOffset Expires);
     private readonly ConcurrentDictionary<string, ShipTarget> _shipTargets = new();
 
+    // A ship keeps one reference for this process: unguessable outside it, the same for the same
+    // account scope, organization and instance. Expiry still bounds what it authorizes; it no
+    // longer renames the ship, so a page held past five minutes still finds its ships
+    // (user report 2026-11-15: every ship picked said the library changed).
+    private readonly byte[] _shipReferenceKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+    private string StableShipReference(params string[] parts) => Convert.ToHexString(
+        System.Security.Cryptography.HMACSHA256.HashData(_shipReferenceKey,
+            System.Text.Encoding.UTF8.GetBytes(string.Join('\u001f', parts)))).ToLowerInvariant()[..32];
+
     internal Task<object> ReadShipsAsync(string bearer, JsonElement body, string scope, Action current, CancellationToken token) =>
         GuardWorkspace(async () =>
         {
@@ -54,7 +63,7 @@ internal sealed partial class CommunityClient
                 || offset > matched || source.Length != Math.Min(20, matched - offset)
                 || next != (offset + source.Length < matched ? offset + source.Length : null)) throw Invalid();
 
-            var now = DateTimeOffset.UtcNow;
+            var now = _targetClock.GetUtcNow();
             var members = new Dictionary<string, MemberTarget>();
             var ships = new Dictionary<string, ShipTarget>();
             string? previousId = null;
@@ -69,9 +78,11 @@ internal sealed partial class CommunityClient
                 if (!(memberId.StartsWith("account:", StringComparison.Ordinal) && memberId.Length > 8 ||
                     memberId.StartsWith("legacy:", StringComparison.Ordinal) && ShipHash(memberId[7..]))) throw Invalid();
                 var memberRef = MemberReferenceFor(memberId, target.Code, scope)!;
-                members[memberRef] = new(memberId, target.Code, scope, now.AddMinutes(5));
-                var shipRef = _shipTargets.FirstOrDefault(p => p.Value.Id == id && p.Value.Code == target.Code
-                    && p.Value.Scope == scope && p.Value.Expires > now).Key ?? Guid.NewGuid().ToString("N");
+                // Member leases stay on the real clock like the rest of the member chain (review R3 P2).
+                members[memberRef] = new(memberId, target.Code, scope, DateTimeOffset.UtcNow.AddMinutes(5));
+                // Rows without an instance fall back to owner + model for their id (Relay and WPF-S2);
+                // the import time tells a replacement of the same model apart (reviews R2/R3 P1).
+                var shipRef = StableShipReference("ship", scope, target.Code, id, Optional(row, "hangarImportedAt", 64) ?? "");
                 ships[shipRef] = new(id, target.Code, scope, now.AddMinutes(5));
                 return ProjectShipView(row, shipRef, memberRef, query);
             }).ToArray();

@@ -11,6 +11,7 @@ import 'package:starbridge_flutter/features/hangar/local_hangar_port.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import 'interaction_batch2_test.dart' show app, pixels;
+import '../../_support/hangar_test_actions.dart';
 
 const target = Key('icon-action');
 Widget action({
@@ -238,6 +239,24 @@ void main() {
             } else {
               port.pending.completeError(const LocalHangarFailure('storage'));
             }
+            await tester.pumpAndSettle();
+            // A physical second press on a disabled row favorite can reach its
+            // independent ship-open action. Return through the stage as needed.
+            if (find.byKey(const Key('hangar-stage')).evaluate().isNotEmpty) {
+              await backToHangarWall(tester);
+            }
+            // A confirmed favorite moves to the leading section. Reveal its
+            // current projection before checking the same business result.
+            await tester.scrollUntilVisible(
+              button,
+              -200,
+              scrollable: find
+                  .descendant(
+                    of: find.byType(CustomScrollView),
+                    matching: find.byType(Scrollable),
+                  )
+                  .first,
+            );
             await tester.pumpAndSettle();
             expect(
               tester.widget<StarBridgeIconAction>(adapter).selected,

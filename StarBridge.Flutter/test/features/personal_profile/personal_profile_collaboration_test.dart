@@ -189,6 +189,9 @@ void main() {
     expect(h.connection.content!['schedule'], originalSchedule);
     expect(h.connection.content!['favoriteShipIds'], [shipA]);
     h.remote.available = false;
+    final failed = await h.port.read();
+    expect(failed.availability, PersonalProfileAvailability.unavailable);
+    h.remote.available = true;
     final offline = await h.port.read();
     expect(offline.roles.single.labelKey, 'profile.legacyRole.medic');
     expect(offline.availabilityWindows.first.endTime, '02:15');

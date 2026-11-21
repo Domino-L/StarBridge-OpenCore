@@ -48,7 +48,7 @@ class MarketCard extends StatelessWidget {
   final num? best;
   @override
   Widget build(BuildContext context) {
-    final name = marketName(row, marketLocale(context));
+    final name = marketOrderTitle(context, row);
     final price = row[trending ? 'price' : 'unitPrice'];
     final colors = context.tokens.colors;
     if (trending) {
@@ -130,23 +130,29 @@ class MarketCard extends StatelessWidget {
       );
     }
     final listing = row.containsKey('seller');
+    // One reading of the side for card, hover and detail (CX-BUYTAG-REVIEW-R4).
     final side = row['displayType'] == 3
         ? 'barter'
-        : row['creatorType'] == 0
+        : marketOrderSide(row) == 'buy'
         ? 'buy'
         : 'sell';
     final t = context.tokens;
     const gold = MarketplacePalette.gold;
     final tags = <MarketSlantTag>[];
     if (listing) {
-      final q = marketQualityValue(row);
+      final q = marketShowsItemVisual(row) ? marketQualityValue(row) : null;
       if (q != null) {
         final tier = MarketQualityTier.of(q);
+        // A buy order's quality is a requirement: 需要｜极品 ≥975 (方案 A).
+        // The figure is the detail's own ("≥900" for any stored minimum).
+        if (side != 'barter' && marketQualityRequired(row)) {
+          tags.add(marketNeedsTag(marketText(context, 'needs')));
+        }
         tags.add(
           MarketSlantTag(
             marketText(context, tier.name),
             color: marketTierColor(context, tier),
-            mono: q.toStringAsFixed(0),
+            mono: marketQuality(row) ?? q.toStringAsFixed(0),
             foil: tier == MarketQualityTier.legendary,
           ),
         );
@@ -155,6 +161,7 @@ class MarketCard extends StatelessWidget {
       // A lowest ask across all qualities says nothing about a quality
       // listing: those are compared inside their tier, never here.
       final leading =
+          !marketIsChecklist(row) &&
           q == null &&
           best != null &&
           p != null &&
@@ -259,7 +266,11 @@ class MarketCard extends StatelessWidget {
                         Text(
                           [
                             marketText(context, 'verbSwap'),
-                            wanted.isEmpty
+                            // Lists never carry the wanted side: unknown is
+                            // "看详情", only a read empty list is "未填写".
+                            row['wantedItems'] is! List
+                                ? marketText(context, 'seeDetail')
+                                : wanted.isEmpty
                                 ? marketText(context, 'notFilled')
                                 : wanted
                                       .map(
@@ -271,7 +282,7 @@ class MarketCard extends StatelessWidget {
                                       .join(', '),
                           ].join(' '),
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                           style: const TextStyle(
                             fontSize: 14,
@@ -295,7 +306,7 @@ class MarketCard extends StatelessWidget {
                           Text(
                             place,
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: TextStyle(
                               fontSize: t.typography.label,
@@ -322,7 +333,7 @@ class MarketCard extends StatelessWidget {
                             color: colors.textSecondary,
                           ),
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                         ),
                     ],
@@ -448,7 +459,7 @@ class MarketCatalogCard extends StatelessWidget {
                           SizedBox(
                             height: 38,
                             child: Text(
-                              marketName(row, marketLocale(context)),
+                              marketOrderTitle(context, row),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -460,7 +471,7 @@ class MarketCatalogCard extends StatelessWidget {
                           Text(
                             (row['itemNameEn'] ?? '').toString(),
                             maxLines: 1,
-                            overflow: TextOverflow.fade,
+                            overflow: fadeOverflow(context),
                             softWrap: false,
                             style: TextStyle(
                               fontSize: 11,
@@ -493,9 +504,9 @@ class MarketCatalogCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              marketName(row, marketLocale(context)),
+                              marketOrderTitle(context, row),
                               maxLines: 1,
-                              overflow: TextOverflow.fade,
+                              overflow: fadeOverflow(context),
                               softWrap: false,
                               style: const TextStyle(
                                 fontSize: 13,
@@ -505,11 +516,11 @@ class MarketCatalogCard extends StatelessWidget {
                             ),
                             if (row['itemNameEn'] is String &&
                                 row['itemNameEn'] !=
-                                    marketName(row, marketLocale(context)))
+                                    marketOrderTitle(context, row))
                               Text(
                                 row['itemNameEn'] as String,
                                 maxLines: 1,
-                                overflow: TextOverflow.fade,
+                                overflow: fadeOverflow(context),
                                 softWrap: false,
                                 style: TextStyle(
                                   fontSize: 11,

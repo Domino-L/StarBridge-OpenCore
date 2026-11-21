@@ -153,6 +153,8 @@ internal sealed partial class OverlayCompositionHudWindow
         return ApplyDirectMessages(ApplyNoticeSlot(new OverlayCompositionFrameState(
             width,
             height,
+            // the overall opacity is retired (user 11-12): a saved value never fades the overlay; calm display
+            // and the per-module opacities still scale from here
             1.0,
             BuildPalette(),
             OverlaySkinCatalog.Get(_settings.Skin).RenderKind,
@@ -221,9 +223,9 @@ internal sealed partial class OverlayCompositionHudWindow
           CommunicationAppearanceActivities = _viewModel.CommunicationAppearanceActivities,
           BarrageFrameRate = _viewModel.PreserveBarrageMotion ? _viewModel.PreviewBarrageFrameRate : _settings.AnimationFrameRate,
           SourceLabels = sourceLabels, EmptyStates = _viewModel.ModuleEmptyStates, MemberPaging = _viewModel.MemberPaging,
-          OverviewFacts = _viewModel.OverviewFacts,
-          EmptyNoticeTitle = _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "公告" : "NOTICE",
-          EmptyEventsTitle = _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "事件通知" : "EVENTS" }));
+          OverviewFacts = _viewModel.OverviewFacts, RealtimeStatusUnknown = _viewModel.RealtimeStatusUnknown,
+          EmptyNoticeTitle = VisorText("召集与提醒", "召集與提醒", "RALLIES & REMINDERS"),
+          EmptyEventsTitle = VisorText("事件", "事件", "EVENTS") }));
     }
 
     private static bool IsNightShadowStyle(OverlayDisplaySettings settings)
@@ -239,7 +241,8 @@ internal sealed partial class OverlayCompositionHudWindow
             Math.Max(1, _surfaceBounds.Width),
             Math.Max(1, _surfaceBounds.Height));
         var membersRect = ResolveItemRect("Members", resolvedItems);
-        _viewModel.ApplyMemberViewport(membersRect.Height);
+        // The visor pages members 11 rows at a time wherever the old panel was.
+        _viewModel.ApplyMemberViewport(VisorSelected ? VisorMemberViewport : membersRect.Height);
         _viewModel.ApplyChatBarrageViewportWidth(Math.Max(1, _surfaceBounds.Width));
     }
 

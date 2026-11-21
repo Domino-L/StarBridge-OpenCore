@@ -25,7 +25,7 @@ internal sealed class LegacyRelayAccountClient : ILegacyRelayAccountPort, IDispo
     private bool _disposed;
 
     internal LegacyRelayAccountClient(Uri baseUri)
-        : this(new HttpClient(), baseUri, ownsHttpClient: true)
+        : this(Support.RelayClientVersion.NewClient(TimeSpan.FromSeconds(100)), baseUri, ownsHttpClient: true)
     {
     }
 
@@ -35,6 +35,7 @@ internal sealed class LegacyRelayAccountClient : ILegacyRelayAccountPort, IDispo
         bool ownsHttpClient = false)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        Support.RelayClientVersion.Apply(_httpClient);
         _baseUri = NormalizeAndValidateBaseUri(baseUri);
         _ownsHttpClient = ownsHttpClient;
     }
@@ -65,6 +66,20 @@ internal sealed class LegacyRelayAccountClient : ILegacyRelayAccountPort, IDispo
             {
                 Reset();
                 return LegacyRelayAccessState.AuthorizationRequired;
+            }
+
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                // MIGRATION-INTERFACE-073 §3: a migrated person on a 0.7.3+ client.
+                // The relay compares legacy IDs ignoring case (main fleet 11-06), so
+                // "same account" ignores case here too. This value is only compared:
+                // the local owner keeps the SCM link's ID exactly as the ready path
+                // uses it, so file names never depend on the relay's spelling.
+                Reset();
+                var migrated = await ReadMigratedAsync(response, cancellationToken).ConfigureAwait(false);
+                return migrated is null ? LegacyRelayAccessState.Unavailable
+                    : migrated.Trim().Equals(expected, StringComparison.OrdinalIgnoreCase) ? LegacyRelayAccessState.Migrated
+                    : LegacyRelayAccessState.AccountMismatch;
             }
 
             if (!response.IsSuccessStatusCode)
@@ -99,6 +114,22 @@ internal sealed class LegacyRelayAccountClient : ILegacyRelayAccountPort, IDispo
             Reset();
             return LegacyRelayAccessState.Unavailable;
         }
+    }
+
+    private static async Task<string?> ReadMigratedAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        if (response.Content.Headers.ContentLength is > 4096) return null;
+        var text = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+        if (text.Length > 4096) return null;
+        using var json = JsonDocument.Parse(text);
+        var root = json.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("code", out var code) || code.ValueKind != JsonValueKind.String ||
+            code.GetString() != "legacy_account_migrated" ||
+            !root.TryGetProperty("legacyAccountId", out var id) || id.ValueKind != JsonValueKind.String)
+            return null;
+        var value = id.GetString();
+        return string.IsNullOrEmpty(value) || value.Length > 256 || value.Any(char.IsControl) ? null : value;
     }
 
     public async Task<LegacyRelayProfileReadResult> ReadOwnProfileAsync(

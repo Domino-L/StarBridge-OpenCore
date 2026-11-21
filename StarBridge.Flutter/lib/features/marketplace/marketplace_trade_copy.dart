@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'marketplace_copy.dart';
 import 'marketplace_port.dart';
+import 'marketplace_recovery.dart';
 
 String tradeText(
   BuildContext context,
@@ -28,6 +29,44 @@ String tradeTextFor(
 }
 
 const tradeCopy = <String, List<String>>{
+  '没有待评价的交易': ['没有待评价的交易', '沒有待評價的交易', 'No trades to review'],
+  '交易完成后，可以在这里评价对方。': ['交易完成后，可以在这里评价对方。', '交易完成後，可以在這裡評價對方。', 'You can review the other trader here after completing a trade.'],
+  '进行中交易尚未读全': ['进行中交易尚未读全', '進行中交易尚未讀全', 'Some ongoing trades have not been loaded'],
+  "清单内容": ["清单内容","清單內容","Checklist contents"],
+  "你给出": ["你给出","你給出","You give"],
+  "你收到": ["你收到","你收到","You receive"],
+  "× {n} 套": ["× {n} 套","× {n} 套","× {n} sets"],
+  "每套价格": ["每套价格","每套價格","Price per set"],
+  "发货（约）": ["发货（约）","發貨（約）","Shipped (approx.)"],
+  "已举报": ["已举报","已舉報","Reported"],
+  "待处理": ["待处理","待處理","Pending"],
+  "处理中": ["处理中","處理中","In progress"],
+  "成立": ["成立","成立","Upheld"],
+  "不成立": ["不成立","不成立","Not upheld"],
+  "待评价": ["待评价","待評價","To review"],
+  "已超过 7 天，不能举报": ["已超过 7 天，不能举报","已超過 7 天，不能舉報","More than 7 days have passed; reporting is unavailable."],
+  "已超过收货期限": ["已超过收货期限","已超過收貨期限","The receipt deadline has passed."],
+  "你已举报过此交易，请查看处理状态。": ["你已举报过此交易，请查看处理状态。","你已舉報過此交易，請查看處理狀態。","You have already reported this trade. Check its handling status."],
+  "你已拉黑对方，不能发起交易。": ["你已拉黑对方，不能发起交易。","你已拉黑對方，不能發起交易。","You have blocked this trader and cannot start a trade."],
+  "对方已拉黑你，不能发起交易。": ["对方已拉黑你，不能发起交易。","對方已拉黑你，不能發起交易。","This trader has blocked you. You cannot start a trade."],
+  "你的账号已被限制交易，请联系 SCM。": ["你的账号已被限制交易，请联系 SCM。","你的帳號已被限制交易，請聯絡 SCM。","Your account is restricted from trading. Contact SCM."],
+  "操作过于频繁，请稍后再试。": ["操作过于频繁，请稍后再试。","操作過於頻繁，請稍後再試。","Too many requests. Try again shortly."],
+  "数量超过当前可交易数量，请刷新后减少数量。": ["数量超过当前可交易数量，请刷新后减少数量。","數量超過目前可交易數量，請重新整理後減少數量。","This quantity is no longer available. Refresh and reduce the quantity."],
+  "挂单已下架或不存在，请选择其他挂单。": ["挂单已下架或不存在，请选择其他挂单。","掛單已下架或不存在，請選擇其他掛單。","This listing is unavailable. Choose another listing."],
+  "交易或挂单已过期，请刷新查看当前状态。": ["交易或挂单已过期，请刷新查看当前状态。","交易或掛單已過期，請重新整理查看目前狀態。","The trade or listing has expired. Refresh to check its current status."],
+  '对方的地点': ['对方的地点', '對方的地點', 'Counterparty location'],
+  '收货位置': ['收货位置', '收貨位置', 'Receiving location'],
+  '发货位置': ['发货位置', '發貨位置', 'Shipping location'],
+  '地点读取失败': ['地点读取失败', '地點讀取失敗', 'Could not load locations'],
+  '请选择地点': ['请选择地点', '請選擇地點', 'Select a location'],
+  '卖家发货位置': ['卖家发货位置', '賣家發貨位置', 'Seller shipping location'],
+  '买家收货位置': ['买家收货位置', '買家收貨位置', 'Buyer receiving location'],
+  '去同意': ['去同意', '去同意', 'Review and accept'],
+  '去收货': ['去收货', '去收貨', 'Review receipt'],
+  '这个筛选下没有交易': ['这个筛选下没有交易', '這個篩選下沒有交易', 'No trades match this filter'],
+  '切换到全部查看其他交易。': ['切换到全部查看其他交易。', '切換到全部查看其他交易。', 'Show all to see other trades.'],
+  '看全部': ['看全部', '看全部', 'Show all'],
+  ...marketplaceRecoveryCopy,
   '暂时读不到交易': ['暂时读不到交易', '暫時讀不到交易', 'Trades could not be loaded'],
   '交易功能暂时不可用，请稍后再试；一直这样请联系支持': [
     '交易功能暂时不可用，请稍后再试；一直这样请联系支持',
@@ -391,7 +430,7 @@ const tradeCopy = <String, List<String>>{
 };
 
 String tradeItemName(BuildContext context, MarketRow row) => marketName(
-  row,
+  {...row, if (row['itemsNameEn'] != null) 'nameEn': row['itemsNameEn']},
   marketLocale(context),
   field: row.containsKey('itemsName') ? 'itemsName' : 'itemName',
 );

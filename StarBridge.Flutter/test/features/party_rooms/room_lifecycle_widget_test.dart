@@ -2,15 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
+import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
+import 'package:starbridge_flutter/app/preferences/in_memory_app_preferences.dart';
 import 'package:starbridge_flutter/platform/window/in_memory_window_chrome.dart';
 
-Future<AppComposition> openExampleRooms(WidgetTester tester) async {
+Future<AppComposition> openExampleRooms(
+  WidgetTester tester, {
+  InteractionStyle interaction = InteractionStyle.standard,
+}) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = const Size(1280, 720);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
   final composition = AppComposition.forShellReview(
     windowChrome: InMemoryWindowChrome(),
+    preferences: InMemoryAppPreferences(
+      initial: AppPreferences.defaults.copyWith(interactionStyle: interaction),
+    ),
   );
   await tester.pumpWidget(StarBridgeApp(composition: composition));
   await tester.pumpAndSettle();

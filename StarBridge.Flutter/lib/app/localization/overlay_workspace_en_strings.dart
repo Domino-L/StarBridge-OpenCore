@@ -1,4 +1,13 @@
+const windowsSystemHotkeyApi = '(RegisterHotKey)';
+const windowsSystemHotkeyApiCjk = '（RegisterHotKey）';
+
 const overlayWorkspaceEn = <String, String>{
+  'overlay.workspace.membersSize.dimensions': '{rows} rows · width {width}',
+  'overlay.workspace.membersSize.rows': '{rows} rows',
+  'overlay.workspace.membersSize.addRow': 'Add one row',
+  'overlay.workspace.membersSize.removeRow': 'Remove one row',
+  'overlay.workspace.membersSize.widen': 'Widen',
+  'overlay.workspace.membersSize.narrow': 'Narrow',
   'overlay.workspace.saving': 'Saving changes…',
   'overlay.workspace.saveFailed': 'Not saved',
   'overlay.workspace.working': 'Working…',
@@ -70,19 +79,21 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.disabled.crosshairStyle':
       'Not used by this crosshair style.',
   'overlay.workspace.disabled.barrage': 'Applies with full-screen barrage',
+  'overlay.workspace.disabled.messageList': 'Applies with the message list',
+  'overlay.workspace.disabled.visorListTime':
+      'The visor message list shows no time; applies with full-screen barrage',
   'overlay.workspace.disabled.bloom':
       'Applies with an appearance that supports glow',
   'overlay.workspace.disabled.fixedPalette':
       'This appearance uses a fixed palette.',
-  'overlay.workspace.disabled.events':
-      'Turn on Show event notifications to adjust this.',
+  'overlay.workspace.disabled.events': 'Turn on Show events to adjust this.',
   'overlay.workspace.disabled.chat': 'Turn on Show chat to adjust this.',
   'overlay.workspace.disabled.offlineMembers':
       'Turn on Hide offline members to adjust this.',
   'overlay.workspace.disabled.notice':
-      'Turn on Show announcement to adjust this.',
+      'Turn on Show rallies & reminders to adjust this.',
   'overlay.workspace.disabled.friendEvents':
-      'Turn on Show friend activity to adjust this.',
+      'Turn on Show direct message alerts to adjust this.',
   'overlay.workspace.disabled.startup':
       'Turn on the overlay startup effect to adjust this.',
   'overlay.workspace.disabled.centerMark':
@@ -222,7 +233,8 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.seconds': '{count} sec',
   'overlay.workspace.hotkey': 'Overlay shortcut',
   'overlay.workspace.hotkeyHelp': 'Use a modifier with a letter or number, or press F1–F12 alone. Esc cancels.',
-  'overlay.workspace.registerHotKey': 'Use system hotkey (RegisterHotKey) for shortcuts',
+  'overlay.workspace.registerHotKey':
+      'Use system hotkey $windowsSystemHotkeyApi for shortcuts',
   'overlay.workspace.registerHotKey.help': 'Off by default. When on, other programs usually do not receive these key combinations, and they may conflict with shortcuts in other software. Testing shows Star Citizen still receives them when it is in front: pressing Alt+O in the chat box types o. This switch does not stop that.',
   'overlay.workspace.registerHotKey.failed': 'Could not register: {keys}. Another program may be using them. These shortcuts now use standard listening and still work; the game and other programs also receive them.',
   'overlay.workspace.hotkeyRecord': 'Set shortcut',
@@ -240,6 +252,9 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.layout.locked': 'Position locked',
   'overlay.workspace.layout.lockPositionSize': 'Lock position and size',
   'overlay.workspace.layout.adjustable': 'Position and size can be adjusted',
+  'overlay.workspace.layout.visorPositionOnly':
+      'You can move it; its size is Visor size under Global → Visor shape.',
+  'overlay.workspace.layout.visorOverview': 'The visor shows the fleet overview at the top of the members block; it moves with that block.',
   'overlay.workspace.layout.horizontalAnchor': 'Horizontal anchor',
   'overlay.workspace.layout.verticalAnchor': 'Vertical anchor',
   'overlay.workspace.layout.x': 'Horizontal position',
@@ -248,12 +263,13 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.layout.height': 'Height',
   'overlay.workspace.layout.textOpacity': 'Text opacity',
   'overlay.workspace.layout.backgroundOpacity': 'Background opacity',
-  'overlay.workspace.layout.decorationOpacity': 'Appearance decoration opacity',
+  'overlay.workspace.layout.decorationOpacity': 'Decoration opacity',
+  'overlay.workspace.layout.backgroundHelp': 'At 100% the background is a solid plate; 15% is the faint plate it used to have. With calm display on, the block still fades to the resting opacity while idle.',
   'overlay.workspace.layout.grid': 'Grid snapping',
   'overlay.workspace.layout.gridOff': 'Off',
   'overlay.workspace.layout.smartSnap': 'Snap to edges and modules',
   'overlay.workspace.layout.nudgeStep': 'Nudge step',
-  'overlay.workspace.layout.dragHelp': 'Drag a module to move it, or drag its lower-right corner to resize it. Lock it to prevent accidental changes.',
+  'overlay.workspace.layout.dragHelp': 'Drag a module to move it. The overall size is Visor size under Global → Visor shape; each block’s width and height are in its own Look section. Lock it to prevent accidental changes.',
   'overlay.workspace.layout.lockedShort': 'Locked',
   'overlay.workspace.layout.hiddenShort': 'Hidden',
   'overlay.workspace.layout.left': 'Move left',
@@ -264,17 +280,29 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.layout.wider': 'Wider',
   'overlay.workspace.layout.shorter': 'Shorter',
   'overlay.workspace.layout.taller': 'Taller',
-  'overlay.workspace.group.notice': 'Notice',
+  'overlay.workspace.group.notice': 'Rallies & reminders',
   'overlay.workspace.group.fleetOverview': 'Fleet overview',
   'overlay.workspace.group.members': 'Members',
   'overlay.workspace.group.appearance': 'Appearance',
+  'overlay.workspace.group.global': 'Global',
+  'overlay.workspace.group.global.shape': 'Visor shape',
+  'overlay.workspace.group.global.color': 'Colour',
+  'overlay.workspace.group.global.calm': 'Calm display',
+  'overlay.workspace.group.global.animation': 'Animation',
+  'overlay.workspace.group.global.openClose': 'Opening and closing',
+  'overlay.workspace.group.look': 'Look',
+  'overlay.workspace.global.help': 'Settings for the whole visor.',
+  'overlay.workspace.global.open': 'Set in Global',
+  'overlay.workspace.global.calmOn': 'Calm display: on',
+  'overlay.workspace.global.calmOff': 'Calm display: off',
+  'overlay.workspace.global.fromAppearance': 'Visor size, depth, colour, calm display and other whole-visor settings are in Global.',
   'overlay.workspace.group.crosshair': 'Crosshair',
   'overlay.workspace.group.startup': 'Startup and game behavior',
-  'overlay.workspace.group.events': 'Event notifications',
+  'overlay.workspace.group.events': 'Events',
   'overlay.workspace.group.chat': 'Chat',
   'overlay.workspace.group.layout': 'Screen layout',
   'overlay.workspace.groupOff': 'Off',
-  'overlay.workspace.module.Notice': 'Notice',
+  'overlay.workspace.module.Notice': 'Rallies & reminders',
   'overlay.workspace.module.Squads': 'Fleet overview',
   'overlay.workspace.module.Members': 'Members',
   'overlay.workspace.module.Chat': 'Chat',
@@ -332,6 +360,61 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.option.NightShadow': 'Night Shadow',
   'overlay.workspace.option.Verdict': 'Verdict',
   'overlay.workspace.option.HajiCitizen': 'Haji Citizen',
+  'overlay.workspace.option.Small': 'Small',
+  'overlay.workspace.option.Medium': 'Medium',
+  'overlay.workspace.option.Large': 'Large',
+  'overlay.workspace.field.visorSize': 'Visor size',
+  'overlay.workspace.field.visorHolidayGold': 'Holiday gold',
+  'overlay.workspace.field.visorTilt': 'Depth',
+  'overlay.workspace.hint.visorTilt': 'How far the side panels fold toward the middle of the screen; 0° keeps them flat.',
+  'overlay.workspace.field.visorViewingDistance': 'Viewing distance',
+  'overlay.workspace.hint.visorViewingDistance': 'How far the visor\'s camera is from the screen: smaller is a stronger perspective, larger is flatter. Default 1000.',
+  'overlay.workspace.disabled.visorFlat': 'No effect while depth is 0°',
+  'overlay.workspace.field.visorChatPlate': 'Chat panel',
+  'overlay.workspace.field.visorMembersAutoWidth':
+      'Members width follows content',
+  'overlay.workspace.field.visorMembersAutoHeight':
+      'Members height follows content',
+  'overlay.workspace.field.visorMembersWidth': 'Members width',
+  'overlay.workspace.field.visorMembersHeight': 'Members height',
+  'overlay.workspace.field.visorMembersWidth.max': 'Members maximum width',
+  'overlay.workspace.field.visorMembersWidth.fixed': 'Members width (fixed)',
+  'overlay.workspace.field.visorMembersHeight.max': 'Members maximum height',
+  'overlay.workspace.field.visorMembersHeight.fixed': 'Members height (fixed)',
+  'overlay.workspace.hint.visorMembersAutoWidth': 'When on, the width follows the names, ships and places, up to the maximum; when off, it stays fixed. Text that does not fit scrolls.',
+  'overlay.workspace.hint.visorMembersAutoHeight': 'When on, the height follows the number of members, up to the maximum; when off, it stays fixed. More members than fit turn pages.',
+  'overlay.workspace.hint.visorMembersWidth': 'Measured at 2560×1440 and medium size; it scales with the resolution and the visor size. You can also drag the corner of the members box in the layout editor.',
+  'overlay.workspace.field.visorEventsAutoWidth':
+      'Events width follows content',
+  'overlay.workspace.field.visorChatAutoWidth': 'Chat width follows content',
+  'overlay.workspace.field.visorEventsWidth': 'Events width',
+  'overlay.workspace.field.visorChatWidth': 'Chat width',
+  'overlay.workspace.field.visorEventsWidth.max': 'Events maximum width',
+  'overlay.workspace.field.visorEventsWidth.fixed': 'Events width (fixed)',
+  'overlay.workspace.field.visorChatWidth.max': 'Chat maximum width',
+  'overlay.workspace.field.visorChatWidth.fixed': 'Chat width (fixed)',
+  'overlay.workspace.hint.visorEventsAutoWidth': 'When on, the width follows the event text, up to the maximum; when off, it stays fixed. Text that does not fit scrolls. How many show comes from Events shown at once.',
+  'overlay.workspace.hint.visorChatAutoWidth': 'When on, the width follows the chat text, up to the maximum; when off, it stays fixed. Text that does not fit scrolls. How many show comes from the chat count setting.',
+  'overlay.workspace.hint.visorEventsWidth': 'Measured at 2560×1440 and medium size; it scales with the resolution and the visor size.',
+  'overlay.workspace.hint.visorChatWidth': 'Measured at 2560×1440 and medium size; it scales with the resolution and the visor size.',
+  'overlay.workspace.hint.visorMembersHeight': 'The members box always keeps this height. Rows spread out when there are few members and tighten a little when there are many; more than fit go to the next page. Measured at 2560×1440 and medium size; it scales with the resolution and the visor size. You can also drag the corner of the members box in the layout editor.',
+  'overlay.workspace.hint.visorChatPlate':
+      'When off, chat shows only the text, without a background or outline.',
+  'overlay.workspace.hint.eventNotificationSide': 'Events open from this side and lean toward it. In the layout editor they can be dragged anywhere on screen; changing the side here takes them back to that screen edge.',
+  'overlay.workspace.hint.eventNotificationMaxVisibleCount': 'Room is kept for this many events, so events coming and going never move the members.',
+  'overlay.workspace.hint.eventNotificationAnimationSpeed':
+      'How fast an event opens and closes.',
+  'overlay.workspace.hint.enableStartupTransition': 'Visor: the frame closes in from four sides, and runs backwards when closing. Off: it simply appears and disappears.',
+  'overlay.workspace.hint.hideSelfMember':
+      'Hidden, your own row (with its health ring) is not shown either.',
+  'overlay.workspace.hint.animationFrameRate':
+      'Used by scrolling text, the health ring and opening events.',
+  'overlay.workspace.hint.healthRing': 'Health ring: only people who read their own health have one. That switch is a setting for this computer, in the client settings under Screen reading.',
+  'overlay.workspace.healthRing.open': 'Open Screen reading',
+  'overlay.workspace.hint.visorBorderless': 'Run the game in borderless window mode; exclusive fullscreen covers the overlay and reminder cards.',
+  'overlay.workspace.disabled.visor':
+      'Choose the visor projection appearance to adjust',
+  'overlay.workspace.option.Visor': 'Visor projection',
   'overlay.workspace.option.eventNotificationMaxVisibleCount.1': '1 item',
   'overlay.workspace.option.eventNotificationMaxVisibleCount.2': '2 items',
   'overlay.workspace.option.eventNotificationMaxVisibleCount.3': '3 items',
@@ -354,7 +437,6 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.event.128': 'Online member summary',
   'overlay.workspace.event.256': 'Primary server change',
   'overlay.workspace.event.512': 'Death and respawn',
-  'overlay.workspace.event.1024': 'Local play reminder',
   'overlay.workspace.duration.memberPresence': 'Member online and offline',
   'overlay.workspace.duration.memberServer': 'Member server change',
   'overlay.workspace.duration.sameServer': 'Joined same server',
@@ -363,13 +445,12 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.duration.onlineSummary': 'Online member summary',
   'overlay.workspace.duration.primaryServer': 'Primary server change',
   'overlay.workspace.duration.deathAndRespawn': 'Death and respawn',
-  'overlay.workspace.duration.localPlayReminder': 'Local play reminder',
   'overlay.workspace.field.memberNameMode': 'Member names',
   'overlay.workspace.field.hideOfflineMembers': 'Hide offline members',
   'overlay.workspace.field.hideSquadIcons': 'Hide squad icons',
   'overlay.workspace.field.enableTrayMode': 'Enable tray mode',
   'overlay.workspace.field.opacity': 'Overall overlay opacity',
-  'overlay.workspace.field.showNotice': 'Show notice',
+  'overlay.workspace.field.showNotice': 'Show rallies & reminders',
   'overlay.workspace.field.showSquads': 'Show fleet overview',
   'overlay.workspace.field.showMembers': 'Show members',
   'overlay.workspace.field.hideMemberOnlineStatus': 'Hide member online status',
@@ -382,6 +463,7 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.field.scenePreference': 'Default info source',
   'overlay.workspace.field.skin': 'Interface skin',
   'overlay.workspace.field.theme': 'Theme color',
+  'overlay.workspace.hint.theme': 'Changes only the panel tint, outline and dividers; status colours and text stay the same.',
   'overlay.workspace.field.autoThemeByShip': 'Match theme to current ship',
   'overlay.workspace.field.nightShadowBloom': 'Bloom intensity',
   'overlay.workspace.field.animationFrameRate': 'Overlay animation frame rate',
@@ -401,14 +483,14 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.field.crosshairOutlineOpacity':
       'Crosshair outline opacity',
   'overlay.workspace.field.enableStartupTransition':
-      'Show overlay startup effect',
+      'Overlay open and close animation',
   'overlay.workspace.field.startupTransitionStyle': 'Startup effect style',
   'overlay.workspace.field.autoFocusGameWindowOnOpen':
       'Return to game after opening overlay',
   'overlay.workspace.field.startupTransitionFollowOverlayTheme':
       'Match startup effect to overlay theme',
   'overlay.workspace.field.startupTransitionFrameRate':
-      'Startup effect frame rate',
+      'Open and close animation frame rate',
   'overlay.workspace.field.autoOpenOverlayOnGameStart':
       'Open overlay when the game starts',
   'overlay.workspace.field.autoOpenOverlayOnGameForeground':
@@ -416,33 +498,33 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.field.autoCloseOverlayOnGameBackground':
       'Close overlay when leaving the game window',
   'overlay.workspace.field.skipStartupTransitionWhenGameForeground':
-      'Skip startup effect when the game is already active',
-  'overlay.workspace.field.showEventNotifications': 'Show event notifications',
-  'overlay.workspace.field.eventNotificationSide': 'Notification side',
+      'Skip the open animation when the game is already active',
+  'overlay.workspace.field.showEventNotifications': 'Show events',
+  'overlay.workspace.field.eventNotificationSide': 'Event side',
   'overlay.workspace.field.eventNotificationDurationSeconds':
-      'Default notification duration',
-  'overlay.workspace.field.eventNotificationY':
-      'Notification vertical position',
-  'overlay.workspace.field.eventNotificationTypes': 'Notification events',
+      'Default event duration',
+  'overlay.workspace.field.eventNotificationY': 'Event vertical position',
+  'overlay.workspace.field.visorEventsX': 'Events horizontal position',
+  'overlay.workspace.field.visorBadgeX': 'Message badge horizontal position',
+  'overlay.workspace.field.visorBadgeY': 'Message badge vertical position',
+  'overlay.workspace.field.eventNotificationTypes': 'Which events to show',
   'overlay.workspace.field.eventNotificationMaxVisibleCount':
-      'Visible notification limit',
+      'Events shown at once',
   'overlay.workspace.field.eventNotificationPinImportant':
-      'Keep important notifications visible',
-  'overlay.workspace.field.eventNotificationAnimationSpeed':
-      'Notification animation speed',
+      'Keep important events visible',
+  'overlay.workspace.field.eventNotificationAnimationSpeed': 'Opening speed',
   'overlay.workspace.field.eventNotificationDurations':
-      'Per-event notification duration',
-  'overlay.workspace.field.eventNotificationTextOpacity':
-      'Notification text opacity',
+      'Duration by event type',
+  'overlay.workspace.field.eventNotificationTextOpacity': 'Event text opacity',
   'overlay.workspace.field.eventNotificationBackgroundOpacity':
-      'Notification background opacity',
+      'Event background opacity',
   'overlay.workspace.field.eventNotificationDecorationOpacity':
-      'Notification appearance decoration opacity',
+      'Event decoration opacity',
   'overlay.workspace.field.showChat': 'Show chat',
   'overlay.workspace.field.chatDisplayMode': 'Chat display mode',
   'overlay.workspace.field.chatSide': 'Chat side',
   'overlay.workspace.field.chatMaxVisibleCount': 'Visible message limit',
-  'overlay.workspace.field.chatDurationSeconds': 'Message duration',
+  'overlay.workspace.field.chatDurationSeconds': 'Barrage speed',
   'overlay.workspace.field.chatShowSender': 'Show sender',
   'overlay.workspace.field.chatShowTimestamp': 'Show sent time',
   'overlay.workspace.field.chatShowSystemMessages': 'Show system messages',
@@ -453,10 +535,11 @@ const overlayWorkspaceEn = <String, String>{
   'overlay.workspace.field.chatBarrageAvoidCenter':
       'Keep barrage clear of screen center',
   'overlay.workspace.field.chatTextEdgeStrength': 'Chat text edge strength',
-  'overlay.workspace.field.communicationFriendEvents': 'Show friend activity',
+  'overlay.workspace.field.communicationFriendEvents':
+      'Show direct message alerts',
   'overlay.workspace.field.communicationMessagePreview':
       'Show message previews',
   'overlay.workspace.field.communicationEventDurationSeconds':
-      'Communication alert duration',
+      'Reminder duration',
   'overlay.workspace.field.fleetChatScope': 'Fleet chat scope',
 };

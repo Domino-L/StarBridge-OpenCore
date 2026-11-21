@@ -49,11 +49,12 @@ internal static class OverlayEventFlickerTests
                 refresh(full, Shard);
             }
             Check(Count(model) == 0, $"pausing sync is not leaving the game for the fleet summary ({Describe(model)})");
+            // 0.7.3: the online summary is a reminder card only; real leaves and returns stay off the overlay too.
             refresh(offline, Shard);
-            Check(Count(model) == 1, $"a member really leaving the game updates the fleet summary once ({Describe(model)})");
+            Check(Count(model) == 0, $"a member really leaving the game is not an overlay event ({Describe(model)})");
             refresh(offline, Shard);
             refresh(full, Shard);
-            Check(Count(model) == 2, $"the member really returning is announced once ({Describe(model)})");
+            Check(Count(model) == 0, $"the member returning is not an overlay event ({Describe(model)})");
         });
     }
 

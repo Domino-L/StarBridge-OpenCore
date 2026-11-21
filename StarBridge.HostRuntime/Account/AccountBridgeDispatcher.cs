@@ -219,6 +219,11 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
             Friends.FriendsReadProbeDiagnostics.DispatchFailure(request.Name, exception);
             return Result(BridgeEnvelope.CancelledResponse(request));
         }
+        catch (Auth.ScmRefreshTemporarilyUnavailableException)
+        {
+            return Result(BridgeEnvelope.ErrorResponse(request, new BridgeError(
+                AccountBridgeStableErrors.CredentialTemporarilyUnavailable, "Session is temporarily unavailable.", true)));
+        }
         catch (Exception exception)
         {
             Friends.FriendsReadProbeDiagnostics.DispatchFailure(request.Name, exception);
@@ -369,6 +374,7 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
             return new(BridgeEnvelope.ErrorResponse(request, new(error.Code, "Bridge request was rejected.")), []);
         }
         catch (OperationCanceledException) { return new(BridgeEnvelope.CancelledResponse(request), []); }
+        catch (Auth.ScmRefreshTemporarilyUnavailableException) { return new(BridgeEnvelope.ErrorResponse(request, new(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, "Session is temporarily unavailable.", true)), []); }
         catch (Exception) { return new(BridgeEnvelope.ErrorResponse(request, new(BridgeErrorCodes.HostError, "Account operation failed.")), []); }
     }
 
@@ -465,6 +471,8 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
                 await UpdateAvatarAsync(request, cancellationToken),
             AccountBridgeRequestNames.UpdateCallSign =>
                 await UpdateCallSignAsync(request, cancellationToken),
+            AccountBridgeRequestNames.RefreshRsiData =>
+                BridgeEnvelope.Response(request, await _host.RefreshRsiDataAsync(RequireCurrentContext(request), request.Payload, cancellationToken)),
             AccountBridgeRequestNames.ReadAvatar =>
                 BridgeEnvelope.Response(request, await _host.ReadAvatarAsync(RequireCurrentContext(request), cancellationToken)),
             AccountBridgeRequestNames.Login =>
@@ -488,6 +496,9 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
                     await _host.GetPersonalProfileAsync(
                         RequireCurrentContext(request),
                         cancellationToken)),
+            "personalProfile.readAccountFacts" =>
+                BridgeEnvelope.Response(request, await _host.ReadAccountFactsAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
             "personalProfile.readVisibility" or "personalProfile.saveVisibility" =>
                 BridgeEnvelope.Response(request, await _host.ProfileVisibilityAsync(
                     RequireCurrentContext(request), request.Payload,
@@ -778,6 +789,15 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
                         RequireCurrentContext(request),
                         ParseLegacyCredential(request.Payload),
                         cancellationToken)),
+            AccountBridgeRequestNames.ReadLegacyMigration =>
+                BridgeEnvelope.Response(request, await _host.ReadLegacyMigrationAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
+            AccountBridgeRequestNames.RetryLegacyMigration =>
+                BridgeEnvelope.Response(request, await _host.RetryLegacyMigrationAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
+            AccountBridgeRequestNames.AcknowledgeLegacyMigration =>
+                BridgeEnvelope.Response(request, await _host.AcknowledgeLegacyMigrationAsync(
+                    RequireCurrentContext(request), request.Payload, cancellationToken)),
             AccountBridgeRequestNames.CreateCompatibilityIdentity =>
                 await CreateCompatibilityIdentityAsync(request, cancellationToken),
             AccountBridgeRequestNames.PatchPreferences =>
@@ -910,47 +930,68 @@ internal sealed partial class AccountBridgeDispatcher : IDisposable
 
     // DEPLOY-QUEUE §4: outside the visibility a visitor gets the always-public header, not an error.
     private static async Task<BridgeEnvelope> ToVisitorProfileResponseAsync(
-        BridgeEnvelope request, Func<Task<StarBridge.Core.Profiles.PersonalProfileDocumentContract>> read)
+        BridgeEnvelope request, Func<Task<VisitorPersonalProfileResult>> read)
     {
-        try { return ToPersonalProfileResponse(request, await read(), editable: false); }
+        try
+        {
+            var result = await read();
+            return ToPersonalProfileResponse(request, result.Profile, editable: false, accountFacts: result.AccountFacts,
+                tradeWindow: result.TradeWindow);
+        }
         catch (PersonalProfileRestrictedException restricted)
         { return BridgeEnvelope.Response(request, restricted.Header.ToBridge()); }
     }
 
-    private static BridgeEnvelope ToPersonalProfileResponse(
+    internal static BridgeEnvelope ToPersonalProfileResponse(
         BridgeEnvelope request,
-        StarBridge.Core.Profiles.PersonalProfileDocumentContract profile, bool editable = true) =>
-        BridgeEnvelope.Response(
-            request,
-            new
+        StarBridge.Core.Profiles.PersonalProfileDocumentContract profile, bool editable = true,
+        PersonalProfilePublicFacts? accountFacts = null,
+        PersonalProfileTradeWindow? tradeWindow = null)
+    {
+        var page = new Dictionary<string, object?>
+        {
+            ["isPublic"] = profile.IsPublic,
+            ["visibility"] = profile.Visibility,
+            ["revision"] = profile.Revision,
+            ["avatarStyle"] = profile.AvatarStyle,
+            ["wallpaperId"] = profile.WallpaperId,
+            ["presentation"] = profile.Presentation is { } presentation ? new Dictionary<string, object?>
             {
-                schemaVersion = AccountBridgeSchema.Version,
-                editable,
-                profile = new
-                {
-                    isPublic = profile.IsPublic,
-                    visibility = profile.Visibility,
-                    revision = profile.Revision,
-                    avatarStyle = profile.AvatarStyle,
-                    wallpaperId = profile.WallpaperId,
-                    presentation = profile.Presentation,
-                    identity = new
-                    {
-                        callSign = profile.Identity.Callsign,
-                        gameHandle = profile.Identity.GameId,
-                        avatarAssetId = profile.Identity.AvatarAssetId
-                    },
-                    content = profile.Content,
-                    // Keep the typed additive LogoUrl from the authorized visitor read.
-                    fleetAffiliation = profile.FleetAffiliation,
-                    fleetAffiliationStatus = profile.FleetAffiliationStatus,
-                    hangar = profile.Hangar is null ? null : new {
-                        ships = profile.Hangar.Ships.Select(Hangar.HangarShipNames.PresentProfile).ToArray()
-                    },
-                    gameplayStatistics = profile.GameplayStatistics,
-                    isGameplayStatisticsPublic = profile.IsGameplayStatisticsPublic
-                }
-            });
+                ["schemaVersion"] = presentation.SchemaVersion,
+                ["origins"] = presentation.Origins,
+                ["sourceVersion"] = presentation.SourceVersion
+            } : null,
+            ["identity"] = new
+            {
+                callSign = profile.Identity.Callsign,
+                gameHandle = profile.Identity.GameId,
+                avatarAssetId = profile.Identity.AvatarAssetId
+            },
+            // Visitor achievements come only from the validated public projection.
+            ["content"] = editable ? profile.Content : profile.Content with { AchievementShowcase = null },
+            // Keep only fields from the authorized response; never fill visitor data locally.
+            ["fleetAffiliation"] = profile.FleetAffiliation,
+            ["fleetAffiliationStatus"] = profile.FleetAffiliationStatus,
+            ["hangar"] = profile.Hangar is null ? null : new
+            {
+                ships = profile.Hangar.Ships.Select(Hangar.HangarShipNames.PresentProfile).ToArray()
+            },
+            ["gameplayStatistics"] = profile.GameplayStatistics,
+            ["isGameplayStatisticsPublic"] = profile.IsGameplayStatisticsPublic
+        };
+        if (!editable && profile.PublicAchievements is not null)
+            page["publicAchievements"] = profile.PublicAchievements;
+        // HK swap 5 (user 11-11): the header's achievement count, the same number for the owner and a
+        // visitor, and a full visitor page's always-public trade window. Absent from older servers.
+        if (profile.AchievementCount is int count and >= 0)
+            page["achievementCount"] = count;
+        if (!editable && tradeWindow is not null)
+            page["tradeWindow"] = tradeWindow.ToPayload();
+        var payload = new Dictionary<string, object?>
+        { ["schemaVersion"] = AccountBridgeSchema.Version, ["editable"] = editable, ["profile"] = page };
+        if (!editable && accountFacts is not null) payload["accountFacts"] = accountFacts.ToPayload();
+        return BridgeEnvelope.Response(request, payload);
+    }
 
     private async Task<BridgeEnvelope> DispatchMigrationAsync(BridgeEnvelope request, CancellationToken token)
     {

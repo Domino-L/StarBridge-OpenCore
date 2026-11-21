@@ -98,6 +98,8 @@ final class CommunityOwnershipTransferOutcome {
               'refreshRequired',
               'requestChanged',
               'identityUnavailable',
+              'identityRequired',
+              'identityAmbiguous',
               'notAllowed',
               'unavailable',
               'invalidDraft',

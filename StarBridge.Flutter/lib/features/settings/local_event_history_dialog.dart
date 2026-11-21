@@ -262,6 +262,16 @@ class _LocalEventHistoryDialogState extends State<LocalEventHistoryDialog> {
                         ],
                       ),
                       SizedBox(height: tokens.space.sm),
+                      if (page != null && page.unavailableSources.isNotEmpty)
+                        Text(
+                          t(
+                            page.unavailableSources.length == 2
+                                ? 'allSourcesUnavailable'
+                                : '${page.unavailableSources.single}Unavailable',
+                          ),
+                          key: const Key('history-unavailable-sources'),
+                          style: TextStyle(color: tokens.colors.warning),
+                        ),
                       if (page?.state == 'recovered')
                         Text(
                           t('recovered'),
@@ -319,8 +329,10 @@ class _LocalEventHistoryDialogState extends State<LocalEventHistoryDialog> {
                             ? Center(
                                 child: Text(
                                   t(
-                                    page?.totalCount == 0
-                                        ? 'empty'
+                                    page != null && page.totalCount == 0
+                                        ? page.unavailableSources.isNotEmpty
+                                              ? 'unavailableEmpty'
+                                              : 'empty'
                                         : 'filteredEmpty',
                                   ),
                                   key: const Key('history-empty'),

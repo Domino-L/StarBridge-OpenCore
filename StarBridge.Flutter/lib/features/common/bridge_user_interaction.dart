@@ -6,6 +6,7 @@ import '../../platform/bridge/bridge_envelope.dart';
 import '../friends/bridge_friends_adapter.dart';
 import '../friends/friends_module.dart';
 import '../personal_profile/bridge_personal_profile_adapter.dart';
+import '../personal_profile/bridge_personal_profile_account_facts.dart';
 import '../personal_profile/personal_profile_models.dart';
 import 'user_interaction.dart';
 
@@ -79,13 +80,19 @@ final class BridgeUserInteraction implements UserInteractionPort {
     try {
       final data = await request('users.profile', target);
       if (data['editable'] != false) throw const FormatException();
-      return parsePersonalProfileSnapshot(data);
+      return parsePersonalProfileSnapshot(
+        data,
+        visitorAccountFactsSupported: session.hostCapabilities.contains(
+          visitorAccountFactsCapability,
+        ),
+      );
     } on BridgeClientException catch (error) {
       return PersonalProfileSnapshot.unavailable(
         failureKey: switch (error.code) {
           'profile.visitor_not_visible' => 'profile.visitor.notVisible',
           'profile.visitor_identity_unavailable' ||
-          'profile.visitor_unavailable' => 'profile.visitor.identityUnavailable',
+          'profile.visitor_unavailable' =>
+            'profile.visitor.identityUnavailable',
           'users.targetChanged' ||
           'communities.refreshRequired' => 'profile.visitor.refreshSource',
           'account.reauthorization_required' =>

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -42,7 +43,7 @@ void main() {
       ),
       hasLength(
         [
-          for (final id in ['Default', 'NightShadow', 'Verdict'])
+          for (final id in ['Default', 'NightShadow', 'Verdict', 'Visor'])
             if (File('${root.path}/$id.png').existsSync()) id,
         ].length,
       ),
@@ -114,6 +115,78 @@ void main() {
       find.byKey(const Key('overlay-native-preview-Default')),
       findsNothing,
     );
+  });
+
+  // build 72 acceptance: the visor card was black. Its still is drawn by the
+  // shipping visor renderer (OverlayVisorTests.Catalog) and has no motion.
+  test('the visor card still is the recorded native capture', () async {
+    final root = Directory('assets/overlay-appearances');
+    final manifest = jsonDecode(
+      File('${root.path}/manifest.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    final poster =
+        (manifest['posters'] as List<dynamic>).single as Map<String, dynamic>;
+    expect(poster['id'], 'Visor');
+    expect(poster['renderer'], 'OverlayVisorRenderer');
+    final bytes = File('${root.path}/${poster['file']}').readAsBytesSync();
+    expect(sha256.convert(bytes).toString(), poster['sha256']);
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    expect(frame.image.width, 2000);
+    expect(frame.image.height, 760);
+    final pixels = (await frame.image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    ))!;
+    // Opaque card backdrop, and lit text in the rally, events and members.
+    expect(pixels.getUint8(3), 255);
+    for (final area in const [
+      Rect.fromLTRB(850, 50, 1150, 100),
+      Rect.fromLTRB(1270, 110, 1605, 240),
+      Rect.fromLTRB(1270, 320, 1605, 580),
+    ]) {
+      var lit = 0;
+      for (var y = area.top.toInt(); y < area.bottom; y++) {
+        for (var x = area.left.toInt(); x < area.right; x++) {
+          final at = (y * 2000 + x) * 4;
+          if (pixels.getUint8(at) +
+                  pixels.getUint8(at + 1) +
+                  pixels.getUint8(at + 2) >
+              300) {
+            lit++;
+          }
+        }
+      }
+      expect(lit, greaterThan(100), reason: '$area');
+    }
+    frame.image.dispose();
+    codec.dispose();
+  }, skip: _privateArtworkOnly);
+
+  testWidgets('the visor card shows its still without motion controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: OverlayAppearancePreview(
+          appearanceId: 'Visor',
+          previewableIds: {'Visor'},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final image = tester.widget<Image>(
+      find.byKey(const Key('overlay-native-preview-Visor')),
+    );
+    expect(
+      (image.image as AssetImage).assetName,
+      'assets/overlay-appearances/Visor.png',
+    );
+    expect(find.byType(NativeAppearancePlayer), findsNothing);
+    expect(
+      find.byKey(const Key('overlay-preview-motion-toggle')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('overlay-preview-browse-Visor')), findsNothing);
   });
 
   testWidgets(

@@ -19,7 +19,7 @@ internal sealed record ScmEnvironmentSettings(
     TimeSpan RegionCacheDuration,
     Uri? RegionFallbackApiUri = null,
     Uri? WebSocketBaseUri = null,
-    bool HasExplicitRouteOverride = false)
+    bool HasExplicitRouteOverride = false, bool HasExplicitWebBaseOverride = false)
 {
     internal Uri EffectiveWebSocketBaseUri => NormalizeWebSocketBase(WebSocketBaseUri ?? ResourceBaseUri);
     internal string AuthorityId => $"scm-{EnvironmentName}";
@@ -62,7 +62,8 @@ internal sealed record ScmEnvironmentSettings(
             !isDevelopment);
         var regionApi = ReadOptionalSecureUri("STARBRIDGE_SCM_REGION_API_URL", isDevelopment) ??
             (isDevelopment ? null : new Uri("https://scms.flowcld.com/app-api/region"));
-        var regionFallbackApi = ReadOptionalSecureUri("STARBRIDGE_SCM_REGION_FALLBACK_API_URL", isDevelopment);
+        var regionFallbackApi = ReadOptionalSecureUri("STARBRIDGE_SCM_REGION_FALLBACK_API_URL", isDevelopment) ??
+            (isDevelopment ? null : new Uri("https://flowcld.xyz/app-api/region"));
         var webBase = ReadRuntimeUri(
             "STARBRIDGE_SCM_WEB_BASE_URL",
             isDevelopment ? "http://127.0.0.1:3000/" : "https://scm.flowcld.com/",
@@ -116,7 +117,8 @@ internal sealed record ScmEnvironmentSettings(
             regionFallbackApi,
             webSocketBase,
             new[] { "STARBRIDGE_SCM_API_BASE_URL", "STARBRIDGE_SCM_RESOURCE_BASE_URL", "STARBRIDGE_SCM_WS_BASE_URL" }
-                .Any(name => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name))));
+                .Any(name => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name))),
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("STARBRIDGE_SCM_WEB_BASE_URL")));
     }
 
     internal static Uri NormalizeWebSocketBase(Uri uri) =>
@@ -205,15 +207,35 @@ internal sealed record ScmRegionRoute(
     string Source,
     DateTimeOffset ResolvedAt,
     Uri? WebSocketBaseUri = null,
-    bool? IsCN = null)
+    bool? IsCN = null,
+    DateTimeOffset? ConfirmedAt = null)
 {
     internal Uri EffectiveWebSocketBaseUri => ScmEnvironmentSettings.NormalizeWebSocketBase(WebSocketBaseUri ?? ResourceBaseUri);
 }
 
 internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, Action<string>? diagnostic = null,
-    Func<Uri, CancellationToken, Task<ScmWebSocketProbeResult>>? webSocketProbe = null)
+    Func<Uri, CancellationToken, Task<ScmWebSocketProbeResult>>? webSocketProbe = null,
+    Func<DateTimeOffset>? utcNow = null)
 {
+    // Keep v4 compatible: ConfirmedAt is optional and old readers ignore unknown JSON fields.
     private const int CacheSchemaVersion = 4;
+    private DateTimeOffset UtcNow => utcNow?.Invoke() ?? DateTimeOffset.UtcNow;
+
+    // Read classification only. Update mirrors must never discover/preflight a region or consume cached URLs.
+    internal static bool? ReadCachedClassification(string path, DateTimeOffset now)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            Updates.InstalledUpdateFiles.Plain(path);
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (input.Length > 4096) return null;
+            var cache = JsonSerializer.Deserialize<ScmRegionCache>(input);
+            return cache is not null && cache.SchemaVersion == CacheSchemaVersion &&
+                cache.ResolvedAt <= now && now - cache.ResolvedAt <= TimeSpan.FromDays(1) ? cache.IsCN : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
     internal async Task<ScmRegionRoute> ResolveAsync(
         ScmEnvironmentSettings settings,
         CancellationToken cancellationToken)
@@ -249,7 +271,7 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
                 var route = CreateDiscoveredRoute(payload, settings);
                 if (route.IsCN == true) SaveCache(route);
                 // Overseas users keep today's start-up: one classification per cache period, then no request.
-                else SaveOverseas(settings, DateTimeOffset.UtcNow);
+                else SaveOverseas(settings, UtcNow);
                 var selected = await PreflightAsync(route, settings, cancellationToken);
                 if (selected.Source == "fallback-preflight") return selected;
                 return route with { WebSocketBaseUri = ScmEnvironmentSettings.NormalizeWebSocketBase(route.EffectiveWebSocketBaseUri) };
@@ -268,8 +290,21 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
                 // Try the configured secondary discovery endpoint before the environment fallback.
             }
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        var retained = TryLoadCache(settings, expiredDomesticOnly: true);
+        if (retained is not null)
+        {
+            // Retry in an hour without extending the age of the actual domestic confirmation.
+            retained = retained with { ResolvedAt = UtcNow - settings.RegionCacheDuration + TimeSpan.FromHours(1) };
+            ScmRegionDiagnostics.Write("failure=all-classifiers retained=domestic", diagnostic);
+            // Preflight first: a caller cancellation during it must leave the cache untouched.
+            var selected = await PreflightAsync(retained, settings, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            SaveCache(retained);
+            return selected;
+        }
         // An unreachable classifier must not delay every start-up: remember the overseas fallback for an hour.
-        SaveOverseas(settings, DateTimeOffset.UtcNow - settings.RegionCacheDuration + TimeSpan.FromHours(1));
+        SaveOverseas(settings, UtcNow - settings.RegionCacheDuration + TimeSpan.FromHours(1));
         return CreateFallback(settings, "fallback");
     }
 
@@ -372,7 +407,7 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
             ?? throw new JsonException("地域识别 API 返回了空响应。");
     }
 
-    private ScmRegionRoute? TryLoadCache(ScmEnvironmentSettings settings)
+    private ScmRegionRoute? TryLoadCache(ScmEnvironmentSettings settings, bool expiredDomesticOnly = false)
     {
         try
         {
@@ -382,10 +417,18 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
             }
 
             var cache = JsonSerializer.Deserialize<ScmRegionCache>(File.ReadAllText(cachePath));
-            if (cache is null ||
-                cache.ResolvedAt > DateTimeOffset.UtcNow ||
-                DateTimeOffset.UtcNow - cache.ResolvedAt > settings.RegionCacheDuration)
+            var now = UtcNow;
+            if (cache is null || cache.ResolvedAt > now || cache.ConfirmedAt > now)
                 return null;
+            var expired = now - cache.ResolvedAt > settings.RegionCacheDuration;
+            // Legacy v4 caches recorded the real classification time in ResolvedAt.
+            var confirmedAt = cache.ConfirmedAt ?? cache.ResolvedAt;
+            if (expiredDomesticOnly)
+            {
+                if (!expired || cache.IsCN != true || now - confirmedAt > TimeSpan.FromDays(30))
+                    return null;
+            }
+            else if (expired) return null;
             // Old overseas routes never become authoritative, even when they were trusted.
             if (cache.IsCN != true) return CreateFallback(settings, "environment");
             if (cache.SchemaVersion != CacheSchemaVersion ||
@@ -414,7 +457,7 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
                 resourceBaseUri,
                 "cache",
                 cache.ResolvedAt,
-                ScmEnvironmentSettings.NormalizeWebSocketBase(webSocketBaseUri), cache.IsCN);
+                ScmEnvironmentSettings.NormalizeWebSocketBase(webSocketBaseUri), cache.IsCN, confirmedAt);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or UriFormatException)
         {
@@ -428,7 +471,7 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
         uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
         settings.TrustedRegionHosts.Contains(uri.Host);
 
-    private static ScmRegionRoute CreateDiscoveredRoute(
+    private ScmRegionRoute CreateDiscoveredRoute(
         ScmRegionResponse payload,
         ScmEnvironmentSettings settings)
     {
@@ -438,14 +481,15 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
             var domesticWs = new Uri("https://ws.flowcld.xyz/");
             if (!IsTrustedCachedUri(domesticApi, settings) || !IsTrustedCachedUri(domesticWs, settings))
                 throw new InvalidOperationException("Domestic route hosts are not trusted.");
+            var now = UtcNow;
             return new ScmRegionRoute(domesticApi, domesticApi, "region-api",
-                DateTimeOffset.UtcNow, domesticWs, payload.IsCN);
+                now, domesticWs, payload.IsCN, now);
         }
         return CreateFallback(settings, "environment");
     }
 
-    private static ScmRegionRoute CreateFallback(ScmEnvironmentSettings settings, string source) =>
-        new(settings.ApiBaseUri, settings.ResourceBaseUri, source, DateTimeOffset.UtcNow,
+    private ScmRegionRoute CreateFallback(ScmEnvironmentSettings settings, string source) =>
+        new(settings.ApiBaseUri, settings.ResourceBaseUri, source, UtcNow,
             settings.EffectiveWebSocketBaseUri);
 
     private void SaveCache(ScmRegionRoute route)
@@ -466,7 +510,7 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
                     route.ResolvedAt,
                     // Persist only the fixed approved domestic endpoints.
                     (route.WebSocketBaseUri ?? route.ResourceBaseUri).AbsoluteUri,
-                    CacheSchemaVersion, route.IsCN)));
+                    CacheSchemaVersion, route.IsCN, route.ConfirmedAt)));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -483,7 +527,8 @@ internal sealed class ScmRegionRouter(HttpClient httpClient, string cachePath, A
         DateTimeOffset ResolvedAt,
         string? WebSocketBaseUri,
         int SchemaVersion,
-        bool? IsCN = null);
+        bool? IsCN = null,
+        DateTimeOffset? ConfirmedAt = null);
 }
 
 internal static class StarBridgeDotEnv

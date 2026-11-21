@@ -67,9 +67,12 @@ final class AppPreferences {
     required this.appearanceMode,
     required this.designStyleId,
     required this.motionPreference,
-    this.interactionStyle = InteractionStyle.standard,
+    this.interactionStyle = InteractionStyle.scan,
     this.applicationBehavior = ApplicationBehaviorPreferences.defaults,
     this.holidayAppearance = true,
+    this.performanceMode = false,
+    this.readOwnHealth = false,
+    this.readOwnHealthInBackground = false,
   });
 
   final Locale locale;
@@ -81,6 +84,16 @@ final class AppPreferences {
 
   /// 节日期间自动换上特别外观；关掉就一直是平时的样子。默认开。
   final bool holidayAppearance;
+
+  /// 性能模式：开着时，检测到游戏运行就自动减少特效；没有游戏时保持完整效果。
+  /// 关掉就一直画完整效果。默认关（用户 11-10 原话"性能模式默认关"）。
+  final bool performanceMode;
+
+  /// 读取自己的血量（截画面左下角头盔 HUD，只在本机）。单独开关，默认关。
+  final bool readOwnHealth;
+
+  /// 游戏在后台时也读取（读血的子开关，只在读血打开时起作用）。默认关（用户 11-13“默认关”）。
+  final bool readOwnHealthInBackground;
 
   static const defaults = AppPreferences(
     locale: Locale('zh', 'CN'),
@@ -98,6 +111,9 @@ final class AppPreferences {
     InteractionStyle? interactionStyle,
     ApplicationBehaviorPreferences? applicationBehavior,
     bool? holidayAppearance,
+    bool? performanceMode,
+    bool? readOwnHealth,
+    bool? readOwnHealthInBackground,
   }) {
     return AppPreferences(
       locale: locale ?? this.locale,
@@ -107,6 +123,10 @@ final class AppPreferences {
       interactionStyle: interactionStyle ?? this.interactionStyle,
       applicationBehavior: applicationBehavior ?? this.applicationBehavior,
       holidayAppearance: holidayAppearance ?? this.holidayAppearance,
+      performanceMode: performanceMode ?? this.performanceMode,
+      readOwnHealth: readOwnHealth ?? this.readOwnHealth,
+      readOwnHealthInBackground:
+          readOwnHealthInBackground ?? this.readOwnHealthInBackground,
     );
   }
 }

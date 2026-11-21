@@ -51,8 +51,9 @@ internal static class RoomOverlaySemanticsTests
                     { SharedLiveStatus = "AppOnline", LiveStatus = "AppOnline" }).ToArray();
                 exact.Refresh(new(changed), events, OverlayRosterSelectionSettings.Default, language, true,
                     projected.Command, PlayerPresenceKind.InGame, "pub-use1-fixture-001", projected.Scene.Context);
-                Check(exact.EventNotifications.Any(e => e.Detail == (language == "zh"
-                    ? "房间游戏中 1 / 2" : "Room in game 1 / 2")), "Room in-game summary never labels the game count as fleet online.");
+                // 0.7.3: the in-game summary is a reminder card only, never an overlay event.
+                Check(!exact.EventNotifications.Any(e => e.EventType == OverlayEventNotificationTypes.OnlineSummary),
+                    "Room in-game summary stays off the overlay.");
             }
             finally { exact.ClearAuthorizedContent(); }
         }

@@ -16,6 +16,7 @@ import '../../features/onboarding/first_use_setup_entry.dart';
 import '../../features/overlay_settings/overlay_settings_module.dart';
 import '../../features/overlay_settings/overlay_settings_page.dart';
 import '../../features/overlay_settings/overlay_settings_feature.dart';
+import '../../features/overlay_settings/overlay_workspace_rules.dart';
 import '../../features/settings/general_settings_page.dart';
 import '../../features/settings/notification_settings_page.dart';
 import '../../features/settings/notification_settings_module.dart';
@@ -65,7 +66,11 @@ final class FirstUseDeviceEditors {
         port == null) {
       throw StateError('Saved native preview is unavailable.');
     }
-    final skin = projection.snapshot?.settings?['skin'];
+    // 0.7.3 overlay v2: a saved hidden appearance previews as the visor (what is drawn).
+    final savedSettings = projection.snapshot?.settings;
+    final skin = savedSettings == null
+        ? null
+        : overlayWorkspaceShownSkin(savedSettings);
     if (skin is! String ||
         !projection.snapshot!.appearances.any(
           (appearance) =>
@@ -189,7 +194,9 @@ Iterable<FeatureDescriptor> createFirstUseSetupFeatures(
     labelKey: 'settings.firstUse',
     descriptionKey: 'settings.firstUse.description',
     icon: StarBridgeIconSemantic.settings,
-    navigationRegion: NavigationRegion.accountMenu,
+    // The conditional entry now lives in Settings > Account and identity.
+    // Keep the route for unfinished setup and startup/recovery navigation.
+    navigationRegion: NavigationRegion.shortcut,
     navigationParentId: 'settings',
     order: 30,
     buildDestination: (_) =>

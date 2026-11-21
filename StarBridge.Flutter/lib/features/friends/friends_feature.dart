@@ -20,6 +20,7 @@ FeatureDescriptor createFriendsFeature({
   Future<void> Function(BuildContext, String)? openCommunityInvite,
   Future<void> Function(BuildContext, DirectMessagesModule)?
   sendCommunityInvite,
+  ValueListenable<bool>? communityInviteAvailable,
   void Function(String section)? openSection,
 }) => FeatureDescriptor(
   id: messagesOnly ? 'messages' : 'friends',
@@ -41,5 +42,6 @@ FeatureDescriptor createFriendsFeature({
     inboxRequests: inboxRequests,
     openCommunityInvite: openCommunityInvite,
     sendCommunityInvite: sendCommunityInvite,
+    communityInviteAvailable: communityInviteAvailable,
   ),
 );

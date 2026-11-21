@@ -29,7 +29,7 @@ internal static class HangarShipNames
         var name = Catalog.Value.Find(title);
         return new { title, liner, rowId = $"ship-{ordinal}",
             catalogId = name.CatalogId, category = name.Category, sizeClass = name.SizeClass,
-            display = name.Display, deliveryStatus = name.DeliveryStatus, priceUsd = name.PriceUsd,
+            manufacturer = name.Manufacturer, display = name.Display, deliveryStatus = name.DeliveryStatus, priceUsd = name.PriceUsd,
             combatSize = name.CombatSize, names = new {
             zhHans = name.ChineseName, zhHant = name.TraditionalChineseName
         }};
@@ -39,10 +39,12 @@ internal static class HangarShipNames
     {
         var name = Catalog.Value.Find(ship.Title);
         return new { id = ship.Id, title = ship.Title, liner = ship.Liner, addedAt = ship.AddedAt, removedAt = ship.RemovedAt,
+            // Official pledge date ("入库时间"), date only; null when RSI showed none or it did not parse.
+            acquiredOn = HangarAcquiredDate.Format(ship.AcquiredText),
             isFavorite = ship.IsFavorite,
             nickname = ship.Nickname, notes = ship.Notes,
             catalogId = name.CatalogId, category = name.Category, sizeClass = name.SizeClass, display = name.Display,
-            deliveryStatus = name.DeliveryStatus, priceUsd = name.PriceUsd, imageAsset = Media.Value.Find(name.ImageKey),
+            manufacturer = name.Manufacturer, deliveryStatus = name.DeliveryStatus, priceUsd = name.PriceUsd, imageAsset = Media.Value.Find(name.ImageKey),
             thumbnailAsset = Media.Value.FindThumbnail(name.ImageKey),
             combatSize = name.CombatSize, names = new {
                 zhHans = name.ChineseName, zhHant = name.TraditionalChineseName

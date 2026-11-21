@@ -19,6 +19,7 @@ OrganizationMemberEntry officialFleetMemberEntry(
   OfficialFleetMember member, {
   String? sourceRef,
   bool allowProfile = true,
+  Widget? actions,
 }) {
   final tokens = context.tokens;
   final restricted =
@@ -74,6 +75,8 @@ OrganizationMemberEntry officialFleetMemberEntry(
   ].join(' · ');
   return OrganizationMemberEntry(
     reference: member.memberRef,
+    lastOnlineDays: member.lastOnlineDays,
+    actions: actions,
     identity: OrganizationMemberIdentity(
       name: name,
       gameId: restricted ? '' : member.gameId,

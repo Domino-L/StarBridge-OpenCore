@@ -19,6 +19,7 @@ class CommunityShipDetailDialog extends StatelessWidget {
     this.ownerTargetFactory = communityShipOwnerTarget,
     this.includeSocialActions = true,
     this.imageDecoder = decodeCommunityImage,
+    this.onLibraryStale,
     super.key,
   });
   final CommunityShipsPort port;
@@ -28,6 +29,7 @@ class CommunityShipDetailDialog extends StatelessWidget {
   final OrganizationShipOwnerTargetFactory? ownerTargetFactory;
   final bool includeSocialActions;
   final CommunityImageDecoder imageDecoder;
+  final VoidCallback? onLibraryStale;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +49,7 @@ class CommunityShipDetailDialog extends StatelessWidget {
             ownerTargetFactory: ownerTargetFactory,
             includeSocialActions: includeSocialActions,
             imageDecoder: imageDecoder,
+            onLibraryStale: onLibraryStale,
             onClose: (source) =>
                 dismissStarBridgeDialog(context, source: source, result: false),
             onRefreshLibrary: (source) =>

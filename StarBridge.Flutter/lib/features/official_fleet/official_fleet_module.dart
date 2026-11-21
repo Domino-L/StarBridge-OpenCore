@@ -109,6 +109,7 @@ final class _DefaultOfficialFleetModule implements OfficialFleetModule {
       }
     });
     _projection.addListener(_bindRally);
+    communication.onWorkspaceActivity = rally.wake;
   }
 
   void _bindRally() {

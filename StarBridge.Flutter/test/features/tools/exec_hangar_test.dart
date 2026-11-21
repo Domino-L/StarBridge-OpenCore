@@ -993,7 +993,7 @@ void main() {
     },
   );
   testWidgets(
-    'tools cards open a separate detail route without loading the hub',
+    'tools hub reads the shared hangar once and opens its separate route',
     (tester) async {
       final port = Port();
       final features = createToolsFeatures(createPort: () => port);
@@ -1018,9 +1018,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ToolsPage), findsOneWidget);
       expect(find.byKey(const Key('exec-countdown')), findsNothing);
-      expect(port.reads, 0);
+      expect(port.reads, 1);
       await tester.tap(find.byKey(const Key('tool-exec-hangar')));
       expect(selected, '/tools/exec-hangar');
+      expect(port.reads, 1);
       expect(features.last.navigationParentId, 'tools');
       expect(features.first.ownsNavigationSelection(features.last), true);
       await tester.pumpWidget(const SizedBox());
@@ -1278,48 +1279,47 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
-  testWidgets(
-    'preset minutes, protected draft, persisted only after Save',
-    (tester) async {
-      size(tester, const Size(1440, 1100));
-      final port = Port();
-      final feature = createToolsFeatures(createPort: () => port).last;
-      late BuildContext pageContext;
-      await tester.pumpWidget(
-        app(
-          Builder(
-            builder: (context) {
-              pageContext = context;
-              return feature.buildDestination(context);
-            },
-          ),
-          const Locale('zh', 'CN'),
-          AppearanceMode.dark,
+  testWidgets('preset minutes, protected draft, persisted only after Save', (
+    tester,
+  ) async {
+    size(tester, const Size(1440, 1100));
+    final port = Port();
+    final feature = createToolsFeatures(createPort: () => port).last;
+    late BuildContext pageContext;
+    await tester.pumpWidget(
+      app(
+        Builder(
+          builder: (context) {
+            pageContext = context;
+            return feature.buildDestination(context);
+          },
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const Key('exec-on-close')));
-      await tester.tap(find.byKey(const Key('exec-on-close')));
-      await tester.pumpAndSettle();
-      expect(port.saves, 0);
-      // Lead minutes are presets now, so only the dirty draft is guarded.
-      final leave = feature.confirmLeave!(pageContext);
-      await tester.pumpAndSettle();
-      expect(find.text('提醒设置尚未保存'), findsOneWidget);
-      await tester.tap(find.text('继续编辑'));
-      await tester.pumpAndSettle();
-      expect(await leave, false);
-      await pickExecPreset(tester, execBeforeOpen, 10);
-      await tester.ensureVisible(find.byKey(const Key('exec-save')));
-      await tester.tap(find.byKey(const Key('exec-save')));
-      await tester.pumpAndSettle();
-      expect(port.saves, 1);
-      expect(port.snapshot.reminders.onClose, true);
-      expect(port.snapshot.reminders.beforeOpenMinutes, 10);
-      expect(await feature.confirmLeave!(pageContext), true);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+        const Locale('zh', 'CN'),
+        AppearanceMode.dark,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('exec-on-close')));
+    await tester.tap(find.byKey(const Key('exec-on-close')));
+    await tester.pumpAndSettle();
+    expect(port.saves, 0);
+    // Lead minutes are presets now, so only the dirty draft is guarded.
+    final leave = feature.confirmLeave!(pageContext);
+    await tester.pumpAndSettle();
+    expect(find.text('提醒设置尚未保存'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(await leave, false);
+    await pickExecPreset(tester, execBeforeOpen, 10);
+    await tester.ensureVisible(find.byKey(const Key('exec-save')));
+    await tester.tap(find.byKey(const Key('exec-save')));
+    await tester.pumpAndSettle();
+    expect(port.saves, 1);
+    expect(port.snapshot.reminders.onClose, true);
+    expect(port.snapshot.reminders.beforeOpenMinutes, 10);
+    expect(await feature.confirmLeave!(pageContext), true);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'stale offline calibration remains visible and explicitly pauses reminders',
     (tester) async {

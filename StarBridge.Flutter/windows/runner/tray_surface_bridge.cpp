@@ -1,4 +1,5 @@
 #include "tray_surface_bridge.h"
+#include "frame_pressure_channel.h"
 #include "manual_status_commands.h"
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
@@ -61,6 +62,7 @@ class TraySurfaceBridge::Impl {
     if (secondary_) secondary_->SetMethodCallHandler(nullptr);
     if (window_) KillTimer(window_, kReadyTimeout);
     secondary_.reset();
+    frame_pressure_.reset();
     controller_.reset();
     if (window_) { SetWindowLongPtrW(window_, GWLP_USERDATA, 0); DestroyWindow(window_); }
   }
@@ -92,7 +94,7 @@ class TraySurfaceBridge::Impl {
     wc.lpfnWndProc = WndProc; wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kClass; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     RegisterClassW(&wc); // Repeated registration is harmless in one process.
-    window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kClass, L"星海舰桥",
+    window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kClass, L"SCM 星海舰桥",
         // Like the WPF quick panel, this is an independent tool window. An
         // owned popup can raise its owner when activated from the shell tray.
         // Flutter can request focus while MaterialApp is being initialized.
@@ -116,6 +118,8 @@ class TraySurfaceBridge::Impl {
     GetClientRect(window_, &client);
     MoveWindow(child, 0, 0, client.right, client.bottom, TRUE);
     ShowWindow(child, SW_SHOWNOACTIVATE);
+    frame_pressure_ = std::make_unique<frame_pressure::Channel>(
+        controller_->engine()->messenger());
     secondary_ = std::make_unique<Channel>(controller_->engine()->messenger(),
         "starbridge/tray-surface", &flutter::StandardMethodCodec::GetInstance());
     secondary_->SetMethodCallHandler([this](const auto& call, auto result) {
@@ -263,6 +267,7 @@ class TraySurfaceBridge::Impl {
   Channel primary_;
   std::unique_ptr<flutter::FlutterViewController> controller_;
   std::unique_ptr<Channel> secondary_;
+  std::unique_ptr<frame_pressure::Channel> frame_pressure_;
 };
 
 TraySurfaceBridge::TraySurfaceBridge(HWND owner, flutter::BinaryMessenger* messenger,

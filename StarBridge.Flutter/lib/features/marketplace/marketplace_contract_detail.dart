@@ -357,12 +357,12 @@ class _Detail extends StatelessWidget {
                 reputation: contract['creatorReputation'],
               ),
               if (contract['fleet'] == true &&
-                  contract['fleetName'] != null) ...[
+                  contract['fleetSid'] != null) ...[
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     contractText(context, '舰队合约 · {name}', {
-                      'name': '${contract['fleetName']}',
+                      'name': '${contract['fleetSid']}',
                     }),
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -437,13 +437,23 @@ class _Detail extends StatelessWidget {
             style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
           ),
           if (contract['mine'] == true &&
-              completed &&
+              contract['status'] != 3 && contract['status'] != 4 &&
+              const [1, 3, 4, 5].contains(p['status']))
+            marketButtonAction(
+              key: ValueKey<(String, String)>(('market-contract-remove', '${p['reference']}')),
+              TextButton(
+                onPressed: c.acting != null || c.needsReconcile ? null : () => _remove(context, p),
+                child: Text(contractText(context, '移出参与者')),
+              ),
+            ),
+          if (contract['mine'] == true &&
+              completed && p['status'] == 4 &&
               p['reviewedByCreator'] != true) ...[
             const SizedBox(width: 6),
             marketButtonAction(
-              key: ValueKey(('market-contract-review', '${p['id']}')),
+              key: ValueKey(('market-contract-review', '${p['reference']}')),
               TextButton(
-                onPressed: () => _review(context, (p['id'] as num).toInt()),
+                onPressed: c.acting != null || c.needsReconcile ? null : () => _review(context, p['reference'] as String),
                 child: Text(contractText(context, '去评价')),
               ),
             ),
@@ -462,30 +472,30 @@ class _Detail extends StatelessWidget {
         : null;
     final myState = (me?['status'] as num?)?.toInt();
     final joined =
-        me != null && myState != null && myState != 2 && myState != 6;
-    final busy = c.acting != null;
+        me != null && const [1, 3, 4, 5].contains(myState);
+    final busy = c.acting != null || c.needsReconcile;
     final actions = <(String, String, bool, Future<void> Function())>[
-      if (!mine && status == 1 && !joined)
+      if (!mine && (status == 1 || status == 2) && !joined)
         ('apply', '报名（可附留言）', true, () => _apply(context)),
-      if (!mine && joined && (myState == 0 || myState == 1) && status <= 2)
+      if (!mine && joined && status != 3 && status != 4)
         ('quit', '退出', false, () => _act(context, 'quit')),
-      if (mine && status == 1) ...[
+      if (mine && (status == 1 || status == 2))
         ('cancel', '取消合约', false, () => _reason(context, 'cancel')),
+      if (mine && status == 1)
         ('start', '开始合约', true, () => _act(context, 'start')),
-      ],
-      if (mine && status == 2)
+      if (mine && status == 2 && ((contract['taken'] as num?) ?? 0) > 0)
         ('complete', '完成合约', true, () => _act(context, 'complete')),
-      if (!mine && joined && status == 3 && me['reviewedByParticipant'] != true)
+      if (!mine && myState == 4 && status == 3 && me!['reviewedByParticipant'] != true)
         (
           'review',
           '去评价',
           true,
-          () => _review(context, (me['id'] as num).toInt()),
+          () => _review(context, me['reference'] as String),
         ),
       if ((mine || joined) && (status == 2 || status == 3))
         ('dispute', '发起争议', false, () => _reason(context, 'dispute')),
     ];
-    if (actions.isEmpty) return const SizedBox(height: 12);
+    if (actions.isEmpty && !c.needsReconcile) return const SizedBox(height: 12);
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       decoration: BoxDecoration(
@@ -496,13 +506,18 @@ class _Detail extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
+          if (c.needsReconcile) ...[
+            Text(contractText(context, '操作结果不确定，请刷新核对参与者状态，再决定下一步。')),
+            TextButton(onPressed: c.detailLoading ? null : c.refreshDetail,
+              child: Text(contractText(context, '刷新核对'))),
+          ],
           for (final (key, label, primary, run) in actions)
             primary
                 ? marketButtonAction(
                     key: ValueKey(('market-contract-action', key)),
                     FilledButton(
                       style: tradePrimaryStyle(context),
-                      onPressed: busy ? null : run,
+                      onPressed: busy || key == 'apply' && contract['eligible'] == false ? null : run,
                       child: Text(contractText(context, label)),
                     ),
                   )
@@ -510,7 +525,7 @@ class _Detail extends StatelessWidget {
                     key: ValueKey(('market-contract-action', key)),
                     OutlinedButton(
                       style: tradeCancelStyle(),
-                      onPressed: busy ? null : run,
+                      onPressed: busy || key == 'apply' && contract['eligible'] == false ? null : run,
                       child: Text(contractText(context, label)),
                     ),
                   ),
@@ -531,11 +546,26 @@ class _Detail extends StatelessWidget {
         content: Text(
           contractText(
             context,
-            ok ? '操作已完成。' : 'SCM 未接受这个操作，详情已按 SCM 的最新状态刷新。',
+            ok ? '操作已完成。' : c.resultUnknown
+                ? '操作结果不确定，请刷新核对参与者状态，再决定下一步。'
+                : '操作未发送，请检查授权或连接后重试。',
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _remove(BuildContext context, MarketRow person) async {
+    final reason = await tradeMotionDialog<String>(context, (dialog) =>
+      ContractTextDialog(
+        title: contractText(context, '移出 {name}', {'name': '${person['name'] ?? ''}'}),
+        message: contractText(context, '对方会被移出这个合约，名额释放；对方会在 SCM 看到被移除和原因。'),
+        hint: contractText(context, '可选，例如联系不上或中途退出'),
+        required: false, maxLength: 200, danger: true,
+      ));
+    if (reason == null || !context.mounted) return;
+    await _act(context, 'remove', {'participantRef': person['reference'],
+      if (reason.trim().isNotEmpty) 'reason': reason.trim()});
   }
 
   Future<void> _apply(BuildContext context) async {
@@ -562,7 +592,7 @@ class _Detail extends StatelessWidget {
     await _act(context, operation, {'reason': text.trim()});
   }
 
-  Future<void> _review(BuildContext context, int participantId) async {
+  Future<void> _review(BuildContext context, String participantRef) async {
     final result = await tradeMotionDialog<(int, String)>(
       context,
       (dialog) => const ContractReviewDialog(),
@@ -570,7 +600,7 @@ class _Detail extends StatelessWidget {
     if (result == null || !context.mounted) return;
     final (rating, text) = result;
     await _act(context, 'review', {
-      'participantId': participantId,
+      'participantRef': participantRef,
       'rating': rating,
       if (text.isNotEmpty) 'comment': text,
     });
@@ -607,7 +637,7 @@ class _Detail extends StatelessWidget {
         4 => '已完成',
         5 => '已违约',
         6 => '已退出',
-        _ => '待审核',
+        _ => '状态未知',
       });
 }
 

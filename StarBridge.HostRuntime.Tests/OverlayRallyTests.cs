@@ -248,6 +248,14 @@ internal static class OverlayRallyTests
         const string first = "0123456789abcdef0123456789abcdef";
         const string second = "abcdef0123456789abcdef0123456789";
         using var f = new Fixture();
+        // Local organization preferences never admit, mute or replace rally
+        // delivery. Run the existing exact hotkey assertions under quiet hours.
+        var localMinute = TimeZoneInfo.ConvertTime(f.Time.Now, TimeZoneInfo.Local).Hour * 60 +
+            TimeZoneInfo.ConvertTime(f.Time.Now, TimeZoneInfo.Local).Minute;
+        new NotificationPolicyStore(f.Root).Save(new("fixture", "fixture", "rally-quiet-synthetic"), 0,
+            Guid.NewGuid().ToString("N"), [new(NotificationPolicyStore.OfficialFleet("officialFleet:7"), NotificationSourceMode.DoNotDisturb) {
+                TypeRules = [new("chat", "disabled")], QuietHours = new(true, localMinute, (localMinute + 1) % 1440)
+            }], () => true, extended: true);
         await f.Eligible();
         // Crossing another thread into Reset would deadlock if registration held _gate.
         f.Hotkeys.DuringConfigure = async () =>

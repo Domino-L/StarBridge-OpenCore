@@ -9,6 +9,7 @@ import '../../design_system/interaction/starbridge_tooltip.dart';
 import 'communities_module.dart';
 import 'community_gameplay_tags.dart';
 import 'community_logo.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 /// Equal-sized discovery cards; the dialog retains complete text and actions.
 class CommunityDirectoryCard extends StatefulWidget {
@@ -72,7 +73,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
             child: Text(
               _summary(label),
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: secondary,
             ),
@@ -116,7 +117,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                         : 'relation.${row.relationship}',
                   ),
                   maxLines: 1,
-                  overflow: TextOverflow.fade,
+                  overflow: fadeOverflow(context),
                   softWrap: false,
                   style: secondary?.copyWith(
                     color: member ? colors.success : colors.textSecondary,
@@ -137,7 +138,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                         ? '${row.memberCount}'
                         : scaleParts.first,
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: theme.titleLarge?.copyWith(
                       color: colors.accent,
@@ -247,7 +248,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
                   Text(
                     '${t('filter.targets')} · ${row.recruitingTarget.isEmpty ? t('card.notSpecified') : communityRecruitingTarget(row.recruitingTarget, t)}',
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                     style: secondary,
                   ),
@@ -280,7 +281,7 @@ class _CommunityDirectoryCardState extends State<CommunityDirectoryCard> {
               child: Text(
                 t('card.details'),
                 maxLines: 1,
-                overflow: TextOverflow.fade,
+                overflow: fadeOverflow(context),
                 softWrap: false,
               ),
             ),

@@ -9,10 +9,11 @@ namespace StarBridge.HostRuntime.Account;
 internal sealed partial class ScmAccountBridgeHost
 {
     public Task<object> GetOfficialFleetRuntimeMembersAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token) =>
-        ObserveOfficialMembers("official-runtime-members", context, payload, () => ReadOfficialFleetRuntimeMembersCoreAsync(context, payload, false, token));
+        ObserveOfficialMembers("official-runtime-members", context, payload, () => WithFleetNavigationFailureAsync(context, Generation,
+            use => ReadOfficialFleetRuntimeMembersCoreAsync(context, payload, false, use, token)));
     public Task<object> WaitOfficialFleetRuntimeActivityAsync(BridgeAccountContext context, JsonElement payload, CancellationToken token) =>
-        ReadOfficialFleetRuntimeMembersCoreAsync(context, payload, true, token);
-    private async Task<object> ReadOfficialFleetRuntimeMembersCoreAsync(BridgeAccountContext context, JsonElement payload, bool wait, CancellationToken token)
+        WithFleetNavigationFailureAsync(context, Generation, use => ReadOfficialFleetRuntimeMembersCoreAsync(context, payload, true, use, token));
+    private async Task<object> ReadOfficialFleetRuntimeMembersCoreAsync(BridgeAccountContext context, JsonElement payload, bool wait, FleetNavigationRead use, CancellationToken token)
     {
         if (!OfficialRealtimeEnabled) throw new AccountBridgeHostException("official_fleet.runtime_unavailable");
         var generation = Generation;
@@ -24,13 +25,14 @@ internal sealed partial class ScmAccountBridgeHost
             if (source is null || search is null || search.Length > 128 || search.Any(char.IsControl) || page is < 1 or > 100000 || size is not (25 or 50 or 100)) throw OfficialFleetReadModel.Invalid();
             AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
             RequireFleetReadOwner(context, generation);
-            using var data = await ReadOfficialFleetMemberPageSourceAsync(context, generation, source, search, page, size, token);
+            using var data = await ReadOfficialFleetMemberPageSourceAsync(context, generation, source, search, page, size, use, token);
             var ids = data.RootElement.GetProperty("list").EnumerateArray().Select(r => OfficialFleetPublicId.Read(r.GetProperty("userId"))).ToArray();
-            var observations = await ReadFleetIdentityObservationsAsync(context, generation, source, ids, token);
+            var observations = await ReadFleetIdentityObservationsAsync(context, generation, source, ids, token,
+                () => RequireFleetNavigationCurrent(context, generation, use));
             void Current() {
                 AccountReadTiming.Checkpoint(MemberReadCheckpoint.OwnerFence);
-                RequireFleetReadOwner(context, generation);
-                OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, _oauth.OfficialFleetIdentityObservationClock.GetUtcNow());
+                RequireFleetNavigationCurrent(context, generation, use);
+                OfficialFleetMemberIdentityObservation.EnsureCurrent(observations.Values, _oauth.OfficialFleetIdentityObservationClock);
             }
             Current(); var identities = observations.ToDictionary(p => p.Key, p => p.Value.Identity);
             var subjects = identities.Values.Where(row => row.State == "visible").Select(row => row.BusinessSubjectId!).ToArray();
@@ -39,24 +41,29 @@ internal sealed partial class ScmAccountBridgeHost
             var session = RequireRelaySession(context);
             if (wait) {
                 var activity = await SendRelayRequestAsync(session, async (active, ct) => {
-                    Current(); var changed = await writer.WaitOfficialRuntimeAsync(active.AccessToken, source, subjects, ct,
-                        () => RequireFleetReadOwner(context, generation));
-                    RequireFleetReadOwner(context, generation); return changed;
+                    try {
+                        Current(); var changed = await writer.WaitOfficialRuntimeAsync(active.AccessToken, source, subjects, ct,
+                            () => RequireFleetNavigationCurrent(context, generation, use));
+                        RequireFleetNavigationCurrent(context, generation, use); return changed;
+                    } catch { RequireFleetNavigationCurrent(context, generation, use); throw; }
                 }, token);
-                RequireFleetReadOwner(context, generation); RequireSameRelaySession(RequireRelaySession(context), activity.ActiveSession);
+                RequireFleetNavigationCurrent(context, generation, use); RequireSameRelaySession(RequireRelaySession(context), activity.ActiveSession);
                 CommitSharingSession(session, activity.ActiveSession);
                 // The wait returns no identities/fields. End it with a new real
                 // G1 observation; only the non-wait data path keeps the first deadline.
-                var finalIdentity = await ReadFleetIdentityObservationsAsync(context, generation, source, ids, token);
-                void HintCurrent() { RequireFleetReadOwner(context, generation);
-                    OfficialFleetMemberIdentityObservation.EnsureCurrent(finalIdentity.Values, _oauth.OfficialFleetIdentityObservationClock.GetUtcNow()); }
+                var finalIdentity = await ReadFleetIdentityObservationsAsync(context, generation, source, ids, token,
+                    () => RequireFleetNavigationCurrent(context, generation, use));
+                void HintCurrent() { RequireFleetNavigationCurrent(context, generation, use);
+                    OfficialFleetMemberIdentityObservation.EnsureCurrent(finalIdentity.Values, _oauth.OfficialFleetIdentityObservationClock); }
                 HintCurrent();
                 var hint = JsonSerializer.SerializeToElement(new { schemaVersion = 2, sourceRef = source, changed = activity.Result });
                 HintCurrent(); return hint;
             }
             var result = await SendRelayRequestAsync(session, async (active, ct) => {
-                Current(); var value = await writer.ReadOfficialRuntimeAsync(active.AccessToken, source, subjects, ct, Current);
-                Current(); return value;
+                try {
+                    Current(); var value = await writer.ReadOfficialRuntimeAsync(active.AccessToken, source, subjects, ct, Current);
+                    Current(); return value;
+                } catch { RequireFleetNavigationCurrent(context, generation, use); throw; }
             }, token);
             Current(); RequireSameRelaySession(RequireRelaySession(context), result.ActiveSession);
             CommitSharingSession(session, result.ActiveSession); Current();
@@ -71,6 +78,7 @@ internal sealed partial class ScmAccountBridgeHost
                 var live = identity.State == "visible" ? result.Result[identity.BusinessSubjectId!] :
                     new OfficialRealtimeMemberWire("", "offline", new("notInGame", null, null), new("notInGame", null, null), new("notInGame", null, null), false, null);
                 member["presence"] = live.Presence;
+                member["lastOnlineDays"] = Support.LastOnlineDays.Resolve(Support.LastOnlineDays.ParseHour(live.LastOnlineHour), null, DateTimeOffset.UtcNow);
                 member["server"] = JsonSerializer.SerializeToNode(live.Server, LocalPrivacyStore.Json);
                 member["ship"] = JsonSerializer.SerializeToNode(live.Ship, LocalPrivacyStore.Json);
                 member["location"] = JsonSerializer.SerializeToNode(live.Location, LocalPrivacyStore.Json);

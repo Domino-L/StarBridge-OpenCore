@@ -144,6 +144,39 @@ void main() {
     monitor.dispose();
     controller.dispose();
   });
+  testWidgets('switching between issues with different delays restarts the grace', (
+    tester,
+  ) async {
+    final port = NoticePrivacy()..state = 'publishing';
+    final controller = LocalPrivacyController(port);
+    final monitor = SharingStatusMonitor(controller: controller);
+    await tester.pumpWidget(
+      app(SharingStatusNotice(status: monitor, onOpenSettings: () {})),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 16));
+    expect(monitor.value, 'waiting');
+    // An expired 15 s "waiting" grace must not let 'service' show at once.
+    port.state = 'reconnecting';
+    await controller.refreshPublication();
+    await tester.pump(const Duration(seconds: 31));
+    expect(monitor.value, isNull);
+    // A running 5 min 'service' grace must not delay a 30 s network issue.
+    port.errorCode = 'privacy_publication.server_error';
+    await controller.refreshPublication();
+    await tester.pump(const Duration(seconds: 31));
+    expect(monitor.value, 'network');
+    // Back to 'service': the expired 30 s grace is not reused.
+    port.errorCode = null;
+    await controller.refreshPublication();
+    await tester.pump(const Duration(seconds: 31));
+    expect(monitor.value, isNull);
+    await tester.pump(const Duration(minutes: 5));
+    expect(monitor.value, 'service');
+    await tester.pumpWidget(const SizedBox.shrink());
+    monitor.dispose();
+    controller.dispose();
+  });
   testWidgets('a first publish still waits out its grace without a notice', (
     tester,
   ) async {
@@ -204,6 +237,17 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        if (issue == 'service') {
+          // An unreachable server waits five minutes before the strip shows.
+          await tester.pump(const Duration(minutes: 4, seconds: 59));
+          await tester.pumpAndSettle();
+          expect(
+            find.text(strings['privacy.notice.service.title']!),
+            findsNothing,
+          );
+          await tester.pump(const Duration(seconds: 2));
+          await tester.pumpAndSettle();
+        }
         expect(
           find.text(strings['privacy.notice.$issue.title']!),
           findsOneWidget,
@@ -386,6 +430,19 @@ void main() {
       ),
       'service',
     );
+    // A conflicting official fleet choice asks for reconfirmation; it is never an identity issue.
+    for (final state in ['failed', 'reconnecting', 'identityRequired']) {
+      expect(
+        sharingStatusIssue(
+          PrivacyPublicationView(
+            state,
+            errorCode: 'official_fleet.choice_changed',
+          ),
+          4,
+        ),
+        'officialChoiceChanged',
+      );
+    }
     expect(
       sharingStatusIssue(
         const PrivacyPublicationView('failed', errorCode: 'unknown'),
@@ -403,6 +460,7 @@ void main() {
         'statusRead',
         'withdrawal',
         'local',
+        'officialChoiceChanged',
       }) {
         expect(strings['privacy.notice.$issue.title'], isNotEmpty);
         expect(strings['privacy.notice.$issue.body'], isNotEmpty);

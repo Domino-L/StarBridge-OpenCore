@@ -17,23 +17,37 @@ import 'overlay_saved_snapshot.dart';
 
 void main() {
   for (final width in [1056.0, 1216.0]) {
-    testWidgets('preset settings has a direct compact toolbar entry at $width', (tester) async {
-      size(tester, Size(width, 900));
-      final port = _Port();
-      final module = OverlayWorkspaceModule(port);
-      addTearDown(module.dispose);
-      await module.refresh();
-      await tester.pumpWidget(app(OverlayWorkspacePresetBar(
-        projection: module.projection.value, module: module, compact: true,
-        onImport: () {}, onExport: () {}, onOpenAppearance: () {})));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('overlay-preset-settings-entry')));
-      await tester.pumpAndSettle();
-      expect(find.byType(OverlayPresetSettingsDialog), findsOneWidget);
-      expect(find.byType(StarBridgeSwitch), findsOneWidget);
-      expect(port.writes, isEmpty);
-      expect(tester.takeException(), isNull);
-    });
+    testWidgets(
+      'preset settings has a direct compact toolbar entry at $width',
+      (tester) async {
+        size(tester, Size(width, 900));
+        final port = _Port();
+        final module = OverlayWorkspaceModule(port);
+        addTearDown(module.dispose);
+        await module.refresh();
+        await tester.pumpWidget(
+          app(
+            OverlayWorkspacePresetBar(
+              projection: module.projection.value,
+              module: module,
+              compact: true,
+              onImport: () {},
+              onExport: () {},
+              onOpenAppearance: () {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const Key('overlay-preset-settings-entry')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(OverlayPresetSettingsDialog), findsOneWidget);
+        expect(find.byType(StarBridgeSwitch), findsOneWidget);
+        expect(port.writes, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
   test('multi-chat v3 preserves draft, undo, runtime payload and preset metadata edits', () async {
     final port = _Port();
@@ -59,39 +73,42 @@ void main() {
     module.discardChanges();
     expect(module.projection.value.sources!.chatSources, isEmpty);
   });
-  test('temporary selection saves pending edits first and never stores the choice', () async {
-    final port = _Port();
-    final module = OverlayWorkspaceModule(port);
-    addTearDown(module.dispose);
-    await module.refresh();
-    final original = module.projection.value.settings!['crosshairOpacity'];
-    module.updateSetting('crosshairOpacity', 0.37);
-    final before = module.projection.value;
-    expect(
-      await module.selectTemporarySource(
-        const OverlaySourceBinding.room(),
-        'owner',
-      ),
-      isTrue,
-    );
-    expect(port.writes.map((w) => w.kind), [
-      OverlayWorkspaceMutationKind.saveActive,
-      OverlayWorkspaceMutationKind.temporarySource,
-    ]);
-    final mutation = port.writes.last;
-    expect(mutation.toPayload(1)['ownerKey'], 'owner');
-    expect(mutation.runtimeDraft!.settings['crosshairOpacity'], 0.37);
-    expect(module.projection.value.dirty, isFalse);
-    expect(module.projection.value.settings!['crosshairOpacity'], 0.37);
-    expect(module.projection.value.sources, before.sources);
-    expect(port.snapshot.presets.single.sources, before.sources);
-    expect(port.draft!.settings['crosshairOpacity'], 0.37);
-    expect(module.canUndo, isTrue);
-    module.undo();
-    await pumpEventQueue();
-    expect(module.projection.value.settings!['crosshairOpacity'], original);
-    expect(port.writes.last.settings!['crosshairOpacity'], original);
-  });
+  test(
+    'temporary selection saves pending edits first and never stores the choice',
+    () async {
+      final port = _Port();
+      final module = OverlayWorkspaceModule(port);
+      addTearDown(module.dispose);
+      await module.refresh();
+      final original = module.projection.value.settings!['crosshairOpacity'];
+      module.updateSetting('crosshairOpacity', 0.37);
+      final before = module.projection.value;
+      expect(
+        await module.selectTemporarySource(
+          const OverlaySourceBinding.room(),
+          'owner',
+        ),
+        isTrue,
+      );
+      expect(port.writes.map((w) => w.kind), [
+        OverlayWorkspaceMutationKind.saveActive,
+        OverlayWorkspaceMutationKind.temporarySource,
+      ]);
+      final mutation = port.writes.last;
+      expect(mutation.toPayload(1)['ownerKey'], 'owner');
+      expect(mutation.runtimeDraft!.settings['crosshairOpacity'], 0.37);
+      expect(module.projection.value.dirty, isFalse);
+      expect(module.projection.value.settings!['crosshairOpacity'], 0.37);
+      expect(module.projection.value.sources, before.sources);
+      expect(port.snapshot.presets.single.sources, before.sources);
+      expect(port.draft!.settings['crosshairOpacity'], 0.37);
+      expect(module.canUndo, isTrue);
+      module.undo();
+      await pumpEventQueue();
+      expect(module.projection.value.settings!['crosshairOpacity'], original);
+      expect(port.writes.last.settings!['crosshairOpacity'], original);
+    },
+  );
   testWidgets(
     'source limit adjustment saves the edit and leaves the warning to Host',
     (tester) async {
@@ -107,9 +124,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.byKey(const Key('overlay-source-binding-trigger')),
-        findsNWidgets(5),
+        // the overview follows the members and is not listed (11-13 请你定 7)
+        findsNWidgets(4),
       );
-      await tester.tap(find.byKey(const Key('overlay-source-binding-trigger')).first);
+      await tester.tap(
+        find.byKey(const Key('overlay-source-binding-trigger')).first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('当前房间').last);
       await tester.pumpAndSettle();
@@ -246,7 +266,10 @@ void main() {
         OverlaySourceMode.room,
       );
       final sources = module.projection.value.sources!;
-      expect(sources.forModule(OverlaySourceModule.chat).mode, OverlaySourceMode.room);
+      expect(
+        sources.forModule(OverlaySourceModule.chat).mode,
+        OverlaySourceMode.room,
+      );
       expect(sources.binding.mode, OverlaySourceMode.room);
       expect(sources.autoSwitch, isTrue);
       expect(module.projection.value.dirty, isFalse);
@@ -255,7 +278,10 @@ void main() {
       final undone = module.projection.value.sources!;
       expect(undone.binding.mode, OverlaySourceMode.room);
       expect(undone.autoSwitch, isTrue);
-      expect(undone.forModule(OverlaySourceModule.chat).mode, OverlaySourceMode.none);
+      expect(
+        undone.forModule(OverlaySourceModule.chat).mode,
+        OverlaySourceMode.none,
+      );
       expect(
         port.writes.last.sources!.forModule(OverlaySourceModule.chat).mode,
         OverlaySourceMode.none,
@@ -312,7 +338,9 @@ void main() {
     await tester.tap(find.text('Open settings'));
     await tester.pumpAndSettle();
     expect(find.byType(StarBridgeSwitch), findsOneWidget);
-    final automatic = tester.widget<StarBridgeSwitch>(find.byType(StarBridgeSwitch));
+    final automatic = tester.widget<StarBridgeSwitch>(
+      find.byType(StarBridgeSwitch),
+    );
     expect(automatic.value, isFalse);
     expect(automatic.onChanged, isNull);
     expect(find.textContaining('先选择一个固定来源'), findsOneWidget);

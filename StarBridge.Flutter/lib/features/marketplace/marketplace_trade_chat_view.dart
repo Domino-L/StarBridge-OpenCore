@@ -381,6 +381,8 @@ class _TradeChatState extends State<MarketplaceTradeChatView> {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: TradeChatBubble(
                     message,
+                    openOrder: c.openOrderDetail == null ? null :
+                        (number) => unawaited(c.openOrderDetail!(context, number)),
                     key: ValueKey(('trade-chat-message', message['id'])),
                   ),
                 ),

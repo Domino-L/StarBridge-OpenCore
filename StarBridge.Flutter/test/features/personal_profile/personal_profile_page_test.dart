@@ -3,6 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/standard_interaction.dart';
+
+import 'package:starbridge_flutter/shared/ships/ship_art_ratio.dart';
 import 'package:starbridge_flutter/app/bootstrap/starbridge_app.dart';
 import 'package:starbridge_flutter/app/composition/app_composition.dart';
 import 'package:starbridge_flutter/app/shell/chrome/in_memory_shell_chrome.dart';
@@ -10,7 +14,6 @@ import 'package:starbridge_flutter/app/shell/chrome/shell_chrome_projection.dart
 import 'package:starbridge_flutter/app/legal/cig_fankit_notice.dart';
 import 'package:starbridge_flutter/app/preferences/app_preferences.dart';
 import 'package:starbridge_flutter/app/preferences/in_memory_app_preferences.dart';
-import 'package:starbridge_flutter/design_system/surfaces/starbridge_surface.dart';
 import 'package:starbridge_flutter/design_system/tokens/starbridge_tokens.dart';
 import 'package:starbridge_flutter/features/account/in_memory_account_adapter.dart';
 import 'package:starbridge_flutter/features/personal_profile/in_memory_personal_profile_adapter.dart';
@@ -324,42 +327,27 @@ void main() {
 
     expect(find.text('Aster Lin'), findsWidgets);
     expect(find.text('@Aster-Lin'), findsOneWidget);
+    // Steam-style page (2026-11-02): one column, a side rail, flat bands.
+    expect(find.byKey(const Key('profile-steam-column')), findsOneWidget);
+    expect(find.byKey(const Key('profile-side-rail')), findsOneWidget);
+    expect(find.byKey(const Key('profile-showcase-week-bars')), findsOneWidget);
     expect(
-      tester
-          .widget<StarBridgeSurface>(
-            find.byKey(const Key('profile-identity-header')),
-          )
-          .fillOpacity,
-      0.90,
+      tester.widget<Text>(find.byKey(const Key('profile-showcase-hours'))).data,
+      '559',
     );
-    expect(
-      tester
-          .widget<StarBridgeSurface>(
-            find
-                .descendant(
-                  of: find.byKey(const Key('profile-module-favorite-ships')),
-                  matching: find.byType(StarBridgeSurface),
-                )
-                .first,
-          )
-          .fillOpacity,
-      0.84,
-    );
-    expect(find.text('通常可游玩时间'), findsOneWidget);
-    expect(find.text('559小时 8分钟'), findsOneWidget);
     expect(find.text('最爱舰船'), findsOneWidget);
     expect(find.text('舰船概览'), findsOneWidget);
     expect(find.text(r'$3,175'), findsOneWidget);
     expect(find.text('舰种构成'), findsOneWidget);
     expect(find.textContaining('RSI 机库同步'), findsOneWidget);
+    expect(find.text('游戏定位'), findsOneWidget);
     expect(find.text('擅长岗位'), findsOneWidget);
-    expect(find.text('参与偏好'), findsOneWidget);
-    expect(find.text('支援能力'), findsOneWidget);
-    expect(find.text('组织归属'), findsOneWidget);
+    expect(find.text('想参与'), findsOneWidget);
     expect(find.text("Aster's Wing"), findsOneWidget);
     expect(find.text('Northwind 联合社区'), findsOneWidget);
-    expect(find.textContaining('主岗位'), findsOneWidget);
+    expect(find.textContaining('主岗位'), findsWidgets);
     expect(find.text('账号与识别'), findsNothing);
+    // No chosen wallpaper: the page default fills the page, keyed as none.
     expect(find.byKey(const Key('profile-wallpaper-none')), findsOneWidget);
     final wallpaperStack = tester.getRect(
       find.byKey(const Key('profile-page-wallpaper-stack')),
@@ -368,8 +356,6 @@ void main() {
       find.byKey(const Key('profile-wallpaper-none')),
     );
     expect(wallpaperBackdrop, wallpaperStack);
-    expect(find.byKey(const Key('profile-wallpaper-image')), findsNothing);
-    expect(find.byKey(const Key('profile-cig-fankit-notice')), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(const Key('profile-identity-header')),
@@ -378,7 +364,7 @@ void main() {
       findsNothing,
     );
     expect(find.text('克拉克'), findsOneWidget);
-    expect(find.text('Carrack'), findsOneWidget);
+    expect(find.textContaining('Carrack'), findsOneWidget);
     expect(find.text('秃鹫'), findsOneWidget);
     expect(find.text('宙斯 Mk II MR'), findsOneWidget);
     expect(
@@ -408,7 +394,7 @@ void main() {
     );
     expect(shipDialog.width, greaterThanOrEqualTo(620));
     expect(hero.width, greaterThan(550));
-    expect(hero.width / hero.height, closeTo(1200 / 420, 0.01));
+    expect(hero.width / hero.height, closeTo(shipArtCardAspectRatio, 0.01));
     expect(hero.center.dx, closeTo(shipDialog.center.dx, 1));
     expect(
       tester.getRect(find.byKey(const Key('profile-ship-data-facts'))).top,
@@ -416,7 +402,10 @@ void main() {
     );
     expect(find.text('克拉克'), findsWidgets);
     expect(find.text('Carrack'), findsWidgets);
-    expect(find.text('制造商'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(Dialog), matching: find.text('制造商')),
+      findsOneWidget,
+    );
     expect(find.text(r'$1,900'), findsWidgets);
     final originalSize = tester.view.physicalSize;
     tester.view.physicalSize = const Size(800, 500);
@@ -446,26 +435,15 @@ void main() {
     final positions = tester.getRect(
       find.byKey(const Key('profile-module-skilled-roles')),
     );
-    expect(favoriteShips.height, 140);
-    expect(hangar.height, 140);
-    expect(positions.height, 140);
     expect(favoriteShips.width, closeTo(grid.width, 0.1));
     expect(hangar.top, greaterThan(favoriteShips.bottom));
     expect(positions.top, greaterThan(hangar.bottom));
-    expect(positions.width, lessThan(grid.width));
-
-    final commandTag = _tagDecoration(
-      tester,
-      const Key('profile-tag-profile.role.expeditionCommander'),
-    );
-    final shipTag = _tagDecoration(
-      tester,
-      const Key('profile-tag-profile.role.pilot'),
-    );
-    expect(commandTag.color, isNot(shipTag.color));
+    expect(positions.width, closeTo(grid.width, 0.1));
     expect(
-      (commandTag.border! as Border).top.width,
-      greaterThan((shipTag.border! as Border).top.width),
+      tester
+          .widget<Text>(find.byKey(const Key('profile-showcase-main-role')))
+          .data,
+      isNotEmpty,
     );
 
     await tester.ensureVisible(find.byKey(const Key('profile-edit')));
@@ -473,28 +451,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('profile-editor-panel')), findsOneWidget);
     expect(find.byType(AlertDialog), findsNothing);
-    await tester.ensureVisible(
-      find.byKey(const Key('profile-module-size-favorite-ships')),
-    );
-    await tester.tap(
-      find.byKey(const Key('profile-module-size-favorite-ships')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('2 格').last);
-    await tester.pumpAndSettle();
-    final resizedFavoriteShips = tester.getRect(
-      find.byKey(const Key('profile-module-favorite-ships')),
-    );
-    expect(resizedFavoriteShips.width, lessThan(grid.width));
-    expect(resizedFavoriteShips.width, greaterThan(grid.width / 2));
     expect(
-      find.byKey(const Key('profile-favorite-ships-hidden-count')),
+      find.byKey(const Key('profile-module-size-favorite-ships')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('profile-module-down-favorite-ships')),
       findsOneWidget,
     );
-    expect(find.text('+1'), findsOneWidget);
     expect(
       find.byKey(const Key('profile-favorite-ship-image-RSI_Zeus_MR')),
-      findsNothing,
+      findsOneWidget,
     );
     await tester.enterText(
       find.byKey(const Key('profile-call-sign-field')),
@@ -515,10 +482,6 @@ void main() {
     expect(find.text('远征与支援玩家。'), findsOneWidget);
     expect(find.text('@Aster-Lin'), findsOneWidget);
     expect(find.byKey(const Key('profile-wallpaper-none')), findsOneWidget);
-    final savedFavoriteShips = tester.getRect(
-      find.byKey(const Key('profile-module-favorite-ships')),
-    );
-    expect(savedFavoriteShips.width, closeTo(resizedFavoriteShips.width, 0.1));
   });
 
   testWidgets('hangar overview reveals information by approved grid span', (
@@ -544,19 +507,15 @@ void main() {
     );
     expect(find.text('最近入库 · 2026-08-26'), findsOneWidget);
     expect(find.text('F7C-M 超级大黄蜂 MK II'), findsOneWidget);
-    final compositionBar = tester.getRect(
-      find.byKey(const Key('profile-hangar-composition-bar')),
-    );
+    // One bar per role, scaled to the largest (Steam-style page).
     final combatSegment = tester.getRect(
       find.byKey(const Key('profile-hangar-composition-segment-0')),
     );
     final otherSegment = tester.getRect(
       find.byKey(const Key('profile-hangar-composition-segment-1')),
     );
-    expect(compositionBar.height, 8);
-    expect(combatSegment.height, 8);
-    expect(otherSegment.height, 8);
-    expect(otherSegment.left - combatSegment.right, 3);
+    expect(combatSegment.height, 7);
+    expect(otherSegment.top, greaterThan(combatSegment.bottom));
     expect(combatSegment.width / otherSegment.width, closeTo(2, 0.05));
     final combatColor = tester
         .widget<ColoredBox>(
@@ -569,62 +528,23 @@ void main() {
         )
         .color;
     expect(combatColor, isNot(otherColor));
-    expect(combatColor.a, closeTo(0.76, 0.01));
-    expect(otherColor.a, closeTo(0.76, 0.01));
 
     await tester.ensureVisible(find.byKey(const Key('profile-edit')));
     await tester.tap(find.byKey(const Key('profile-edit')));
     await tester.pumpAndSettle();
 
-    await _selectModuleSize(
-      tester,
-      PersonalProfileModuleIds.hangarSummary,
-      '1 格',
-    );
-    expect(find.byKey(const Key('profile-hangar-count-panel')), findsOneWidget);
-    expect(find.byKey(const Key('profile-hangar-value-panel')), findsOneWidget);
+    // One column: no cell size to choose, the overview keeps every panel.
     expect(
-      find.byKey(const Key('profile-hangar-composition-panel')),
+      find.byKey(
+        Key('profile-module-size-${PersonalProfileModuleIds.hangarSummary}'),
+      ),
       findsNothing,
     );
     expect(
       find.byKey(const Key('profile-hangar-recent-ship-panel')),
-      findsNothing,
-    );
-    expect(find.byKey(const Key('profile-hangar-sync-footer')), findsNothing);
-
-    await _selectModuleSize(
-      tester,
-      PersonalProfileModuleIds.hangarSummary,
-      '2 格',
-    );
-    expect(
-      find.byKey(const Key('profile-hangar-composition-panel')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('profile-hangar-composition-bar')),
       findsOneWidget,
     );
     expect(find.byKey(const Key('profile-hangar-sync-footer')), findsOneWidget);
-    expect(
-      find.byKey(const Key('profile-hangar-recent-ship-panel')),
-      findsNothing,
-    );
-
-    await _selectModuleSize(
-      tester,
-      PersonalProfileModuleIds.hangarSummary,
-      '3 格',
-    );
-    expect(
-      find.byKey(const Key('profile-hangar-recent-ship-panel')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('profile-hangar-recent-ship-image')),
-      findsOneWidget,
-    );
     expect(tester.takeException(), isNull);
   });
 
@@ -745,10 +665,48 @@ void main() {
       find.byKey(const Key('profile-module-favorite-ships')),
       findsNothing,
     );
-    expect(find.byKey(const Key('profile-cig-fankit-notice')), findsNothing);
+    // No wallpaper of the owner's: the page default (a Fan Kit picture) shows.
+    expect(find.byKey(const Key('profile-cig-fankit-notice')), findsOneWidget);
   });
 
-  testWidgets('profile modules can be dragged to another grid cell', (
+  // build 65: in a window about half a 2560 screen wide the floating
+  // notice sat on the side rail's 组织 block.
+  for (final width in [1280.0, 2560.0]) {
+    testWidgets('the Fan Kit notice never covers the page column at $width', (
+      tester,
+    ) async {
+      await _pumpSignedInShell(tester, size: Size(width, 1000));
+      await tester.tap(find.byKey(const Key('account-command')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
+      await tester.pumpAndSettle();
+      final notice = find.byKey(const Key('profile-cig-fankit-notice'));
+      expect(notice, findsOneWidget);
+      final column = tester.getRect(
+        find.byKey(const Key('profile-steam-column')),
+      );
+      await tester.ensureVisible(notice);
+      await tester.pumpAndSettle();
+      final rect = tester.getRect(notice);
+      final columnNow = tester.getRect(
+        find.byKey(const Key('profile-steam-column')),
+      );
+      expect(
+        rect.overlaps(columnNow),
+        isFalse,
+        reason: 'width $width: notice $rect, column $columnNow',
+      );
+      if (width == 2560) {
+        // Wide: it floats in the wallpaper margin beside the column.
+        expect(rect.left, greaterThanOrEqualTo(column.right));
+      } else {
+        // Narrow: it follows the page, under the column.
+        expect(rect.top, greaterThanOrEqualTo(columnNow.bottom));
+      }
+    });
+  }
+
+  testWidgets('profile showcases move up and down the single column', (
     tester,
   ) async {
     await _pumpSignedInShell(tester, size: const Size(1280, 1000));
@@ -760,68 +718,32 @@ void main() {
     await tester.tap(find.byKey(const Key('profile-edit')));
     await tester.pumpAndSettle();
 
-    final module = find.byKey(const Key('profile-module-skilled-roles'));
-    final handle = find.byKey(const Key('profile-module-drag-skilled-roles'));
-    final destination = find.byKey(const Key('profile-grid-cell-8'));
-    await tester.ensureVisible(destination);
-    await tester.pumpAndSettle();
-    final originalLeft = tester.getTopLeft(module).dx;
-    final destinationCenter = tester.getCenter(destination);
-
-    final gesture = await tester.startGesture(tester.getCenter(handle));
-    await gesture.moveBy(const Offset(24, 0));
-    await tester.pump();
-    await gesture.moveTo(destinationCenter);
-    await tester.pump();
-
-    final previewLeft = tester.getTopLeft(module).dx;
-    expect(previewLeft, greaterThan(originalLeft));
-
-    await gesture.up();
-    await tester.pumpAndSettle();
-
-    expect(tester.getTopLeft(module).dx, closeTo(previewLeft, 0.1));
-  });
-
-  testWidgets('dropping a profile module outside the grid restores layout', (
-    tester,
-  ) async {
-    await _pumpSignedInShell(tester, size: const Size(1280, 1000));
-    await tester.tap(find.byKey(const Key('account-command')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('profile-edit')));
-    await tester.tap(find.byKey(const Key('profile-edit')));
-    await tester.pumpAndSettle();
-
-    final module = find.byKey(const Key('profile-module-skilled-roles'));
-    final draggable = find.byKey(
-      const Key('profile-module-drag-skilled-roles'),
+    final roles = find.byKey(const Key('profile-module-skilled-roles'));
+    final hangar = find.byKey(const Key('profile-module-hangar-summary'));
+    expect(
+      tester.getTopLeft(roles).dy,
+      greaterThan(tester.getTopLeft(hangar).dy),
     );
-    final destination = find.byKey(const Key('profile-grid-cell-8'));
-    final grid = find.byKey(const Key('profile-module-grid'));
-    await tester.ensureVisible(destination);
+    // The last showcase (the trading card, shown last by default) cannot
+    // move further down.
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const Key('profile-module-down-trade-card')),
+          )
+          .onPressed,
+      isNull,
+    );
+    final up = find.byKey(const Key('profile-module-up-skilled-roles'));
+    await tester.ensureVisible(up);
+    await tester.tap(up);
     await tester.pumpAndSettle();
-    final originalTopLeft = tester.getTopLeft(module);
-    final destinationCenter = tester.getCenter(destination);
-
-    final gesture = await tester.startGesture(tester.getCenter(draggable));
-    await gesture.moveBy(const Offset(24, 0));
-    await tester.pump();
-    await gesture.moveTo(destinationCenter);
-    await tester.pump();
-    expect(tester.getTopLeft(module).dx, greaterThan(originalTopLeft.dx));
-
-    final gridRect = tester.getRect(grid);
-    await gesture.moveTo(Offset(gridRect.left - 24, gridRect.center.dy));
-    await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
-
-    final restoredTopLeft = tester.getTopLeft(module);
-    expect(restoredTopLeft.dx, closeTo(originalTopLeft.dx, 0.1));
-    expect(restoredTopLeft.dy, closeTo(originalTopLeft.dy, 0.1));
+    expect(tester.getTopLeft(roles).dy, lessThan(tester.getTopLeft(hangar).dy));
+    expect(
+      tester.getTopLeft(roles).dx,
+      closeTo(tester.getTopLeft(hangar).dx, 0.1),
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('English profile remains localized at compact desktop size', (
@@ -841,14 +763,14 @@ void main() {
     await tester.tap(find.byKey(const Key('account-menu-personal-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Personal profile'), findsOneWidget);
+    expect(find.text('Edit profile'), findsWidgets);
     expect(find.text('Favorite ships'), findsOneWidget);
     expect(find.text('Carrack'), findsOneWidget);
     expect(find.text('克拉克'), findsNothing);
     expect(find.text('Ship composition'), findsOneWidget);
     expect(find.textContaining('RSI hangar sync'), findsOneWidget);
-    expect(find.textContaining('Expedition commander'), findsOneWidget);
-    expect(find.text('Affiliations'), findsOneWidget);
+    expect(find.textContaining('Expedition commander'), findsWidgets);
+    expect(find.text('Organizations'), findsOneWidget);
     expect(find.text('Fleet member · ASTER'), findsOneWidget);
     expect(find.text('Operation host · NORTH'), findsOneWidget);
     expect(find.text('远征指挥'), findsNothing);
@@ -895,26 +817,46 @@ void main() {
     expect(find.byKey(const Key('help-cig-fankit-notice')), findsOneWidget);
     expect(find.text(CigFankitLegalNotice.requiredEnglish), findsOneWidget);
   });
-}
 
-BoxDecoration _tagDecoration(WidgetTester tester, Key key) {
-  final tag = find.byKey(key);
-  expect(tag, findsOneWidget);
-  final container = find.descendant(of: tag, matching: find.byType(Container));
-  return tester.widget<Container>(container.first).decoration! as BoxDecoration;
-}
-
-Future<void> _selectModuleSize(
-  WidgetTester tester,
-  String moduleId,
-  String label,
-) async {
-  final control = find.byKey(Key('profile-module-size-$moduleId'));
-  await tester.ensureVisible(control);
-  await tester.tap(control);
-  await tester.pumpAndSettle();
-  await tester.tap(find.text(label).last);
-  await tester.pumpAndSettle();
+  // 0.7.3 default is scan: the profile editor works there too. Buttons are
+  // found by key and checked through semantics, not widget type.
+  for (final requiresReload in [true, false]) {
+    testWidgets(
+      'scan interaction smoke: editor save; reload gate: $requiresReload',
+      (tester) async {
+        final port = _FailedEditPort(requiresReload);
+        await _pumpSignedInShell(
+          tester,
+          personalProfilePort: port,
+          interaction: InteractionStyle.scan,
+        );
+        await tester.tap(find.byKey(const Key('account-command')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const Key('account-menu-personal-profile')),
+        );
+        await tester.pumpAndSettle();
+        final edit = find.byKey(const Key('profile-edit'));
+        expectScanSuite(tester, edit);
+        expectButtonState(tester, edit, enabled: true);
+        await tester.tap(edit);
+        await tester.pumpAndSettle();
+        final field = find.byKey(const Key('profile-call-sign-field'));
+        await tester.ensureVisible(field);
+        await tester.enterText(field, 'Scan draft');
+        final save = find.byKey(const Key('profile-save'));
+        await tester.ensureVisible(save);
+        expectButtonState(tester, save, enabled: true);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(port.saves, 1);
+        expect(find.text('Scan draft'), findsOneWidget);
+        expect(find.byKey(const Key('profile-save-error')), findsOneWidget);
+        expectButtonState(tester, save, enabled: !requiresReload);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }
 
 Future<void> _pumpSignedInShell(
@@ -923,6 +865,7 @@ Future<void> _pumpSignedInShell(
   InMemoryAppPreferences? preferences,
   InMemoryShellChrome? shellChrome,
   PersonalProfilePort? personalProfilePort,
+  InteractionStyle interaction = InteractionStyle.standard,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
@@ -930,7 +873,7 @@ Future<void> _pumpSignedInShell(
   addTearDown(tester.view.resetPhysicalSize);
   final composition = AppComposition.forTest(
     windowChrome: InMemoryWindowChrome(),
-    preferences: preferences,
+    preferences: await pinInteraction(preferences, interaction),
     shellChrome: shellChrome,
     accountPort: InMemoryAccountAdapter.forReview(AccountReviewState.signedIn),
     personalProfilePort:

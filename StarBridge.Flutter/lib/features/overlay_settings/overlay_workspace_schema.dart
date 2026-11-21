@@ -1,6 +1,18 @@
 import 'package:flutter/foundation.dart';
 
-enum OverlayWorkspaceUnit { seconds, percent, pixels, count, none }
+import 'overlay_workspace_visor_specs.dart';
+
+enum OverlayWorkspaceUnit {
+  seconds,
+  percent,
+  pixels,
+  count,
+  degrees,
+
+  /// Visor design units, shown as pixels at 2560x1440 and medium size.
+  visorPixels,
+  none,
+}
 
 enum OverlayWorkspaceFieldKind {
   toggle,
@@ -46,6 +58,7 @@ final class OverlayWorkspaceFieldSpec {
 }
 
 const overlayWorkspaceGroupOrder = <String>[
+  'global',
   'notice',
   'fleetOverview',
   'members',
@@ -56,9 +69,12 @@ const overlayWorkspaceGroupOrder = <String>[
   'startup',
 ];
 
+/// The groups the settings page and the fullscreen editor list. The fleet
+/// overview has no group of its own (11-10 "舰队总览 隐藏", 11-12 "为什么浮层
+/// 那里还有单独的舰队总览设置"): the visor shows it on top of the members.
 const overlayWorkspaceNavigationGroupOrder = <String>[
+  'global',
   'notice',
-  'fleetOverview',
   'members',
   'chat',
   'events',
@@ -98,19 +114,21 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'opacity',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.number,
-    '浮层整体透明度',
+    '浮层整体不透明度',
     minimum: 0.15,
     maximum: 1,
-    userVisible: false,
     unit: OverlayWorkspaceUnit.percent,
+    // retired 11-12 ("这是之前遗留的废弃项"): saved and read as before, never
+    // shown, and the overlay draws full whatever it holds
+    userVisible: false,
   ),
   OverlayWorkspaceFieldSpec(
     'showNotice',
     'notice',
     OverlayWorkspaceFieldKind.toggle,
-    '显示公告',
+    '显示召集与提醒',
   ),
   OverlayWorkspaceFieldSpec(
     'showSquads',
@@ -183,17 +201,13 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'appearance',
     OverlayWorkspaceFieldKind.choice,
     '界面皮肤',
-    options: [
-      'Default',
-      'NightShadow',
-      'Verdict',
-      'HajiCitizen',
-    ],
-    selectableOptions: ['Default', 'NightShadow', 'Verdict'],
+    options: ['Default', 'NightShadow', 'Verdict', 'HajiCitizen', 'Visor'],
+    // 0.7.3 overlay v2: only the visor; the others return when redone for v2.
+    selectableOptions: ['Visor'],
   ),
   OverlayWorkspaceFieldSpec(
     'theme',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.choice,
     '主题色',
     options: [
@@ -231,10 +245,12 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'autoThemeByShip',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.toggle,
     '根据当前舰船自动切换主题',
   ),
+  // 0.7.3 visor projection (overlay_workspace_visor_specs.dart).
+  ...overlayWorkspaceVisorFieldSpecs,
   OverlayWorkspaceFieldSpec(
     'nightShadowBloom',
     'appearance',
@@ -244,7 +260,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'animationFrameRate',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.choice,
     '浮层动画帧率',
     options: ['Off', 'Fps30', 'Fps60', 'Fps120'],
@@ -254,12 +270,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'appearance',
     OverlayWorkspaceFieldKind.choice,
     '指定皮肤',
-    options: [
-      'Default',
-      'NightShadow',
-      'Verdict',
-      'HajiCitizen',
-    ],
+    options: ['Default', 'NightShadow', 'Verdict', 'HajiCitizen', 'Visor'],
     userVisible: false,
   ),
 
@@ -310,7 +321,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'crosshairOpacity',
     'crosshair',
     OverlayWorkspaceFieldKind.number,
-    '准星透明度',
+    '准星不透明度',
     minimum: 0.2,
     maximum: 1,
     unit: OverlayWorkspaceUnit.percent,
@@ -342,14 +353,14 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'crosshairOutlineOpacity',
     'crosshair',
     OverlayWorkspaceFieldKind.number,
-    '准星描边透明度',
+    '准星描边不透明度',
     maximum: 0.8,
     unit: OverlayWorkspaceUnit.percent,
   ),
 
   OverlayWorkspaceFieldSpec(
     'enableStartupTransition',
-    'startup',
+    'global',
     OverlayWorkspaceFieldKind.toggle,
     '显示浮层启动效果',
   ),
@@ -370,7 +381,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'autoFocusGameWindowOnOpen',
-    'startup',
+    'global',
     OverlayWorkspaceFieldKind.toggle,
     '打开浮层后返回游戏',
   ),
@@ -383,7 +394,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'startupTransitionFrameRate',
-    'startup',
+    'global',
     OverlayWorkspaceFieldKind.choice,
     '启动效果帧率',
     options: ['Fps30', 'Fps45', 'Fps60', 'Fps120'],
@@ -408,7 +419,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'skipStartupTransitionWhenGameForeground',
-    'startup',
+    'global',
     OverlayWorkspaceFieldKind.toggle,
     '游戏已在前台时跳过启动效果',
   ),
@@ -417,20 +428,20 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'showEventNotifications',
     'events',
     OverlayWorkspaceFieldKind.toggle,
-    '显示事件通知',
+    '显示事件',
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationSide',
     'events',
     OverlayWorkspaceFieldKind.choice,
-    '通知出现位置',
+    '事件出现位置',
     options: ['Left', 'Right'],
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationDurationSeconds',
     'events',
     OverlayWorkspaceFieldKind.number,
-    '默认通知时长',
+    '默认事件停留时间',
     minimum: 1,
     maximum: 12,
     unit: OverlayWorkspaceUnit.seconds,
@@ -439,20 +450,20 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'eventNotificationY',
     'events',
     OverlayWorkspaceFieldKind.number,
-    '通知垂直位置',
+    '事件垂直位置',
     userVisible: false,
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationTypes',
     'events',
     OverlayWorkspaceFieldKind.eventTypes,
-    '通知事件',
+    '显示哪些事件',
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationMaxVisibleCount',
     'events',
     OverlayWorkspaceFieldKind.numberChoice,
-    '同时显示通知数',
+    '同时显示事件数',
     numberOptions: [1, 2, 3, 4, 5],
     minimum: 1,
     maximum: 5,
@@ -462,26 +473,26 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'eventNotificationPinImportant',
     'events',
     OverlayWorkspaceFieldKind.toggle,
-    '优先保留重要通知',
+    '优先保留重要事件',
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationAnimationSpeed',
     'events',
     OverlayWorkspaceFieldKind.choice,
-    '通知动画速度',
+    '事件动画速度',
     options: ['Slow', 'Normal', 'Fast'],
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationDurations',
     'events',
     OverlayWorkspaceFieldKind.eventDurations,
-    '各类通知时长',
+    '各类事件停留时间',
   ),
   OverlayWorkspaceFieldSpec(
     'eventNotificationTextOpacity',
     'events',
     OverlayWorkspaceFieldKind.number,
-    '通知文字透明度',
+    '事件文字不透明度',
     minimum: 0.15,
     maximum: 1,
     divisions: 85,
@@ -492,7 +503,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'eventNotificationBackgroundOpacity',
     'events',
     OverlayWorkspaceFieldKind.number,
-    '通知背景透明度',
+    '事件背景不透明度',
     userVisible: false,
     unit: OverlayWorkspaceUnit.percent,
   ),
@@ -500,7 +511,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'eventNotificationDecorationOpacity',
     'events',
     OverlayWorkspaceFieldKind.number,
-    '外观装饰透明度',
+    '外观装饰不透明度',
     userVisible: false,
     unit: OverlayWorkspaceUnit.percent,
   ),
@@ -508,7 +519,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   // overview, members and chat modules (OverlayCalmDisplayControls).
   OverlayWorkspaceFieldSpec(
     'calmDisplay',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.choice,
     '安静显示',
     options: ['Unset', 'Off', 'On'],
@@ -516,7 +527,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'calmWaitSeconds',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.numberChoice,
     '无变化多久后淡出',
     numberOptions: [5, 10, 20, 30],
@@ -525,7 +536,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'calmIdleOpacity',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.number,
     '空闲时不透明度',
     userVisible: false,
@@ -533,7 +544,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'calmLitOpacity',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.number,
     '点亮时不透明度',
     userVisible: false,
@@ -541,7 +552,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'calmLightWhen',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.choice,
     '点亮时机',
     options: ['Relevant', 'Any'],
@@ -549,7 +560,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'calmPeekHotkey',
-    'appearance',
+    'global',
     OverlayWorkspaceFieldKind.hotkey,
     '按住查看',
     userVisible: false,
@@ -584,7 +595,8 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     minimum: 1,
     maximum: 8,
     divisions: 7,
-    userVisible: false,
+    // shown (11-10 settings comparison: "同时显示消息数现在显示出来"): the
+    // visor's message list keeps this many lines
     unit: OverlayWorkspaceUnit.count,
   ),
   OverlayWorkspaceFieldSpec(
@@ -651,21 +663,23 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
   ),
   OverlayWorkspaceFieldSpec(
     'chatTextEdgeStrength',
-    'chat',
+    'look.chat',
     OverlayWorkspaceFieldKind.choice,
     '聊天文字描边',
     options: ['Off', 'Light', 'Standard', 'Strong'],
   ),
 
+  // direct messages pop up whatever the rally block does; with the DM badge
+  // gone they are chat settings (11-13 user)
   OverlayWorkspaceFieldSpec(
     'communicationFriendEvents',
-    'notice',
+    'chat',
     OverlayWorkspaceFieldKind.toggle,
-    '显示好友动态',
+    '显示私信提醒',
   ),
   OverlayWorkspaceFieldSpec(
     'communicationMessagePreview',
-    'notice',
+    'chat',
     OverlayWorkspaceFieldKind.toggle,
     '显示消息内容预览',
   ),
@@ -673,7 +687,7 @@ const overlayWorkspaceFieldSpecs = <OverlayWorkspaceFieldSpec>[
     'communicationEventDurationSeconds',
     'notice',
     OverlayWorkspaceFieldKind.number,
-    '通讯提醒时长',
+    '提醒停留时间',
     minimum: 2,
     maximum: 12,
     divisions: 40,
@@ -714,5 +728,4 @@ const overlayDurationFields = <(String, String)>[
   ('onlineSummary', '在线成员汇总'),
   ('primaryServer', '主服务器变化'),
   ('deathAndRespawn', '死亡与重生'),
-  ('localPlayReminder', '本地游玩提醒'),
 ];

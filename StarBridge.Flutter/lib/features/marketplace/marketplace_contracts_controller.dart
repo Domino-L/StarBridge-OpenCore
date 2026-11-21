@@ -30,15 +30,28 @@ class MarketplaceContractsController extends ChangeNotifier {
 
   bool get supported => port.contractsSupported;
 
-  /// Created contracts that wait on the member (recruiting with applicants,
-  /// or running). Feeds the banner's "待我处理".
-  int get attention => created.rows
-      .where(
-        (row) =>
-            row['status'] == 1 && ((row['applications'] as num?) ?? 0) > 0 ||
-            row['status'] == 2,
-      )
-      .length;
+  /// Count contracts with an available action, never cumulative applications.
+  int get attention => [...created.rows, ...participated.rows]
+      .where((row) => row['attention'] == true).map((row) => row['id']).toSet().length;
+  bool get attentionIncomplete => [created, participated].any((list) =>
+      list.page == 0 || list.more || list.failed ||
+      list.rows.any((row) => row['attentionComplete'] != true));
+  bool resultUnknown = false;
+  // The contract whose write result is unknown (0 = a create). Only a fresh
+  // read of THAT contract clears it, and only it is locked (C review P2).
+  int? _reconcileId;
+  bool get needsReconcile =>
+      _reconcileId == 0 || (_reconcileId != null && _reconcileId == openId);
+
+  Future<void> refreshDetail() async {
+    final id = openId;
+    await _loadDetail();
+    if (!detailFailed && detail != null && id == openId &&
+        (_reconcileId == 0 || _reconcileId == id)) {
+      _reconcileId = null;
+      _notify();
+    }
+  }
 
   bool _live(int epoch) => !_disposed && epoch == _epoch;
   void _notify() {
@@ -118,9 +131,10 @@ class MarketplaceContractsController extends ChangeNotifier {
   /// apply / quit / start / complete / cancel / dispute / review on the open
   /// contract, or create (with `contract`). True when SCM confirmed.
   Future<bool> act(String operation, [MarketRow input = const {}]) async {
-    if (acting != null) return false;
-    final epoch = _epoch;
+    if (acting != null || needsReconcile) return false;
+    final epoch = _epoch, target = openId ?? 0;
     acting = operation;
+    resultUnknown = false;
     actionError = null;
     _notify();
     var confirmed = false;
@@ -130,12 +144,18 @@ class MarketplaceContractsController extends ChangeNotifier {
         ...input,
       });
       confirmed = data['confirmed'] == true || data['id'] != null;
+      if (!confirmed) actionError = 'marketplace.unavailable';
     } on MarketplaceTradeError catch (error) {
       actionError = error.code;
     } on Object {
       actionError = 'marketplace.unavailable';
     } finally {
       if (_live(epoch)) {
+        resultUnknown = !confirmed && !const {
+          'marketplace.reauthorize_required', 'marketplace.invalid_request',
+          'marketplace.offline',
+        }.contains(actionError);
+        if (resultUnknown) _reconcileId = target;
         acting = null;
         _notify();
         await Future.wait([
@@ -159,6 +179,8 @@ class MarketplaceContractsController extends ChangeNotifier {
     detail = null;
     detailLoading = detailFailed = false;
     acting = actionError = null;
+    resultUnknown = false;
+    _reconcileId = null;
     _notify();
   }
 

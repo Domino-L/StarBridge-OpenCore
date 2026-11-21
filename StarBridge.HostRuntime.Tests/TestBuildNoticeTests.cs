@@ -12,7 +12,15 @@ internal static class TestBuildNoticeTests
         {
             var reader = new ClientLicenseReader(root);
             var store = new TestBuildNoticeStore(root);
-            var path = Path.Combine(root, "official-binary-license.accepted.json");
+            var path = Path.Combine(root, TestBuildNoticeStore.FileName);
+            Require(TestBuildNoticeStore.FileName != TestBuildNoticeStore.LegacyFileName);
+            // 0.7.2.1's record (its own v4) sits in the legacy file; 0.7.3 neither counts
+            // nor touches it, so switching between the two clients never re-asks either.
+            var legacy = Path.Combine(root, TestBuildNoticeStore.LegacyFileName);
+            var legacyBytes = JsonSerializer.SerializeToUtf8Bytes(new { SchemaVersion = 1,
+                TermsVersion = "2026-10-31-v4", AcceptedAtUtc = DateTimeOffset.UnixEpoch,
+                AppVersion = "Flutter", TermsSha256 = "fixture" });
+            await File.WriteAllBytesAsync(legacy, legacyBytes);
             await File.WriteAllTextAsync(Path.Combine(root, ClientLicenseReader.FileName), "Synthetic terms");
             long generation = 4;
             using var dispatcher = new ClientLicenseBridgeDispatcher(reader, () => generation, store);
@@ -30,6 +38,22 @@ internal static class TestBuildNoticeTests
             generation = 4;
             Require((await dispatcher.DispatchAsync(accept)).Response.Payload.GetProperty("acknowledged").GetBoolean());
             Require(new TestBuildNoticeStore(root).IsAcknowledged());
+            Require(legacyBytes.SequenceEqual(await File.ReadAllBytesAsync(legacy)));
+            // A current-version record in the legacy file (builds before this fix) is not
+            // read either: the per-version file alone decides.
+            var other = Directory.CreateTempSubdirectory("starbridge-notice-legacy-").FullName;
+            try
+            {
+                var current = JsonSerializer.SerializeToUtf8Bytes(new { SchemaVersion = 1,
+                    TermsVersion = TestBuildNoticeStore.TermsVersion, AppVersion = "Flutter" });
+                await File.WriteAllBytesAsync(Path.Combine(other, TestBuildNoticeStore.LegacyFileName), current);
+                var otherStore = new TestBuildNoticeStore(other);
+                Require(!otherStore.IsAcknowledged());
+                otherStore.Acknowledge(TestBuildNoticeStore.TermsVersion, "fixture", () => true);
+                Require(otherStore.IsAcknowledged() && current.SequenceEqual(
+                    await File.ReadAllBytesAsync(Path.Combine(other, TestBuildNoticeStore.LegacyFileName))));
+            }
+            finally { Directory.Delete(other, true); }
             // Ordinary binary/document packaging updates do not reset the agreed terms version.
             await File.WriteAllTextAsync(Path.Combine(root, ClientLicenseReader.FileName), "Synthetic updated packaging");
             Require((await dispatcher.DispatchAsync(read)).Response.Payload.GetProperty("acknowledged").GetBoolean());

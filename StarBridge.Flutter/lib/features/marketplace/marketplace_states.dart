@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../app/runtime/frame_governor.dart';
+
 import 'package:flutter/rendering.dart';
 
 import '../../design_system/icons/starbridge_icon.dart';
@@ -463,7 +466,13 @@ class MarketRefilter extends StatefulWidget {
   State<MarketRefilter> createState() => _MarketRefilterState();
 }
 
-class _MarketRefilterState extends State<MarketRefilter> {
+class _MarketRefilterState extends State<MarketRefilter>
+    with SingleTickerProviderStateMixin {
+  late final _fade = AnimationController(
+    vsync: this,
+    value: widget.active ? .45 : 1,
+    duration: const Duration(milliseconds: 120),
+  );
   Timer? _tick;
   int _seconds = 0;
 
@@ -490,25 +499,42 @@ class _MarketRefilterState extends State<MarketRefilter> {
   void didUpdateWidget(MarketRefilter oldWidget) {
     super.didUpdateWidget(oldWidget);
     _sync();
+    if (oldWidget.active != widget.active) {
+      _fade.animateTo(
+        widget.active ? .45 : 1,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 120),
+      );
+    }
   }
 
   @override
   void dispose() {
     _tick?.cancel();
+    _fade.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: lightVisuals(),
+    builder: (context, lightOnly, _) => _build(context, lightOnly),
+  );
+
+  Widget _build(BuildContext context, bool lightOnly) {
     final t = context.tokens;
     final still = MediaQuery.disableAnimationsOf(context);
     final slow = _seconds >= 10;
     return Stack(
       fit: StackFit.passthrough,
       children: [
-        AnimatedOpacity(
-          opacity: widget.active ? 0.45 : 1,
-          duration: still ? Duration.zero : const Duration(milliseconds: 120),
+        FadeTransition(
+          // The active catalog keeps its .45 group alpha; only the tween is
+          // skipped, including a pressure change halfway through that tween.
+          opacity: still || lightOnly
+              ? AlwaysStoppedAnimation(widget.active ? .45 : 1.0)
+              : _fade,
           child: IgnorePointer(ignoring: widget.active, child: widget.child),
         ),
         if (widget.active && _seconds >= 1)

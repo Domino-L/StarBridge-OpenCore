@@ -70,7 +70,7 @@ internal sealed partial class CommunityClient
     }
     private void ApplyOfficialPerson(JsonObject person, OfficialAuthorObservation? observation, bool preserveLapsedVisible = false)
     {
-        var visible = observation?.Current(_targetClock.GetUtcNow()) == true;
+        var visible = observation?.Current(_identityClock.GetUtcNow()) == true;
         if (!visible) person["memberRef"] = null;
         // Chat detail may carry a lapsed display observation, never a member permission.
         visible |= preserveLapsedVisible && observation?.State == "visible";
@@ -104,7 +104,7 @@ internal sealed partial class CommunityClient
             JsonObject Person(AnnouncementPerson value, string code, bool found)
             {
                 var observation = found ? Author(value.AccountId) : null;
-                var memberRef = observation?.Current(_targetClock.GetUtcNow()) == true
+                var memberRef = observation?.Current(_identityClock.GetUtcNow()) == true
                     ? MemberReferenceFor("account:" + value.AccountId, code, scope, create: false) : null;
                 var person = new JsonObject { ["memberRef"] = memberRef }; ApplyOfficialPerson(person, observation); return person;
             }

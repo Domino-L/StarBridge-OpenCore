@@ -66,7 +66,21 @@ public sealed partial class OAuthPkceClient
             edit.EditedGroups.Distinct(StringComparer.Ordinal).Count() != edit.EditedGroups.Length ||
             edit.EditedGroups.Any(group => !PageGroups.Contains(group, StringComparer.Ordinal)) ||
             edit.AvatarStyle is < 0 or > 3 || string.IsNullOrEmpty(edit.WallpaperId) ||
-            edit.Content is null || edit.Content.PresenceIntent is not null)
+            edit.Content is null || edit.Content.PresenceIntent is not null ||
+            !PersonalProfileShowcasePolicy.ValidShowcases(edit.Content.Showcases) ||
+            !PersonalProfileShowcasePolicy.ValidAchievements(edit.Content.AchievementShowcase) ||
+            // The 4th showcase ship travels only here; a module keeps at most 3
+            // because released clients reject a module with 4 selections.
+            (edit.Content.Modules ?? []).Any(module => module?.FavoriteShipIds is { Length: > PersonalProfileContractPolicy.MaximumFavoriteShips }) ||
+            !PersonalProfileShowcasePolicy.ValidFavoriteExtra(edit.Content.FavoriteShowcaseExtra, edit.Content.Modules) ||
+            edit.Content.FavoriteShowcaseExtra is not null && !edit.EditedGroups.Contains("layout", StringComparer.Ordinal) ||
+            // Per-module fourth ships: only with the layout group, only for modules this page holds.
+            !PersonalProfileShowcasePolicy.ValidFavoriteExtras(edit.Content.FavoriteShowcaseExtras, edit.Content.Modules, edit.Content.Showcases) ||
+            edit.Content.FavoriteShowcaseExtras is not null && !edit.EditedGroups.Contains("layout", StringComparer.Ordinal) ||
+            // The main role travels only with the play style group: "" or one of the roles sent.
+            edit.Content.MainRole is { } mainRole && (!edit.EditedGroups.Contains("playStyle", StringComparer.Ordinal) ||
+                mainRole.Length > 80 || mainRole.Any(char.IsControl) ||
+                mainRole.Length > 0 && !(edit.Content.SkilledRoles ?? []).Contains(mainRole, StringComparer.Ordinal)))
             throw new ArgumentException("Invalid page update.");
 
         // Do not normalize here: normalization can silently discard rich local

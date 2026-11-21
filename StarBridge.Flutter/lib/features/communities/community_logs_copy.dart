@@ -3,9 +3,9 @@ import 'package:flutter/widgets.dart';
 import '../../app/localization/app_strings.dart';
 
 const communityLogsCopy = <String, (String, String, String)>{
-  'activityReading': ('正在读取组织日志…', '正在讀取組織日誌…', 'Loading organization logs…'),
+  'activityReading': ('正在读取操作记录…', '正在讀取操作記錄…', 'Loading the activity record…'),
   'activityDeleting': ('正在删除日志…', '正在刪除日誌…', 'Deleting log entry…'),
-  'title': ('组织日志', '組織日誌', 'Organization log'),
+  'title': ('操作记录', '操作記錄', 'Activity record'),
   'All': ('全部', '全部', 'All'),
   '成员': ('成员', '成員', 'Members'),
   '公告': ('公告', '公告', 'Announcements'),
@@ -23,7 +23,7 @@ const communityLogsCopy = <String, (String, String, String)>{
     '會刪除這條記錄及其合併的重複記錄，無法在應用程式內復原。不撤銷日誌記錄的業務操作。',
     'This removes the entry and its grouped repetitions. It cannot be restored in the app. The recorded action is not undone.',
   ),
-  'empty': ('暂无组织日志', '暫無組織日誌', 'No organization logs yet'),
+  'empty': ('暂无操作记录', '暫無操作記錄', 'No activity recorded yet'),
   'noMatches': (
     '没有符合条件的日志，请调整分类或搜索词。',
     '沒有符合條件的日誌，請調整分類或搜尋詞。',

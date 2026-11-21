@@ -1,3 +1,10 @@
+const _deviceContinuityProfileStrings = <String, String>{
+  'profile.ownerRead.neverSaved': '这个账号还没有保存过个人页',
+  'profile.ownerRead.retry': '重试',
+  'profile.local.onlySaved': '这些改动只保存在这台电脑上，换电脑后看不到。',
+  'profile.error.ownerReadFailed': '暂时读不到你的个人页，稍后重试',
+};
+
 const _sharedProfileBackgroundNames = <String, String>{
   'profile.background.sc02': 'SC 02',
   'profile.background.sc03': 'SC 03',
@@ -34,6 +41,7 @@ const _sharedProfileBackgroundNames = <String, String>{
 };
 
 const simplifiedProfileSettingsStrings = <String, String>{
+  ..._deviceContinuityProfileStrings,
   'profile.avatar.change': '更换账号头像',
   'profile.avatar.shared': '设置星海舰桥账号头像。保存后生效，不修改 SCM 主站头像。',
   'profile.avatar.managed': '此头像由登录账号管理。',
@@ -74,6 +82,10 @@ const simplifiedProfileSettingsStrings = <String, String>{
   'profile.unavailable.retry': '重新读取',
   'profile.error.unavailable': '个人主页服务暂时不可用，请检查连接后重试。',
   'profile.error.refreshBeforeSave': '当前主页尚未读取完成或账号已变化。请重新读取个人页面后再编辑保存。',
+  'profile.error.confirmConflictingGroups': '你修改的部分内容也在别处更新了。请确认当前草稿后再次保存。',
+  'profile.error.retryCurrentDraft': '暂时无法确认服务器上的最新资料。草稿仍在，请稍后重试保存。',
+  'profile.error.retryLocalDraft': '暂时无法确认最新的本机档案。草稿仍在，请稍后重试保存。',
+  'profile.error.draftSaveUnconfirmed': '保存结果未确认。草稿仍在，再次保存时会先核对服务器版本。',
   'profile.error.writeUnconfirmed':
       '暂时无法确认保存结果，更改可能已保存。请重新读取个人页面并核对后再编辑，不要重复提交。',
   'profile.error.hostUnavailable': 'Native Host 当前不可用，请重新启动客户端后重试。',
@@ -181,6 +193,7 @@ const simplifiedProfileSettingsStrings = <String, String>{
   'profile.support.pilot': '驾驶',
   'profile.support.gunner': '炮手',
   'profile.ships.title': '最爱舰船',
+  'profile.ships.moduleLimit': '最爱舰船模块最多 3 个',
   'profile.shipRole.expedition': '远征',
   'profile.shipRole.salvage': '打捞',
   'profile.shipRole.multirole': '多用途',
@@ -258,6 +271,7 @@ const simplifiedProfileSettingsStrings = <String, String>{
 };
 
 const traditionalProfileSettingsStrings = <String, String>{
+  ..._deviceContinuityProfileStrings,
   'profile.avatar.change': '更換帳號頭像',
   'profile.avatar.shared': '設定星海艦橋帳號頭像。儲存後生效，不修改 SCM 主站頭像。',
   'profile.avatar.managed': '此頭像由登入帳號管理。',
@@ -298,6 +312,10 @@ const traditionalProfileSettingsStrings = <String, String>{
   'profile.unavailable.retry': '重新讀取',
   'profile.error.unavailable': '個人主頁服務暫時無法使用，請檢查連線後再試。',
   'profile.error.refreshBeforeSave': '目前主頁尚未讀取完成或帳號已變更。請重新讀取個人頁面後再編輯儲存。',
+  'profile.error.confirmConflictingGroups': '你修改的部分內容也在其他地方更新了。請確認目前的草稿後再次儲存。',
+  'profile.error.retryCurrentDraft': '暫時無法確認伺服器上的最新資料。草稿仍在，請稍後重試儲存。',
+  'profile.error.retryLocalDraft': '暫時無法確認最新的本機檔案。草稿仍在，請稍後重試儲存。',
+  'profile.error.draftSaveUnconfirmed': '儲存結果未確認。草稿仍在，再次儲存時會先核對伺服器版本。',
   'profile.error.writeUnconfirmed':
       '暫時無法確認儲存結果，變更可能已儲存。請重新讀取個人頁面並核對後再編輯，不要重複提交。',
   'profile.error.hostUnavailable': 'Native Host 目前無法使用，請重新啟動客戶端後再試。',
@@ -405,6 +423,7 @@ const traditionalProfileSettingsStrings = <String, String>{
   'profile.support.pilot': '駕駛',
   'profile.support.gunner': '砲手',
   'profile.ships.title': '最愛艦船',
+  'profile.ships.moduleLimit': '最愛艦船模組最多 3 個',
   'profile.shipRole.expedition': '遠征',
   'profile.shipRole.salvage': '打撈',
   'profile.shipRole.multirole': '多用途',
@@ -482,6 +501,7 @@ const traditionalProfileSettingsStrings = <String, String>{
 };
 
 const englishProfileSettingsStrings = <String, String>{
+  ..._deviceContinuityProfileStrings,
   'profile.avatar.change': 'Change account photo',
   'profile.avatar.shared': 'Set your StarBridge account photo. Applies after saving; your SCM main-site photo stays unchanged.',
   'profile.avatar.managed': 'This photo is managed by your sign-in account.',
@@ -522,6 +542,10 @@ const englishProfileSettingsStrings = <String, String>{
   'profile.unavailable.retry': 'Read again',
   'profile.error.unavailable': 'The personal profile service is temporarily unavailable. Check your connection and retry.',
   'profile.error.refreshBeforeSave': 'The profile has not finished loading or the account has changed. Reload your personal profile before editing and saving.',
+  'profile.error.confirmConflictingGroups': 'Some of your edits were also changed elsewhere. Review your draft, then save it again.',
+  'profile.error.retryCurrentDraft': 'The latest profile could not be confirmed. Your draft is still here. Try saving again shortly.',
+  'profile.error.retryLocalDraft': 'The latest local profile could not be confirmed. Your draft is still here. Try saving again shortly.',
+  'profile.error.draftSaveUnconfirmed': 'The save could not be confirmed. Your draft is still here. Saving again will check the latest server version first.',
   'profile.error.writeUnconfirmed': 'We could not confirm the save. Your changes may already be saved. Reload your profile and check it before making further edits. Do not resubmit yet.',
   'profile.error.hostUnavailable':
       'Native Host is unavailable. Restart the client and retry.',
@@ -636,6 +660,7 @@ const englishProfileSettingsStrings = <String, String>{
   'profile.support.pilot': 'Piloting',
   'profile.support.gunner': 'Gunnery',
   'profile.ships.title': 'Favorite ships',
+  'profile.ships.moduleLimit': 'Up to 3 favorite ship modules',
   'profile.shipRole.expedition': 'Expedition',
   'profile.shipRole.salvage': 'Salvage',
   'profile.shipRole.multirole': 'Multi-role',

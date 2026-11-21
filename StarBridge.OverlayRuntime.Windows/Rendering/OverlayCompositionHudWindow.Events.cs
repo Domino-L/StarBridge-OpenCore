@@ -54,5 +54,6 @@ internal sealed partial class OverlayCompositionHudWindow
 
     private static bool IsPartySceneLabel(string value) =>
         value.Contains("房间", StringComparison.OrdinalIgnoreCase) ||
-        value.Contains("PARTY", StringComparison.OrdinalIgnoreCase);
+        value.Contains("PARTY", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("ROOM", StringComparison.OrdinalIgnoreCase);
 }

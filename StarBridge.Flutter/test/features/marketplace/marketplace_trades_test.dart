@@ -7,7 +7,19 @@ import 'package:starbridge_flutter/features/marketplace/marketplace_trades_contr
 import 'marketplace_test.dart' show FixturePort;
 
 class TradesPort extends FixturePort implements MarketplaceTradePort {
-  int writes = 0, reads = 0, revision = 0;
+  @override
+  Future<MarketRead> read(String operation, {int id = 0, String keyword = '',
+    int category = 0, int side = 1, int page = 1, String language = 'CN',
+    Map<String, String> options = const {}}) async {
+    if (operation == 'locations') {
+      return MarketRead({
+        'rows': [{'id': 99, 'name': 'Fixture location'}], 'total': 1,
+      }, DateTime.now());
+    }
+    return super.read(operation, id: id, keyword: keyword, category: category,
+      side: side, page: page, language: language, options: options);
+  }
+  int writes = 0, reads = 0, ongoingReads = 0, revision = 0;
   Completer<MarketRow>? writeGate, tradeReadGate;
   bool fail = false;
   final pages = <int, List<MarketRow>>{};
@@ -26,6 +38,13 @@ class TradesPort extends FixturePort implements MarketplaceTradePort {
   Future<MarketRow> trade(String op, [MarketRow input = const {}]) async {
     if (op == 'revision') return {'revision': revision};
     if (op == 'list') {
+      if (input['status'] == 1) {
+        ongoingReads++;
+        final all = (pages.isEmpty ? [row] : pages.values.expand((p) => p))
+            .where((r) => r['transactionStatus'] == 1).toList();
+        final page = input['page'] as int? ?? 1;
+        return {'rows': all.skip((page - 1) * 20).take(20).toList(), 'total': all.length};
+      }
       reads++;
       if (pages.isNotEmpty) {
         return {

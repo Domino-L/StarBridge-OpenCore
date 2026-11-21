@@ -49,7 +49,7 @@ void main() {
         includeLocal ? findsOneWidget : findsNothing,
       );
       expect(
-        find.textContaining('账号汇总: 0小时 0分钟'),
+        find.textContaining('账号累计暂时读不到'),
         includeLocal ? findsOneWidget : findsNothing,
       );
       if (!includeLocal) expect(find.text('0小时 0分钟'), findsOneWidget);
@@ -106,7 +106,11 @@ void main() {
       final h = support.Harness();
       await tester.pump();
       final account = profile(90);
-      h.controller.value = const GameplayTimeView(seconds: 3600);
+      h.controller.value = const GameplayTimeView(
+        seconds: 3600,
+        accountTotalState: 'available',
+        accountTotalSeconds: 10800,
+      );
       await tester.pumpWidget(
         support.app(
           PersonalProfileSummaryStrip(
@@ -117,10 +121,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('1小时 0分钟'), findsOneWidget);
-      h.controller.value = const GameplayTimeView(seconds: 7200);
+      h.controller.value = const GameplayTimeView(
+        seconds: 7200,
+        accountTotalState: 'available',
+        accountTotalSeconds: 10800,
+      );
       await tester.pump();
       expect(find.text('2小时 0分钟'), findsOneWidget);
-      expect(find.text('账号汇总: 1小时 30分钟'), findsOneWidget);
+      expect(find.textContaining('账号累计 3 小时'), findsOneWidget);
       expect(account.gameplayMinutes, 90);
       await tester.pumpWidget(const SizedBox());
       await h.close(tester);

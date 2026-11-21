@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'official_fleet_governance_management.dart';
 import 'official_fleet_governance_copy.dart';
 import 'official_fleet_governance_writer.dart';
+import '../../design_system/interaction/panel_dialog_scope.dart';
 
 String fleetRoleName(BuildContext context, GovernanceRow role) {
   final metadata = role['metadata'];
@@ -71,6 +72,7 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
   bool _permissionsDone = false;
   bool _permissionSaved = false;
   bool _ready = false;
+  bool _reading = false;
   bool _opened = false;
   @override
   void initState() {
@@ -80,6 +82,8 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
   }
 
   Future<void> _open() async {
+    if (_reading) return;
+    setState(() => _reading = true);
     try {
       final page = await readFleetRoleTemplatePage(
         widget.port,
@@ -112,6 +116,10 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
       }
     } on Object {
       if (mounted) setState(() => _writer.result = 'unavailable');
+    } finally {
+      // A missing role can still have an exact pending deletion to retry.
+      // Failed reads end loading without granting fresh edit authority.
+      if (mounted) setState(() => _reading = false);
     }
   }
 
@@ -141,6 +149,7 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
       await widget.onChanged();
     }
   }
+
   bool get _rallyClosed => governanceRows(_page['creationCapabilities']).any(
     (r) =>
         r['capability'] == 'rally.manage' &&
@@ -157,7 +166,20 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
           {...permission},
   ];
 
+  bool get _pendingDeletion =>
+      _writer.pending?.command == 'updateRolePermissions' &&
+      _writer.pending?.fields['enabled'] == false;
+
   Future<void> _save() async {
+    // A disabled or omitted role still has an exact pending deletion to resolve.
+    // The writer reuses its original intent and operation ID, even after rereads.
+    if (_pendingDeletion) {
+      final result = await _writer.submit('updateRolePermissions', const {});
+      if (mounted && const {'accepted', 'duplicate'}.contains(result)) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
     if (_name.text.trim().isEmpty && _writer.pending == null) return;
     if (_role == null && widget.role == null) {
       final result = await _writer.submit('manageRoleTemplates', {
@@ -233,6 +255,49 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
     }
   }
 
+  /// A disabled role grants nothing, and the policy refuses every grant bound to
+  /// it: the relay has no other way to remove one, and the audit keeps the step.
+  Future<void> _delete() async {
+    final role = _role;
+    if (role == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      useRootNavigator: PanelDialogScope.allowsRoot(context),
+      builder: (context) {
+        String t(String key) => fleetGovernanceText(context, key);
+        return AlertDialog(
+          title: Text(t('deleteRole')),
+          content: Text(t('deleteRoleConfirm')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('keepRole')),
+            ),
+            FilledButton(
+              key: const Key('role-delete-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('deleteRole')),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    final result = await _writer.submit('updateRolePermissions', {
+      'expectedPolicyRevision': _page['revision'],
+      'roleKey': role['roleKey'],
+      'expectedPermissionVersion': role['permissionVersion'],
+      'enabled': false,
+      'permissions': [
+        for (final permission in governanceRows(role['permissions']))
+          {...permission},
+      ],
+    });
+    if (mounted && const {'accepted', 'duplicate'}.contains(result)) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   void dispose() {
     _name.dispose();
@@ -258,12 +323,19 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
       }
       final locked =
           !_ready || _writer.busy || _writer.pending != null || _writer.retired;
+      final access = _page['access'];
+      final writable =
+          access is Map &&
+          governanceAllowed(
+            access[widget.role == null ? 'create' : 'updateMetadata'],
+          );
       final canSave =
-          _ready &&
+          (_ready || _pendingDeletion) &&
           !_writer.busy &&
           !_writer.retired &&
           (_writer.pending != null ||
-              _name.text.trim().isNotEmpty &&
+              writable &&
+                  _name.text.trim().isNotEmpty &&
                   !(_rallyClosed && _selected.contains('rally.manage')));
       // Leaving with an unconfirmed write is allowed: the role page keeps the
       // writer, so opening this again continues the same operation.
@@ -312,19 +384,27 @@ class _EditorState extends State<OfficialFleetRoleEditor> {
                             },
                     ),
                   if (_rallyClosed) Text(t('closed')),
-                  if (_writer.busy || !_ready) const LinearProgressIndicator(),
+                  if (_writer.busy || _reading) const LinearProgressIndicator(),
                   if (_permissionSaved &&
                       _role != null &&
                       _name.text.trim() != fleetRoleName(context, _role!))
                     Text(t('permissionsSaved')),
                   if (_writer.result case final result?) Text(t(result)),
-                  if (!_ready && !_writer.busy)
+                  if (!_ready && !_reading && !_writer.busy)
                     TextButton(onPressed: _open, child: Text(t('retry'))),
                 ],
               ),
             ),
           ),
           actions: [
+            if (widget.role != null &&
+                writable &&
+                widget.port.supports('updateRolePermissions'))
+              TextButton(
+                key: const Key('role-delete'),
+                onPressed: locked ? null : _delete,
+                child: Text(t('deleteRole')),
+              ),
             TextButton(
               onPressed: _writer.busy
                   ? null

@@ -1,12 +1,16 @@
 import 'dart:ui' show Locale;
 
+import '../../features/account/account_migration_controller.dart';
 import '../../features/account/account_module.dart';
+import '../../features/account/account_relay_features.dart';
+import '../presence/connected_manual_presence.dart';
+import '../../platform/window/menu_bridge_relay.dart';
 import '../../shared/remote_image_loader.dart';
 import '../product_features.dart';
 import '../preferences/app_preferences_port.dart';
 import '../preferences/app_preferences.dart';
 
-import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:flutter/widgets.dart' show Listenable, WidgetsBinding;
 
 import '../localization/app_strings.dart';
 import '../../platform/window/menu_interaction_presentation.dart';
@@ -35,7 +39,6 @@ import '../../features/settings/bridge_local_privacy.dart';
 import '../../features/direct_messages/bridge_direct_messages.dart';
 import '../../features/common/bridge_user_interaction.dart';
 import '../menu_overlay/menu_profiles_session.dart';
-import '../presence/manual_presence.dart';
 import '../../features/communities/bridge_communities.dart';
 import '../../features/communities/communities_module.dart';
 import '../../features/communities/community_overview_reader.dart';
@@ -64,7 +67,7 @@ OverlaySettingsModule composeOverlaySettings(
   required PartyRoomsModule rooms,
   AppPreferencesPort? applicationPreferences,
   CommunitiesModule Function()? menuCommunities,
-  ManualPresenceController? Function()? menuPresence,
+  ConnectedManualPresence? Function()? menuPresence,
   GameLogView Function()? menuGame,
   MenuOpenLabels Function()? menuLabels,
   MenuAttentionSource Function()? menuAttention,
@@ -96,6 +99,10 @@ OverlaySettingsModule composeOverlaySettings(
         : null;
   }
 
+  bool scmOnly() {
+    return relayAccountFeaturesBlocked(account.projection);
+  }
+
   late final OverlaySettingsModule module;
   module = OverlaySettingsModule(
     port,
@@ -105,6 +112,26 @@ OverlaySettingsModule composeOverlaySettings(
         ? null
         : MethodChannelMenuPreviewWindow(
             lifetime: menuLifetime,
+            pageRelay: session == null
+                ? null
+                : MenuBridgeRelay(
+                    session,
+                    mode: () => menuPresence?.call()?.connectionMode,
+                    ownProfile: () => account.projection.value.profile,
+                    // Disband in the menu follows the migration offer too.
+                    ownProfileChanges: Listenable.merge([
+                      account.projection,
+                      AccountMigrationController.offerChangesFor(
+                        account.projection,
+                      ),
+                    ]),
+                    presenceChanges: () => menuPresence?.call()?.source,
+                    countedOnline: () => !const {
+                      'presence.invisible',
+                      'presence.offline',
+                    }.contains(menuPresence?.call()?.source.value.selfKey),
+                    scmOnly: scmOnly,
+                  ),
             interaction: applicationPreferences == null
                 ? null
                 : MenuInteractionFeed(
@@ -114,8 +141,11 @@ OverlaySettingsModule composeOverlaySettings(
                           applicationPreferences.projection.value.effective;
                       return MenuInteractionPresentation(
                         language: value.locale.toLanguageTag(),
+                        performanceMode: value.performanceMode,
+                        // 0.7.3: no holiday mark on the overlay for now
+                        // (user, 11-07: "浮层先不做节日"); the client keeps its own.
                         holiday: menuHolidayId(
-                          enabled: value.holidayAppearance,
+                          enabled: false,
                           now: DateTime.now(),
                         ),
                         style: MenuInteractionStyle.values.byName(
@@ -232,7 +262,8 @@ OverlaySettingsModule composeOverlaySettings(
                           .where((v) => v.isNotEmpty)
                           .join(' · ')
                     : notInGame,
-                menuPresence?.call()?.snapshot.selfKey ?? 'presence.unknown',
+                menuPresence?.call()?.source.controller.snapshot.selfKey ??
+                    'presence.unknown',
               ];
             },
             preferences:
@@ -246,7 +277,11 @@ OverlaySettingsModule composeOverlaySettings(
                 ? const {}
                 : {
                     'organizations': (publish) => MenuOrganizationsSession(
-                      BridgeCommunities(session, ownAvatar: ownAvatar),
+                      BridgeCommunities(
+                        session,
+                        ownAvatar: ownAvatar,
+                        scmOnly: scmOnly,
+                      ),
                       publish,
                       locale: () =>
                           applicationPreferences
@@ -282,7 +317,7 @@ OverlaySettingsModule composeOverlaySettings(
                 : (publish) => MenuFriendsSession(
                     BridgeFriendsAdapter(session),
                     publish,
-                    presence: menuPresence?.call(),
+                    presence: menuPresence?.call()?.source.controller,
                     identityChanges: account.projection,
                     identity: () {
                       final current = account.projection.value;
@@ -311,7 +346,7 @@ OverlaySettingsModule composeOverlaySettings(
                     ownAvatar: ownAvatar,
                     identityChanges: account.projection,
                     invitations: (publish) => MenuCommsInvitations(
-                      BridgeCommunities(session),
+                      BridgeCommunities(session, scmOnly: scmOnly),
                       publish,
                       locale: () =>
                           applicationPreferences

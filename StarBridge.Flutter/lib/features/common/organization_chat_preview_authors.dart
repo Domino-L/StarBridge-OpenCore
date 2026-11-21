@@ -203,7 +203,7 @@ final class OrganizationChatPreviewAuthors extends ChangeNotifier {
       senderRef,
       admitted,
       admitted.visible
-          ? _elapsed() + admitted.validUntil!.difference(now)
+          ? _elapsed() + admitted.displayDeadline!.difference(now)
           : null,
     );
   }

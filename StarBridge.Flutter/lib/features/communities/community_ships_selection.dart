@@ -42,10 +42,12 @@ final class CommunityShipsSelection {
     page = null;
   }
 
-  /// A new list page may replace the one shown, or say the ship has gone.
-  void afterPage(CommunityShipsPage read) {
-    final after = communityShipSelectionAfter(
-      read,
+  /// The pages now held may replace the one shown, or say the ship has gone.
+  /// All of them answer together: the ship may have moved to another loaded
+  /// page (review R1).
+  void afterPages(List<CommunityShipsPage> pages) {
+    final after = communityShipSelectionAcross(
+      pages,
       page,
       model().selectedShipRef,
     );

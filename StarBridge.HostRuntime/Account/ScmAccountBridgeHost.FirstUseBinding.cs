@@ -3,7 +3,13 @@ namespace StarBridge.HostRuntime.Account;
 internal sealed partial class ScmAccountBridgeHost
 {
     private Func<bool>? _firstUseGameIdentityReady;
+    private long _restoredSessionGeneration = -1;
     internal void RequireColdFirstUseGameIdentity(Func<bool> ready) => _firstUseGameIdentityReady ??= ready;
+    // True only while the current session is the one restored from the vault
+    // at startup, unchanged: a sign-in or account change publishes a new
+    // generation, and a replaced credential fails the installed lineage check.
+    internal bool IsRestoredFirstUseSession(FirstUseScmIdentityFacts facts) =>
+        Interlocked.Read(ref _restoredSessionGeneration) == facts.Generation && InstalledFirstUseIdentityCurrent(facts);
     internal FirstUseScmIdentityFacts? CurrentInstalledFirstUseFacts()
     {
         var session = Volatile.Read(ref _session);

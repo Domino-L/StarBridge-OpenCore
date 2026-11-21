@@ -28,6 +28,7 @@ internal static class PlayerActivityTransitionReliabilityTests
             var sink = new Sink();
             PlayerActivityEnvironment environment = new(true, true, false, false);
             long timestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+            var clock = new CelebrationTestClock();
             var deliveryEnvironmentUnknown = false;
             var transientHandoffUnknown = false;
             var recoveryUnknownReads = 0;
@@ -37,14 +38,24 @@ internal static class PlayerActivityTransitionReliabilityTests
                     transientHandoffUnknown && ++environmentReads == 2 ||
                     recoveryUnknownReads > 0 && ++environmentReads >= 2 && environmentReads < recoveryUnknownReads + 2)
                     ? new(false, true, true, false) : environment;
-            using var runtime = new PlayerActivityRuntime(root, () => 1, sink, ReadEnvironment, () => timestamp);
+            using var runtime = new PlayerActivityRuntime(root, () => 1, sink, ReadEnvironment, () => timestamp, clock);
             long sequence = 0;
             Task Observe(string state, string? avatar = null) => runtime.ObserveAsync(new(1, "fixture", "friends", "friends", ++sequence,
                 true, [new("peer", "Fixture", "fixture", state, false, true, avatar)], () => true));
+            async Task SettledOffline()
+            {
+                var next = sink.Next();
+                await Observe("offline");
+                await CelebrationTestClock.Until(() => clock.Waiting(TimeSpan.FromSeconds(20)));
+                timestamp += 20L * System.Diagnostics.Stopwatch.Frequency;
+                clock.Advance(TimeSpan.FromSeconds(20));
+                await next.WaitAsync(TimeSpan.FromSeconds(2));
+                await runtime.OfflineSettleWork.WaitAsync(TimeSpan.FromSeconds(2));
+            }
             await Observe("online");
             // Each observed transition is new, including repeated kinds. Identical
             // snapshots are duplicates; a real intervening state is not.
-            for (var i = 0; i < 3; i++) { await Observe("offline"); await Observe("online"); }
+            for (var i = 0; i < 3; i++) { await SettledOffline(); await Observe("online"); }
             if (sink.Seen.Count != 6)
                 throw new Exception($"Repeated real offline/online transitions: expected 6, got {sink.Seen.Count}");
             await Observe("online");
@@ -92,7 +103,7 @@ internal static class PlayerActivityTransitionReliabilityTests
             await Observe("inGame");
             await Observe("away"); await Observe("inGame");
             if (sink.Seen.Count != 0) throw new Exception("Away must not manufacture game stop/start notifications");
-            await Observe("away"); await Observe("offline");
+            await Observe("away"); await SettledOffline();
             if (sink.Seen.Single().Activity?.Kind != "Offline")
                 throw new Exception("Real disconnection while away still announces offline");
             sink.Seen.Clear(); runtime.Reset();

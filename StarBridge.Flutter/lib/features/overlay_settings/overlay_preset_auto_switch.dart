@@ -21,6 +21,7 @@ final class OverlayPresetAutoSwitch {
   (String, int)? _scope;
   String? _source, _restorePreset, _observedActive;
   Object? _attempt;
+  Set<String>? _policies;
   int _manual = 0;
   bool _paused = false, _scheduled = false, _running = false, _disposed = false;
 
@@ -62,6 +63,17 @@ final class OverlayPresetAutoSwitch {
       _restorePreset = null;
     }
     if (!_running) _observedActive = active;
+    // 11-13 user "开启浮层自动切换应该立刻切换，不再等待": turning a plan's
+    // automatic use on, or binding it to another source, applies now even
+    // after a manual choice paused automatic use.
+    if (snapshot != null) {
+      final policies = _automaticPolicies(snapshot);
+      if (_policies != null && !_policies!.containsAll(policies)) {
+        _paused = false;
+        _attempt = null;
+      }
+      _policies = policies;
+    }
     // An unknown source suppresses new commands, but is not a leave event.
     // Invalidated identities above erase the pending transition immediately.
     if (scope == null ||
@@ -134,6 +146,13 @@ final class OverlayPresetAutoSwitch {
       _schedule();
     }
   }
+
+  static Set<String> _automaticPolicies(OverlayWorkspaceSnapshot snapshot) => {
+    for (final preset in snapshot.presets)
+      if (preset.sources case final sources? when sources.autoSwitch)
+        '${preset.id}|${sources.binding.mode.name}|'
+            '${sources.binding.ownerKey}|${sources.binding.communityCode}',
+  };
 
   void dispose() {
     _disposed = true;

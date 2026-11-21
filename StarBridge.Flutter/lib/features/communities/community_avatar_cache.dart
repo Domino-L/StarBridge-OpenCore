@@ -18,6 +18,16 @@ class CommunityAvatarCache {
   int _retainedBytes = 0;
   static const _maximumRetainedBytes = 16 * 1024 * 1024;
   static const _maximumEntries = 96, _maximumActive = 3;
+  // Missing content versions cannot certify an unchanged portrait forever.
+  static const unversionedLifetime = Duration(minutes: 1);
+
+  bool isFresh(String identity, String? version) {
+    final key = (identity, version ?? '');
+    final expires = _retryAt[key];
+    return _entries.containsKey(key) &&
+        _byteSizes.containsKey(key) &&
+        (expires == null || now().isBefore(expires));
+  }
 
   /// Decoded portraits (about 36 KB each at 96 px), so a large member list
   /// scrolled back shows already seen avatars in the same frame.
@@ -60,6 +70,9 @@ class CommunityAvatarCache {
             if (identical(_entries[key], entry)) {
               final size = bytes?.lengthInBytes ?? 0;
               _byteSizes[key] = size;
+              if (key.$2.isEmpty) {
+                _retryAt[key] = now().add(unversionedLifetime);
+              }
               _retainedBytes += size;
               while (_retainedBytes > _maximumRetainedBytes &&
                   _entries.isNotEmpty) {
@@ -95,7 +108,6 @@ class CommunityAvatarCache {
     _retryAt.remove(key);
     _retainedBytes -= _byteSizes.remove(key) ?? 0;
   }
-
 
   Future<Uint8List?> member(
     CommunityWorkspacePort port,

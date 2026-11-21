@@ -16,12 +16,25 @@ OverlayWorkspaceSettings settings() => OverlayWorkspaceSettings.fromMap({
       OverlayWorkspaceFieldKind.readOnlyChoice => f.options.first,
       OverlayWorkspaceFieldKind.numberChoice => f.numberOptions.first,
       OverlayWorkspaceFieldKind.number =>
-        f.field == 'chatMaxVisibleCount' ? f.minimum.round() : f.minimum,
+        f.field == 'chatMaxVisibleCount'
+            ? f.minimum.round()
+            // 11-07 the visor members size at its defaults
+            : f.field == 'visorMembersWidth'
+            ? 364.0
+            : f.field == 'visorMembersHeight'
+            ? 394.0
+            : f.field == 'visorEventsWidth' || f.field == 'visorChatWidth'
+            ? 364.0
+            // the visor's camera as it always was (11-11 viewing distance)
+            : f.field == 'visorViewingDistance'
+            ? 1000.0
+            : f.minimum,
       OverlayWorkspaceFieldKind.color => '#FFFFFF',
       OverlayWorkspaceFieldKind.hotkey => '',
       OverlayWorkspaceFieldKind.eventTypes => 0,
       OverlayWorkspaceFieldKind.eventDurations => {
         for (final e in overlayDurationFields) e.$1: 0,
+        'localPlayReminder': 0,
         'squadChange': 0,
         'commanderChange': 0,
       },

@@ -39,6 +39,7 @@ class AttentionDetail {
   final String Function(BuildContext context) describe;
   final Listenable listenable;
 }
+
 typedef DestinationLeaveGuard = Future<bool> Function(BuildContext context);
 
 final class FeatureDescriptor {
@@ -63,12 +64,19 @@ final class FeatureDescriptor {
     this.prefetch,
     this.onDispose,
     this.openSection,
+    this.runtimePromptBuilder,
+    this.appScopeBuilder,
   }) : assert(
          availability == FeatureAvailability.comingSoon ||
              buildDestination != null,
        ),
        _buildDestination = buildDestination;
 
+  final Widget Function(Widget)? runtimePromptBuilder;
+
+  /// Wraps the whole app above the navigator, so dialogs see it as well as
+  /// pages (see [FeatureRegistry.appScope]).
+  final Widget Function(Widget)? appScopeBuilder;
   final String id;
   final String route;
   final String labelKey;
@@ -122,6 +130,24 @@ final class FeatureRegistry {
   FeatureRegistry(Iterable<FeatureDescriptor> descriptors)
     : _descriptors = List.unmodifiable(descriptors) {
     _validate();
+  }
+
+  Widget runtimePrompts(Widget child) {
+    if (_disposed) return child;
+    for (final descriptor in _descriptors) {
+      child = descriptor.runtimePromptBuilder?.call(child) ?? child;
+    }
+    return child;
+  }
+
+  /// App-wide scopes from the features, mounted by the app around its
+  /// navigator without depending on feature implementations.
+  Widget appScope(Widget child) {
+    if (_disposed) return child;
+    for (final descriptor in _descriptors) {
+      child = descriptor.appScopeBuilder?.call(child) ?? child;
+    }
+    return child;
   }
 
   final List<FeatureDescriptor> _descriptors;
@@ -185,4 +211,10 @@ final class FeatureRegistry {
       }
     }
   }
+}
+
+/// Shell mounts runtime prompts without depending on feature implementations.
+extension FeatureRuntimePromptPresentation on Widget {
+  Widget withRuntimePrompts(FeatureRegistry registry) =>
+      registry.runtimePrompts(this);
 }

@@ -1,5 +1,7 @@
 import '../../design_system/icons/marketplace_icon.dart';
 import 'marketplace_trade_copy.dart';
+import 'marketplace_bundle_copy.dart';
+import 'marketplace_trade_chat_entry.dart';
 
 import 'package:flutter/material.dart';
 
@@ -21,10 +23,11 @@ Future<void> showMarketOrder(
   MarketplaceController c,
   MarketRow row,
 ) async {
+  c.fullOrders.rememberOpened(row);
   final id = marketItemId(row);
   // Same suite route as the trade detail sheet: the selected open/close
   // motion, keyboard and reader closes land within two frames.
-  final open = await tradeMotionDialog<bool>(
+  final open = await tradeMotionDialog<int>(
     context,
     barrierDismissible: true,
     (ctx) => Dialog(
@@ -59,35 +62,45 @@ Future<void> showMarketOrder(
                       controlKey: const Key('market-order-close'),
                       label: tradeText(context, '关闭'),
                       onActivate: (source) =>
-                          dismissStarBridgeDialog<bool>(ctx, source: source),
+                          dismissStarBridgeDialog<int>(ctx, source: source),
                       consumeHintEscape: false,
                       icon: MarketplaceIcon(MarketplaceGlyph.close),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                Expanded(child: MarketOrderDetail(c, row)),
+                Expanded(
+                  child: MarketOrderDetail(c, row, onFullOrder: (full) => row = full, openItem: (itemId) =>
+                    dismissStarBridgeDialog<int>(ctx,
+                      source: StarBridgeActivationOrigin.sourceOf(ctx), result: itemId)),
+                ),
                 const SizedBox(height: 12),
-                if (id != null)
+                if (id != null && !marketIsChecklist(row) && row['displayType'] != 3)
                   marketButtonAction(
                     OutlinedButton(
-                      onPressed: () => dismissStarBridgeDialog<bool>(
+                      onPressed: () => dismissStarBridgeDialog<int>(
                         ctx,
                         source: StarBridgeActivationOrigin.sourceOf(ctx),
-                        result: true,
+                        result: id,
                       ),
                       child: Text(tradeText(context, '查看物品')),
                     ),
                     key: const Key('market-order-view-item'),
                   ),
-                if (c.trades.supported &&
-                    row['displayType'] != 3 &&
-                    marketIsMine(row))
+                if (marketIsMine(row))
                   Text(marketText(context, 'mineHint'))
-                else if (c.trades.supported && row['displayType'] != 3)
+                else if (row['displayType'] == 3) ...[
+                  Text(bundleText(context, '以物易物需要和对方商量，请先私信联系')),
+                  if (c.tradeChat != null && row['orderNumber'] is String)
+                    marketButtonAction(FilledButton(
+                      onPressed: () => contactOrderOwner(ctx, c, row),
+                      child: Text(tradeChatEntryText(context,
+                          row['creatorType'] == 0 ? '联系买家' : '联系卖家')),
+                    ), key: const Key('market-order-contact')),
+                ] else if (c.trades.supported)
                   marketButtonAction(
                     FilledButton(
-                      onPressed: () => confirmMarketTrade(ctx, c, row),
+                      onPressed: () => confirmMarketTrade(ctx, c, row, fromOrderDetail: true),
                       child: Text(
                         row['creatorType'] == 1
                             ? tradeText(context, '购买')
@@ -103,5 +116,5 @@ Future<void> showMarketOrder(
       ),
     ),
   );
-  if (open == true && id != null) await c.openItem(id);
+  if (open != null) await c.openItem(open);
 }

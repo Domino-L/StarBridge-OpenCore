@@ -6,6 +6,8 @@ import 'package:starbridge_flutter/features/marketplace/marketplace_controller.d
 import 'package:starbridge_flutter/features/marketplace/marketplace_details.dart';
 import 'package:starbridge_flutter/features/marketplace/marketplace_port.dart';
 import 'package:starbridge_flutter/features/personal_profile/personal_profile_trade_strip.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_public_facts.dart';
+import 'package:starbridge_flutter/features/personal_profile/personal_profile_public_header.dart';
 
 import '../features/marketplace/marketplace_slice4_test.dart' show preview;
 import '../features/marketplace/marketplace_trade_profile_test.dart'
@@ -27,7 +29,57 @@ class _FailingProfilePort extends ProfilePort {
       throw const MarketplaceTradeError('trade_profile.rejected');
 }
 
+class _SummaryProfilePort extends ProfilePort {
+  _SummaryProfilePort(this.summary);
+  final bool summary;
+  @override
+  Future<MarketRow> tradeProfile([MarketRow? changes]) async => {
+    ..._profile(),
+    if (!summary) 'point': null,
+  };
+}
+
 void main() {
+  for (final summary in [false, true]) {
+    testWidgets(
+      // With account facts the strip keeps only days and window and the
+      // numbers come from the facts, as on every visitor page (user 11-08).
+      'account facts replace the hall summary in the strip: $summary',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final c = MarketplaceController(_SummaryProfilePort(summary));
+        addTearDown(c.dispose);
+        Widget page(ProfileTradeStripView view) => preview(
+          ProfileOwnerTradeFactsScope(
+            facts: const PersonalProfilePublicFacts(
+              reputation: 999,
+              completedTrades: 80,
+              sellOrders: 5,
+              buyOrders: 3,
+            ),
+            child: ProfileTradeStripHost(c, view: view),
+          ),
+          AppearanceMode.dark,
+        );
+        await tester.pumpWidget(page(ProfileTradeStripView.visitor));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('★ 999'), findsOneWidget);
+        expect(find.textContaining('★ 128'), findsNothing);
+        expect(find.text('80'), findsOneWidget);
+        expect(find.text('5'), findsOneWidget);
+        expect(find.text('3'), findsOneWidget);
+        await tester.pumpWidget(page(ProfileTradeStripView.restrictedVisitor));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('★'), findsNothing);
+        expect(find.text('80'), findsNothing);
+        expect(find.text('5'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   testWidgets('trade profile maps to the strip in local time', (tester) async {
     final local = DateTime.now().timeZoneOffset.inMinutes;
     final c = MarketplaceController(ProfilePort());

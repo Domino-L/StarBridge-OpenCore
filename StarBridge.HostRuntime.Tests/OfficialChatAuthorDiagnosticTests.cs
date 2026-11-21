@@ -54,7 +54,7 @@ internal static class OfficialChatAuthorDiagnosticTests
     {
         using var f = new Fixture(kind); await f.Prepare();
         f.Handler.Outcome = outcome == "slow" ? "visible" : outcome;
-        f.Handler.DelaySeconds = outcome == "slow" ? 6 : 0;
+        f.Handler.DelaySeconds = outcome == "slow" ? 16 : 0;
         var calls = f.Handler.Calls;
         var result = J(await f.Read());
         var author = kind == "detail" ? result.GetProperty("author") : result.GetProperty("messages")[0];
@@ -63,8 +63,8 @@ internal static class OfficialChatAuthorDiagnosticTests
         Check(author.GetProperty(kind == "detail" ? "callsign" : "senderCallsign").GetString() == Name, "Original callsign reaches Flutter");
         Check(author.GetProperty("avatarVersion").GetString() == AvatarVersion &&
             author.GetProperty(kind == "detail" ? "identityVersion" : "authorIdentityVersion").GetString() == Version, "Original versions reach Flutter");
-        Check(author.GetProperty("identityObservedAtUtc").GetDateTimeOffset() == f.Handler.Clock.Now.AddSeconds(outcome is "expired" or "slow" ? -6 : 2) &&
-            author.GetProperty("identityValidUntilUtc").GetDateTimeOffset() == f.Handler.Clock.Now.AddSeconds(outcome is "expired" or "slow" ? -1 : 7), "Original proof times reach Flutter");
+        Check(author.GetProperty("identityObservedAtUtc").GetDateTimeOffset() == f.Handler.Clock.Now.AddSeconds(outcome is "expired" or "slow" ? -16 : 11) &&
+            author.GetProperty("identityValidUntilUtc").GetDateTimeOffset() == f.Handler.Clock.Now.AddSeconds(outcome is "expired" or "slow" ? -11 : 16), "Original proof times reach Flutter");
         Check(f.Handler.Calls == calls + (kind == "page" ? 2 : 1), "No extra requests or retries");
         Field(f.Lines().Last(), "invalidVisible", "1");
         if (kind == "detail")
@@ -80,7 +80,7 @@ internal static class OfficialChatAuthorDiagnosticTests
     {
         using var f = new Fixture(kind); await f.Prepare();
         var pending = await f.Read(); var observed = f.Handler.Clock.Now;
-        f.Handler.Clock.Advance(6);
+        f.Handler.Clock.Advance(16);
         var result = J(pending);
         var author = kind == "detail" ? result.GetProperty("author") : result.GetProperty("messages")[0];
         Check(author.GetProperty(kind == "detail" ? "identityState" : "authorIdentityState").GetString() ==
@@ -174,8 +174,8 @@ internal static class OfficialChatAuthorDiagnosticTests
                 Field(line, "hidden", outcome == "hidden" ? "1" : "0");
                 Field(line, "unavailable", outcome == "unavailable" ? "1" : "0");
                 Field(line, "invalidVisible", outcome is "expired" or "future" ? "1" : "0");
-                Field(line, "arrivalAgeMs", outcome switch { "hidden" or "unavailable" => "none", "expired" => "6000", "future" => "-2000", _ => "0" });
-                Field(line, "remainingMs", outcome switch { "hidden" or "unavailable" => "none", "expired" => "-1000", "future" => "7000", "near-expiry" => "1", _ => "5000" });
+                Field(line, "arrivalAgeMs", outcome switch { "hidden" or "unavailable" => "none", "expired" => "16000", "future" => "-11000", _ => "0" });
+                Field(line, "remainingMs", outcome switch { "hidden" or "unavailable" => "none", "expired" => "-11000", "future" => "16000", "near-expiry" => "1", _ => "5000" });
                 if (kind == "detail")
                 {
                     Field(line, "avatarData", outcome is "hidden" or "unavailable" ? "0" : "1");
@@ -392,7 +392,7 @@ internal static class OfficialChatAuthorDiagnosticTests
             {
                 var state = Outcome == "mixed" ? i == 2 ? "hidden" : i == 3 ? "unavailable" : "visible" : Outcome is "hidden" or "unavailable" ? Outcome : "visible";
                 if (state != "visible") return new { businessSubjectId = Subject(i), state };
-                var observed = Clock.Now.AddSeconds(Outcome == "expired" ? -6 : Outcome == "future" ? 2 : Outcome == "mixed" ? i == 0 ? -3 : -1 : 0);
+                var observed = Clock.Now.AddSeconds(Outcome == "expired" ? -16 : Outcome == "future" ? 11 : Outcome == "mixed" ? i == 0 ? -3 : -1 : 0);
                 var until = Outcome == "mixed" ? Clock.Now.AddMilliseconds(i == 0 ? 1000 : 500) : Outcome == "near-expiry" ? Clock.Now.AddMilliseconds(1) : observed.AddSeconds(Outcome == "bad-window" ? 6 : 5);
                 var row = JsonSerializer.SerializeToNode(new { businessSubjectId = Subject(i), state, callsign = Name, hasAvatar = true,
                     avatarVersion = AvatarVersion, identityVersion = Outcome == "shape" ? new string('0', 64) : Version,

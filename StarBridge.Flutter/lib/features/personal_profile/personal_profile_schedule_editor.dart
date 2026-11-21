@@ -12,6 +12,7 @@ import '../../app/localization/app_strings.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import '../../design_system/icons/icon_semantic.dart';
 import '../../design_system/icons/starbridge_icon.dart';
+import 'personal_profile_edit_row.dart';
 import 'personal_profile_models.dart';
 import 'personal_profile_collaboration.dart';
 
@@ -92,20 +93,12 @@ class _ScheduleState extends State<PersonalProfileScheduleEditor> {
                 onExpansionChanged: (value) =>
                     setState(() => _expanded = value),
                 headerMinHeight: 0,
-                headerBuilder: (context, visual, open) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    strings.text('profile.collab.schedule'),
-                    style: Theme.of(context).textTheme.titleMedium,
+                headerBuilder: (context, visual, open) => ProfileEditGroupRow(
+                  title: strings.text('profile.collab.schedule'),
+                  summary: TextSpan(
+                    text: ProfileCollaboration.summary(context, _windows),
                   ),
-                  subtitle: Text(
-                    ProfileCollaboration.summary(context, _windows),
-                  ),
-                  trailing: StarBridgeIcon(
-                    _expanded
-                        ? StarBridgeIconSemantic.menuDown
-                        : StarBridgeIconSemantic.forward,
-                  ),
+                  open: _expanded,
                 ),
                 // Floating labels paint above their field; keep them inside the
                 // ExpansionTile's animated clip, including enlarged text.

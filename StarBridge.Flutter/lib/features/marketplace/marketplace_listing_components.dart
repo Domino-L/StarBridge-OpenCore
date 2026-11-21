@@ -2,6 +2,7 @@ import '../../design_system/icons/marketplace_icon.dart';
 import '../../design_system/styles/marketplace_palette.dart';
 import 'marketplace_listing_copy.dart';
 import 'package:flutter/material.dart';
+import 'marketplace_numbers.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'marketplace_port.dart';
 import 'marketplace_states.dart' show marketButtonAction;
@@ -35,7 +36,7 @@ class ListingSegments<T> extends StatelessWidget {
 
 class ListingCapacity extends StatelessWidget {
   const ListingCapacity({super.key, required this.used, required this.limit});
-  final int used;
+  final int? used;
   final int? limit;
   @override
   Widget build(BuildContext context) {
@@ -50,7 +51,7 @@ class ListingCapacity extends StatelessWidget {
               children: [
                 TextSpan(text: '${listingText(context, '挂单')} '),
                 TextSpan(
-                  text: '$used',
+                  text: '${used ?? '—'}',
                   style: TextStyle(
                     fontFamily: t.typography.monoFamily,
                     fontWeight: FontWeight.w600,
@@ -65,14 +66,14 @@ class ListingCapacity extends StatelessWidget {
             ),
             style: TextStyle(fontSize: 12, color: t.colors.textSecondary),
           ),
-          if (limit != null && limit! > 0) ...[
+          if (used != null && limit != null && limit! > 0) ...[
             const SizedBox(width: 8),
             SizedBox(
               width: 80,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
-                  value: (used / limit!).clamp(0, 1).toDouble(),
+                  value: (used! / limit!).clamp(0, 1).toDouble(),
                   minHeight: 4,
                   backgroundColor: marketLine(context),
                   color: t.colors.accent,
@@ -163,7 +164,7 @@ class ListingPriceHint extends StatelessWidget {
             child: Text(
               text!,
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
               style: TextStyle(fontSize: 11.5, color: color),
             ),
@@ -193,7 +194,7 @@ class ListingListingStatus extends StatelessWidget {
   final MarketRow row;
   @override
   Widget build(BuildContext context) {
-    final expired = row['expired'] == true, visible = row['visible'] == true;
+    final expired = marketListingExpired(row), visible = row['visible'] == true;
     final color = expired || !visible
         ? context.tokens.colors.textSecondary
         : MarketplacePalette.success;

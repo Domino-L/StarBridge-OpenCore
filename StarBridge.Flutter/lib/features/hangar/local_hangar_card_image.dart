@@ -17,6 +17,11 @@ class LocalHangarCardImage extends StatefulWidget {
     this.height = 108,
     this.cache,
     this.cacheKey = '',
+    this.fit = BoxFit.contain,
+    this.tint,
+    this.sharp = false,
+    this.placeholder,
+    this.onCustomImage,
     super.key,
   });
   final LocalHangarPresentation item;
@@ -25,6 +30,16 @@ class LocalHangarCardImage extends StatefulWidget {
   final LocalHangarImageCache? cache;
   final String cacheKey;
   final LocalHangarImagePort? imagePort;
+  final BoxFit fit;
+  final Color? tint;
+  final bool sharp;
+
+  /// Shown when the ship has no picture of its own at all.
+  final Widget? placeholder;
+
+  /// Told the player's own picture once it is read, so a caller that lays the
+  /// picture out by its shape can measure the one actually shown.
+  final ValueChanged<Uint8List?>? onCustomImage;
   @override
   State<LocalHangarCardImage> createState() => _LocalHangarCardImageState();
 }
@@ -57,7 +72,10 @@ class _LocalHangarCardImageState extends State<LocalHangarCardImage> {
       final bytes = widget.cache == null
           ? LocalHangarImageCache.decode(await port.readImage())
           : await widget.cache!.read(widget.cacheKey, port);
-      if (mounted && epoch == _epoch) setState(() => _custom = bytes);
+      if (mounted && epoch == _epoch) {
+        setState(() => _custom = bytes);
+        widget.onCustomImage?.call(bytes);
+      }
     } catch (_) {
       // A bookmark may advance Host's conditional-read revision while the
       // image request is pending. Retry only with the replacement port.
@@ -77,18 +95,33 @@ class _LocalHangarCardImageState extends State<LocalHangarCardImage> {
       item: widget.item,
       width: widget.width,
       height: widget.height,
-      fit: BoxFit.contain,
+      fit: widget.fit,
+      tint: widget.tint,
+      sharp: widget.sharp,
     );
+    if (_custom == null &&
+        widget.item.bundledImage == null &&
+        widget.placeholder != null) {
+      return widget.placeholder!;
+    }
     return _custom == null
         ? fallback
         : Image.memory(
             _custom!,
             width: widget.width,
             height: widget.height,
-            fit: BoxFit.contain,
+            fit: widget.fit,
+            color: widget.tint,
+            colorBlendMode: widget.tint == null ? null : BlendMode.srcATop,
             excludeFromSemantics: true,
-            cacheWidth: (widget.width * MediaQuery.devicePixelRatioOf(context))
-                .ceil(),
+            filterQuality: widget.sharp
+                ? FilterQuality.medium
+                : FilterQuality.low,
+            cacheWidth:
+                (widget.width *
+                        MediaQuery.devicePixelRatioOf(context) *
+                        (widget.sharp ? 2 : 1))
+                    .ceil(),
             errorBuilder: (_, _, _) => fallback,
           );
   }

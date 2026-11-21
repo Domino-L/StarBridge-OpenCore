@@ -1,6 +1,7 @@
 import '../direct_messages/bridge_direct_messages.dart'
     show readConversationKey;
 import 'friends_module.dart';
+import '../common/last_online_days.dart';
 
 FriendsSnapshot parseFriendsSnapshot(
   Map<String, Object?> value, {
@@ -126,6 +127,7 @@ Map<String, Object?> _readShared(Object? raw) {
       'ship',
       'location',
       'lastOnlineAt',
+      'lastOnlineDays',
     }.contains(key),
   )) {
     throw const FormatException();
@@ -146,6 +148,7 @@ Map<String, Object?> _readShared(Object? raw) {
       throw const FormatException();
     }
   }
+  readLastOnlineDays(data['lastOnlineDays']);
   if (data['sameServer'] != null && data['sameServer'] is! bool) {
     throw const FormatException();
   }

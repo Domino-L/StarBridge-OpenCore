@@ -11,6 +11,8 @@ internal sealed class PrivacyPublicationPair : IDisposable
 {
     private readonly PrivacyPublication _ordinary, _official;
     private readonly SemaphoreSlim _visibilityGate = new(1, 1);
+    private readonly object _statusGate = new();
+    private PrivacyPublicationStatus _notifiedStatus = new("inactive");
     private bool? _resumeForTransition;
     internal PrivacyPublicationPair(LocalPrivacyStore store, Func<PrivacyPublicationInput?> current,
         Func<PrivacyPublicationInput, JsonElement, CancellationToken, Task> send, bool startTimer = true,
@@ -31,13 +33,34 @@ internal sealed class PrivacyPublicationPair : IDisposable
     }
     internal event Action? StatusChanged;
     internal Action<string, string?>? Diagnostic { get; set; }
-    private void Changed() { var s = Status; Diagnostic?.Invoke(s.State, s.ErrorCode); StatusChanged?.Invoke(); }
+    private void Changed()
+    {
+        // Both lanes may complete concurrently. Compare the merged view, not
+        // the lane that woke us. Flutter consumes revision/error/first-use and
+        // state, but not receipt time. Status still exposes fresh AppliedAt for
+        // admission/recovery checks and on-demand readers.
+        lock (_statusGate)
+        {
+            // Fixed state names and stable error codes only.
+            Support.IdentityGateJournal.Changed("publication-lanes",
+                $"ordinary={_ordinary.Status.State}:{_ordinary.Status.ErrorCode ?? "none"} official={_official.Status.State}:{_official.Status.ErrorCode ?? "none"}");
+            var status = Status with { AppliedAt = null };
+            if (_notifiedStatus == status) return;
+            _notifiedStatus = status;
+            Diagnostic?.Invoke(status.State, status.ErrorCode);
+            StatusChanged?.Invoke();
+        }
+    }
     internal PrivacyPublicationStatus OrdinaryStatus => _ordinary.Status;
     internal PrivacyPublicationStatus OfficialStatus => _official.Status;
     internal PrivacyPublicationStatus Status => Combine(_ordinary.Status, _official.Status);
     private static PrivacyPublicationStatus Combine(PrivacyPublicationStatus a, PrivacyPublicationStatus b)
     {
         // Never report global success when either configured lane is still failing.
+        // A refused main fleet choice waits for the user's explicit save and never
+        // retries by itself, so it is reported first: both settings entries must be
+        // able to offer that save. The ordinary error shows again once it is done.
+        if (b.ErrorCode == "official_fleet.choice_changed") return b;
         if (a.ErrorCode is not null) return a;
         if (b.ErrorCode is not null) return b;
         if (a.State == "inactive") return b;
@@ -52,10 +75,10 @@ internal sealed class PrivacyPublicationPair : IDisposable
     internal void Invalidate() { _ordinary.Invalidate(); _official.Invalidate(); }
     internal Task TickAsync() => Task.WhenAll(_ordinary.TickAsync(), _official.TickAsync());
     internal async Task<PrivacyPublicationStatus> ApplyAsync(BridgeAccountContext owner, long generation, long revision,
-        CancellationToken token, bool preservePause = false)
+        CancellationToken token, bool preservePause = false, bool firstOfficialDefault = false)
     {
-        await Task.WhenAll(_ordinary.ApplyAsync(owner, generation, revision, token, preservePause),
-            _official.ApplyAsync(owner, generation, revision, token, preservePause)).ConfigureAwait(false);
+        await Task.WhenAll(_ordinary.ApplyAsync(owner, generation, revision, token, preservePause, firstOfficialDefault),
+            _official.ApplyAsync(owner, generation, revision, token, preservePause, firstOfficialDefault)).ConfigureAwait(false);
         return Status;
     }
     internal async Task<bool> StopAsync(CancellationToken token, bool explicitRequest = false)

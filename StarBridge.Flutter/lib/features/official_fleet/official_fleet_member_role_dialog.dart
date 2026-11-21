@@ -202,7 +202,7 @@ class _MemberState extends State<OfficialFleetMemberRoleDialog> {
                   if (_page case final page?) ...[
                     for (final grant in governanceRows(
                       page['grants'],
-                    ).where((g) => g['revoked'] == false))
+                    ).where((g) => g['revoked'] == false && !_deleted(g)))
                       ListTile(
                         title: Text(_roleName(grant['roleKey'])),
                         trailing: TextButton(
@@ -271,6 +271,11 @@ class _MemberState extends State<OfficialFleetMemberRoleDialog> {
       );
     },
   );
+  /// A grant bound to a deleted role already gives nothing, so it isn't shown.
+  bool _deleted(GovernanceRow grant) => _roles.any(
+    (r) => r['roleKey'] == grant['roleKey'] && r['enabled'] != true,
+  );
+
   String _roleName(Object? key) {
     final role = _roles.where((r) => r['roleKey'] == key).firstOrNull;
     return role == null

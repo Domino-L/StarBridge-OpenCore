@@ -18,7 +18,8 @@ internal static class PageEditBridgeContract
             if (payload.GetProperty("schemaVersion").GetInt32() != 1) throw new JsonException();
             Exact(payload.GetProperty("content"), ["showOnlineTime", "onlineTimeStart", "onlineTimeEnd", "activityRhythm",
                 "introduction", "skilledRoles", "supportCapabilities", "participationInterests", "shipWishlist",
-                "favoriteShipCodes", "modules", "availabilityTimeZoneId", "availabilityWindows"]);
+                "favoriteShipCodes", "modules", "availabilityTimeZoneId", "availabilityWindows"],
+                ["showcases", "achievementShowcase", "favoriteShowcaseExtra", "mainRole", "favoriteShowcaseExtras"]);
             var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
             { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, PropertyNameCaseInsensitive = false };
             var edit = new PersonalProfilePageEditContract(payload.GetProperty("expectedRevision").GetInt64(),
@@ -32,9 +33,10 @@ internal static class PageEditBridgeContract
         catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException or FormatException or OverflowException)
         { throw new AccountBridgeHostException("personalProfile.write_invalid"); }
     }
-    private static void Exact(JsonElement value, string[] fields)
+    private static void Exact(JsonElement value, string[] fields, string[]? optional = null)
     {
-        if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != fields.Length ||
+        if (value.ValueKind != JsonValueKind.Object ||
+            value.EnumerateObject().Any(property => !fields.Contains(property.Name) && !(optional?.Contains(property.Name) ?? false)) ||
             fields.Any(field => !value.TryGetProperty(field, out _))) throw new JsonException();
     }
     private static void UniqueObjects(JsonElement value)

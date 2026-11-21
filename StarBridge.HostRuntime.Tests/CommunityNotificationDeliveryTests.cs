@@ -101,7 +101,9 @@ internal static class CommunityNotificationDeliveryTests
             Check(!notice.IsCurrent(), "Policy save invalidates pending cards.");
             reader.Feed = Feed(2, 3, "muted"); await runtime.TickAsync();
             Check(sink.Notices.Count == 1, "DND suppresses both kinds.");
-            delivery.SavePolicies(account, 2, Guid.NewGuid().ToString("N"), [], () => true);
+            // 0.7.3: chat cards only when turned on for the source (here, with unmuting).
+            delivery.SavePolicies(account, 2, Guid.NewGuid().ToString("N"),
+                [new(key, NotificationSourceMode.Normal) { TypeRules = [new("chat", "enabled")] }], () => true, extended: true);
             reader.Feed = Feed(3, 3, "muted"); await runtime.TickAsync();
             Check(sink.Notices.Count == 1, "Unmuting does not replay consumed events.");
             await Channels(1, "hiddenDetails");
@@ -116,13 +118,17 @@ internal static class CommunityNotificationDeliveryTests
             current = null; generation++; runtime.Invalidate(); await pending;
             Check(sink.Notices.All(item => !item.IsCurrent()), "Logout cancels work and invalidates every old card.");
             runtime.Dispose(); await runtime.TickAsync(); Check(reader.Calls == calls, "Disposed loops cannot restart.");
-            var policyFile = Directory.GetFiles(Path.Combine(root, "notification-policies-v1"), "*.json").Single();
+            var policyFile = Directory.GetFiles(Path.Combine(root, "notification-policies-v2"), "*.json").Single();
             File.WriteAllText(policyFile, "{");
+            Check(store.Read(account).Revision == 0, "Corrupt v2 with missing v1 uses legacy defaults.");
+            var legacyDirectory = Path.Combine(root, "notification-policies-v1");
+            Directory.CreateDirectory(legacyDirectory);
+            File.WriteAllText(Path.Combine(legacyDirectory, Path.GetFileName(policyFile)), "{");
             try { store.Read(account); throw new Exception("Corrupt data must not restore normal mode"); }
-            catch (System.Text.Json.JsonException) { }
+            catch (InvalidDataException) { }
             var beforeCorrupt = sink.Notices.Count;
             await delivery.PresentCommunityAsync(new(account, Feed(6, 6, "corrupt").Sources[0], NotificationEventKind.OrganizationChat, () => true), default);
-            Check(sink.Notices.Count == beforeCorrupt, "Corrupt policy storage fails delivery closed.");
+            Check(sink.Notices.Count == beforeCorrupt, "Two corrupt policy generations fail delivery closed.");
         } finally { Directory.Delete(root, true); }
     }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }

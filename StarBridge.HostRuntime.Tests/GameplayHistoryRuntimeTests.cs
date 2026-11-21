@@ -63,12 +63,13 @@ internal static class GameplayHistoryRuntimeTests
                 "Recovery never uploads or counts import twice.");
             importRemote.AfterWrite = null;
             importRemote.LoseReply = false;
+            // A saved display choice no longer withholds the total (user 11-08): the page visibility does.
             imported.Runtime.Dispatch(imported.Request("setVisibility", new { schemaVersion = 1, showOnProfile = false }));
             await imported.Runtime.PublishCurrentGameplayAsync();
             var count = importRemote.Writes;
             await imported.Runtime.PublishCurrentGameplayAsync();
-            Require(!importRemote.State.IsPublic && importRemote.State.PlayTimeSeconds == 3600 &&
-                count == 2 && importRemote.Writes == count, "Background publication preserves history and suppresses unchanged writes.");
+            Require(importRemote.State.IsPublic && importRemote.State.PlayTimeSeconds == 3600 &&
+                importRemote.Writes == count, "Background publication preserves history, stays public and suppresses unchanged writes.");
         }
         using (var missing = new Harness())
         {

@@ -25,11 +25,14 @@ internal static class OfficialFleetIdentityObservationTests
         clock.Now = initial.AddSeconds(3);
         OfficialFleetMemberIdentityObservation.EnsureCurrent(first.Result.Values, clock.Now);
         Check(first.Result[1].Identity.Callsign == "Bridge Pilot1", "last observation within its original TTL is not an atomic revocation guarantee");
-        clock.Now = initial.AddSeconds(6);
+        clock.Now = initial.AddSeconds(15).AddTicks(-1);
+        OfficialFleetMemberIdentityObservation.EnsureCurrent(first.Result.Values, clock.Now);
+        clock.Now = initial.AddSeconds(15);
         var last = await oauth.ReadOfficialFleetMemberIdentityObservationsAsync(session, "officialFleet:7", [101], default);
-        Check(last.Result[101].IdentityValidUntilUtc == initial.AddSeconds(11), "later batch has its independently observed deadline");
+        Check(last.Result[101].IdentityValidUntilUtc == initial.AddSeconds(20), "later batch has its independently observed deadline");
+        OfficialFleetMemberIdentityObservation.EnsureCurrent(last.Result.Values, clock.Now);
         Refuses(() => OfficialFleetMemberIdentityObservation.EnsureCurrent(first.Result.Values.Concat(last.Result.Values), clock.Now),
-            "101 owners cannot reuse an expired original deadline after a later batch; no receipt-time TTL renewal");
+            "at original until plus ten seconds, 101 owners cannot renew first deadline with a current later batch");
         Check(first.Result[1].IdentityValidUntilUtc == initial.AddSeconds(5), "final checks never overwrite original source timestamps");
         clock.Now = initial;
         using var validDocument = JsonDocument.Parse(handler.Body([42]));
@@ -41,7 +44,7 @@ internal static class OfficialFleetIdentityObservationTests
             valid.Replace("+00:00", "+01:00"),
             valid.Replace("+00:00", "Z\\n"),
             valid.Replace("12:00:05", "12:00:06"),
-            valid.Replace("12:00:00", "12:00:02"),
+            valid.Replace("12:00:00", "12:00:11").Replace("12:00:05", "12:00:16"),
             valid.Replace("12:00:05", "12:00:00"),
             valid.Replace("\"identityObservedAtUtc\":", "\"identityObservedAtUtc\":\"2026-10-17T12:00:00Z\",\"identityObservedAtUtc\":"),
             valid.Replace("\"visible\"", "\"restricted\""),
@@ -49,7 +52,7 @@ internal static class OfficialFleetIdentityObservationTests
             Check(invalid != valid, "Each negative fixture must actually mutate the valid transport");
             Refuses(() => Parse(invalid, [42], clock.Now), "invalid negotiation, UTC, deadline, duplicate or privacy state is rejected");
         }
-        Refuses(() => Parse(valid, [42], initial.AddSeconds(5)), "deadline equality is expired before exposure");
+        Refuses(() => Parse(valid, [42], initial.AddSeconds(15).AddTicks(1)), "original deadline plus more than ten seconds is expired before exposure");
         _ = Parse(valid.Replace("+00:00", "Z"), [42], clock.Now);
         if (fixtureDirectory is not null)
         {
@@ -83,7 +86,7 @@ internal static class OfficialFleetIdentityObservationTests
     private static IReadOnlyDictionary<long, OfficialFleetMemberIdentityObservation> Parse(string text, long[] ids, DateTimeOffset now)
     { using var document = JsonDocument.Parse(text); return OfficialFleetMemberIdentityObservation.Parse(document.RootElement, "officialFleet:7", ids, now); }
     private static void Refuses(Action action, string message)
-    { try { action(); } catch (AccountBridgeHostException error) when (error.Code == OfficialFleetMemberIdentity.Unavailable) { return; } throw new Exception(message); }
+    { try { action(); } catch (AccountBridgeHostException error) when (error.Code is OfficialFleetMemberIdentity.Unavailable or "official_fleet.identity_time_invalid" or "official_fleet.identity_clock_skew") { return; } throw new Exception(message); }
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
     private sealed class Clock : TimeProvider { internal DateTimeOffset Now; public override DateTimeOffset GetUtcNow() => Now; }
     private sealed class Vault : ITokenVault {

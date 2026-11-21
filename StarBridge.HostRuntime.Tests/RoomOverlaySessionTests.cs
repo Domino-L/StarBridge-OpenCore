@@ -78,6 +78,32 @@ internal static class RoomOverlaySessionTests
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 11-14 ("甲 按推荐"): a room state the overlay does not know is Unknown, never app online; the own row while
+    /// invisible reads offline, as others see it.
+    /// </summary>
+    internal static Task Presence()
+    {
+        var session = new RoomOverlaySession(() => Start);
+        var cases = new (string Text, string Expected)[]
+        {
+            ("游戏中 · 4.0.2", "InGame"), ("应用在线", "AppOnline"), ("暂离", "Away"), ("离线", "Offline"),
+            ("状态未知", "Unknown"), ("隐身", "Offline"), ("", "Offline"), ("something new", "Unknown"),
+        };
+        var directory = Directory();
+        directory.Rooms[0] = directory.Rooms[0] with
+        {
+            Members = cases.Select((item, index) => new RoomMemberView($"Member{index}", $"Handle_{index}", index == 0,
+                item.Text, "", "", "") { IsSelf = index == 5 }).ToArray()
+        };
+        session.ApplyDirectory(Owner, 1, directory, "Handle_5");
+        var members = session.Read(Owner, 1)!.Members;
+        for (var index = 0; index < cases.Length; index++)
+            Check(members[index].Presence == cases[index].Expected,
+                $"Room presence '{cases[index].Text}' reaches the overlay as {cases[index].Expected}, got {members[index].Presence}.");
+        return Task.CompletedTask;
+    }
+
     internal static Task Chat()
     {
         var session = new RoomOverlaySession(() => Start);

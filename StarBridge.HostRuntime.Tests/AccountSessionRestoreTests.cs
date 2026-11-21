@@ -86,7 +86,9 @@ internal static partial class AccountSessionRestoreTests
                 : JsonResponse(HttpStatusCode.OK,
                     "{\"subject\":\"subject-1\",\"displayName\":\"Synthetic Pilot\",\"capabilities\":[\"profile.read\"]}");
         });
-        using var account = CreateAccountRuntime(settings, options, vault, handler);
+        var clock = new CredentialClock();
+        var oauth = new OAuthPkceClient(new ScmHttpClient(handler), vault, options) { SessionClock = clock };
+        using var account = new AccountBridgeRuntime(new ScmAccountBridgeHost(oauth, new ScmProfileCacheStore(), settings.EnvironmentName, () => null));
         var before = account.Generation;
         var result = await ReadCurrent(account, "restore-deadline");
         AssertEqual(BridgeResponseStatuses.Ok, result.Response.Status,
@@ -98,6 +100,7 @@ internal static partial class AccountSessionRestoreTests
         AssertEqual(0, result.Events.Count, "timeout published an account change");
         AssertEqual("synthetic-timeout-refresh", vault.LoadRefreshToken(accountKey),
             "timeout removed the saved credential");
+        clock.Now = clock.Now.AddMinutes(5);
         timedOut = false;
         var recovered = await ReadCurrent(account, "restore-deadline-retry");
         AssertEqual("signedIn", recovered.Response.Payload.GetProperty("state").GetString(),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
@@ -39,7 +40,9 @@ class PrivacySettingsPage extends StatefulWidget {
     this.directMessagePrivacy,
     this.friendRequestPrivacy,
     this.recentlyPlayedPrivacy,
+    this.scmOnly,
     this.eventSession,
+    this.leaderboardSetting,
     super.key,
   });
 
@@ -48,7 +51,12 @@ class PrivacySettingsPage extends StatefulWidget {
   final DirectMessagePrivacyModule? directMessagePrivacy;
   final FriendRequestPrivacyModule? friendRequestPrivacy;
   final RecentlyPlayedPrivacyModule? recentlyPlayedPrivacy;
+
+  /// SCM account without a linked legacy account: relay-only settings explain
+  /// that instead of reporting a changed account.
+  final ValueListenable<bool>? scmOnly;
   final BridgeClientSession? eventSession;
+  final Widget? leaderboardSetting;
 
   @override
   State<PrivacySettingsPage> createState() => _PrivacySettingsPageState();
@@ -57,6 +65,7 @@ class PrivacySettingsPage extends StatefulWidget {
 class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
   PrivacySettingsSection selected = PrivacySettingsSection.scopes;
   final drafts = PrivacyPageDrafts();
+  final _visibleSharingSuggestions = <Object>{};
   StreamSubscription? _accountEvents;
   bool _saving = false;
   InteractionSource _waitSource = InteractionSource.programmatic;
@@ -99,6 +108,17 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     }
   }
 
+  void _suggestionVisibilityChanged(Object suggestion, bool visible) {
+    if (!mounted) return;
+    final wasEmpty = _visibleSharingSuggestions.isEmpty;
+    if (visible) {
+      _visibleSharingSuggestions.add(suggestion);
+    } else {
+      _visibleSharingSuggestions.remove(suggestion);
+    }
+    if (wasEmpty != _visibleSharingSuggestions.isEmpty) setState(() {});
+  }
+
   void _discard() {
     drafts.discard();
     widget.localPrivacy.discard();
@@ -116,10 +136,16 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     try {
       final remoteOk = await drafts.save();
       if (!mounted || epoch != drafts.epoch) return false;
+      if (drafts.saveConflicted) return false;
       if (!identical(localDraft, widget.localPrivacy.draft)) return false;
+      // Domains acknowledge independently. A failed remote group must not
+      // block explicit local edits or their normal publication apply/stop path.
+      // Untouched first-use suggestions must not become saved consent/grants.
+      // A main fleet reconfirmation is submitted although nothing is dirty.
       final localOk =
-          (!widget.localPrivacy.dirty && widget.localPrivacy.hasSaved) ||
-          await widget.localPrivacy.save();
+          !widget.localPrivacy.dirty &&
+              !widget.localPrivacy.officialSubmitRequired ||
+          await widget.localPrivacy.save(explicitEditsOnly: !remoteOk);
       return remoteOk && localOk;
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -217,6 +243,18 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final strings = AppStrings.of(context);
+    final local = widget.localPrivacy;
+    final footerStatus = drafts.failed
+        ? 'settings.privacy.page.failed'
+        : drafts.saveConflicted
+        ? 'settings.privacy.page.conflict'
+        : _dirty
+        ? 'privacy.local.dirty'
+        : local.officialReconfirmRequired
+        ? 'settings.privacy.page.reconfirm'
+        : selected == PrivacySettingsSection.scopes && local.draft == null
+        ? 'settings.privacy.page.notLoaded'
+        : null;
     return PrivacyDraftScope(
       drafts: drafts,
       child: Column(
@@ -363,84 +401,96 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
                   showSaveBar: false,
                 ),
                 SyncPrivacyPage(
+                  accountSectionSelected:
+                      selected == PrivacySettingsSection.account,
                   gameIdVisibility: widget.eventSession == null
                       ? null
                       : GameIdVisibilitySetting(session: widget.eventSession!),
+                  leaderboardSetting: widget.leaderboardSetting,
                   friendSharing: widget.eventSession == null
                       ? null
-                      : FriendSharingSetting(session: widget.eventSession!),
+                      : FriendSharingSetting(
+                          session: widget.eventSession!,
+                          onSuggestionVisibilityChanged:
+                              _suggestionVisibilityChanged,
+                        ),
                   showLegacyEvents: widget.eventSession == null,
                   module: widget.syncPrivacy,
                   directMessagePrivacy: widget.directMessagePrivacy,
                   friendRequestPrivacy: widget.friendRequestPrivacy,
                   recentlyPlayedPrivacy: widget.recentlyPlayedPrivacy,
+                  scmOnly: widget.scmOnly,
                 ),
                 if (widget.eventSession != null)
-                  EventSharingPage(session: widget.eventSession!)
+                  EventSharingPage(
+                    session: widget.eventSession!,
+                    scmOnly: widget.scmOnly,
+                    onSuggestionVisibilityChanged: _suggestionVisibilityChanged,
+                  )
                 else
                   const SizedBox.shrink(),
               ],
             ),
           ),
-          const Divider(height: 1),
-          Padding(
-            padding: EdgeInsets.all(tokens.space.md),
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                if (_saving || widget.localPrivacy.publicationBusy)
-                  SizedBox(
-                    width: 240,
-                    child: HelpSupportWaiting(
-                      key: _saving
-                          ? ValueKey(('privacy-page-saving', _waitPhase))
-                          : ValueKey((
-                              'privacy-page-publication',
-                              _publicationPhase,
-                            )),
-                      label: strings.text(
-                        _saving
-                            ? 'privacy.local.saving'
-                            : 'privacy.scope.live.publishing',
+          if (_visibleSharingSuggestions.isEmpty ||
+              footerStatus != null ||
+              _saving ||
+              local.publicationBusy ||
+              local.officialSubmitRequired) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: EdgeInsets.all(tokens.space.md),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  if (_saving || local.publicationBusy)
+                    SizedBox(
+                      width: 240,
+                      child: HelpSupportWaiting(
+                        key: _saving
+                            ? ValueKey(('privacy-page-saving', _waitPhase))
+                            : ValueKey((
+                                'privacy-page-publication',
+                                _publicationPhase,
+                              )),
+                        label: strings.text(
+                          _saving
+                              ? 'privacy.local.saving'
+                              : 'privacy.scope.live.publishing',
+                        ),
+                        source: _saving ? _waitSource : _publicationSource,
                       ),
-                      source: _saving ? _waitSource : _publicationSource,
+                    )
+                  else
+                    Text(
+                      strings.text(
+                        footerStatus ?? 'settings.privacy.page.noUnsavedChanges',
+                      ),
                     ),
-                  )
-                else
-                  Text(
-                    strings.text(
-                      _saving
-                          ? 'privacy.local.saving'
-                          : drafts.failed
-                          ? 'settings.privacy.page.failed'
-                          : _dirty
-                          ? 'privacy.local.dirty'
-                          : 'settings.privacy.page.saved',
-                    ),
+                  const SizedBox(width: 16),
+                  HelpSupportAction(
+                    controlKey: const Key('privacy-discard'),
+                    onActivate: _dirty && !_saving ? (_) => _discard() : null,
+                    child: Text(strings.text('privacy.local.discard')),
                   ),
-                const SizedBox(width: 16),
-                HelpSupportAction(
-                  controlKey: const Key('privacy-discard'),
-                  onActivate: _dirty && !_saving ? (_) => _discard() : null,
-                  child: Text(strings.text('privacy.local.discard')),
-                ),
-                HelpSupportAction(
-                  controlKey: const Key('privacy-save'),
-                  kind: StarBridgeActionKind.primary,
-                  onActivate: _canSave && !_saving
-                      ? (source) =>
-                            runStarBridgeActivation<void>(source, () async {
-                              await _save();
-                            })
-                      : null,
-                  child: Text(strings.text('settings.privacy.page.save')),
-                ),
-              ],
+                  HelpSupportAction(
+                    controlKey: const Key('privacy-save'),
+                    kind: StarBridgeActionKind.primary,
+                    onActivate: _canSave && !_saving
+                        ? (source) =>
+                              runStarBridgeActivation<void>(source, () async {
+                                await _save();
+                              })
+                        : null,
+                    child: Text(strings.text('settings.privacy.page.save')),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

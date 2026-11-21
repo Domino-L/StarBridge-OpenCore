@@ -217,6 +217,41 @@ void main() {
       );
     },
   );
+  test(
+    'first official default intent is optional and explicit on the wire',
+    () async {
+      final h = Harness(publication: true);
+      addTearDown(h.close);
+      await h.adapter.read();
+      await h.adapter.save(LocalPrivacySettings.editorDefaults);
+      await h.adapter.publication('applyPreservingPause', revision: 1);
+      expect(h.connection.requests.last.payload, {
+        'schemaVersion': 1,
+        'expectedRevision': 1,
+        'preservePause': true,
+      });
+      await h.adapter.publication(
+        'applyPreservingPause',
+        revision: 1,
+        firstOfficialDefault: false,
+      );
+      expect(
+        h.connection.requests.last.payload.containsKey('firstOfficialDefault'),
+        isFalse,
+      );
+      await h.adapter.publication(
+        'applyPreservingPause',
+        revision: 1,
+        firstOfficialDefault: true,
+      );
+      expect(h.connection.requests.last.payload, {
+        'schemaVersion': 1,
+        'expectedRevision': 1,
+        'preservePause': true,
+        'firstOfficialDefault': true,
+      });
+    },
+  );
   test('older Host never receives a publication command', () async {
     final h = Harness();
     addTearDown(h.close);

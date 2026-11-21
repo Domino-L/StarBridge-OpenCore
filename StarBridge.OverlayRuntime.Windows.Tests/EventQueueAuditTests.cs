@@ -40,6 +40,12 @@ internal static class EventQueueAuditTests
             {
                 model.QueueGameEventNotification(type, "visible", "fixture", false, false);
                 model.QueueGameEventNotification(type, "pending", "fixture", false, false);
+                if ((OverlayViewModel.CardOnlyEventTypes & type) != 0)
+                {
+                    // 0.7.3: member online/offline and the online summary are reminder cards only.
+                    Check(model.EventNotifications.Count == 0 && model.PendingEventNotificationCount == 0, type + " never reaches the overlay");
+                    continue;
+                }
                 Check(model.EventNotifications.Count == 1 && model.PendingEventNotificationCount == 1, type + " reaches both queues");
                 model.Refresh(new([]), settings with { EventNotificationTypes = OverlayEventNotificationTypes.All & ~type },
                     OverlayRosterSelectionSettings.Default, "en", false, new("", "", null, null, null, null), PlayerPresenceKind.InGame, "");
@@ -51,7 +57,7 @@ internal static class EventQueueAuditTests
             }
             finally { model.ClearAuthorizedContent(); }
         }
-        Console.WriteLine("PASS all nine active event categories clear both queues and reject disabled additions");
+        Console.WriteLine("PASS overlay event categories clear both queues and reject disabled additions; card-only categories never reach the overlay");
     }
 
     private static void LocalGameCards()

@@ -55,6 +55,9 @@ internal sealed partial class CommunityClient
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             current();
             if (epoch != Interlocked.Read(ref _inviteEpoch)) return new("unknown", "outcomeUnknown");
+            if (response.StatusCode != HttpStatusCode.OK &&
+                await CommunityRelayRefusal.ReasonAsync(response, token) is { } refusal)
+                return new("rejected", refusal);
             if (response.StatusCode != HttpStatusCode.OK) return response.StatusCode switch
             {
                 HttpStatusCode.Unauthorized => new("rejected", "identityUnavailable"),

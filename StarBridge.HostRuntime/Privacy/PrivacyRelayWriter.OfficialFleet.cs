@@ -92,6 +92,13 @@ internal sealed partial class PrivacyRelayWriter
             // Refreshing a revision is allowed only for exact-target authority decrease, never positive replay.
             save.Content = JsonContent.Create(new { schemaVersion = 4, choice = command });
             using var saved = await SendAdmittedAsync(save, token, current, admission);
+            // Only this save conflicts with the explicit choice on this device.
+            if (saved.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                // Same fixed diagnostic line RequireSuccess writes for every other status.
+                Support.IdentityGateJournal.Changed("publication-require-official-consent-save", "status=409");
+                throw new AccountBridgeHostException("official_fleet.choice_changed", httpStatus: saved.StatusCode);
+            }
             RequireSuccess(saved);
             await ObservePublicationReceiptAsync(saved, async () =>
             {

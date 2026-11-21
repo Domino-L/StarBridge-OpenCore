@@ -7,6 +7,8 @@ import 'overlay_appearance_configuration.dart';
 import 'overlay_appearance_progress.dart';
 import 'bridge_overlay_appearance_live_port.dart';
 import 'overlay_appearance_live_session.dart';
+import 'overlay_visor_editor_content.dart';
+import 'overlay_visor_switch_notice.dart';
 
 final class BridgeOverlayWorkspaceAdapter
     implements
@@ -20,14 +22,18 @@ final class BridgeOverlayWorkspaceAdapter
         OverlayAppearanceLivePlaybackPort,
         OverlayAppearanceLivePlacementPort,
         OverlayAppearanceLiveOwnerEvents,
-        OverlayRuntimeChangePort {
+        OverlayRuntimeChangePort,
+        OverlayVisorEditorContentPort,
+        OverlayVisorNoticePort {
   BridgeOverlayWorkspaceAdapter(this._session);
 
   final BridgeClientSession _session;
   @override
   Future<bool> readPreviewGuideSeen() async {
-    final response = await _session.request('applicationPreferences.get',
-        payload: const {'schemaVersion': 1});
+    final response = await _session.request(
+      'applicationPreferences.get',
+      payload: const {'schemaVersion': 1},
+    );
     final preferences = response.payload['preferences'];
     if (response.payload['storageState'] == 'recoveredDefaults' ||
         preferences is! Map ||
@@ -40,25 +46,32 @@ final class BridgeOverlayWorkspaceAdapter
   @override
   Future<void> markPreviewGuideSeen() async {
     // Fresh revision; never rewrite a cached copy of unrelated preferences.
-    final response = await _session.request('applicationPreferences.get',
-        payload: const {'schemaVersion': 1});
+    final response = await _session.request(
+      'applicationPreferences.get',
+      payload: const {'schemaVersion': 1},
+    );
     final values = response.payload['preferences'];
     if (response.payload['storageState'] == 'recoveredDefaults' ||
-        values is! Map || values['appearancePreviewGuideSeen'] is! bool ||
+        values is! Map ||
+        values['appearancePreviewGuideSeen'] is! bool ||
         response.payload['revision'] is! int) {
       throw StateError('Preview guide preference unavailable.');
     }
     if (values['appearancePreviewGuideSeen'] == true) return;
-    final saved = await _session.request('applicationPreferences.update', payload: {
-      'schemaVersion': 1,
-      'expectedRevision': response.payload['revision'],
-      'patch': {'appearancePreviewGuideSeen': true},
-    });
+    final saved = await _session.request(
+      'applicationPreferences.update',
+      payload: {
+        'schemaVersion': 1,
+        'expectedRevision': response.payload['revision'],
+        'patch': {'appearancePreviewGuideSeen': true},
+      },
+    );
     final stored = saved.payload['preferences'];
     if (stored is! Map || stored['appearancePreviewGuideSeen'] != true) {
       throw StateError('Preview guide acknowledgement not confirmed.');
     }
   }
+
   late final BridgeOverlayAppearanceLivePort _livePreview =
       BridgeOverlayAppearanceLivePort(_session);
   @override
@@ -179,6 +192,27 @@ final class BridgeOverlayWorkspaceAdapter
         response.payload['closed'] != true) {
       throw const FormatException('Invalid appearance preview close.');
     }
+  }
+
+  @override
+  bool get supportsVisorEditorContent =>
+      _session.hostCapabilities.contains('overlay.editorPreview');
+
+  @override
+  Future<OverlayVisorEditorContent> readVisorEditorContent({
+    required String language,
+    OverlayWorkspaceRuntimeDraft? draft,
+  }) async {
+    if (!supportsVisorEditorContent) throw StateError('preview_unavailable');
+    final response = await _session.request(
+      'overlay.editorPreview.content',
+      payload: {
+        'schemaVersion': 1,
+        'language': language,
+        if (draft != null) 'workspace': draft.toMap(),
+      },
+    );
+    return OverlayVisorEditorContent.fromMap(response.payload);
   }
 
   @override
@@ -353,7 +387,21 @@ final class BridgeOverlayWorkspaceAdapter
         body['appearanceProgressIds'],
         appearances,
       ),
+      // Optional line; a malformed value only hides the hint.
+      visorSwitchNotice: body['visorSwitchNotice'] == true,
     );
+  }
+
+  @override
+  Future<void> dismissVisorNotice() async {
+    final response = await _session.request(
+      'overlay.visorNotice.dismiss',
+      payload: const {'schemaVersion': 1},
+    );
+    if (response.payload['schemaVersion'] != 1 ||
+        response.payload['dismissed'] != true) {
+      throw const FormatException('Invalid visor notice dismissal.');
+    }
   }
 
   static List<OverlayAppearanceConfiguration> _configurations(Object? value) {

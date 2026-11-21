@@ -122,7 +122,8 @@ public sealed partial class OAuthPkceClient
                     self = CacheSelfMemberId(owner, me);
                 }
                 var data = await Send(HttpMethod.Get, $"sc/order-reviews/page?reviewerId={self}&pageNo={page}&pageSize=20");
-                return (Page(data, MarketplaceRecords.Review), active);
+                var contracts = await Send(HttpMethod.Get, $"trade/contract/review-page?revieweeId={self}&pageNo={page}&pageSize=20");
+                return (MarketplaceRecords.ReviewPage(data, contracts), active);
             }
             case "reports":
                 return (Page(await Send(HttpMethod.Get, $"trade/order-report/my-list?pageNo={page}&pageSize=20"), MarketplaceRecords.Report), active);

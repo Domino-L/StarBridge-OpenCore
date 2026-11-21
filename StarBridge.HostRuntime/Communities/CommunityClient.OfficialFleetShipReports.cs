@@ -41,7 +41,7 @@ internal sealed partial class CommunityClient
                 return OfficialReportReceipt(context, prior.Official != context || prior.Fingerprint != fingerprint ? new("rejected", "intentConflict") : prior.Result);
             var bound = LookupOfficialShipImage(body, accountScope, clock, report: true);
             if (bound.Version != version) return OfficialReportReceipt(context, new("rejected", "mediaChanged"));
-            foreach (var old in _shipReportAttempts.Where(p => p.Value.Result.Status != "unknown" && p.Value.CreatedAt < clock.GetUtcNow().AddMinutes(-10)).ToArray())
+            foreach (var old in _shipReportAttempts.Where(p => p.Value.Result.Status != "unknown" && p.Value.CreatedAt < _targetClock.GetUtcNow().AddMinutes(-10)).ToArray())
                 _shipReportAttempts.TryRemove(old.Key, out _);
             if (_shipReportAttempts.Count >= 2048) return OfficialReportReceipt(context, new("rejected", "refreshRequired"));
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(12));
@@ -49,7 +49,7 @@ internal sealed partial class CommunityClient
             { Content = JsonContent.Create(new { schemaVersion = 1, sourceRef = bound.SourceRef, shipId = bound.ShipId, version, reason, details, clientRequestId = key }) };
             request.Headers.Authorization = new("Bearer", bearer);
             current(); deadline.Token.ThrowIfCancellationRequested();
-            _shipReportAttempts[key] = new(fingerprint, new("unknown", "outcomeUnknown"), clock.GetUtcNow(), context); sent = true;
+            _shipReportAttempts[key] = new(fingerprint, new("unknown", "outcomeUnknown"), _targetClock.GetUtcNow(), context); sent = true;
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             current(); deadline.Token.ThrowIfCancellationRequested();
             ShipReportResult result;
@@ -71,7 +71,7 @@ internal sealed partial class CommunityClient
                 _ => new("unknown", "outcomeUnknown")
             };
             current(); deadline.Token.ThrowIfCancellationRequested();
-            _shipReportAttempts[key] = new(fingerprint, result, clock.GetUtcNow(), context);
+            _shipReportAttempts[key] = new(fingerprint, result, _targetClock.GetUtcNow(), context);
             return OfficialReportReceipt(context, result);
         }
         catch (Exception error) when (error is HttpRequestException or IOException or OperationCanceledException or JsonException or InvalidOperationException or

@@ -160,7 +160,10 @@ internal static class PlayerSessionStatePresentation
                !text.Equals("地点：未知星域", StringComparison.OrdinalIgnoreCase) &&
                !text.Equals("飞船：未知", StringComparison.OrdinalIgnoreCase) &&
                !text.StartsWith("等待", StringComparison.OrdinalIgnoreCase) &&
-               !IsSessionStateText(text);
+               !IsSessionStateText(text) &&
+               // the English stand-ins ("Location pending" / "Ship pending") are not a place or ship either
+               // (review CX-LOC-PLACEHOLDER-073-R1 P3: place groups, the visor's current place, shared activity)
+               !OverlayPlaceholderText.Is(text);
     }
 
     public static bool IsSessionStateText(string? value)

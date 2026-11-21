@@ -25,6 +25,9 @@ void main() {
       'Saira': 'assets/fonts/Saira-VF.ttf',
       'Rajdhani': 'assets/fonts/Rajdhani-SemiBold.ttf',
       'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
+      // Headless tests have no system fonts. Use a bundled CJK face for
+      // the Traditional Chinese fallback family without changing product fonts.
+      'Microsoft JhengHei UI': 'assets/fonts/SourceHanSansCN-VF.ttf',
     }.entries) {
       await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
     }
@@ -34,6 +37,93 @@ void main() {
     const Locale('zh', 'TW'),
     const Locale('en', 'US'),
   ]) {
+    for (final state in ['verificationRequired', 'mismatch']) {
+      testWidgets(
+        'merged account $state at 320 width and 160 percent: $locale',
+        (tester) async {
+          tester.view.physicalSize = const Size(320, 840);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final port = FakeOnlinePort()
+            ..snapshot = OnlineReviewWire.parse(
+              onlineWire(
+                state: state,
+                local: 'Pilot-Example',
+                remote: state == 'mismatch' ? 'Other-Pilot' : null,
+                display: 'Synthetic Pilot',
+              ),
+            );
+          final online = OnlineReviewController(port);
+          addTearDown(online.dispose);
+          addTearDown(port.close);
+          final mainPort = FakeOnboardingPort(
+            facts(confirmed: true, onlineSetupPending: true, matched: false),
+          );
+          await pumpSetup(
+            tester,
+            step: OnboardingStep.mode,
+            mode: OnboardingMode.online,
+            port: mainPort,
+            onlineReview: online,
+            locale: locale,
+            scale: 1.6,
+          );
+          final copy = OnboardingCopy(locale);
+          expect(find.text(copy.text('onlineReview.title')), findsNothing);
+          expect(find.text(copy.text('accountCard.title')), findsOneWidget);
+          if (state == 'mismatch') {
+            expect(find.text('Pilot-Example'), findsOneWidget);
+            expect(find.text('Other-Pilot'), findsOneWidget);
+            expect(
+              find.text(copy.text('onlineReview.localHandle')),
+              findsOneWidget,
+            );
+            expect(
+              find.text(copy.text('onlineReview.scmHandle')),
+              findsOneWidget,
+            );
+            expect(
+              find.text(copy.text('onlineReview.confirmOne')),
+              findsNothing,
+            );
+          } else {
+            expect(
+              find.text(copy.text('accountCard.unverified')),
+              findsOneWidget,
+            );
+            expect(
+              find.text(copy.text('onlineReview.localHandle')),
+              findsNothing,
+            );
+            expect(
+              find.text(copy.text('onlineReview.scmHandle')),
+              findsNothing,
+            );
+          }
+          for (final key in [
+            'online-account-change',
+            'online-review-cancel',
+            'online-review-refresh',
+          ]) {
+            final button = find.byKey(Key(key));
+            await tester.ensureVisible(button);
+            await tester.pumpAndSettle();
+            expect(button.hitTestable(), findsOneWidget);
+          }
+          // Old-account data migrates only to the SCM account it was linked to.
+          expect(
+            find.text(copy.text('accountCard.migrationHint')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('online-review-confirm')), findsNothing);
+          expect(mainPort.actions, isEmpty);
+          expect(mainPort.finishes, 0);
+          expect(mainPort.saves, 0);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
     testWidgets(
       'retained resume has truthful labels and cancellable waiting: $locale',
       (tester) async {
@@ -55,7 +145,7 @@ void main() {
             action == OnlineReviewAction.resume ? resume.future : cancel.future;
         await pumpSetup(
           tester,
-          step: OnboardingStep.identity,
+          step: OnboardingStep.mode,
           mode: OnboardingMode.online,
           observation: facts(confirmed: true, onlineSetupPending: true),
           onlineReview: online,
@@ -116,11 +206,27 @@ void main() {
         addTearDown(online.dispose);
         addTearDown(port.close);
         final mainPort = FakeOnboardingPort(
-          facts(confirmed: true, onlineSetupPending: true),
+          facts(
+            confirmed: true,
+            matched: false,
+            onlineReviewed: false,
+            onlineSetupPending: true,
+          ),
         );
+        port.onAction = (action) async {
+          expect(action, OnlineReviewAction.confirm);
+          mainPort.facts = facts(
+            confirmed: true,
+            onlineReviewed: false,
+            onlineSetupPending: true,
+          );
+          return port.snapshot = OnlineReviewWire.parse(
+            reviewWire(confirmed: true),
+          );
+        };
         await pumpSetup(
           tester,
-          step: OnboardingStep.identity,
+          step: OnboardingStep.mode,
           mode: OnboardingMode.online,
           port: mainPort,
           onlineReview: online,
@@ -146,19 +252,64 @@ void main() {
           null,
         );
         final confirm = find.byKey(const Key('online-review-confirm'));
+        for (final name in ['PILOT-EXAMPLE']) {
+          for (final element in find.text(name).evaluate().toList()) {
+            final target = find.byWidget(element.widget);
+            await tester.ensureVisible(target);
+            await tester.pumpAndSettle();
+            expect(target.hitTestable(), findsOneWidget);
+          }
+        }
+        final match = find.text(copy.text('onlineReview.namesMatch'));
+        await tester.ensureVisible(match);
+        await tester.pumpAndSettle();
+        expect(match.hitTestable(), findsOneWidget);
         await tester.ensureVisible(confirm);
         await tester.pumpAndSettle();
+        expect(confirm.hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        final visual = Platform.environment['STARBRIDGE_TEST_VISUAL_DIR'];
+        if (visual != null) {
+          final boundary = tester.renderObject<RenderRepaintBoundary>(
+            find.byKey(const Key('onboarding-capture')),
+          );
+          await tester.runAsync(() async {
+            final image = await boundary.toImage();
+            try {
+              final bytes = (await image.toByteData(
+                format: ui.ImageByteFormat.png,
+              ))!;
+              await Directory(visual).create(recursive: true);
+              await File('$visual/r2-review-320-$locale.png').writeAsBytes(
+                bytes.buffer.asUint8List(
+                  bytes.offsetInBytes,
+                  bytes.lengthInBytes,
+                ),
+              );
+            } finally {
+              image.dispose();
+            }
+          });
+        }
         await tester.tap(confirm);
         await tester.pumpAndSettle();
         expect(port.actions, [OnlineReviewAction.confirm]);
         expect(mainPort.finishes, 0);
         expect(mainPort.saves, 0);
+        expect(mainPort.actions, isEmpty);
+        expect(online.value.snapshot.identityConfirmed, isTrue);
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('onboarding-next')))
+              .onPressed,
+          isNotNull,
+        );
         expect(tester.takeException(), null);
       },
     );
   }
   testWidgets(
-    'online route can confirm the local log before matching SCM; it still cannot advance',
+    'local confirmation precedes automatic online review, which still needs explicit confirmation',
     (tester) async {
       final mainPort = FakeOnboardingPort(
         facts(onlineSetupPending: true, matched: false),
@@ -188,21 +339,14 @@ void main() {
         onlineReview: online,
       );
       expect(port.reads, 0);
-      expect(port.actions, isEmpty);
-      final confirm = find.byKey(const Key('onboarding-confirm-local-handle'));
-      await tester.ensureVisible(confirm);
-      await tester.tap(confirm);
+      final next = find.byKey(const Key('onboarding-next'));
+      await tester.ensureVisible(next);
+      await tester.tap(next);
       await tester.pumpAndSettle();
       expect(mainPort.actions, [OnboardingAction.confirmHandle]);
-      expect(port.reads, 1);
-      expect(port.actions, isEmpty);
-      expect(online.value.canConfirm, false);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const Key('onboarding-next')))
-            .onPressed,
-        null,
-      );
+      expect(port.actions, [OnlineReviewAction.review]);
+      expect(online.value.canConfirm, true);
+      expect(tester.widget<FilledButton>(next).onPressed, null);
     },
   );
   testWidgets(
@@ -222,6 +366,7 @@ void main() {
         step: OnboardingStep.mode,
         mode: OnboardingMode.online,
         observation: facts(
+          confirmed: true,
           onlineSetupPending: true,
           signedIn: false,
           matched: false,
@@ -279,7 +424,7 @@ void main() {
       addTearDown(port.close);
       await pumpSetup(
         tester,
-        step: OnboardingStep.identity,
+        step: OnboardingStep.mode,
         mode: OnboardingMode.online,
         observation: facts(confirmed: true, onlineSetupPending: true),
         onlineReview: online,
@@ -360,7 +505,7 @@ void main() {
       addTearDown(port.close);
       await pumpSetup(
         tester,
-        step: OnboardingStep.identity,
+        step: OnboardingStep.mode,
         mode: OnboardingMode.online,
         observation: facts(
           confirmed: true,
@@ -370,10 +515,7 @@ void main() {
         ),
         onlineReview: online,
       );
-      final check = find.byKey(const Key('online-review-check'));
-      await tester.ensureVisible(check);
-      await tester.tap(check);
-      await tester.pumpAndSettle();
+
       final confirm = find.byKey(const Key('online-review-confirm'));
       await tester.ensureVisible(confirm);
       await tester.tap(confirm);
@@ -400,14 +542,14 @@ void main() {
     addTearDown(port.close);
     await pumpSetup(
       tester,
-      step: OnboardingStep.identity,
+      step: OnboardingStep.mode,
       mode: OnboardingMode.online,
       observation: facts(confirmed: true, onlineSetupPending: true),
       onlineReview: online,
     );
     expect(
       find.text(
-        const OnboardingCopy(Locale('zh', 'CN')).text('onlineReview.title'),
+        const OnboardingCopy(Locale('zh', 'CN')).text('accountCard.title'),
       ),
       findsOneWidget,
     );

@@ -75,7 +75,8 @@ Future<void> _arrowEnter(WidgetTester t, FocusNode owner) async {
 void main() {
   setUpAll(loadFonts);
   for (final suite in InteractionSuite.values) {
-    for (final failure in ['capacity', 'space']) {
+    // The single column has no cell size to shrink (2026-11-02).
+    for (final failure in ['space']) {
       testWidgets(
         '$suite real Tab Arrow Enter grid $failure preserves the complete original layout and static error toast',
         (t) async {

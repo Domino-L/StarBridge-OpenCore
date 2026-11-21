@@ -1,3 +1,4 @@
+import '../runtime/frame_governor.dart';
 import 'menu_overlay_locale.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -19,6 +20,8 @@ import 'menu_friends_view.dart';
 import 'menu_comms_view.dart';
 import 'menu_profile_view.dart';
 import 'menu_feature_view.dart';
+import 'menu_relay_pages.dart';
+import 'menu_page_relay.dart';
 import 'menu_surface_features.dart';
 import '../../platform/window/menu_window_preferences.dart';
 import 'menu_layout_sync.dart';
@@ -42,6 +45,8 @@ class MenuOverlaySurfaceApp extends StatefulWidget {
 class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
   final _nativePopups = MenuNativePopupObserver();
   static const _channel = MethodChannel('starbridge/menu-surface');
+  final _pageRelay = MenuPageRelay(_channel);
+  late final _pages = MenuRelayPages(_pageRelay);
   int _opening = -1;
   bool _wanted = false;
   late final _layoutSync = MenuLayoutSync(_savePreferences);
@@ -137,8 +142,10 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     super.initState();
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'snapshot') _accept(call.arguments);
+      if (call.method == 'bridgeEvent') _pageRelay.accept(call.arguments);
       if (call.method == 'interactionPresentation' &&
           _interaction.accept(call.arguments)) {
+        performanceModePreference.value = _interaction.value.performanceMode;
         setState(() {});
       }
       if (call.method == 'noticeView' && call.arguments is Map) {
@@ -316,7 +323,9 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
       _wanted = wanted;
       _workspacePreview = value['workspacePreview'] == true;
       _interaction.open(opening, wanted, value['interactionPresentation']);
+      performanceModePreference.value = _interaction.value.performanceMode;
       _labels = wanted ? Map<Object?, Object?>.from(value) : const {};
+      _pageRelay.fromSnapshot(opening, wanted, value);
       if (newOpening || !wanted) {
         _hangarOpening = false;
         _hangarOpenFailed = false;
@@ -542,6 +551,7 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
     _friendsAck?.cancel();
     _layoutSync.cancel();
     _channel.setMethodCallHandler(null);
+    _pages.dispose();
     _localTools?.dispose();
     _nativePopups.dispose();
     super.dispose();
@@ -666,6 +676,7 @@ class _MenuOverlaySurfaceAppState extends State<MenuOverlaySurfaceApp> {
                 },
                 profiles: Map.unmodifiable(_profiles),
                 features: Map.unmodifiable(_features),
+                relayPages: _pages.pages,
                 onFeatureVisible: _labels['liveFeatures'] == true
                     ? (tool, visible) {
                         visible

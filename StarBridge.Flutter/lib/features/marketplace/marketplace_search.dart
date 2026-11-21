@@ -12,6 +12,7 @@ import 'marketplace_controller.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_port.dart';
 import 'marketplace_widgets.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
 List<String> marketSearchTerms(
   List<MarketRow> rows,
@@ -367,7 +368,7 @@ class _SearchState extends State<MarketplaceSearch> {
                   child: Text(
                     label,
                     maxLines: 1,
-                    overflow: TextOverflow.fade,
+                    overflow: fadeOverflow(context),
                     softWrap: false,
                   ),
                 ),
@@ -446,7 +447,7 @@ class _SearchState extends State<MarketplaceSearch> {
                         child: Text(
                           '${i + 1}  ${_hot[i]}',
                           maxLines: 1,
-                          overflow: TextOverflow.fade,
+                          overflow: fadeOverflow(context),
                           softWrap: false,
                         ),
                       ),

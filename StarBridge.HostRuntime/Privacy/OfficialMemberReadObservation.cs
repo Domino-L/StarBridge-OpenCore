@@ -30,6 +30,8 @@ internal sealed class OfficialMemberReadObservation : IDisposable
         Code = error switch {
             TimeoutException or OperationCanceledException => "timeout",
             AccountBridgeHostException host => host.Code switch {
+                "official_fleet.identity_clock_skew" => "identity-clock-skew",
+                "official_fleet.identity_time_invalid" => "identity-time-invalid",
                 AccountBridgeStableErrors.ReauthorizationRequired or "privacy_publication.identity_unavailable" or
                     "privacy_publication.identity_required" => "reauthorization",
                 AccountBridgeStableErrors.OfficialFleetReadForbidden or "privacy_publication.forbidden" => "forbidden",

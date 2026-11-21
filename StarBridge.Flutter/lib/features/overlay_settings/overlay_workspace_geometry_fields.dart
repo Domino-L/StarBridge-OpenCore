@@ -17,11 +17,15 @@ class OverlayWorkspaceGeometryFields extends StatelessWidget {
     required this.enabled,
     required this.onChanged,
     this.surfaceSize = OverlayWorkspaceLayoutGeometry.referenceSize,
+    this.showSize = true,
     super.key,
   });
   final OverlayWorkspaceLayoutItem item;
   final bool enabled;
   final Size surfaceSize;
+
+  /// False for a visor block, which keeps the S/M/L size: position only.
+  final bool showSize;
   final ValueChanged<OverlayWorkspaceLayoutItem> onChanged;
 
   @override
@@ -33,8 +37,7 @@ class OverlayWorkspaceGeometryFields extends StatelessWidget {
     final values = {
       'x': rect.left,
       'y': rect.top,
-      'width': rect.width,
-      'height': rect.height,
+      if (showSize) ...{'width': rect.width, 'height': rect.height},
     };
     return LayoutBuilder(
       builder: (context, constraints) => Wrap(

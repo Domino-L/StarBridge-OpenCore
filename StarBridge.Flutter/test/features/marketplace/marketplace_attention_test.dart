@@ -207,9 +207,141 @@ void main() {
       findsOneWidget,
     );
   });
+
+  // 11-05 user report: the card stayed open after a click. Clicking the item
+  // focuses it (standard suite), and focus alone held the card; Escape only
+  // reached a focused card and a click outside moved no focus.
+  testWidgets('the card closes on leave, outside click, Escape and blur', (
+    tester,
+  ) async {
+    size(tester, const Size(700, 420));
+    late MarketplaceAttention a;
+    await tester.runAsync(() async {
+      (a, _, _) = await _attention();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    addTearDown(a.dispose);
+    final feature = FeatureDescriptor(
+      id: 'marketplace',
+      route: '/marketplace',
+      labelKey: 'navigation.marketplace',
+      descriptionKey: 'navigation.marketplace.description',
+      icon: StarBridgeIconSemantic.marketplace,
+      navigationRegion: NavigationRegion.primary,
+      order: 40,
+      buildDestination: (_) => const SizedBox(),
+      attentionCount: a,
+      attentionDetail: a.detail(),
+    );
+    final next = FocusNode(debugLabel: 'next');
+    addTearDown(next.dispose);
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('attention-render'),
+        child: scopedApp(
+          Scaffold(
+            backgroundColor: const Color(0xFF0B1118),
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: SizedBox(
+                  width: 220,
+                  child: Column(
+                    children: [
+                      ShellNavigationItem(
+                        descriptor: feature,
+                        mode: ShellLayoutMode.wide,
+                        selected: false,
+                        onPressed: () {},
+                        onKeyboardPressed: () {},
+                        onPrevious: () {},
+                        onNext: () {},
+                      ),
+                      Focus(focusNode: next, child: const SizedBox(height: 8)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          InteractionSuite.standard,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final card = find.byKey(const Key('attention-detail-card'));
+    final item = find.byType(ShellNavigationItem);
+    const away = Offset(690, 410);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: away);
+    addTearDown(mouse.removePointer);
+    Future<void> settle() => tester.pump(const Duration(milliseconds: 400));
+
+    // Click the item, then leave: the click focused it, the card still closes.
+    await mouse.moveTo(tester.getCenter(item));
+    await settle();
+    await mouse.down(tester.getCenter(item));
+    await mouse.up();
+    await settle();
+    expect(card, findsOneWidget);
+    expect(
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<ShellNavigationItem>(),
+      isNotNull,
+      reason: 'the click focused the item, the original trap',
+    );
+    await mouse.moveTo(away);
+    await settle();
+    await _render(tester, 'after-leave');
+    expect(card, findsNothing, reason: 'leaving closes it despite focus');
+
+    // A new hover opens it again; Escape closes it with focus on the item.
+    await mouse.moveTo(tester.getCenter(item));
+    await settle();
+    expect(card, findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle();
+    expect(card, findsNothing, reason: 'Escape closes it while hovered');
+
+    // Escape also works with no focus anywhere (hover alone).
+    await mouse.moveTo(away);
+    await settle();
+    FocusManager.instance.primaryFocus?.unfocus();
+    await settle();
+    await mouse.moveTo(tester.getCenter(item));
+    await settle();
+    expect(card, findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle();
+    expect(card, findsNothing, reason: 'Escape closes a hover-only card');
+    await mouse.moveTo(away);
+    await settle();
+
+    // Keyboard focus opens it; a click outside closes it, focus unmoved.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await settle();
+    expect(card, findsOneWidget);
+    await mouse.down(away);
+    await mouse.up();
+    await settle();
+    expect(card, findsNothing, reason: 'a click outside closes it');
+
+    // Focus leaving the item closes it; coming back opens it again.
+    next.requestFocus();
+    await settle();
+    expect(card, findsNothing);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await settle();
+    expect(card, findsOneWidget, reason: 'a new focus reopens it');
+    next.requestFocus();
+    await settle();
+    expect(card, findsNothing, reason: 'focus moving away closes it');
+  });
 }
 
-Future<void> _render(WidgetTester tester) async {
+Future<void> _render(WidgetTester tester, [String name = 'badge-hover']) async {
   const out = String.fromEnvironment('OUT');
   if (out.isEmpty) return;
   final boundary = tester.renderObject<RenderRepaintBoundary>(
@@ -218,6 +350,6 @@ Future<void> _render(WidgetTester tester) async {
   await tester.runAsync(() async {
     final image = await boundary.toImage(pixelRatio: 1);
     final png = await image.toByteData(format: ui.ImageByteFormat.png);
-    File('$out/badge-hover.png').writeAsBytesSync(png!.buffer.asUint8List());
+    File('$out/$name.png').writeAsBytesSync(png!.buffer.asUint8List());
   });
 }

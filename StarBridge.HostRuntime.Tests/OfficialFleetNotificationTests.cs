@@ -39,6 +39,10 @@ internal static class OfficialFleetNotificationTests
                 pendingManagement: (_, count) => pending.Add(count));
             await runtime.TickAsync();
             Check(sink.Notices.Count == 0, "existing official history starts at a quiet baseline");
+            // 0.7.3: fleet chat raises a card only when chat cards are turned on for the source.
+            settings.SavePolicies(host.CurrentContext!, 0, Guid.NewGuid().ToString("N"),
+                [new(NotificationPolicyStore.OfficialFleet("officialFleet:" + handler.Fleet), NotificationSourceMode.Normal) { TypeRules = [new("chat", "enabled")] }],
+                () => true, extended: true);
             handler.Clock.Now = handler.Clock.Now.AddSeconds(1); handler.Sequence++;
             await runtime.TickAsync();
             Check(sink.Notices.Count == 1 && sink.Notices[0].Community is { Callsign: "", Text: "Incoming fixture" },
@@ -48,7 +52,7 @@ internal static class OfficialFleetNotificationTests
             var activation = (await settings.DispatchAsync(BridgeEnvelope.Request("notificationSettings.consumeActivation", "fixture-activation", 1,
                 new { schemaVersion = 1, activationId = notice.Id.ToString("N") }))).Response;
             Check(activation.Payload.GetProperty("destination").GetString() == "officialFleet", "official notification activation must route to fleet, not the community directory");
-            settings.SavePolicies(host.CurrentContext!, 0, Guid.NewGuid().ToString("N"), [new(source.PolicyKey, NotificationSourceMode.DoNotDisturb)], () => true);
+            settings.SavePolicies(host.CurrentContext!, 1, Guid.NewGuid().ToString("N"), [new(source.PolicyKey, NotificationSourceMode.DoNotDisturb)], () => true, extended: true);
             Check(!notice.IsCurrent(), "source mode change retires the old official card");
             async Task Tick(bool newMessage = true) {
                 handler.Clock.Now = handler.Clock.Now.AddSeconds(1);
@@ -56,7 +60,12 @@ internal static class OfficialFleetNotificationTests
                 await runtime.TickAsync();
             }
             await Tick(); Check(sink.Notices.Count == 1, "official DND uses the same source policy gate");
-            settings.SavePolicies(host.CurrentContext!, 1, Guid.NewGuid().ToString("N"), [], () => true);
+            settings.SavePolicies(host.CurrentContext!, 2, Guid.NewGuid().ToString("N"),
+                [new(source.PolicyKey, NotificationSourceMode.Normal) { TypeRules = [new("chat", "enabled")] },
+                 new(NotificationPolicyStore.Organization("COMMUNITY", handler.Joined), NotificationSourceMode.Normal) { TypeRules = [new("chat", "enabled")] },
+                 // the fleet the fixture switches to later (Fleet + 1)
+                 new(NotificationPolicyStore.OfficialFleet("officialFleet:" + (handler.Fleet + 1)), NotificationSourceMode.Normal) { TypeRules = [new("chat", "enabled")] }],
+                () => true, extended: true);
             await Tick(false); Check(sink.Notices.Count == 1, "unmuting never replays the consumed official event");
             handler.Incoming = false; await Tick(); Check(sink.Notices.Count == 1, "own official messages never notify");
             handler.Incoming = true; await Tick(); Check(sink.Notices.Count == 2, "fresh incoming official message after mute can notify");
@@ -165,11 +174,13 @@ internal static class OfficialFleetNotificationTests
         internal HttpStatusCode OfficialStatus = HttpStatusCode.OK;
         internal TaskCompletionSource MessageStarted = new(TaskCreationOptions.RunContinuationsAsynchronously), ReleaseMessage = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly DateTimeOffset _joined = DateTimeOffset.UtcNow.AddDays(-1);
+        internal DateTimeOffset Joined => _joined;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Requests.Add(request);
             var now = Clock.Now;
             var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/announcements", StringComparison.Ordinal)) return new(HttpStatusCode.NotFound);
             if (path == "/api/fleets/notification-sources" && CommunityUnavailable) return new(HttpStatusCode.ServiceUnavailable);
             if (path == "/api/official-fleets/context" && (!Member || OfficialStatus != HttpStatusCode.OK)) return new(Member ? OfficialStatus : HttpStatusCode.Forbidden);
             var code = "OFFICIALFLEET:" + Fleet;

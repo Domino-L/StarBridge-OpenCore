@@ -44,6 +44,9 @@ internal sealed partial class CommunityClient : IDisposable
     private readonly HttpClient _http;
     private readonly HttpClient _officialActivityHttp;
     private readonly TimeProvider _targetClock;
+    private OfficialFleet.OfficialFleetServerClock _identityClock;
+    internal void UseIdentityClock(TimeProvider clock) =>
+        _identityClock = clock as OfficialFleet.OfficialFleetServerClock ?? throw new ArgumentException("Identity clock required");
     private readonly Lazy<InvitationSendWorkflow> _invitationWorkflow;
     private readonly Lazy<AnnouncementAttemptJournal> _announcementJournal;
     private readonly Func<string, string?, string, object[]?> _shipLoaners;
@@ -58,6 +61,7 @@ internal sealed partial class CommunityClient : IDisposable
             origin.Scheme != "https" && !(origin.Scheme == "http" && origin.IsLoopback)) throw new ArgumentException("Trusted origin required");
         _origin = origin;
         _targetClock = targetClock ?? TimeProvider.System;
+        _identityClock = new(_targetClock);
         _invitationWorkflow = new(() => new(invitationJournal ?? new InvitationOutboxJournal()));
         _announcementJournal = new(() => announcementJournal ?? new AnnouncementAttemptJournal(clock: _targetClock));
         _shipLoaners = shipLoaners ?? CommunityShipCatalog.Loaners;
@@ -69,9 +73,11 @@ internal sealed partial class CommunityClient : IDisposable
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
         };
         _http = new(transport) { Timeout = TimeSpan.FromSeconds(12) };
+        Support.RelayClientVersion.Apply(_http);
         // The official wait has its own longer deadline. Ordinary reads keep 12s.
         // The ordinary client owns this shared transport.
         _officialActivityHttp = new(transport, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
+        Support.RelayClientVersion.Apply(_officialActivityHttp);
     }
     internal static CommunityQuery ParseQuery(JsonElement body)
     {
@@ -231,6 +237,7 @@ internal sealed partial class CommunityClient : IDisposable
         Action current, CancellationToken token)
     {
         var (action, reference) = ParseCommand(body);
+        var callerToken = token;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(40));
         token = deadline.Token;
@@ -258,7 +265,12 @@ internal sealed partial class CommunityClient : IDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
             sent = true;
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            if (!response.IsSuccessStatusCode) return new(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden or HttpStatusCode.NotFound ? "rejected" : "unknown", "refreshRequired");
+            if (!response.IsSuccessStatusCode)
+            {
+                // Both refusals are definite: nothing changed, so the UI need not ask to recheck.
+                if (await CommunityRelayRefusal.ReasonAsync(response, callerToken) is { } refusal) return new("rejected", refusal);
+                return new(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden or HttpStatusCode.NotFound ? "rejected" : "unknown", "refreshRequired");
+            }
             current();
             if (target.WpfS2ViewerId is not null)
             {

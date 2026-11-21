@@ -9,6 +9,8 @@ import '../../design_system/interaction/starbridge_action_button.dart';
 import '../../design_system/interaction/starbridge_dialog.dart';
 import '../../design_system/tokens/starbridge_tokens.dart';
 import 'achievement_art.dart';
+import 'swift_leaderboard.dart';
+import 'swift_leaderboard_page.dart';
 import 'achievement_catalog.dart';
 import 'achievement_collection_port.dart';
 import 'achievement_entry.dart';
@@ -18,6 +20,7 @@ class AchievementDetail extends StatelessWidget {
   const AchievementDetail({
     required this.definition,
     required this.collection,
+    this.leaderboard,
     this.index = 0,
     this.total = 1,
     this.onPrevious,
@@ -26,6 +29,7 @@ class AchievementDetail extends StatelessWidget {
   });
   final AchievementDefinition definition;
   final AchievementCollection collection;
+  final SwiftLeaderboardController? leaderboard;
   final int index, total;
   final VoidCallback? onPrevious, onNext;
 
@@ -51,8 +55,21 @@ class AchievementDetail extends StatelessWidget {
           p.name,
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
         ),
+        if (p.note case final note?) ...[
+          const SizedBox(height: 6),
+          Text(
+            note,
+            style: TextStyle(fontSize: 12, color: tokens.colors.textSecondary),
+          ),
+        ],
+        AchievementRarityInfo(presentation: p),
+        if (definition.id == 'contract-tsg-swift' && leaderboard != null)
+          SwiftLeaderboardEntry(controller: leaderboard!),
         const SizedBox(height: 14),
-        if (p.earned) ...[Text(p.memory), const SizedBox(height: 18)],
+        if (p.earned && p.memory.isNotEmpty) ...[
+          Text(p.memory),
+          const SizedBox(height: 18),
+        ],
         Text(
           definition.isSeries && definition.metricKey != null && !p.concealed
               ? s
@@ -65,7 +82,7 @@ class AchievementDetail extends StatelessWidget {
         if (!definition.isSeries || p.concealed) ...[
           Text(p.condition),
           const SizedBox(height: 10),
-          AchievementProgress(presentation: p),
+          AchievementProgress(presentation: p, showStations: true),
           if (collection.dateFor(definition.id) case final date?) ...[
             const SizedBox(height: 14),
             Text(
@@ -212,6 +229,7 @@ class AchievementDetail extends StatelessWidget {
                       final art = AchievementArt(
                         definition: definition,
                         earned: p.earned,
+                        rank: p.rank,
                         size: stacked
                             ? constraints.maxWidth.clamp(1, 240)
                             : 240,
@@ -279,9 +297,15 @@ class _Tier extends StatelessWidget {
               .replaceAll('{unit}', p.unit)
               .trim();
     final progress = peak == null
-        ? s.text('achievements.progressPending')
+        ? p.seriesPending
         : '${achievementNumber(peak.clamp(0, target))} / ${achievementNumber(target)}';
-    final right = done ? achievementDate(context, date) : progress;
+    final rarity = p.rarityTextFor(level);
+    final label = p.rarityLabelFor(level);
+    final right = [
+      done ? achievementDate(context, date) : progress,
+      ?rarity,
+      ?label,
+    ].join('\n');
     final extra = current && peak != null
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -335,6 +359,15 @@ class _Tier extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (definition.earnedTierAssets.isNotEmpty) ...[
+                AchievementArt(
+                  definition: definition,
+                  earned: done,
+                  rank: level,
+                  size: 36,
+                ),
+                const SizedBox(width: 8),
+              ],
               SizedBox(
                 width: 18,
                 child: Text(
@@ -377,7 +410,8 @@ class _Tier extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          info,
+                          // Longer wording wraps instead of overflowing.
+                          Flexible(child: info),
                         ],
                       ),
                     ?extra,

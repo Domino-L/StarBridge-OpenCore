@@ -183,9 +183,9 @@ const guideTourWords = <String, (String, String, String)>{
     'Sign in to your RSI account on the page.',
   ),
   'tour.hangar.2.note': (
-    '登录状态只留在这台电脑上，过期了需要重新登录。',
-    '登入狀態只留在這台電腦上，過期了需要重新登入。',
-    'Sign-in stays on this computer and expires after a while.',
+    '要不要在这台电脑上记住登录，可以在读取页上选。不记住的话，每次都要重新登录，RSI 可能会发邮箱验证码。',
+    '要不要在這台電腦上記住登入，可以在讀取頁上選。不記住的話，每次都要重新登入，RSI 可能會寄電子郵件驗證碼。',
+    'Choose on the reader page whether to remember the sign-in on this computer. If not, you sign in every time and RSI may email you a code.',
   ),
   'tour.hangar.3.title': ('点右上角头像', '點右上角頭像', 'Click your avatar'),
   'tour.hangar.3.body': (

@@ -10,7 +10,20 @@ List<MenuPanelSpec> menuBridgePanelSpecs({
   required Iterable<String> profileIds,
   MenuPanelSpec? hudPanel,
   Size? commsViewport,
+  bool hasMarketplace = false,
+  bool hasFleet = false,
+  bool clientOrganizations = false,
 }) => [
+  for (final id in [
+    if (hasMarketplace) 'marketplace',
+    if (hasFleet) 'officialFleet',
+  ])
+    MenuPanelSpec(
+      id: id,
+      initialBounds: const Rect.fromLTWH(120, 64, 1180, 760),
+      viewportBounds: _initialPageBounds,
+      minimumSize: const Size(900, 600),
+    ),
   if (hasHangar)
     MenuPanelSpec(
       id: 'execHangar',
@@ -21,13 +34,19 @@ List<MenuPanelSpec> menuBridgePanelSpecs({
     for (final id in const ['organizations', 'rooms'])
       MenuPanelSpec(
         id: id,
-        initialBounds: id == 'organizations'
-            ? const Rect.fromLTWH(168, 132, 900, 620)
-            : const Rect.fromLTWH(168, 132, 680, 550),
-        viewportBounds: id == 'organizations'
-            ? _initialOrganizationBounds
-            : null,
-        minimumSize: const Size(320, 200),
+        initialBounds: id != 'organizations'
+            ? const Rect.fromLTWH(168, 132, 680, 550)
+            : clientOrganizations
+            ? const Rect.fromLTWH(120, 64, 1460, 800)
+            : const Rect.fromLTWH(168, 132, 900, 620),
+        viewportBounds: id != 'organizations'
+            ? null
+            : clientOrganizations
+            ? _initialClientOrganizationBounds
+            : _initialOrganizationBounds,
+        minimumSize: id == 'organizations' && clientOrganizations
+            ? const Size(900, 600)
+            : const Size(320, 200),
       ),
   ?hudPanel,
   if (hasLocalTools)
@@ -62,9 +81,34 @@ List<MenuPanelSpec> menuBridgePanelSpecs({
     ),
 ];
 
+Rect _initialPageBounds(Size viewport) {
+  final width = (viewport.width - 48).clamp(900.0, 1180.0);
+  final height = (viewport.height - 120).clamp(600.0, 760.0);
+  // Initial placement only: never clamp a restored or manually moved window.
+  return Rect.fromLTWH(
+    (viewport.width - width) / 2,
+    (viewport.height - height) / 2,
+    width,
+    height,
+  );
+}
+
 Rect _initialOrganizationBounds(Size viewport) {
   final width = (viewport.width - 48).clamp(320.0, 900.0);
   final height = (viewport.height - 180).clamp(200.0, 620.0);
   // Initial placement only: never clamp a restored or manually moved window.
   return Rect.fromLTWH((viewport.width - width) / 2, 64, width, height);
+}
+
+/// The client's organization page (10-30 layout: 1460×800, names from 1400).
+Rect _initialClientOrganizationBounds(Size viewport) {
+  final width = (viewport.width - 48).clamp(900.0, 1460.0);
+  final height = (viewport.height - 120).clamp(600.0, 800.0);
+  // Initial placement only: never clamp a restored or manually moved window.
+  return Rect.fromLTWH(
+    (viewport.width - width) / 2,
+    (viewport.height - height) / 2,
+    width,
+    height,
+  );
 }

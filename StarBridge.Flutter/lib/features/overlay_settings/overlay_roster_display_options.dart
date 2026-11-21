@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'overlay_workspace_visor_specs.dart';
+
 import '../../design_system/interaction/starbridge_compact_select.dart';
 import '../../design_system/interaction/starbridge_interaction_theme.dart';
 
@@ -22,7 +24,7 @@ final class OverlayRosterDisplay {
   });
 
   static const overflowModes = ['summary', 'rotate', 'truncate'];
-  static const rowLimits = [0, 3, 4, 5, 6, 8, 10, 12];
+  static const rowLimits = [0, 3, 4, 5, 6, 8, 10, 12, 16, 20];
   static const intervals = [5, 10, 15, 20, 30, 60];
 
   /// 'summary' shows "N more", 'rotate' pages through, 'truncate' shows the first rows.
@@ -43,7 +45,10 @@ final class OverlayRosterDisplay {
     }
     final rowLimit = value['rowLimit'] as int;
     final interval = value['rotationIntervalSeconds'] as int;
-    if (rowLimit < 0 || rowLimit > 12 || interval < 5 || interval > 60) {
+    if (rowLimit < 0 ||
+        rowLimit > overlayWorkspaceVisorMembersMaxRows ||
+        interval < 5 ||
+        interval > 60) {
       return null;
     }
     return OverlayRosterDisplay(
@@ -136,7 +141,7 @@ class OverlayRosterDisplayOptions extends StatelessWidget {
                 StarBridgeSelectOption(
                   value: rows,
                   label: rows == 0
-                      ? copy('按模块高度', '依模組高度', 'Fit module height')
+                      ? copy('按成员面板高度', '依成員面板高度', 'Fit members panel height')
                       : copy('$rows 行', '$rows 行', '$rows rows'),
                 ),
             ],

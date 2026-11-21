@@ -81,7 +81,7 @@ final class TestBuildNoticeFlow {
   bool? _receipt(Map<String, Object?> p) =>
       p.length == 3 &&
           p['schemaVersion'] == 1 &&
-          p['termsVersion'] == '2026-10-31-v4' &&
+          p['termsVersion'] == '2026-11-05-v5' &&
           p['acknowledged'] is bool
       ? p['acknowledged'] as bool
       : null;
@@ -107,7 +107,7 @@ final class TestBuildNoticeFlow {
             'legal.acceptTestBuildNotice',
             payload: const {
               'schemaVersion': 1,
-              'termsVersion': '2026-10-31-v4',
+              'termsVersion': '2026-11-05-v5',
             },
           );
           return !_disposed && _valid(response.payload);

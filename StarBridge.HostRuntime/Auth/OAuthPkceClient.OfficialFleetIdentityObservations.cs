@@ -8,12 +8,16 @@ namespace StarBridge.HostRuntime.Auth;
 public sealed partial class OAuthPkceClient
 {
     // Narrow clock owner shared by V2 transport and the Host's final projection checks.
-    // Production uses true UTC; tests may inject their unchanged wire fixture clock.
-    internal TimeProvider OfficialFleetIdentityObservationClock { get; init; } = TimeProvider.System;
+    private OfficialFleetServerClock _identityClock = new(TimeProvider.System);
+    internal TimeProvider OfficialFleetIdentityObservationClock
+    {
+        get => _identityClock;
+        init => _identityClock = new(value);
+    }
 
     internal Task<(IReadOnlyDictionary<long, OfficialFleetMemberIdentityObservation> Result, ScmOAuthSession ActiveSession)>
         ReadOfficialFleetMemberIdentityObservationsAsync(ScmOAuthSession session, string sourceRef,
-            IReadOnlyCollection<long> memberIds, CancellationToken token)
+            IReadOnlyCollection<long> memberIds, CancellationToken token, Action? current = null)
     {
         if (!session.Capabilities.Contains("profile.read", StringComparer.Ordinal) ||
             !session.Capabilities.Contains("organizations.read", StringComparer.Ordinal) ||
@@ -24,18 +28,29 @@ public sealed partial class OAuthPkceClient
         {
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
             budget.CancelAfter(TimeSpan.FromSeconds(12));
-            using var request = new HttpRequestMessage(HttpMethod.Post,
-                new Uri(options.ResourceServerBaseUri, "app-api/starbridge/v1/official-fleet/member-identities"))
-            { Content = JsonContent.Create(new { schemaVersion = 2, sourceRef, memberIds }) };
-            request.Headers.Add("X-StarBridge-Member-Identity-Version", "2");
-            using var response = await scmHttpClient.SendAsync(request, active.AccessToken, budget.Token,
-                completionOption: HttpCompletionOption.ResponseHeadersRead);
-            await ScmHttpClient.EnsureSuccessAsync(response, "读取舰队成员可见资料", budget.Token);
-            using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, budget.Token, 512 * 1024);
-            var result = OfficialFleetMemberIdentityObservation.Parse(json.RootElement, sourceRef, memberIds,
-                OfficialFleetIdentityObservationClock.GetUtcNow());
-            OfficialFleetMemberIdentityObservation.EnsureCurrent(result.Values, OfficialFleetIdentityObservationClock.GetUtcNow());
-            return result;
+            for (var attempt = 0; ; attempt++)
+            {
+                var endpoint = new Uri(options.ResourceServerBaseUri, "app-api/starbridge/v1/official-fleet/member-identities");
+                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+                { Content = JsonContent.Create(new { schemaVersion = 2, sourceRef, memberIds }) };
+                request.Headers.Add("X-StarBridge-Member-Identity-Version", "2");
+                request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
+                var started = _identityClock.Start();
+                current?.Invoke();
+                using var response = await scmHttpClient.SendAsync(request, active.AccessToken, budget.Token,
+                    completionOption: HttpCompletionOption.ResponseHeadersRead);
+                current?.Invoke();
+                await ScmHttpClient.EnsureSuccessAsync(response, "读取舰队成员可见资料", budget.Token);
+                using var json = await LegacyPasswordRecoveryClient.ReadBoundedJsonAsync(response.Content, budget.Token, 512 * 1024);
+                var result = OfficialFleetMemberIdentityObservation.Parse(json.RootElement, sourceRef, memberIds,
+                    OfficialFleetIdentityObservationClock.GetUtcNow(), checkTime: false);
+                // Only a successful, bounded, structurally valid response from this exact trusted resource route is a sample.
+                _identityClock.Observe(started, response, json.RootElement, endpoint);
+                try { OfficialFleetMemberIdentityObservation.EnsureCurrent(result.Values, _identityClock); return result; }
+                catch (AccountBridgeHostException error) when (attempt == 0 && _identityClock.NeedsConfirmation &&
+                    error.Code is "official_fleet.identity_time_invalid" or "official_fleet.identity_clock_skew")
+                { /* One bounded repeat confirms a candidate, never extends the first proof's TTL. */ }
+            }
         }, token);
     }
 }

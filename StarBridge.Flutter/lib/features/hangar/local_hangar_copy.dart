@@ -15,6 +15,27 @@ class LocalHangarCopy {
       ? tw
       : cn;
 
+  String get deviceStorage => pick(
+    '机库只保存在这台电脑上。',
+    '機庫只儲存在這台電腦上。',
+    'Your hangar is saved on this computer only.',
+  );
+  // User 11-05 final copy: "保存到你的账号就行 因为是SCM登录".
+  String get accountStorage => pick(
+    '机库已保存到你的账号。',
+    '機庫已儲存到你的帳號。',
+    'Your hangar is saved to your account.',
+  );
+  String get cloudFirstUpload => pick(
+    '机库已保存到你的账号。舰队和组织能看到哪些舰船，仍然按你的共享设置；个人页访客能看到什么，按个人页的公开范围和模块。',
+    '機庫已儲存到你的帳號。艦隊和組織能看到哪些艦船，仍然依你的分享設定；個人頁訪客能看到什麼，依個人頁的公開範圍和模組。',
+    "Your hangar is saved to your account. What fleets and organizations can see still follows your sharing settings; what profile visitors can see follows your profile's visibility and modules.",
+  );
+  String cloudRestored(int count) => pick(
+    '已载入你账号里的机库（$count 艘）。',
+    '已載入你帳號裡的機庫（$count 艘）。',
+    'Loaded the hangar saved to your account ($count ships).',
+  );
   String get title => pick('个人机库', '個人機庫', 'Personal hangar');
   String get currentOwned => pick('当前拥有', '目前擁有', 'Currently owned');
   String get favorites => pick('收藏', '收藏', 'Bookmarks');
@@ -27,13 +48,37 @@ class LocalHangarCopy {
     '未能確認收藏結果，請重新整理機庫後重試。',
     'Bookmark could not be confirmed. Refresh your hangar and try again.',
   );
-  String get gridView => pick('卡片视图', '卡片檢視', 'Card view');
-  String get listView => pick('列表视图', '清單檢視', 'List view');
+  String get gridView => pick('大图', '大圖', 'Large');
+  String get compactView => pick('紧凑', '緊湊', 'Compact');
+  String get listView => pick('列表', '清單', 'List');
+  String get segmentLabel => pick('分段', '分段', 'Group');
+  String get bySize => pick('按尺寸', '按尺寸', 'By size');
+  String get byMaker => pick('按制造商', '按製造商', 'By maker');
+  String get jumpLabel => pick('跳转', '跳轉', 'Jump to');
+  String get backToTop => pick('回到顶部', '回到頂部', 'Back to top');
+  String get searchAction => pick('搜索', '搜尋', 'Search');
+  String get otherSection => pick('其他', '其他', 'Other');
+  String shipUnits(int n) =>
+      pick('$n 艘', '$n 艘', n == 1 ? '1 ship' : '$n ships');
+  String get backToWall => pick('返回整墙', '返回整牆', 'Back to wall');
+  String stagePosition(String section, int index, int count) => pick(
+    '$section · 第 $index / $count 艘',
+    '$section · 第 $index / $count 艘',
+    '$section · $index of $count',
+  );
+  String instanceShort(int index) =>
+      pick('第 $index 艘', '第 $index 艘', 'No. $index');
+  String get previousShip => pick('上一艘', '上一艘', 'Previous ship');
+  String get nextShip => pick('下一艘', '下一艘', 'Next ship');
+  String get viewDetails => pick('查看详情', '查看詳情', 'View details');
+  String get bookmarked => pick('已收藏', '已收藏', 'Bookmarked');
+  String get officialStatus => pick('官网状态', '官網狀態', 'Official status');
+  String get roleFact => pick('定位', '定位', 'Role');
   String get allRoles => pick('全部用途', '全部用途', 'All roles');
   String get sortLabel => pick('排序', '排序', 'Sort');
   String get sortDefault => pick('默认顺序', '預設順序', 'Default order');
   String get sortName => pick('名称', '名稱', 'Name');
-  String get sortAdded => pick('最近加入', '最近加入', 'Recently added');
+  String get sortAdded => pick('最近入库', '最近入庫', 'Recently acquired');
   String get sortValue => pick('参考价格', '參考價格', 'Reference price');
   String get clearFilters => pick('清除筛选', '清除篩選', 'Clear filters');
   String get details => pick('舰船详情', '艦船詳情', 'Ship details');
@@ -140,7 +185,9 @@ class LocalHangarCopy {
       pick('$count 艘舰船', '$count 艘艦船', count == 1 ? '1 ship' : '$count ships');
   String get original => pick('原名', '原名', 'Original name');
   String get manufacturer => pick('制造商', '製造商', 'Manufacturer');
-  String get addedAt => pick('加入时间', '加入時間', 'Date added');
+
+  /// Official RSI pledge date; unknown reads "入库时间 未知" in details.
+  String get acquiredOn => pick('入库时间', '入庫時間', 'Acquired');
   String get close => pick('关闭', '關閉', 'Close');
   String? combatSize(String? value) {
     final label = shipGroundSizeLabels[value];

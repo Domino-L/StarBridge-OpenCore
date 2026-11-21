@@ -35,8 +35,8 @@ internal sealed partial class CommunityClient
         {
             current(); token.ThrowIfCancellationRequested();
             RequireOfficialFleetTarget(body, sourceRef, scope);
-            if (projectionDeadline is { } expires && observationClock.GetUtcNow() >= expires)
-                throw new AccountBridgeHostException("communities.identityUnavailable");
+            if (projectionDeadline is { } expires && OfficialFleet.OfficialFleetServerClock.IsExpired(expires, observationClock.GetUtcNow()))
+                throw OfficialFleet.OfficialFleetServerClock.ErrorFor(observationClock);
         }
         async Task<JsonElement> Page(int pageOffset, string? revision, ShipQuery selection, CancellationToken ct)
         {
@@ -48,9 +48,10 @@ internal sealed partial class CommunityClient
             try { raw = await WorkspaceJson(bearer, path, ct, 400 * 1024, officialImages: true); }
             catch (AccountBridgeHostException e) when (e.Code == "communities.unavailable")
             {
-                // A failed directory read cannot establish whether the former
-                // viewer-scoped identity is still public. Clear stale UI.
-                throw new AccountBridgeHostException("communities.identityUnavailable");
+                // Clear stale presentation without claiming the account changed.
+                // An intervening identity/source change still takes precedence.
+                Current();
+                throw new AccountBridgeHostException("communities.readUnavailable");
             }
             Current(); ShipObject(raw);
             var protocol = Number(raw, "schemaVersion", 1, 2);
@@ -77,8 +78,9 @@ internal sealed partial class CommunityClient
             else
             {
                 if (deadline.ValueKind != JsonValueKind.String || !deadline.TryGetDateTimeOffset(out var value) ||
-                    value.Offset != TimeSpan.Zero || value <= observationClock.GetUtcNow())
+                    value.Offset != TimeSpan.Zero)
                     throw new AccountBridgeHostException("communities.identityUnavailable");
+                if (OfficialFleet.OfficialFleetServerClock.IsExpired(value, observationClock.GetUtcNow())) throw OfficialFleet.OfficialFleetServerClock.ErrorFor(observationClock);
                 projectionDeadline = projectionDeadline is null || value < projectionDeadline ? value : projectionDeadline;
                 projectionDeadlineObserved?.Invoke(projectionDeadline);
             }
@@ -123,7 +125,7 @@ internal sealed partial class CommunityClient
                 Page, TimeSpan.FromSeconds(12))
             : await Page(offset, expected, query, token);
         Current();
-        var now = observationClock.GetUtcNow();
+        var now = _targetClock.GetUtcNow();
         foreach (var item in _officialShipDisplayReferences.Where(p => p.Value.Expires <= now).ToArray())
             _officialShipDisplayReferences.TryRemove(item.Key, out _);
         string Ref(string kind, string id)
@@ -132,7 +134,7 @@ internal sealed partial class CommunityClient
             if (_officialShipDisplayReferences.Count >= 20000 && !_officialShipDisplayReferences.ContainsKey(key))
                 throw new AccountBridgeHostException("communities.refreshRequired");
             return _officialShipDisplayReferences.AddOrUpdate(key,
-                _ => new(Guid.NewGuid().ToString("N"), now.AddMinutes(5)),
+                _ => new(StableShipReference("official", key), now.AddMinutes(5)),
                 (_, old) => old with { Expires = now.AddMinutes(5) }).Reference;
         }
         var selected = Rows(root, "ships", 20);

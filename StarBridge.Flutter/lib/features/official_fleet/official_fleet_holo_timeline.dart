@@ -66,6 +66,15 @@ class OfficialFleetHoloTimeline {
     }
   }
 
+  /// The same terminal frame without an entrance or controller listeners.
+  OfficialFleetHoloTimeline.settled() : quick = true, slabOffset = -10 {
+    const done = AlwaysStoppedAnimation(1.0);
+    const idle = AlwaysStoppedAnimation(0.0);
+    seam = unveil = ambient = mirror = slab = edge = code = done;
+    scan = glint = idle;
+    _stats = [done, done, done];
+  }
+
   final bool quick;
   final double slabOffset;
   final _owned = <Animation<double>>[];

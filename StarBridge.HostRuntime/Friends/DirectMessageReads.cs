@@ -14,6 +14,7 @@ internal sealed record ConversationView(string TargetRef, string Callsign, strin
     public long? LatestSequence { get; init; }
     public bool? LastMessageIncoming { get; init; }
     public string? Presence { get; init; }
+    public int? LastOnlineDays { get; init; }
 }
 internal sealed record ConversationsView(ConversationView[] Conversations, int TotalUnread, DateTimeOffset ServerTime)
 { public int SchemaVersion => 1; }
@@ -77,6 +78,7 @@ internal sealed partial class FriendsReader
         deadline.CancelAfter(TimeSpan.FromSeconds(12));
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(_origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        if (target is null) Support.LastOnlineDays.Apply(request);
         try {
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw ChatError("identity_unavailable");
@@ -114,12 +116,14 @@ internal sealed partial class FriendsReader
             long? sequence = entry.TryGetProperty("latestSequence", out var latest) ? latest.GetInt64() : null;
             if (sequence < 0) throw ChatError("data_invalid");
             var sender = entry.TryGetProperty("lastSenderAccountId", out _) ? Text(entry, "lastSenderAccountId", 256) : null;
+            var shared = ChatState(entry) == "friend" ? ParseShared(user) : null;
             var presence = ChatState(entry) == "friend" ? ReadObservedPresence(user) : null;
             return new ConversationView(reference, Text(user, "callsign", 512), Text(user, "gameId", 512),
                 user.TryGetProperty("avatarImageData", out var avatar) && avatar.ValueKind == JsonValueKind.String ? RoomAvatarProjection.Normalize(avatar.GetString(), 512 * 1024) : null,
                 MessageText(entry, "lastMessagePreview", 4096), entry.GetProperty("lastMessageAt").GetDateTimeOffset(), unread, ChatState(entry)) {
                     ConversationKey = ConversationKey(Owner(bearer, scope), id, scope),
                     LatestSequence = sequence,
+                    LastOnlineDays = shared?.LastOnlineDays,
                     LastMessageIncoming = string.IsNullOrWhiteSpace(sender) ? null : sender == id,
                     Presence = presence switch { "AppOnline" => "online", "InGame" => "inGame", "Away" => "away", "Offline" => "offline", _ => null },
                 };

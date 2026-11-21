@@ -10,24 +10,60 @@ import '../common/user_interaction.dart';
 import '../common/user_profile_page.dart';
 import 'marketplace_copy.dart';
 import 'marketplace_diagonal.dart'
-    show MarketParallelogramPainter, MarketSlantTag;
+    show
+        MarketFusedTags,
+        MarketParallelogramPainter,
+        MarketSlantTag,
+        marketNeedsTag;
 import 'marketplace_quality.dart';
 import 'marketplace_port.dart';
+import '../../design_system/surfaces/light_visual_text.dart';
 
-String? marketQuality(MarketRow row) {
+/// The listing's material quality data, or null.
+Map<Object?, Object?>? _materialQuality(MarketRow row) {
   final raw =
       marketRows(row['items']).firstOrNull?['qualityData'] ??
       row['qualityData'];
   try {
     final data = raw is String ? jsonDecode(raw) : raw;
-    if (data is! Map || data['type'] != 'material') return null;
-    final value = marketNumber(data['qualityMin'] ?? data['quality']);
-    return value == null
-        ? null
-        : '${data['qualityMin'] != null ? '≥' : ''}${value.toStringAsFixed(0)}';
+    return data is Map && data['type'] == 'material' ? data : null;
   } on FormatException {
     return null;
   }
+}
+
+/// A buy order's quality is what it needs, at least (user 2026-11-07: "求购
+/// 应该是要求，比如>=975这种"), whether SCM stored it as `qualityMin` or, for
+/// older orders, as `quality`. A stated side decides (creatorType 0 buy, 1
+/// sell; own listings' `side`); only a row without one falls back to the data
+/// (CX-BUYTAG-REVIEW P2-2).
+bool marketQualityRequired(MarketRow row) {
+  final side = marketOrderSide(row) ?? row['side'];
+  if (side == 'buy') return true;
+  if (side == 'sell') return false;
+  return _materialQuality(row)?['qualityMin'] != null;
+}
+
+/// An order's side from SCM's `creatorType`: 'buy' for 0, 'sell' for 1, as
+/// an integer or exactly the text "0" / "1" (no " 1", "+1", "01", "0x1");
+/// null for anything else, which leaves the side unknown rather than
+/// guessing (CX-BUYTAG-REVIEW-R3/R4). A valid creatorType outranks a row's
+/// own `side`: it is SCM's field, the projections never disagree.
+String? marketOrderSide(MarketRow row) => switch (row['creatorType']) {
+  // Typed patterns: a plain `1` would also match the double 1.0.
+  int() && 0 || '0' => 'buy',
+  int() && 1 || '1' => 'sell',
+  _ => null,
+};
+
+/// The quality as shown: "≥975" for a minimum (a requirement, or a stored
+/// `qualityMin`), else "975". Whether to add 需要 is [marketQualityRequired].
+String? marketQuality(MarketRow row) {
+  final data = _materialQuality(row);
+  final value = marketNumber(data?['qualityMin'] ?? data?['quality']);
+  if (value == null) return null;
+  final minimum = data?['qualityMin'] != null || marketQualityRequired(row);
+  return '${minimum ? '≥' : ''}${value.toStringAsFixed(0)}';
 }
 
 /// SCM time zone id -> minutes east of UTC currently in force (Host applies DST).
@@ -354,7 +390,7 @@ class MarketTrader extends StatelessWidget {
             child: Text(
               row['seller'] as String? ?? '',
               maxLines: 1,
-              overflow: TextOverflow.fade,
+              overflow: fadeOverflow(context),
               softWrap: false,
             ),
           ),
@@ -371,14 +407,14 @@ class MarketTrader extends StatelessWidget {
           child: Text(
             row['seller'] as String? ?? '—',
             maxLines: 1,
-            overflow: TextOverflow.fade,
+            overflow: fadeOverflow(context),
             softWrap: false,
           ),
         ),
         Text(
           '● ${marketText(context, presence)}${row['point'] == null ? '' : ' · ★ ${row['point']}'}',
           maxLines: 1,
-          overflow: TextOverflow.fade,
+          overflow: fadeOverflow(context),
           softWrap: false,
           style: TextStyle(
             fontSize: context.tokens.typography.label,
@@ -393,9 +429,18 @@ class MarketTrader extends StatelessWidget {
 }
 
 class MarketQualityBadge extends StatelessWidget {
-  const MarketQualityBadge(this.row, {this.prefixed = false, super.key});
+  const MarketQualityBadge(
+    this.row, {
+    this.prefixed = false,
+    this.inColumn = false,
+    super.key,
+  });
   final MarketRow row;
   final bool prefixed;
+
+  /// In the item page's quality column the low tier's name moves to the
+  /// tooltip on both tabs (user choice 2026-11-12).
+  final bool inColumn;
   @override
   Widget build(BuildContext context) {
     final quality = marketQuality(row);
@@ -403,22 +448,33 @@ class MarketQualityBadge extends StatelessWidget {
     final value = num.tryParse(quality.replaceAll('≥', ''))!;
     final t = context.tokens;
     final tier = MarketQualityTier.of(value).name;
+    // A buy order's tag keeps its tier look behind a fused 需要 (方案 A).
+    final needs = marketQualityRequired(row);
+    Widget labelled(Widget tag) => Tooltip(
+      message: marketText(context, tier),
+      child: Semantics(
+        label:
+            '${needs ? '${marketText(context, 'needs')} ' : ''}${marketText(context, tier)} $quality',
+        excludeSemantics: true,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          widthFactor: 1,
+          child: needs
+              ? MarketFusedTags([
+                  marketNeedsTag(marketText(context, 'needs')),
+                  tag,
+                ])
+              : tag,
+        ),
+      ),
+    );
     if (tier == 'legendary') {
-      return Tooltip(
-        message: marketText(context, tier),
-        child: Semantics(
-          label: '${marketText(context, tier)} $quality',
-          excludeSemantics: true,
-          child: Align(
-            alignment: Alignment.centerLeft,
-            widthFactor: 1,
-            child: MarketSlantTag(
-              prefixed ? marketText(context, 'quality') : '',
-              color: t.domainColors.industry.foreground,
-              mono: quality,
-              foil: true,
-            ),
-          ),
+      return labelled(
+        MarketSlantTag(
+          prefixed ? marketText(context, 'quality') : '',
+          color: t.domainColors.industry.foreground,
+          mono: quality,
+          foil: true,
         ),
       );
     }
@@ -434,38 +490,32 @@ class MarketQualityBadge extends StatelessWidget {
         : value >= 600
         ? t.domainColors.recon.soft
         : t.surfaces.raised.fill;
+    // A buy order's fused tag, and any tag in the item page's column, drops
+    // the low tier's name to fit;
+    // the tooltip and screen reader still say it (user choice 2026-11-12).
     final label =
-        '${prefixed ? '${marketText(context, 'quality')} ' : ''}$quality${value < 200 ? ' ${marketText(context, tier)}' : ''}';
-    return Tooltip(
-      message: marketText(context, tier),
-      child: Semantics(
-        label: '${marketText(context, tier)} $quality',
-        excludeSemantics: true,
-        child: Align(
-          alignment: Alignment.centerLeft,
-          widthFactor: 1,
-          // The hall's slanted tag; tier colours unchanged.
-          child: CustomPaint(
-            painter: MarketParallelogramPainter(
-              fill: Color.alphaBlend(fg.withValues(alpha: .1), bg),
-              border: fg.withValues(alpha: .55),
-            ),
-            // Sized by its text: a Container with an alignment would fill
-            // every loose width it is given (a Wrap row, a name column).
-            child: Container(
-              height: 20,
-              padding: const EdgeInsets.symmetric(horizontal: 9),
-              child: Center(
-                widthFactor: 1,
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: fg,
-                    fontFamily: t.typography.monoFamily,
-                    fontSize: t.typography.label,
-                    fontWeight: t.typography.emphasisWeight,
-                  ),
-                ),
+        '${prefixed ? '${marketText(context, 'quality')} ' : ''}$quality${value < 200 && !needs && !inColumn ? ' ${marketText(context, tier)}' : ''}';
+    return labelled(
+      // The hall's slanted tag; tier colours unchanged.
+      CustomPaint(
+        painter: MarketParallelogramPainter(
+          fill: Color.alphaBlend(fg.withValues(alpha: .1), bg),
+          border: fg.withValues(alpha: .55),
+        ),
+        // Sized by its text: a Container with an alignment would fill
+        // every loose width it is given (a Wrap row, a name column).
+        child: Container(
+          height: 20,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontFamily: t.typography.monoFamily,
+                fontSize: t.typography.label,
+                fontWeight: t.typography.emphasisWeight,
               ),
             ),
           ),
@@ -504,7 +554,7 @@ class MarketPublished extends StatelessWidget {
       child: Text(
         text,
         maxLines: 1,
-        overflow: TextOverflow.fade,
+        overflow: fadeOverflow(context),
         softWrap: false,
         style: TextStyle(
           fontSize: context.tokens.typography.label,

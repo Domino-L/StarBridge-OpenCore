@@ -3,7 +3,8 @@ using StarBridge.HostRuntime.Presence;
 namespace StarBridge.HostRuntime.Onboarding;
 
 // Consent for the independent local profile while its sampler is stopped.
-// Never starts a timer, transfers totals or changes the online account's consent.
+// This writer never changes online records or transfers totals. An Unknown
+// online record may later adopt this explicit choice in OnlineGameplayConsent.
 internal sealed class InstalledSetupStatisticsChoice(string root, FirstUseModeRuntime mode)
 {
     private readonly LocalFirstUseStore _local = new(root);

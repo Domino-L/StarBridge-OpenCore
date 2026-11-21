@@ -61,7 +61,7 @@ internal static class CommunityMemberReferenceAuthorTests
         f.Handler.State = "visible";
         var pendingPage = await f.AnnouncementResponse(reference);
         var pendingDetail = await f.DetailResponse(reference);
-        f.Clock.Now += TimeSpan.FromSeconds(6);
+        f.Clock.Now += TimeSpan.FromSeconds(16);
         CheckPage(Freeze(pendingPage), "expired at publication");
         CheckPeople(Freeze(pendingDetail), "expired at publication detail");
         f.Handler.NotRetained = true;

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/app/localization/app_strings.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_controls.dart';
+import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_global_group.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_module_style_controls.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_module.dart';
 import 'package:starbridge_flutter/features/overlay_settings/overlay_workspace_models.dart';
@@ -97,11 +98,8 @@ class _Probe {
     valueListenable: module.projection,
     builder: (context, projection, _) {
       final values = projection.settings!;
-      final startup = OverlayWorkspaceSettingsGroup(
-        group: 'startup',
-        fields: overlayWorkspaceFieldSpecs
-            .where((f) => f.field == 'startupTransitionFrameRate')
-            .toList(),
+      // the frame rate and the experience presets are in the global group (11-11)
+      final startup = OverlayWorkspaceGlobalGroup(
         settings: values,
         onChanged: _setting,
         onExperiencePreset: (preset) {
@@ -279,6 +277,10 @@ Future<void> _keyboard(
   LogicalKeyboardKey? key,
 ]) async {
   await _tab(t, target);
+  // the focus walk scrolls the page to keep each control in view; let that
+  // settle first (the global group is long since 11-11), so the check after
+  // the key sees the control's own feedback, not the page still scrolling
+  await _frames(t);
   await t.sendKeyEvent(key ?? LogicalKeyboardKey.enter);
   await t.pump();
   await t.pump();
@@ -303,7 +305,7 @@ Map<String, Object?> _bounds(
   expect(MediaQuery.textScalerOf(context).scale(16), 24);
   final boxes = <String, Object?>{};
   for (final key in [
-    'overlay-group-startup',
+    'overlay-group-global',
     'overlay-group-notice',
     'overlay-group-events',
     'overlay-module-style-Notice',

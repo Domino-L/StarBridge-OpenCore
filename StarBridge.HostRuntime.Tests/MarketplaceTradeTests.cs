@@ -10,6 +10,7 @@ internal static class MarketplaceTradeTests
     internal static async Task Run()
     {
         MarketplaceAvatarTests.Run();
+        await MarketplaceTradeDetailTests.Run();
         foreach (var creator in new[] {0,1})
         foreach (var role in new[] {"buyer","seller","stranger"})
         foreach (var state in Enumerable.Range(0,5))

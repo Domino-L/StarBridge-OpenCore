@@ -13,6 +13,8 @@ internal sealed class OfficialFleetRealtimePrivacyBridge(LocalPrivacyStore store
     private sealed record Context(BridgeAccountContext Owner, long Generation, OfficialFleetRealtimeTarget Target,
         string ExpectedServerRevision, bool Positive, bool AudienceSupported = false);
     private readonly Dictionary<string, Context> _contexts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _issued = new(StringComparer.Ordinal);
+    private long _issueSequence;
     private readonly object _gate = new();
     private Context? _currentScope;
     private string? _scopeRef;
@@ -66,7 +68,10 @@ internal sealed class OfficialFleetRealtimePrivacyBridge(LocalPrivacyStore store
             var audienceSpecified = body.TryGetProperty("maximumRankValue", out var rank);
             var maximum = audienceSpecified && rank.ValueKind != JsonValueKind.Null ? rank.GetInt32() : (int?)null;
             if (maximum is not (null or >= 1 and <= 4)) throw new LocalPrivacyException("privacy_local.invalid_request");
-            if (context is null || context.Owner != owner.Owner || context.Generation != owner.Generation ||
+            // An expired or retired reference needs a fresh read, not a sign-in:
+            // the client shows account_changed as "check your sign-in".
+            if (context is null) throw new LocalPrivacyException("privacy_local.refresh_required");
+            if (context.Owner != owner.Owner || context.Generation != owner.Generation ||
                 !context.Positive && fields != 0 || (fields & ~CommunityRealtimeScope.SupportedFields) != 0)
                 throw new LocalPrivacyException("privacy_local.account_changed");
             var requested = maximum;
@@ -133,8 +138,16 @@ internal sealed class OfficialFleetRealtimePrivacyBridge(LocalPrivacyStore store
         }
     }
     private string Remember(Context value) {
-        lock (_gate) { while (_contexts.Count >= 64) _contexts.Remove(_contexts.Keys.First());
-            var key = Guid.NewGuid().ToString("N"); _contexts.Add(key, value); return key; }
+        lock (_gate) {
+            // Evict the oldest issued context. Dictionary order is not insertion
+            // order after a removal: a new key reuses the freed first slot, so
+            // Keys.First() was the context issued a moment ago. Once 64 were
+            // held, each read's positive context was evicted by its own cancel
+            // context and every later save failed (build 71).
+            while (_contexts.Count >= 64)
+                _contexts.Remove(_contexts.Keys.MinBy(key => _issued.GetValueOrDefault(key))!);
+            foreach (var retired in _issued.Keys.Where(key => !_contexts.ContainsKey(key)).ToArray()) _issued.Remove(retired);
+            var key = Guid.NewGuid().ToString("N"); _contexts.Add(key, value); _issued[key] = ++_issueSequence; return key; }
     }
     private static BridgeDispatchBatch Error(BridgeEnvelope request, string code) =>
         new(BridgeEnvelope.ErrorResponse(request, new(code, "Official realtime choice unavailable.", true)), []);

@@ -180,6 +180,8 @@ void main() {
             handle.dispose();
           }
         },
+        // 0.7.3 overlay v2: other appearances are put away until v2 (only the visor is offered).
+        skip: true,
       );
 
       testWidgets(

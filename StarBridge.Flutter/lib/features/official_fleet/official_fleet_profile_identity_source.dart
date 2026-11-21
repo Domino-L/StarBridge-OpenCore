@@ -35,7 +35,9 @@ class OfficialFleetProfileIdentitySource extends StatelessWidget {
             title: strings.text('officialFleet.profile.myIdentity'),
             color: tokens.domainColors.command.foreground,
             lines: [
-              '$rankName · ${rankValue == null ? '—' : '$rankValue★'}',
+              rankValue == null
+                  ? strings.text('officialFleet.rank.unavailable')
+                  : '$rankName · $rankValue★',
               if (fleet.profile?.starBridgeRoleName case final role?)
                 '${strings.text('officialFleet.profile.starBridgeRole')} · $role',
             ],

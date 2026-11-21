@@ -186,6 +186,9 @@ final class OrganizationCommunication extends ChangeNotifier {
   ValueListenable<int> get attentionCount => _attentionCount;
   bool _notifyQueued = false;
   bool get needsScopeRefresh => factory != null && _source == null;
+  /// The same push, for what lives beside this module. It adds no listener, so
+  /// it never keeps the wait running longer than the module itself does.
+  VoidCallback? onWorkspaceActivity;
   Stream<void>? get workspaceChanges => _port is CommunityActivityPort
       ? (_port as CommunityActivityPort).workspaceChanges
       : null;
@@ -334,6 +337,7 @@ final class OrganizationCommunication extends ChangeNotifier {
             .listen((_) {
               if (!_closed && epoch == _epoch && identical(port, _port)) {
                 unawaited(refreshReadback());
+                onWorkspaceActivity?.call();
               }
             });
       }

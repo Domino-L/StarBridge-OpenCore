@@ -142,7 +142,7 @@ internal static class FirstUseSessionResumeTests
         foreach (var key in new[] { "synthetic-scm:synthetic-subject", "synthetic-other:subject" })
         {
             using var f = new Fixture(); f.Transport.HoldToken = true; var work = f.Resume();
-            await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); f.Vault.SaveRefreshToken(key, "synthetic-newer");
+            await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound); f.Vault.SaveRefreshToken(key, "synthetic-newer");
             var bytes = File.ReadAllBytes(f.PathName); f.Transport.ReleaseToken.TrySetResult();
             Check((await work).State == "contextChanged" && f.Host.CurrentContext is null && f.Transport.Identities == 0 &&
                 File.ReadAllBytes(f.PathName).SequenceEqual(bytes), "A late refresh must not overwrite any newer selected version.");
@@ -152,7 +152,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task IdentityReplacement()
     {
         using var f = new Fixture(); f.Transport.HoldIdentity = true; var work = f.Resume();
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); f.Vault.SaveRefreshToken("synthetic-scm:synthetic-subject", "synthetic-newer");
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound); f.Vault.SaveRefreshToken("synthetic-scm:synthetic-subject", "synthetic-newer");
         var bytes = File.ReadAllBytes(f.PathName); f.Transport.ReleaseIdentity.TrySetResult();
         Check((await work).State == "contextChanged" && f.Host.CurrentContext is null && File.ReadAllBytes(f.PathName).SequenceEqual(bytes),
             "Identity cannot authorize the superseded rotated credential.");
@@ -162,7 +162,7 @@ internal static class FirstUseSessionResumeTests
     {
         using var f = new Fixture(); var bytes = File.ReadAllBytes(f.PathName); f.Transport.HoldToken = true;
         using var cancel = new CancellationTokenSource(); var work = f.Resume(cancel.Token);
-        await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); cancel.Cancel();
+        await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound); cancel.Cancel();
         Check(!work.IsCompleted, "Actual transport ignoring cancellation remains owned.");
         f.Transport.ReleaseToken.TrySetResult();
         try { await work; throw new InvalidOperationException("Cancelled restore must remain cancelled."); } catch (OperationCanceledException) { }
@@ -202,7 +202,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task WriterConflict()
     {
         using var f = new Fixture(); var bytes = File.ReadAllBytes(f.PathName); f.Transport.HoldToken = true; var work = f.Resume();
-        await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         using var lease = new FileStream(f.PathName + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         f.Transport.ReleaseToken.TrySetResult();
         Check((await work).State == "unavailable" && f.Host.CurrentContext is null && f.Transport.Identities == 0 &&
@@ -214,7 +214,7 @@ internal static class FirstUseSessionResumeTests
         f.Transport.HoldIdentity = true;
         f.Transport.IdentityStatus = HttpStatusCode.Unauthorized;
         var work = f.Resume();
-        await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         var bytes = File.ReadAllBytes(f.PathName);
         using var writer = new FileStream(f.PathName + ".lock", FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         f.Transport.ReleaseIdentity.TrySetResult();
@@ -250,7 +250,7 @@ internal static class FirstUseSessionResumeTests
             using var f = new Fixture();
             if (identity) f.Transport.HoldIdentity = true; else f.Transport.HoldToken = true;
             var work = f.Resume();
-            await (identity ? f.Transport.IdentityEntered.Task : f.Transport.TokenEntered.Task).WaitAsync(TimeSpan.FromSeconds(3));
+            await (identity ? f.Transport.IdentityEntered.Task : f.Transport.TokenEntered.Task).WaitAsync(FirstUseTestWait.Bound);
             var bytes = File.ReadAllBytes(f.PathName); f.Current = false;
             (identity ? f.Transport.ReleaseIdentity : f.Transport.ReleaseToken).TrySetResult();
             Check((await work).State == "contextChanged" && f.Host.CurrentContext is null &&
@@ -274,7 +274,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task Disposed()
     {
         using var f = new Fixture(); var bytes = File.ReadAllBytes(f.PathName); f.Transport.HoldToken = true;
-        var work = f.Resume(); await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3)); f.Host.Dispose();
+        var work = f.Resume(); await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound); f.Host.Dispose();
         Check(!work.IsCompleted, "A requested close is not the actual held transport exit.");
         f.Transport.ReleaseToken.TrySetResult();
         Check((await work).State == "contextChanged" && f.Host.CurrentContext is null &&
@@ -285,7 +285,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task ExpiredDuringIdentity()
     {
         using var f = new Fixture(); f.Transport.Lifetime = 1; f.Transport.HoldIdentity = true;
-        var work = f.Resume(); await f.Transport.IdentityEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var work = f.Resume(); await f.Transport.IdentityEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         // This bounded wait crosses a real one-second token expiry. No fake
         // clock can satisfy the production OAuth/current-session time checks.
         await Task.Delay(TimeSpan.FromMilliseconds(1250)); f.Transport.ReleaseIdentity.TrySetResult();
@@ -296,7 +296,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task ExpiredDuringDevice()
     {
         using var f = new Fixture(checkDevice: true); f.Transport.Lifetime = 1; f.Transport.HoldDevice = true;
-        var work = f.Resume(); await f.Transport.DeviceEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var work = f.Resume(); await f.Transport.DeviceEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         await Task.Delay(TimeSpan.FromMilliseconds(1250)); f.Transport.ReleaseDevice.TrySetResult();
         Check((await work).State == "reauthorizationRequired" && f.Host.CurrentContext is null &&
             f.Vault.LoadRefreshToken("synthetic-scm:synthetic-subject") == "synthetic-rotated-1",
@@ -305,7 +305,7 @@ internal static class FirstUseSessionResumeTests
     private static async Task Concurrent()
     {
         using var f = new Fixture(); f.Transport.HoldToken = true; var work = f.Resume();
-        await f.Transport.TokenEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await f.Transport.TokenEntered.Task.WaitAsync(FirstUseTestWait.Bound);
         Check((await f.Resume()).State == "operationInProgress" && f.Transport.Tokens == 1,
             "Concurrent resume must not select, refresh or replace the original credential owner.");
         f.Transport.ReleaseToken.TrySetResult();

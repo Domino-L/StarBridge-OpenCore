@@ -76,6 +76,7 @@ final class OfficialFleetMember {
     this.hasServerSession,
     this.locationHiddenReason,
     this.arrivalTargetCode,
+    this.lastOnlineDays,
   });
 
   final String memberRef;
@@ -100,6 +101,7 @@ final class OfficialFleetMember {
   final bool isSelf;
   final String? serverRegion, locationHiddenReason, arrivalTargetCode;
   final bool? hasServerSession;
+  final int? lastOnlineDays;
 
   OfficialFleetMember withPresence(OfficialFleetMemberPresence value) =>
       value == presence
@@ -126,6 +128,7 @@ final class OfficialFleetMember {
           hasServerSession: hasServerSession,
           locationHiddenReason: locationHiddenReason,
           arrivalTargetCode: arrivalTargetCode,
+          lastOnlineDays: lastOnlineDays,
         );
 
   bool sameValue(OfficialFleetMember other) =>
@@ -148,6 +151,7 @@ final class OfficialFleetMember {
         hasServerSession,
         locationHiddenReason,
         arrivalTargetCode,
+        lastOnlineDays,
         server.state,
         server.value,
         ship.state,
@@ -174,6 +178,7 @@ final class OfficialFleetMember {
         other.hasServerSession,
         other.locationHiddenReason,
         other.arrivalTargetCode,
+        other.lastOnlineDays,
         other.server.state,
         other.server.value,
         other.ship.state,
@@ -319,17 +324,18 @@ final class OfficialFleetMemberDirectoryProjection {
     this.query, {
     this.presenceWasShown = false,
   }) : availability = OfficialFleetMemberDirectoryAvailability.loading,
-      lastReadAtUtc = null,
-      isRefreshing = false,
-      members = const [],
-      totalCount = null,
-      onlineCount = null,
-      inGameCount = null,
-      totalPages = null,
-      coverage = OfficialFleetRosterCoverage.unknown,
-      runtimeCapabilities = const OfficialFleetMemberRuntimeCapabilities.none(),
-      supportedFilters = const {OfficialFleetMemberFilter.all},
-      failureKey = null;
+       lastReadAtUtc = null,
+       isRefreshing = false,
+       members = const [],
+       totalCount = null,
+       onlineCount = null,
+       inGameCount = null,
+       totalPages = null,
+       coverage = OfficialFleetRosterCoverage.unknown,
+       runtimeCapabilities =
+           const OfficialFleetMemberRuntimeCapabilities.none(),
+       supportedFilters = const {OfficialFleetMemberFilter.all},
+       failureKey = null;
 
   OfficialFleetMemberDirectoryProjection.fromSnapshot(
     OfficialFleetMemberDirectorySnapshot snapshot, {
@@ -421,7 +427,8 @@ final class OfficialFleetMemberDirectoryProjection {
             .where(
               (m) =>
                   m.publicPresence == OfficialFleetMemberPresence.online ||
-                  m.publicPresence == OfficialFleetMemberPresence.inGame,
+                  m.publicPresence == OfficialFleetMemberPresence.inGame ||
+                  m.publicPresence == OfficialFleetMemberPresence.away,
             )
             .length
       : null;

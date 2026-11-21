@@ -149,13 +149,17 @@ internal sealed class RoomOverlaySession(Func<DateTimeOffset>? clock = null)
         }
     }
 
-    private static string OverlayPresence(string value) => RoomAvatarProjection.PresenceKey(value) switch
+    // 11-14 (user: "甲 按推荐"): a state the room does not know (the relay's "状态未知", the own row before its first
+    // observation) is Unknown, never a guess; the own row while invisible reads as others see it, offline. Neither shows
+    // as app online any more.
+    internal static string OverlayPresence(string value) => RoomAvatarProjection.PresenceKey(value) switch
     {
         "presence.inGame" => "InGame",
         "presence.online" => "AppOnline",
         "presence.away" => "Away",
-        "presence.offline" => "Offline",
-        _ => value
+        "presence.offline" or "presence.invisible" => "Offline",
+        _ when string.IsNullOrWhiteSpace(value) => "Offline",
+        _ => "Unknown"
     };
 
     internal void ApplyChat(string roomId, RoomChatPageView? page, RoomChatMessageView? sent,

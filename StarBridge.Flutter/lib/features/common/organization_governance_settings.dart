@@ -10,7 +10,9 @@ import '../communities/community_workspace_management_chrome.dart';
 import '../communities/community_settings_workspace.dart'
     show communitySettingsText;
 import 'organization_governance_port.dart';
+import 'organization_evidence_refresh.dart';
 import 'organization_settings_layout.dart';
+import '../settings/organization_notification_leave_guard.dart';
 
 /// One more left-hand section beside the permissions read.
 @immutable
@@ -70,7 +72,9 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
   OrganizationGovernanceContext? _context;
   String? _error;
   bool _loading = false, _writing = false;
+  bool _refreshingEvidence = false;
   int _epoch = 0, _writeEpoch = 0;
+  int _refreshIdentity = 0;
   final _visitedPanes = <String>{};
 
   /// The whole request whose outcome is unknown: a retry repeats exactly it
@@ -80,6 +84,7 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
   void _retireWrite() {
     ++_writeEpoch;
     _writing = false;
+    _refreshingEvidence = false;
     _pendingIntent = null;
     _writeResult = null;
   }
@@ -90,6 +95,7 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
     _subscription = port.invalidations.listen((_) {
       if (!mounted || widget.port != port || widget.sourceRef != source) return;
       ++_epoch;
+      ++_refreshIdentity;
       setState(() {
         _retireWrite();
         _context = null;
@@ -112,6 +118,7 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
     if (oldWidget.port != widget.port ||
         oldWidget.sourceRef != widget.sourceRef) {
       ++_epoch;
+      ++_refreshIdentity;
       unawaited(_subscription.cancel());
       _context = null;
       _visitedPanes.clear();
@@ -122,7 +129,7 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
   }
 
   Future<void> _read() async {
-    if (_loading || _writing) return;
+    if (_loading || _writing || _refreshingEvidence) return;
     final epoch = ++_epoch, port = widget.port, source = widget.sourceRef;
     setState(() {
       _loading = true;
@@ -180,7 +187,9 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
 
   Future<void> _setActivation(bool active) async {
     final value = _context, port = widget.port, source = widget.sourceRef;
-    if (value == null || _writing || !port.canActivate) return;
+    if (value == null || _writing || _refreshingEvidence || !port.canActivate) {
+      return;
+    }
     final pending = _pendingIntent;
     final intent =
         pending != null && pending.active == active && pending.source == source
@@ -246,7 +255,11 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
     final text = Theme.of(context).textTheme;
     final canActivate = _decisionState(value, 'activate') == 'allowed';
     final activated = _decisionState(value, 'delegate') == 'allowed';
-    final writable = widget.port.canActivate && !_writing && !_loading;
+    final writable =
+        widget.port.canActivate &&
+        !_writing &&
+        !_loading &&
+        !_refreshingEvidence;
     final unknown = _pendingIntent;
     final updated = value.membershipUpdatedAt;
     return Column(
@@ -324,6 +337,9 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
     trailing: decision.reason == 'notGranted' ? Text(t('notGranted')) : null,
   );
   Future<void> _select(String id) async {
+    if (id == _selected || !await confirmOrganizationNotificationLeave()) {
+      return;
+    }
     if (mounted && id != _selected) setState(() => _selected = id);
   }
 
@@ -345,8 +361,14 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
         communityWorkspaceManagementHeader(
           context,
           name: widget.name,
-          onBack: widget.onBack,
-          onRefresh: _loading || _writing ? () async {} : _read,
+          onBack: () async {
+            if (await confirmOrganizationNotificationLeave() && mounted) {
+              await widget.onBack();
+            }
+          },
+          onRefresh: _loading || _writing || _refreshingEvidence
+              ? () async {}
+              : _read,
         ),
         const SizedBox(height: 12),
         Expanded(
@@ -400,8 +422,27 @@ class _SettingsState extends State<OrganizationGovernanceSettings> {
                           }),
                           key: const Key('governance-unavailable'),
                         ),
+                      if (_context case final value?) _leaderPanel(value),
+                      if (widget.port
+                          case final OrganizationEvidenceRefreshPort refresh
+                          when refresh.canRefreshEvidence)
+                        OrganizationEvidenceRefresh(
+                          key: ValueKey((
+                            widget.port,
+                            widget.sourceRef,
+                            _refreshIdentity,
+                          )),
+                          port: refresh,
+                          text: t,
+                          enabled: !_loading && !_writing,
+                          onBusyChanged: (value) =>
+                              setState(() => _refreshingEvidence = value),
+                          stale:
+                              _context?.evidenceStale == true ||
+                              _error == 'membershipEvidenceStale',
+                          onRequested: _read,
+                        ),
                       if (_context case final value?) ...[
-                        _leaderPanel(value),
                         Text(
                           t('permissions'),
                           key: const Key('governance-permissions'),
@@ -448,6 +489,44 @@ String organizationGovernanceText(BuildContext context, String key) {
 }
 
 const _copy = <String, (String, String, String)>{
+  'refreshEvidence.refresh': ('刷新星级证明', '重新整理星級證明', 'Refresh rank evidence'),
+  'refreshEvidence.sending': ('正在请求刷新…', '正在請求重新整理…', 'Requesting refresh…'),
+  'refreshEvidence.requested': (
+    '已请求刷新，约 1 分钟后回来重试。权限是否恢复请以重新读取的结果为准。',
+    '已請求重新整理，約 1 分鐘後回來重試。權限是否恢復請以重新讀取的結果為準。',
+    'Refresh requested. Come back in about 1 minute and try again. Read permissions again to check whether they have recovered.',
+  ),
+  'refreshEvidence.cached': (
+    '刷新未完成，SCM 返回了旧资料。请稍后再试。',
+    '重新整理未完成，SCM 傳回了舊資料。請稍後再試。',
+    'Refresh did not complete; SCM returned cached data. Try again later.',
+  ),
+  'refreshEvidence.rateLimited': (
+    '还要等 {minutes} 分钟才能刷新。',
+    '還要等 {minutes} 分鐘才能重新整理。',
+    'Wait {minutes} more minutes before refreshing.',
+  ),
+  'refreshEvidence.globalBusy': (
+    '刷新服务繁忙，请稍后再点一次。',
+    '重新整理服務繁忙，請稍後再點一次。',
+    'The refresh service is busy. Try again later.',
+  ),
+  'refreshEvidence.verificationRequired': (
+    '请先在 SCM 完成或重新进行账户验证，再回来刷新。',
+    '請先在 SCM 完成或重新進行帳戶驗證，再回來重新整理。',
+    'Complete or repeat account verification on SCM, then come back to refresh.',
+  ),
+  'refreshEvidence.signInRequired': (
+    '请重新登录 SCM 后再刷新。',
+    '請重新登入 SCM 後再重新整理。',
+    'Sign in to SCM again, then refresh.',
+  ),
+  'refreshEvidence.unavailable': (
+    '没有确认刷新结果，请稍后手动重试。',
+    '沒有確認重新整理結果，請稍後手動重試。',
+    'The refresh result could not be confirmed. Try again manually later.',
+  ),
+
   'permissions': ('我的权限', '我的權限', 'My permissions'),
   'useOnly': (
     '这里显示你当前可用的权限。',

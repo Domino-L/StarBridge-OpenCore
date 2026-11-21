@@ -2,7 +2,6 @@ import 'dart:async';
 
 import '../diagnostics/loading_diagnostics.dart';
 import '../diagnostics/loading_tour.dart';
-
 import '../routing/user_page_navigation.dart';
 
 import '../tray/tray_application_binding.dart';
@@ -12,7 +11,6 @@ import '../social_windows/social_window_binding.dart';
 import '../composition/social_window_actions.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
@@ -29,6 +27,8 @@ import '../routing/room_invitation_destination.dart';
 import '../routing/destination_section.dart';
 import 'shell_layout_mode.dart';
 import 'trade_reminder_destination.dart';
+import '../composition/announcement_reminder_destination.dart';
+import 'shell_destination_shortcuts.dart';
 import 'shell_focus_traversal.dart';
 import 'shell_navigation_controller.dart';
 import 'widgets/navigation_pane.dart';
@@ -270,7 +270,9 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
     if (invitations && _openingRoomInvitation) return;
     if (invitations) _openingRoomInvitation = true;
     try {
-      final (path, section) = invitations ? ('/rooms', null) : destinationSection(route);
+      final (path, section) = invitations
+          ? ('/rooms', null)
+          : destinationSection(route);
       final destination = widget.composition.features.byRoute(path);
       if (section != null) destination.openSection?.call(section);
       var selected = false;
@@ -468,6 +470,24 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
         return;
       }
       if (!current()) return;
+      if (destination == 'communityAnnouncements' ||
+          destination == 'officialFleetAnnouncements') {
+        final page = await announcementReminderDestination(
+          widget.composition,
+          target!,
+          current,
+        );
+        if (!current()) return;
+        if (page == null) {
+          _reminderUnavailable();
+          return;
+        }
+        await _pushUserPage(
+          (_) => page,
+          'settings.notification.organization.announcement',
+        );
+        return;
+      }
       final trade = tradeReminderDestination(
         widget.composition.features,
         destination,
@@ -478,7 +498,9 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
         return;
       }
       if (destination == 'execHangar') {
-        _openFromReminder(widget.composition.features.byRoute('/tools/exec-hangar'));
+        _openFromReminder(
+          widget.composition.features.byRoute('/tools/exec-hangar'),
+        );
         return;
       }
       if (destination == 'gameIdentity') {
@@ -570,161 +592,141 @@ class _StarBridgeShellState extends State<StarBridgeShell> {
 
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(
-          LogicalKeyboardKey.keyK,
-          control: true,
-        ): () async {
-          if (ModalRoute.of(context)?.isCurrent == false) return;
-          final destination = widget.composition.features.byRoute(
-            '/marketplace',
-          );
-          var selected = false;
-          await _select(
-            destination,
-            NavigationInteraction.keyboard,
-            onSelected: () => selected = true,
-          );
-          if (mounted && selected) {
-            await (destination.onSearchShortcut ??
-                    destination.onPrimaryNavigation)
-                ?.call();
-          }
-        },
+    return shellDestinationShortcuts(
+      context: context,
+      features: widget.composition.features,
+      selectForSearch: (destination) async {
+        var selected = false;
+        await _select(
+          destination,
+          NavigationInteraction.keyboard,
+          onSelected: () => selected = true,
+        );
+        return mounted && selected;
       },
-      child: Actions(
-        actions: {
-          OpenDestinationIntent: CallbackAction<OpenDestinationIntent>(
-            onInvoke: (intent) {
-              unawaited(_openDestination(intent.route));
-              return null;
-            },
-          ),
-        },
-        child: Scaffold(
-          body: ShellWindowFrame(
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                _navigation,
-                widget.composition.shellChrome.projection,
-              ]),
-              builder: (context, _) {
-                return LayoutBuilder(
-                  builder: (context, constraints) {
-                    final mode = ShellLayoutResolver.resolve(
-                      constraints.maxWidth,
-                    );
-                    final projection =
-                        widget.composition.shellChrome.projection.value;
-                    return FocusTraversalGroup(
-                      policy: ShellFocusTraversalPolicy(),
-                      child: Row(
-                        textDirection: TextDirection.ltr,
-                        children: [
-                          FocusTraversalOrder(
-                            order: const NumericFocusOrder(0),
-                            child: StarBridgeNavigationPane(
-                              registry: widget.composition.features,
-                              onActivateWithSource:
-                                  (descriptor, interaction) async {
-                                    await _select(descriptor, interaction);
-                                    return mounted &&
-                                        identical(
-                                          _navigation.selected,
-                                          descriptor,
-                                        );
-                                  },
-                              mode: mode,
-                              onPrimaryInteractionFinished:
-                                  (descriptor, interaction) {
-                                    if (mounted &&
-                                        identical(
-                                          _navigation.selected,
-                                          descriptor,
-                                        )) {
-                                      setState(
-                                        () => _navigation.recordInteraction(
-                                          interaction,
-                                        ),
-                                      );
-                                    }
-                                  },
-                              selected: _navigation.selected,
-                              interaction: _navigation.lastInteraction,
-                              onSelect: (descriptor, interaction) =>
-                                  unawaited(_select(descriptor, interaction)),
-                            ),
-                          ),
-                          Expanded(
-                            child: FocusTraversalOrder(
-                              order: const NumericFocusOrder(1),
-                              child: Column(
-                                children: [
-                                  composeShellTopBar(
-                                    composition: widget.composition,
-                                    interaction: _titleInteraction,
-                                    selected: _userTitle == null
-                                        ? _navigation.selected
-                                        : widget.composition.features.byRoute(
-                                            _userTitle == 'navigation.profile'
-                                                ? '/profile'
-                                                : '/friends',
-                                          ),
-                                    projection: projection,
-                                    mode: mode,
-                                    onSelect: (descriptor) => unawaited(
-                                      _select(
+      openDestination: _openDestination,
+      child: Scaffold(
+        body: ShellWindowFrame(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              _navigation,
+              widget.composition.shellChrome.projection,
+            ]),
+            builder: (context, _) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final mode = ShellLayoutResolver.resolve(
+                    constraints.maxWidth,
+                  );
+                  final projection =
+                      widget.composition.shellChrome.projection.value;
+                  return FocusTraversalGroup(
+                    policy: ShellFocusTraversalPolicy(),
+                    child: Row(
+                      textDirection: TextDirection.ltr,
+                      children: [
+                        FocusTraversalOrder(
+                          order: const NumericFocusOrder(0),
+                          child: StarBridgeNavigationPane(
+                            registry: widget.composition.features,
+                            onActivateWithSource:
+                                (descriptor, interaction) async {
+                                  await _select(descriptor, interaction);
+                                  return mounted &&
+                                      identical(
+                                        _navigation.selected,
                                         descriptor,
-                                        currentNavigationInteraction,
+                                      );
+                                },
+                            mode: mode,
+                            onPrimaryInteractionFinished:
+                                (descriptor, interaction) {
+                                  if (mounted &&
+                                      identical(
+                                        _navigation.selected,
+                                        descriptor,
+                                      )) {
+                                    setState(
+                                      () => _navigation.recordInteraction(
+                                        interaction,
                                       ),
-                                    ),
-                                    onPrivacy: () => unawaited(
-                                      _select(
-                                        widget.composition.features.byRoute(
-                                          '/settings/privacy',
+                                    );
+                                  }
+                                },
+                            selected: _navigation.selected,
+                            interaction: _navigation.lastInteraction,
+                            onSelect: (descriptor, interaction) =>
+                                unawaited(_select(descriptor, interaction)),
+                          ),
+                        ),
+                        Expanded(
+                          child: FocusTraversalOrder(
+                            order: const NumericFocusOrder(1),
+                            child: Column(
+                              children: [
+                                composeShellTopBar(
+                                  composition: widget.composition,
+                                  interaction: _titleInteraction,
+                                  selected: _userTitle == null
+                                      ? _navigation.selected
+                                      : widget.composition.features.byRoute(
+                                          _userTitle == 'navigation.profile'
+                                              ? '/profile'
+                                              : '/friends',
                                         ),
-                                        NavigationInteraction.pointer,
+                                  projection: projection,
+                                  mode: mode,
+                                  onSelect: (descriptor) => unawaited(
+                                    _select(
+                                      descriptor,
+                                      currentNavigationInteraction,
+                                    ),
+                                  ),
+                                  onPrivacy: () => unawaited(
+                                    _select(
+                                      widget.composition.features.byRoute(
+                                        '/settings/privacy',
                                       ),
+                                      NavigationInteraction.pointer,
                                     ),
                                   ),
-                                  ...shellRuntimeNotices(
-                                    composition: widget.composition,
-                                    projection: projection,
-                                    exampleSceneControl:
-                                        widget.exampleSceneControl,
-                                    onRetryConnection: widget.onRetryConnection,
-                                    onHandleMismatch: widget.onHandleMismatch,
-                                    onOpenPrivacy: () => unawaited(
-                                      _select(
-                                        widget.composition.features.byRoute(
-                                          '/settings/privacy',
-                                        ),
-                                        NavigationInteraction.pointer,
+                                ),
+                                ...shellRuntimeNotices(
+                                  composition: widget.composition,
+                                  projection: projection,
+                                  exampleSceneControl:
+                                      widget.exampleSceneControl,
+                                  onRetryConnection: widget.onRetryConnection,
+                                  onHandleMismatch: widget.onHandleMismatch,
+                                  onOpenPrivacy: () => unawaited(
+                                    _select(
+                                      widget.composition.features.byRoute(
+                                        '/settings/privacy',
                                       ),
+                                      NavigationInteraction.pointer,
                                     ),
                                   ),
-                                  Expanded(
-                                    child: ShellWorkspaceNavigator(
-                                      navigatorKey: _userNavigator,
-                                      navigation: _navigation,
-                                    ),
+                                ),
+                                Expanded(
+                                  child: ShellWorkspaceNavigator(
+                                    navigatorKey: _userNavigator,
+                                    navigation: _navigation,
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
           ),
         ),
       ),
-    );
+    ).withRuntimePrompts(widget.composition.features);
   }
 
   bool _selecting = false;

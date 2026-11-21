@@ -76,7 +76,6 @@ class OverlaySharedPresetCard extends StatelessWidget {
                   [
                     for (final entry in const {
                       'notice': 'showNotice',
-                      'fleetOverview': 'showSquads',
                       'members': 'showMembers',
                       'chat': 'showChat',
                       'events': 'showEventNotifications',

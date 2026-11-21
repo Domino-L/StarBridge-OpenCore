@@ -1,7 +1,7 @@
 STARBRIDGE OFFICIAL BINARY END USER LICENSE AGREEMENT
 
-Terms version: 2026-10-31-v4
-Effective date: the date StarBridge 0.7.2 is released
+Terms version: 2026-11-05-v5
+Effective date: the date StarBridge 0.7.3 is released
 
 This agreement is between you and Ruiyang Lyu, an individual ("Licensor").
 It governs only the Proprietary Components included in an Official Binary.
@@ -160,6 +160,14 @@ passwords, verification codes, recovery codes, payment credentials, or other
 unnecessary sensitive information through feedback, chat, profiles, or
 diagnostics. Applicable privacy disclosures and in-application controls remain
 part of the information presented for those data functions.
+
+When you sign in with SCM, your hangar (the ships read from RSI, together with
+your notes and bookmarks) is saved to your account. What fleets and
+organizations can see follows your sharing settings. When you read your
+hangar, you may choose whether this computer remembers your RSI sign-in; if it
+does not (the default), StarBridge clears that sign-in after the read.
+StarBridge does not read or save your RSI password, and the RSI sign-in is
+never saved to your account.
 
 10. Updates, compatibility, and online functions
 

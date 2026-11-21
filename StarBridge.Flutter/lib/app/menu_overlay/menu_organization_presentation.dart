@@ -180,4 +180,5 @@ Map<String, Object?> organizationShipPresentation(CommunitySharedShip ship) => {
   'status': ship.catalogStatus,
   'image': ship.catalogThumbnailAsset ?? ship.catalogImageAsset,
   'iconKey': ship.displayIcon ?? '',
+  'vehicleName': ship.englishName ?? ship.displayName,
 };

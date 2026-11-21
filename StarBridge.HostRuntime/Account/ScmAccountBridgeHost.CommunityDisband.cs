@@ -14,10 +14,12 @@ internal sealed partial class ScmAccountBridgeHost
 
     private async Task<object> CommunityDisbandAsync(BridgeAccountContext context, JsonElement payload, bool execute, CancellationToken token)
     {
-        if (execute) CommunityClient.ValidateDisband(payload);
+        if (execute) CommunityClient.ValidateDisband(payload, allowEmptyPassword: true);
         var session = RequireRelaySession(context);
         var generation = Generation;
-        if (_reauthorizationRequired || _credentialTemporarilyUnavailable)
+        if (_credentialTemporarilyUnavailable && !_reauthorizationRequired)
+            throw new AccountBridgeHostException(AccountBridgeStableErrors.CredentialTemporarilyUnavailable, retryable: true);
+        if (_reauthorizationRequired)
             throw new AccountBridgeHostException(AccountBridgeStableErrors.ReauthorizationRequired);
         var client = _communities ?? throw new AccountBridgeHostException("communities.unavailable");
         void Current()

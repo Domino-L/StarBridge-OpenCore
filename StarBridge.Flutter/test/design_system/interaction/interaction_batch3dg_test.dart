@@ -5,6 +5,7 @@ import 'package:starbridge_flutter/design_system/interaction/starbridge_action_r
 import 'package:starbridge_flutter/design_system/interaction/starbridge_dialog.dart';
 import 'package:starbridge_flutter/design_system/interaction/starbridge_page_motion.dart';
 import 'package:starbridge_flutter/features/settings/help_support_settings_page.dart';
+import 'package:starbridge_flutter/features/settings/spiritual_support_button.dart';
 import 'package:starbridge_interaction/starbridge_interaction.dart';
 
 import '../../features/friends/social_layout_test.dart' show loadFonts, size;
@@ -19,7 +20,9 @@ void main() {
       size(t, const Size(1400, 1100));
       await t.pumpWidget(scopedApp(const HelpSupportSettingsPage(), suite));
       await t.pumpAndSettle();
-      for (final id in ['help-spiritual-support', 'help-scm-team']) {
+      // The daily support button is not shown (user 11-10).
+      expect(find.byKey(const Key('help-spiritual-support')), findsNothing);
+      for (final id in ['help-scm-team']) {
         expect(
           find.ancestor(
             of: find.byKey(Key(id)),
@@ -52,7 +55,7 @@ void main() {
       '$suite local moral support has source-aware route and approved close',
       (t) async {
         size(t, const Size(1400, 1100));
-        await t.pumpWidget(scopedApp(const HelpSupportSettingsPage(), suite));
+        await t.pumpWidget(scopedApp(const SpiritualSupportButton(), suite));
         await t.pumpAndSettle();
         await t.tap(find.byKey(const Key('help-spiritual-support')));
         await t.pumpAndSettle();

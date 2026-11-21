@@ -190,14 +190,26 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     await model.load();
   }
 
+  /// A ship's details found it under a new reference: the pages held show old
+  /// ones, so read them again even when the revision has not moved.
+  void _libraryStale() {
+    if (mounted) unawaited(model.refreshVisible(force: true));
+  }
+
   void _changed() {
-    if (model.invalidated) {
+    if (model.invalidated || model.error == 'readUnavailable') {
       _dismissDetail();
+      if (model.error == 'readUnavailable') _selection.reset();
       _selection.clear();
       _statistics = null;
     }
     final page = model.page;
-    if (page != null) _selection.afterPage(page);
+    // Every page held answers together: a refresh replaces all of them, and
+    // the selected ship may now sit on another one.
+    final pages = model.pages;
+    if (pages.isNotEmpty || page != null) {
+      _selection.afterPages(pages.isEmpty ? [page!] : pages);
+    }
     if (model.selectedShipRef != null &&
         _selection.page == null &&
         !_selection.lookingUp) {
@@ -334,6 +346,7 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
         ownerTargetFactory: widget.ownerTargetFactory,
         includeSocialActions: widget.includeSocialActions,
         imageDecoder: owner.avatars.images.decode,
+        onLibraryStale: _libraryStale,
       ),
       onRouteCreated: (route) => _detailRoute = opened = route,
     );
@@ -526,7 +539,8 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
     ));
     return CommunityShipsPrefetch(
       key: const Key('community-ships-list'),
-      canLoad: _hasNext && !model.busy && !model.invalidated && model.error == null,
+      canLoad:
+          _hasNext && !model.busy && !model.invalidated && model.error == null,
       load: _loadMore,
       child: model.viewMode == 'list'
           ? Column(
@@ -572,6 +586,7 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
       ownerTargetFactory: widget.ownerTargetFactory,
       includeSocialActions: widget.includeSocialActions,
       onRefreshLibrary: () => unawaited(model.load()),
+      onLibraryStale: _libraryStale,
     );
   }
 
@@ -633,12 +648,10 @@ class _CommunityShipsPanelState extends State<CommunityShipsPanel>
                   // Only the first page can say the inventory changed.
                   firstPage: _pages.firstOrNull,
                   initial: model.statisticsFor(communityShipsCulture(context)),
+                  onReadUnavailable: model.readUnavailable,
                   onStatistics: (stats) {
                     if (!mounted) return;
-                    model.holdStatistics(
-                      stats,
-                      communityShipsCulture(context),
-                    );
+                    model.holdStatistics(stats, communityShipsCulture(context));
                     if (stats != null) model.showOwners(stats.ships);
                     setState(() {
                       _statistics = stats;

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/legal/cig_fankit_notice.dart';
+import '../../app/localization/app_strings.dart';
 import '../../app/shell/chrome/shell_chrome_projection.dart';
 
 import 'package:flutter/foundation.dart';
@@ -20,6 +21,8 @@ import 'personal_profile_models.dart';
 import '../../shared/diagnostics/loading_content_probe.dart';
 import '../../shared/diagnostics/loading_metrics.dart';
 import 'personal_profile_module.dart';
+import 'personal_profile_port.dart';
+import 'personal_profile_public_header.dart';
 import 'personal_profile_read_status.dart';
 import 'personal_profile_view_state.dart';
 import 'personal_profile_draft.dart';
@@ -28,6 +31,8 @@ import 'personal_profile_visibility.dart';
 import 'personal_profile_visibility_dialog.dart';
 import 'personal_profile_wallpaper_backdrop.dart';
 import 'personal_profile_wallpaper_catalog.dart';
+import 'personal_profile_achievement_showcase.dart';
+import 'personal_profile_notice_placement.dart';
 import 'personal_profile_view.dart';
 
 class PersonalProfilePage extends StatefulWidget {
@@ -37,6 +42,7 @@ class PersonalProfilePage extends StatefulWidget {
     this.gameplayTime,
     this.isVisitor = false,
     this.offline = false,
+    this.readOnlyOwnerImportPending = false,
     this.visitorAvatarImageData,
     this.pageToolbar,
     this.viewState,
@@ -49,6 +55,7 @@ class PersonalProfilePage extends StatefulWidget {
   final PersonalProfileAccess? access;
   final bool isVisitor;
   final bool offline;
+  final bool readOnlyOwnerImportPending;
   final String? visitorAvatarImageData;
 
   /// Navigation overlays the wallpaper without reducing its viewport.
@@ -61,6 +68,8 @@ class PersonalProfilePage extends StatefulWidget {
 }
 
 class _PersonalProfilePageState extends State<PersonalProfilePage> {
+  // Where the Fan Kit notice goes; see ProfileNoticeRoom.
+  final _noticeFloats = ValueNotifier<bool?>(null);
   final ScrollController _scrollController = ScrollController();
   final _editorKey = GlobalKey<PersonalProfileEditorPanelState>();
   PersonalProfileViewState? _view;
@@ -70,9 +79,44 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
   bool _editing = false;
   PersonalProfileEditingSession? _editingOwner;
   List<PersonalProfileModuleLayoutItem>? _layoutDraft;
+  List<String>? _achievementDraft;
+  bool _achievementsActivated = false;
   String? _wallpaperDraft;
   int _wallpaperReadEpoch = 0;
   bool _profileWasRefreshing = false;
+  PersonalProfilePublicFacts? _ownerFacts;
+  bool _factsRequested = false;
+  int _factsEpoch = 0;
+
+  void _resetAccountFacts() {
+    _factsEpoch++;
+    _factsRequested = false;
+    _ownerFacts = null;
+  }
+
+  Future<void> _readAccountFacts() async {
+    final module = widget.module;
+    if (widget.isVisitor ||
+        widget.offline ||
+        module.projection.value.availability !=
+            PersonalProfileAvailability.available ||
+        module is! PersonalProfileAccountFactsReader) {
+      return;
+    }
+    _factsRequested = true;
+    final epoch = ++_factsEpoch;
+    PersonalProfilePublicFacts? facts;
+    try {
+      facts = await (module as PersonalProfileAccountFactsReader)
+          .readAccountFacts();
+    } on Object {
+      facts = null;
+    }
+    if (mounted && epoch == _factsEpoch && identical(widget.module, module)) {
+      setState(() => _ownerFacts = facts);
+    }
+  }
+
   InteractionSource? _refreshIntent;
   InteractionSource _readSource = InteractionSource.programmatic;
   int _readPhase = 0;
@@ -117,6 +161,18 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     _profileWasRefreshing =
         widget.module.projection.value.operation ==
         PersonalProfileOperation.refreshing;
+    unawaited(_readAccountFacts());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The achievement showcase reads the shared collection once per page.
+    final achievements = ProfileAchievementsScope.of(context);
+    if (achievements != null && !_achievementsActivated && !widget.isVisitor) {
+      _achievementsActivated = true;
+      unawaited(achievements.activate());
+    }
   }
 
   @override
@@ -132,6 +188,7 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
       _rememberView();
     }
     if (moduleChanged) {
+      _resetAccountFacts();
       _parkDraft(oldWidget.module);
       oldWidget.module.projection.removeListener(_onProfileChanged);
       widget.module.projection.addListener(_onProfileChanged);
@@ -146,6 +203,7 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
       _avatarViewData = null;
       _clearDraft();
       _restoreDraft();
+      unawaited(_readAccountFacts());
     }
     if (moduleChanged || oldWidget.viewState != widget.viewState) {
       _view = widget.viewState;
@@ -155,6 +213,11 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
 
   void _onProfileChanged() {
     final next = widget.module.projection.value;
+    if (next.availability != PersonalProfileAvailability.available) {
+      _resetAccountFacts();
+    } else if (!_factsRequested) {
+      unawaited(_readAccountFacts());
+    }
     if (next.availability != PersonalProfileAvailability.available ||
         widget.access?.permitsEditing == false) {
       _retireVisibility();
@@ -251,6 +314,7 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     _editing = true;
     _restoredDraft = draft;
     _layoutDraft = draft.edit.moduleLayout;
+    _achievementDraft = draft.edit.achievementShowcase;
     _wallpaperDraft = draft.edit.wallpaperId;
     _editingOwner = module is PersonalProfileEditingSession
         ? module as PersonalProfileEditingSession
@@ -262,6 +326,7 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     _editing = false;
     _visitorPreview = false;
     _layoutDraft = null;
+    _achievementDraft = null;
     _wallpaperDraft = null;
     _releaseEditing();
   }
@@ -276,8 +341,17 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     // Provenance of this synchronous admission only. Deferred/background reads
     // must not inherit an earlier keyboard command; the module still owns them.
     _refreshIntent = currentStarBridgeActivationSource;
+    final module = widget.module;
+    final epoch = _factsEpoch;
     try {
-      return widget.module.refresh();
+      return module.refresh().then((result) async {
+        if (mounted &&
+            identical(widget.module, module) &&
+            epoch == _factsEpoch) {
+          await _readAccountFacts();
+        }
+        return result;
+      });
     } finally {
       _refreshIntent = null;
     }
@@ -335,14 +409,36 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
     }
   }
 
+  Future<PersonalProfileActionResult> _save(PersonalProfileEdit edit) async {
+    final module = widget.module;
+    final access = widget.access;
+    final result = await (access?.save ?? module.save)(edit);
+    if (mounted &&
+        identical(widget.module, module) &&
+        identical(widget.access, access) &&
+        !widget.isVisitor &&
+        !_visitorPreview &&
+        result.outcome == PersonalProfileActionOutcome.completed &&
+        result.messageKey != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppStrings.of(context).text(result.messageKey!)),
+        ),
+      );
+    }
+    return result;
+  }
+
   @override
   void dispose() {
+    _resetAccountFacts();
     _retireVisibility();
     _rememberView();
     _parkDraft(widget.module);
     widget.module.projection.removeListener(_onProfileChanged);
     _releaseEditing();
     _scrollController.dispose();
+    _noticeFloats.dispose();
     super.dispose();
   }
 
@@ -365,7 +461,19 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
             hasProfile && !(_visitorPreview && !projection.isPublic)
             ? ownerWallpaperId
             : PersonalProfileWallpaperCatalog.noneId;
-        final wallpaper = PersonalProfileWallpaperCatalog.resolve(wallpaperId);
+        // The default picture stands in only once a page is shown; while
+        // loading or after the account changes the backdrop stays plain.
+        final pageDefault =
+            hasProfile && wallpaperId == PersonalProfileWallpaperCatalog.noneId;
+        final shownWallpaperId = pageDefault
+            ? PersonalProfileWallpaperCatalog.pageDefaultId
+            : wallpaperId;
+        final wallpaper = PersonalProfileWallpaperCatalog.resolve(
+          shownWallpaperId,
+        );
+        final notice = wallpaper.requiresCigFankitNotice
+            ? const CigFankitNoticeButton(key: Key('profile-cig-fankit-notice'))
+            : null;
         final content = Stack(
           key: const Key('profile-page-wallpaper-stack'),
           fit: StackFit.expand,
@@ -373,7 +481,8 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
             Positioned.fill(
               child: PersonalProfileWallpaperBackdrop(
                 key: ValueKey(_wallpaperReadEpoch),
-                wallpaperId: wallpaperId,
+                wallpaperId: shownWallpaperId,
+                quietFailure: pageDefault,
               ),
             ),
             Scrollbar(
@@ -393,92 +502,128 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
                     constraints: BoxConstraints(
                       maxWidth: tokens.density.contentMaxWidth,
                     ),
-                    child: switch (projection.availability) {
-                      PersonalProfileAvailability.loading =>
-                        PersonalProfileLoadingView(
-                          key: ValueKey(('profile-load', _readPhase)),
-                          source: _readSource,
-                        ),
-                      PersonalProfileAvailability.signedOut =>
-                        const PersonalProfileSignedOutView(),
-                      PersonalProfileAvailability.unavailable =>
-                        PersonalProfileUnavailableView(
-                          failureKey:
-                              projection.failureKey ??
-                              'profile.error.unavailable',
-                          onRetry: _refresh,
-                          source: _readSource,
-                          retrying:
-                              projection.operation ==
-                              PersonalProfileOperation.refreshing,
-                        ),
-                      PersonalProfileAvailability.available => PersonalProfileView(
-                        readSource: _readSource,
-                        readPhase: _readPhase,
-                        editorKey: _editorKey,
-                        onVisibility:
-                            widget.offline ||
-                                !projection.canEdit ||
-                                widget.module is! ProfileVisibilityAccess
-                            ? null
-                            : () => unawaited(_editVisibility()),
-                        projection: projection,
-                        presence: widget.presence,
-                        gameplayTime: widget.gameplayTime,
-                        visitorPreview: _visitorPreview,
-                        isVisitor: widget.isVisitor,
-                        offline: widget.offline,
-                        editing: _editing,
-                        layout: _editing
-                            ? _layoutDraft ??
-                                  PersonalProfileLayout.normalize(
-                                    projection.moduleLayout,
-                                  )
-                            : PersonalProfileLayout.normalize(
-                                projection.moduleLayout,
-                              ),
-                        onPreview: () => setState(() => _visitorPreview = true),
-                        onExitPreview: () =>
-                            setState(() => _visitorPreview = false),
-                        onEdit: () {
-                          if (widget.access?.permitsEditing == false) return;
-                          final module = widget.module;
-                          if (module is PersonalProfileEditingSession) {
-                            if (!(module as PersonalProfileEditingSession)
-                                .beginEditing()) {
-                              return;
-                            }
-                            _editingOwner =
-                                module as PersonalProfileEditingSession;
-                          }
-                          setState(() {
-                            _editing = true;
-                            _wallpaperDraft = projection.wallpaperId;
-                            _layoutDraft = PersonalProfileLayout.normalize(
-                              projection.moduleLayout,
-                            );
-                          });
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        switch (projection.availability) {
+                          PersonalProfileAvailability.loading =>
+                            PersonalProfileLoadingView(
+                              key: ValueKey(('profile-load', _readPhase)),
+                              source: _readSource,
+                            ),
+                          PersonalProfileAvailability.signedOut =>
+                            const PersonalProfileSignedOutView(),
+                          PersonalProfileAvailability.unavailable =>
+                            PersonalProfileUnavailableView(
+                              failureKey:
+                                  projection.failureKey ??
+                                  'profile.error.unavailable',
+                              onRetry: _refresh,
+                              source: _readSource,
+                              retrying:
+                                  projection.operation ==
+                                  PersonalProfileOperation.refreshing,
+                            ),
+                          PersonalProfileAvailability.available =>
+                            PersonalProfileView(
+                              readSource: _readSource,
+                              readPhase: _readPhase,
+                              editorKey: _editorKey,
+                              onVisibility:
+                                  widget.offline ||
+                                      !projection.canEdit ||
+                                      widget.module is! ProfileVisibilityAccess
+                                  ? null
+                                  : () => unawaited(_editVisibility()),
+                              projection: projection,
+                              ownerFacts: _ownerFacts,
+                              presence: widget.presence,
+                              gameplayTime: widget.gameplayTime,
+                              visitorPreview: _visitorPreview,
+                              isVisitor: widget.isVisitor,
+                              offline: widget.offline,
+                              readOnlyOwnerImportPending:
+                                  widget.readOnlyOwnerImportPending,
+                              editing: _editing,
+                              layout: _editing
+                                  ? _layoutDraft ??
+                                        PersonalProfileLayout.normalize(
+                                          projection.moduleLayout,
+                                        )
+                                  : PersonalProfileLayout.normalize(
+                                      projection.moduleLayout,
+                                    ),
+                              onPreview: () =>
+                                  setState(() => _visitorPreview = true),
+                              onExitPreview: () =>
+                                  setState(() => _visitorPreview = false),
+                              onEdit: () {
+                                if (widget.access?.permitsEditing == false) {
+                                  return;
+                                }
+                                final module = widget.module;
+                                if (module is PersonalProfileEditingSession) {
+                                  if (!(module as PersonalProfileEditingSession)
+                                      .beginEditing()) {
+                                    return;
+                                  }
+                                  _editingOwner =
+                                      module as PersonalProfileEditingSession;
+                                }
+                                setState(() {
+                                  _editing = true;
+                                  _wallpaperDraft = projection.wallpaperId;
+                                  _layoutDraft =
+                                      PersonalProfileLayout.normalize(
+                                        projection.moduleLayout,
+                                      );
+                                });
+                              },
+                              onCancelEdit: () => setState(_clearDraft),
+                              onSaved: () => setState(_clearDraft),
+                              onWallpaperChanged: (wallpaperId) => setState(() {
+                                _wallpaperDraft = wallpaperId;
+                              }),
+                              onLayoutChanged: (layout) => setState(() {
+                                _layoutDraft = layout;
+                              }),
+                              achievementPicks: _editing
+                                  ? _achievementDraft ??
+                                        projection
+                                            .showcaseData
+                                            .achievementShowcase
+                                  : projection.showcaseData.achievementShowcase,
+                              onAchievementPicksChanged: (picks) =>
+                                  setState(() {
+                                    _achievementDraft = picks;
+                                  }),
+                              initialDraft: _restoredDraft,
+                              ownerRequiresReload:
+                                  widget.module is PersonalProfileDraftSession
+                                  ? (widget.module
+                                            as PersonalProfileDraftSession)
+                                        .draftRequiresReload
+                                  : null,
+                              onSave: _save,
+                              onRefresh: () => unawaited(_refresh()),
+                              onEditPositions: () =>
+                                  _editorKey.currentState?.editPositions(),
+                            ),
                         },
-                        onCancelEdit: () => setState(_clearDraft),
-                        onSaved: () => setState(_clearDraft),
-                        onWallpaperChanged: (wallpaperId) => setState(() {
-                          _wallpaperDraft = wallpaperId;
-                        }),
-                        onLayoutChanged: (layout) => setState(() {
-                          _layoutDraft = layout;
-                        }),
-                        initialDraft: _restoredDraft,
-                        ownerRequiresReload:
-                            widget.module is PersonalProfileDraftSession
-                            ? (widget.module as PersonalProfileDraftSession)
-                                  .draftRequiresReload
-                            : null,
-                        onSave: widget.access?.save ?? widget.module.save,
-                        onRefresh: () => unawaited(_refresh()),
-                        onEditPositions: () =>
-                            _editorKey.currentState?.editPositions(),
-                      ),
-                    },
+                        if (notice != null)
+                          ProfileNoticeSlot(
+                            floats: _noticeFloats,
+                            floating: false,
+                            child: Padding(
+                              padding: EdgeInsets.only(top: tokens.space.md),
+                              child: Align(
+                                alignment: AlignmentDirectional.centerEnd,
+                                child: notice,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -491,13 +636,24 @@ class _PersonalProfilePageState extends State<PersonalProfilePage> {
                 height: 40,
                 child: widget.pageToolbar!,
               ),
-            if (wallpaper.requiresCigFankitNotice)
+            if (notice != null)
               PositionedDirectional(
                 end: tokens.space.xl,
                 bottom: tokens.space.lg,
-                child: const SafeArea(
-                  child: CigFankitNoticeButton(
-                    key: Key('profile-cig-fankit-notice'),
+                child: ProfileNoticeSlot(
+                  floats: _noticeFloats,
+                  floating: true,
+                  child: SafeArea(child: notice),
+                ),
+              ),
+            // Last, so adding it never shifts (and rebuilds) the page above.
+            if (notice != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ProfileNoticeRoom(
+                    floats: _noticeFloats,
+                    columnMaxWidth: tokens.density.contentMaxWidth,
+                    sidePadding: tokens.space.xl,
                   ),
                 ),
               ),
