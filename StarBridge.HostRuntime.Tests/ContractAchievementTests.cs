@@ -18,12 +18,8 @@ internal static partial class ContractAchievementTests
     }
     internal static void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
     internal static string Root() { var path = Path.Combine(Path.GetTempPath(), "sb-contract-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
-    internal static string SamplePath(string name)
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        { var path = Path.Combine(dir.FullName, "contracts", "achievements", name); if (File.Exists(path)) return path; }
-        throw new FileNotFoundException(name);
-    }
+    internal static string SamplePath(string name) =>
+        Path.Combine(HostTestSource.Root, "contracts", "achievements", name);
     internal static (string Source, string Line)[] Lines()
     {
         using var sample = JsonDocument.Parse(RestrictedSamples.Read("tsg-replay.json"));

@@ -1043,6 +1043,17 @@ internal static class OverlayVisorTests
     /// </summary>
     internal static void TextWidths()
     {
+        var data = Path.Combine(FindRepositoryRoot(), "StarBridge.Desktop", "Data");
+        foreach (var name in new[] { "ship-names-zh.txt", "location-names-zh.txt" })
+        {
+            try { using var input = File.OpenRead(Path.Combine(data, name)); }
+            catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
+            {
+                Console.WriteLine($"SKIP visor text widths: open-core restricted sample {name} absent");
+                return;
+            }
+        }
+
         using var d3d = D3D11.D3D11CreateDevice(DriverType.Hardware, DeviceCreationFlags.BgraSupport, [Vortice.Direct3D.FeatureLevel.Level_11_0]);
         using var dxgi = d3d.QueryInterface<IDXGIDevice>();
         using var factory = D2D1.D2D1CreateFactory<ID2D1Factory1>();
@@ -1050,7 +1061,6 @@ internal static class OverlayVisorTests
         using var dc = device.CreateDeviceContext(DeviceContextOptions.None);
         using var dw = DWrite.DWriteCreateFactory<IDWriteFactory5>();
         using var p = new OverlayVisorPainter(dc, dw);
-        var data = Path.Combine(FindRepositoryRoot(), "StarBridge.Desktop", "Data");
         static IEnumerable<(string Key, string Value)> Pairs(string path) => File.ReadLines(path)
             .Where(line => line.Length > 0 && line[0] != '#' && line.Contains('='))
             .Select(line => (line[..line.IndexOf('=')].Trim(), line[(line.IndexOf('=') + 1)..].Trim()))
@@ -1086,11 +1096,17 @@ internal static class OverlayVisorTests
         "QuantumLeap", "Drifter", "冷锋", "Kite", "RedBaron_CN", "Sabre", "TitanForge", "Nebula_Walker",
     ];
 
-    private static string FindRepositoryRoot()
+    internal static string FindRepositoryRoot()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "StarBridge.sln"))) dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("repository root");
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var root = directory.FullName;
+            if (File.Exists(Path.Combine(root, "StarBridge.OverlayRuntime.Windows.Tests", "StarBridge.OverlayRuntime.Windows.Tests.csproj")))
+                return root;
+            var git = Path.Combine(root, ".git");
+            if (Directory.Exists(git) || File.Exists(git) || File.Exists(Path.Combine(root, "StarBridge.sln"))) break;
+        }
+        throw new InvalidOperationException("Overlay test source tree not found");
     }
 
     /// <summary>The leftmost and rightmost columns with a clearly visible pixel (alpha over a half).</summary>

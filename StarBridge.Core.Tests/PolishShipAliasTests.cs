@@ -6,15 +6,18 @@ internal static class PolishShipAliasTests
 {
     internal static void RunAll()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "StarBridge.Desktop", "Data", "ship-catalog.tsv")))
-            root = root.Parent;
-        if (root is null) { Console.WriteLine("SKIP optional source catalog comparison: checkout catalog absent"); return; }
+        var path = Path.Combine(FindSourceRoot(), "StarBridge.Desktop", "Data", "ship-catalog.tsv");
+        string source;
+        try { source = File.ReadAllText(path); }
+        catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            Console.WriteLine("SKIP optional source catalog comparison: open-core restricted sample ship-catalog.tsv absent");
+            return;
+        }
         using var stream = typeof(ShipNameIndex).Assembly.GetManifestResourceStream("StarBridge.ShipNamePack.json")!;
         using var reader = new StreamReader(stream);
         var names = reader.ReadToEnd();
-        var catalog = new ShipPresentationCatalog(names, File.ReadAllText(Path.Combine(root.FullName,
-            "StarBridge.Desktop", "Data", "ship-catalog.tsv")));
+        var catalog = new ShipPresentationCatalog(names, source);
         foreach (var model in new[] { "Taurus", "Andromeda", "Aquila", "Phoenix" }) {
             var old = catalog.Find("Constellation " + model);
             var current = catalog.Find("Constellation Mk IV " + model);
@@ -39,6 +42,18 @@ internal static class PolishShipAliasTests
             "Missing optional catalog invents no artwork");
         Console.WriteLine("PASS CX-POLISH-B 12 ship alias/catalog checks");
     }
+    private static string FindSourceRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var root = directory.FullName;
+            if (File.Exists(Path.Combine(root, "StarBridge.Core.Tests", "StarBridge.Core.Tests.csproj"))) return root;
+            var git = Path.Combine(root, ".git");
+            if (Directory.Exists(git) || File.Exists(git) || File.Exists(Path.Combine(root, "StarBridge.sln"))) break;
+        }
+        throw new InvalidOperationException("Core test source tree not found");
+    }
+
     private static void Print(string name, ShipPresentation ship) => Console.WriteLine(
         $"SHIP {name}|{ship.CatalogId}|{ship.SizeClass}|{ship.Category}|{ship.PriceUsd?.ToString() ?? "unpublished"}|{ship.ImageKey}");
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

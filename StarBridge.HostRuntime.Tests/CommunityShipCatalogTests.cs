@@ -42,9 +42,21 @@ internal static class CommunityShipCatalogTests
     // in-concept (the catalog's 官网状态), and every loaner must resolve to a catalog model.
     private static void BundledMatrixMatchesCatalog()
     {
-        var data = FindDataDirectory();
-        if (data is null) return; // Public export carries neither private data file.
-        var catalogRows = File.ReadAllLines(Path.Combine(data, "ship-catalog.tsv"))
+        var data = Path.Combine(HostTestSource.Root, "StarBridge.Desktop", "Data");
+        string catalog;
+        string matrixBody;
+        try
+        {
+            catalog = RestrictedSamples.ReadFile(Path.Combine(data, "ship-catalog.tsv"), "ship-catalog.tsv");
+            matrixBody = RestrictedSamples.ReadFile(Path.Combine(data, "ship-loaner-matrix.tsv"), "ship-loaner-matrix.tsv");
+        }
+        catch (RestrictedSampleAbsentException error)
+        {
+            error.Report("community ship loaner matrix comparison");
+            return;
+        }
+
+        var catalogRows = catalog.Split('\n').Select(line => line.TrimEnd('\r'))
             .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'))
             .Select(line => line.Split('\t')).ToArray();
         var header = catalogRows[0];
@@ -53,7 +65,7 @@ internal static class CommunityShipCatalogTests
         var status = catalogRows.Skip(1).Where(row => row.Length > Math.Max(nameColumn, statusColumn))
             .GroupBy(row => row[nameColumn].Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First()[statusColumn].Trim(), StringComparer.OrdinalIgnoreCase);
-        var tsv = File.ReadAllText(Path.Combine(data, "ship-loaner-matrix.tsv"));
+        var tsv = matrixBody;
         var matrix = new ShipLoanerCatalog(tsv);
         Check(matrix.Available, "bundled matrix is recognized");
         var rows = tsv.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#') &&
@@ -73,16 +85,5 @@ internal static class CommunityShipCatalogTests
         Check(Loaners("Javelin").SequenceEqual(["Aegis Idris-P", "Argo MPUV Cargo"]), "Javelin has the two official loaners");
     }
 
-    private static string? FindDataDirectory()
-    {
-        var roots = new[] { Environment.GetEnvironmentVariable("STARBRIDGE_HOST_TEST_SOURCE_ROOT"), AppContext.BaseDirectory, Environment.CurrentDirectory };
-        foreach (var start in roots.Where(root => !string.IsNullOrWhiteSpace(root)))
-            for (var directory = new DirectoryInfo(start!); directory is not null; directory = directory.Parent)
-            {
-                var data = Path.Combine(directory.FullName, "StarBridge.Desktop", "Data");
-                if (File.Exists(Path.Combine(data, "ship-loaner-matrix.tsv")) && File.Exists(Path.Combine(data, "ship-catalog.tsv"))) return data;
-            }
-        return null;
-    }
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 }

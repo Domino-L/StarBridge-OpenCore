@@ -24,15 +24,8 @@ internal static class AchievementReadContractTests
     }
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 
-    private static string SamplePath()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            var path = Path.Combine(directory.FullName, "contracts", "achievements", "read-response.json");
-            if (File.Exists(path)) return path;
-        }
-        throw new FileNotFoundException("contracts/achievements/read-response.json");
-    }
+    private static string SamplePath() =>
+        Path.Combine(HostTestSource.Root, "contracts", "achievements", "read-response.json");
 
     private static async Task<AchievementSnapshot> Read(string body)
     {

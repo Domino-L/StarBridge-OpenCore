@@ -1,18 +1,27 @@
 import 'dart:io';
 
-/// Finds an optional sibling fixture without embedding a developer drive path.
-/// Explicit absolute overrides remain usable; unconfigured exports need no data.
+/// Resolves optional development fixtures within the checkout that owns the tests.
 String developmentFixturePath(String relative) {
-  if (File(relative).isAbsolute) return relative;
-  var ancestor = Directory.current;
-  var prefix = '';
-  final sibling = relative.split('/').first;
-  while (true) {
-    if (Directory('$prefix$sibling').existsSync()) return '$prefix$relative';
-    final parent = ancestor.parent;
-    if (parent.path == ancestor.path) break;
-    ancestor = parent;
-    prefix = '../$prefix';
+  for (var directory = Directory.current; ; directory = directory.parent) {
+    final root = directory.uri;
+    if (File.fromUri(root.resolve('StarBridge.Flutter/pubspec.yaml'))
+        .existsSync()) {
+      final fixture = root.resolveUri(Uri.file(relative)).normalizePath();
+      final rootPath = root.toFilePath();
+      final fixturePath = fixture.toFilePath();
+      final inside = Platform.isWindows
+          ? fixturePath.toLowerCase().startsWith(rootPath.toLowerCase())
+          : fixturePath.startsWith(rootPath);
+      if (!inside || fixturePath.length <= rootPath.length) {
+        throw ArgumentError.value(relative, 'relative', 'Outside the checkout');
+      }
+      return fixturePath;
+    }
+    final git = root.resolve('.git');
+    if (Directory.fromUri(git).existsSync() ||
+        File.fromUri(git).existsSync() ||
+        directory.parent.path == directory.path) {
+      throw StateError('StarBridge test checkout not found');
+    }
   }
-  return '../../$relative';
 }

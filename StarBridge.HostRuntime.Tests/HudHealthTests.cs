@@ -2360,8 +2360,12 @@ internal static class HudHealthTests
     // agree with PyTorch. Skipped where the private model is not staged.
     static void PrivateModelMatchesTrainingOutput()
     {
-        var path = FindPrivateModel();
-        if (path == null) { Console.WriteLine("SKIP own health private model check (private model not staged)"); return; }
+        var path = Path.Combine(HostTestSource.Root, ".private-ops", "hud-health", HudHealthModel.FileName);
+        if (!File.Exists(path))
+        {
+            new RestrictedSampleAbsentException(HudHealthModel.FileName, "model").Report("own health private model check");
+            return;
+        }
         var model = HudHealthModel.Load(path);
         AssertEqual(3, model.Alt.Count, "the private model carries the suffocation icon in three sizes");
         var cnn = new HudDigitCnn(model);
@@ -2371,16 +2375,6 @@ internal static class HudHealthTests
         if (Math.Abs(p[10] - 0.8620f) > 0.002f || Math.Abs(p[7] - 0.0266f) > 0.001f)
             throw new InvalidOperationException($"CNN differs from training output: p10={p[10]}, p7={p[7]}");
         Console.WriteLine("PASS own health CNN matches the training output");
-    }
-
-    static string? FindPrivateModel()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, ".private-ops", "hud-health", HudHealthModel.FileName);
-            if (File.Exists(candidate)) return candidate;
-        }
-        return null;
     }
 
     static void AssertEqual<T>(T expected, T actual, string label)

@@ -7,7 +7,7 @@ internal static partial class SharingReviewRegressionTests
     private static Task VisibilityReadArchitecture()
     {
         VerifyVisibilitySourceLayouts();
-        var sourceRoot = FindVisibilitySourceRoot(AppContext.BaseDirectory);
+        var sourceRoot = VisibilitySourceDirectory(HostTestSource.Root);
         var sources = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
             .Where(p => !Path.GetRelativePath(sourceRoot, p).Split(Path.DirectorySeparatorChar).Any(s => s is "obj" or "bin"))
             .ToDictionary(p => Path.GetRelativePath(sourceRoot, p).Replace('\\', '/'), File.ReadAllText);
@@ -42,17 +42,13 @@ internal static partial class SharingReviewRegressionTests
         return Task.CompletedTask;
     }
 
-    private static string FindVisibilitySourceRoot(string start)
+    private static string VisibilitySourceDirectory(string root)
     {
-        for (var root = new DirectoryInfo(start); root is not null; root = root.Parent)
-        {
-            var candidate = Path.Combine(root.FullName, "StarBridge.HostRuntime");
-            // Artifact layouts also contain a directory named after the project.
-            // Require actual source, not a bin/obj/package directory of that name.
-            if (File.Exists(Path.Combine(candidate, "StarBridge.HostRuntime.csproj")) &&
-                File.Exists(Path.Combine(candidate, "Privacy", "PrivacyPublication.cs"))) return candidate;
-        }
-        throw new InvalidOperationException("source root is required for visibility architecture regression: " + start);
+        var source = Path.Combine(root, "StarBridge.HostRuntime");
+        if (!File.Exists(Path.Combine(source, "StarBridge.HostRuntime.csproj")) ||
+            !File.Exists(Path.Combine(source, "Privacy", "PrivacyPublication.cs")))
+            throw new InvalidOperationException("Host visibility source is required in " + root);
+        return source;
     }
 
     private static void VerifyVisibilitySourceLayouts()
@@ -60,6 +56,7 @@ internal static partial class SharingReviewRegressionTests
         var root = Directory.CreateTempSubdirectory("visibility-source-layout-").FullName;
         try
         {
+            MarkTestCheckout(root);
             var source = Path.Combine(root, "StarBridge.HostRuntime");
             Directory.CreateDirectory(Path.Combine(source, "Privacy"));
             File.WriteAllText(Path.Combine(source, "StarBridge.HostRuntime.csproj"), "<Project />");
@@ -68,13 +65,23 @@ internal static partial class SharingReviewRegressionTests
             {
                 var start = Directory.CreateDirectory(Path.Combine(root, layout)).FullName;
                 Directory.CreateDirectory(Path.Combine(Directory.GetParent(start)!.FullName, "StarBridge.HostRuntime"));
-                Check(FindVisibilitySourceRoot(start) == source, "source discovery ignores artifact siblings: " + layout);
+                Check(VisibilitySourceDirectory(HostTestSource.FindRoot(start)) == source, "source discovery ignores artifact siblings: " + layout);
             }
-            try { FindVisibilitySourceRoot(Path.GetPathRoot(root)!); }
+            var nested = Path.Combine(root, "nested-export");
+            MarkTestCheckout(nested);
+            var nestedOutput = Directory.CreateDirectory(Path.Combine(nested, "bin")).FullName;
+            Check(HostTestSource.FindRoot(nestedOutput) == nested, "the nearest checkout owns its source lookups");
+            try { VisibilitySourceDirectory(HostTestSource.FindRoot(nestedOutput)); }
             catch (InvalidOperationException) { return; }
-            throw new Exception("missing source must fail closed");
+            throw new Exception("missing source must fail closed at the nested checkout");
         }
         finally { Directory.Delete(root, true); }
+    }
+
+    private static void MarkTestCheckout(string root)
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(root, "StarBridge.HostRuntime.Tests")).FullName;
+        File.WriteAllText(Path.Combine(folder, "StarBridge.HostRuntime.Tests.csproj"), "<Project />");
     }
 
     private static void VerifyVisibilitySources(Dictionary<string, string> sources)

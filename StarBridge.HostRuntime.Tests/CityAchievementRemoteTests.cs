@@ -22,15 +22,8 @@ internal static class CityAchievementRemoteTests
         internal bool InvalidReceipt;
         internal string ExpectedEvidence = "explicit", ExpectedCity = "orison";
         private readonly JsonDocument _sample = JsonDocument.Parse(File.ReadAllText(SamplePath()));
-        private static string SamplePath()
-        {
-            for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-            {
-                var path = Path.Combine(directory.FullName, "contracts", "achievements", "city-observation.json");
-                if (File.Exists(path)) return path;
-            }
-            throw new FileNotFoundException("contracts/achievements/city-observation.json");
-        }
+        private static string SamplePath() =>
+            Path.Combine(HostTestSource.Root, "contracts", "achievements", "city-observation.json");
         protected override void Dispose(bool disposing) { if (disposing) _sample.Dispose(); base.Dispose(disposing); }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {

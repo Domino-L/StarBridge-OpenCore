@@ -1,26 +1,7 @@
 internal static class RestrictedSamples
 {
-    internal static string Read(string fileName)
-    {
-        // Find the checkout even when the runner is started outside the repository.
-        var sourceRoot = Environment.GetEnvironmentVariable("STARBRIDGE_HOST_TEST_SOURCE_ROOT");
-        if (string.IsNullOrWhiteSpace(sourceRoot))
-        {
-            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-            {
-                if (IsSourceRoot(dir.FullName))
-                {
-                    sourceRoot = dir.FullName;
-                    break;
-                }
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(sourceRoot) || !IsSourceRoot(sourceRoot))
-            throw new InvalidOperationException("Could not locate the Host test source tree.");
-
-        return ReadFile(Path.Combine(sourceRoot, "contracts", "achievements", fileName), fileName);
-    }
+    internal static string Read(string fileName) =>
+        ReadFile(Path.Combine(HostTestSource.Root, "contracts", "achievements", fileName), fileName);
 
     internal static string ReadFile(string path, string sampleName)
     {
@@ -43,10 +24,6 @@ internal static class RestrictedSamples
             throw new RestrictedSampleAbsentException("city location catalog", "data");
         }
     }
-
-    private static bool IsSourceRoot(string path) =>
-        Path.IsPathFullyQualified(path) &&
-        File.Exists(Path.Combine(path, "StarBridge.HostRuntime.Tests", "StarBridge.HostRuntime.Tests.csproj"));
 }
 
 internal sealed class RestrictedSampleAbsentException(string name, string kind = "sample")

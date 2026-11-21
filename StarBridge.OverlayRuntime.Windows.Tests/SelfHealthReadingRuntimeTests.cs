@@ -1,5 +1,6 @@
 using System.IO;
 using System.Diagnostics;
+using StarBridge.Desktop.Tests;
 using StarBridge.HostRuntime.HealthReading;
 using StarBridge.OverlayRuntime.Windows.HealthReading;
 
@@ -59,14 +60,15 @@ internal static class SelfHealthReadingRuntimeTests
                 throw new InvalidOperationException("a missing file was loaded");
             if (SelfHealthReadingRuntime.ModelSha256.Length != 64) throw new InvalidOperationException("pin is a sha256");
             // Where the private model is staged (.private-ops, git-ignored), the pinned hash must match it.
-            for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+            const string model = "hud-health-v1.bin";
+            var staged = Path.Combine(OverlayVisorTests.FindRepositoryRoot(), ".private-ops", "hud-health", model);
+            if (File.Exists(staged))
             {
-                var staged = Path.Combine(d.FullName, ".private-ops", "hud-health", "hud-health-v1.bin");
-                if (!File.Exists(staged)) continue;
                 if (SelfHealthReadingRuntime.LoadPinnedModel(staged, SelfHealthReadingRuntime.ModelSha256) == null)
                     throw new InvalidOperationException("the staged private model does not match the pinned hash");
-                break;
             }
+            else
+                Console.WriteLine($"SKIP own health staged model hash: open-core restricted model {model} absent");
             Console.WriteLine("PASS own health loads only the pinned model file");
         }
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } }

@@ -2177,6 +2177,10 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Help support history and public endpoints", HelpSupportTests.RunAll),
     ("Mission and blueprint catalogue reads (27 synthetic cases)", ScmCatalogReaderTests.Run),
     ("Public profile header reads the shared sample and visitor facts", ProfilePublicHeaderTests.Run),
+    ("Legacy visitor profile with callsign matches the shared sample",
+        () => ProfilePublicHeaderTests.LegacyVisitorFoundMatchesTheHongKongSample("visitor-legacy-found.json", "Old Pilot")),
+    ("Legacy visitor profile without callsign matches the shared sample",
+        () => ProfilePublicHeaderTests.LegacyVisitorFoundMatchesTheHongKongSample("visitor-legacy-found-no-callsign.json", "成员")),
     ("Marketplace reads: hall, item offers (single or checklist), masked traders", MarketplaceTests.Run),
     ("Marketplace listing drafts and publish checks", MarketplaceListingTests.Run),
     ("Marketplace trade records and masked counterparties", MarketplaceRecordsTests.Run),
@@ -4435,7 +4439,7 @@ static HttpResponseMessage JsonResponse<T>(T payload) => new(HttpStatusCode.OK)
 
 static Task HostLayersRemainWpfIndependent()
 {
-    var root = FindRepositoryRoot();
+    var root = HostTestSource.Root;
     foreach (var relativeProject in new[]
              {
                  "StarBridge.NativeHost/StarBridge.NativeHost.csproj",
@@ -4480,36 +4484,6 @@ static Task HostLayersRemainWpfIndependent()
     }
 
     return Task.CompletedTask;
-}
-
-static string FindRepositoryRoot()
-{
-    // Isolated --artifacts-path builds are outside the checkout. An explicit
-    // test source root retains the same checks without searching an unrelated parent.
-    var explicitRoot = Environment.GetEnvironmentVariable("STARBRIDGE_HOST_TEST_SOURCE_ROOT");
-    if (!string.IsNullOrWhiteSpace(explicitRoot))
-    {
-        if (!Path.IsPathFullyQualified(explicitRoot) ||
-            !File.Exists(Path.Combine(explicitRoot, "StarBridge.HostRuntime", "StarBridge.HostRuntime.csproj")) ||
-            !File.Exists(Path.Combine(explicitRoot, "StarBridge.NativeHost", "StarBridge.NativeHost.csproj")))
-            throw new InvalidOperationException("Invalid explicit Host test source root.");
-        return Path.GetFullPath(explicitRoot);
-    }
-    for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
-         directory is not null;
-         directory = directory.Parent)
-    {
-        // Identify this source tree by its projects, not the old solution name.
-        // An exported client tree can live beneath the private repository; never
-        // walk past that tree and accidentally validate the private parent's files.
-        if (File.Exists(Path.Combine(directory.FullName, "StarBridge.HostRuntime", "StarBridge.HostRuntime.csproj")) &&
-            File.Exists(Path.Combine(directory.FullName, "StarBridge.NativeHost", "StarBridge.NativeHost.csproj")))
-        {
-            return directory.FullName;
-        }
-    }
-
-    throw new InvalidOperationException("Could not locate the client source projects from the test output directory.");
 }
 
 static string CreateIsolatedDataRoot()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using StarBridge.HostRuntime.Notifications;
 
 // 0.7.3 (user 11-06: "合成一张"): within 60 s the third member onward is shown on one card.
@@ -34,12 +35,11 @@ internal static class PlayerActivityGroupTests
                     online.Contains(name) ? "online" : "offline", false, true)).ToArray(), () => true));
             int Count() { lock (sink.Seen) return sink.Seen.Count; }
             DesktopNotification Last() { lock (sink.Seen) return sink.Seen[^1]; }
-            async Task Settle() => await Task.Delay(500);
 
             await Observe();
             await Observe("Alpha", "Bravo", "Charlie");
             Check(Count() == 0, "three members coming online together are held for one card");
-            await Settle();
+            await WaitFor(() => Count() >= 1);
             Check(Count() == 1, "the held members arrive as one card");
             var group = Last().Activity!;
             Check(group.Kind == "Online" && group.GroupNames!.SequenceEqual(new[] { "Alpha", "Bravo", "Charlie" }),
@@ -51,7 +51,7 @@ internal static class PlayerActivityGroupTests
             await Observe("Alpha", "Bravo");
             Check(!grouped.IsCurrent(), "a grouped card naming someone who left again is no longer current");
 
-            sink.Seen.Clear(); runtime.Reset();
+            lock (sink.Seen) sink.Seen.Clear(); runtime.Reset();
             await Observe();
             await Observe("Alpha");
             await Observe("Alpha", "Bravo");
@@ -60,37 +60,43 @@ internal static class PlayerActivityGroupTests
             await Observe("Alpha", "Bravo", "Charlie");
             await Observe("Alpha", "Bravo", "Charlie", "Delta");
             Check(Count() == 2, "from the third member on, arrivals are held");
-            await Settle();
+            await WaitFor(() => Count() >= 3);
             Check(Count() == 3 && Last().Activity!.GroupNames!.SequenceEqual(new[] { "Charlie", "Delta" }),
                 "later arrivals join one card; cards already shown are not repeated");
             await Observe("Alpha", "Bravo", "Charlie", "Delta", "Echo");
-            await Settle();
+            await WaitFor(() => Count() >= 4);
             Check(Count() == 4 && Last().Activity!.GroupNames is null && Last().Activity!.Callsign == "Echo",
                 "a single held member still gets an ordinary card");
 
-            sink.Seen.Clear();
+            lock (sink.Seen) sink.Seen.Clear();
             await Observe("Delta", "Echo");
             Check(Count() == 0, "three members going offline together are held too");
-            await Settle();
+            await WaitFor(() => Count() >= 1);
             Check(Count() == 1 && Last().Activity!.Kind == "Offline" && Last().Activity!.GroupNames!.Length == 3 &&
                 Last().Activity!.OnlineNow == 2, "going offline follows the same rule");
 
-            sink.Seen.Clear(); runtime.Reset();
+            lock (sink.Seen) sink.Seen.Clear(); runtime.Reset();
             await Observe();
             await Observe("Alpha", "Bravo", "Charlie");
             await Observe();
-            await Settle();
+            await WaitFor(() => Count() >= 1);
             Check(Count() == 1 && Last().Activity!.Kind == "Offline",
                 "members who left again before the card was shown get only the offline card");
 
-            sink.Seen.Clear(); runtime.Reset();
+            lock (sink.Seen) sink.Seen.Clear(); runtime.Reset();
             await Observe();
             await Observe("Alpha", "Bravo", "Charlie");
             runtime.Reset();
-            await Settle();
+            // Observe the whole delivery interval; zero is already true immediately after reset.
+            var quiet = Stopwatch.StartNew();
+            do
+            {
+                Check(Count() == 0, "a reset (account or settings change) discards the held card");
+                await Task.Delay(10);
+            } while (quiet.Elapsed < TimeSpan.FromMilliseconds(500));
             Check(Count() == 0, "a reset (account or settings change) discards the held card");
 
-            sink.Seen.Clear(); runtime.Reset();
+            lock (sink.Seen) sink.Seen.Clear(); runtime.Reset();
             await Observe();
             await Observe("Alpha", "Bravo");
             Check(Count() == 2, "two members together keep two cards");
@@ -132,12 +138,25 @@ internal static class PlayerActivityGroupTests
             SavePolicies();
             await Observe("Alpha", "Bravo", "Charlie");
             await Observe("Alpha", "Bravo", "Charlie", "Delta");
-            await Task.Delay(500);
-            Check(sink.Seen.Count(notice => notice.Activity?.Callsign == "Delta") == 1,
+            int DeltaCards()
+            {
+                lock (sink.Seen) return sink.Seen.Count(notice => notice.Activity?.Callsign == "Delta");
+            }
+            await WaitFor(() => DeltaCards() >= 1);
+            Check(DeltaCards() == 1,
                 "after a policy change during the hold, the next arrival still gets its card");
         } finally {
             Directory.Delete(root, true);
         }
+    }
+
+    // Longer than the production offline settle (20s) and group hold (10s) combined.
+    // The exact count and card contents are checked by the caller after this wait.
+    private static async Task WaitFor(Func<bool> arrived)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (!arrived() && elapsed.Elapsed < TimeSpan.FromSeconds(45))
+            await Task.Delay(10);
     }
 
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }

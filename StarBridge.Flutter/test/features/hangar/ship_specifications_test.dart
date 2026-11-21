@@ -434,7 +434,7 @@ void main() {
         developmentFixturePath(
           const String.fromEnvironment(
             'SHIP_SPEC_REVIEW_PATH',
-            defaultValue: 'Star-Bridge/.artifacts/scm-ship-details-20261015/detail-review.png',
+            defaultValue: '.artifacts/scm-ship-details-20261015/detail-review.png',
           ),
         ),
       );
@@ -449,7 +449,7 @@ void main() {
       final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
       const path = String.fromEnvironment(
         'SHIP_SPEC_REVIEW_PATH',
-        defaultValue: 'Star-Bridge/.artifacts/scm-ship-details-20261015/detail-review.png',
+        defaultValue: '.artifacts/scm-ship-details-20261015/detail-review.png',
       );
       await File(
         developmentFixturePath(path).replaceFirst('.png', '-expanded.png'),

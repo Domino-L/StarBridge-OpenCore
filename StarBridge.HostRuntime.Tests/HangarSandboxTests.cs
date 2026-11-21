@@ -79,7 +79,7 @@ internal static class HangarSandboxTests
             HangarSandboxLocation.ReportRefusal(Path.Combine(root, "client.dpapi", "nested"), "unwritable");
 
             // The source carries no developer folder any more.
-            var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "StarBridge.HostRuntime", "Hangar", "HangarSandboxDispatcher.cs"));
+            var source = File.ReadAllText(Path.Combine(HostTestSource.Root, "StarBridge.HostRuntime", "Hangar", "HangarSandboxDispatcher.cs"));
             if (source.Contains(@":\", StringComparison.Ordinal)) throw new Exception("Dispatcher still names a local folder");
         }
         finally
@@ -87,14 +87,6 @@ internal static class HangarSandboxTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
         return Task.CompletedTask;
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-            if (File.Exists(Path.Combine(directory.FullName, "StarBridge.HostRuntime", "Hangar", "HangarSandboxDispatcher.cs")))
-                return directory.FullName;
-        throw new Exception("Repository root not found");
     }
 
     private sealed class Handler : HttpMessageHandler
