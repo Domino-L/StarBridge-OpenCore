@@ -142,7 +142,7 @@ internal static partial class ContractAchievementTests
         {
             Require(request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/app-api/starbridge/v1/achievements/observations/contract", "exact contract POST route");
             using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-            using var sample = JsonDocument.Parse(File.ReadAllText(SamplePath("contract-observation.json")));
+            using var sample = JsonDocument.Parse(RestrictedSamples.Read("contract-observation.json"));
             var expected = sample.RootElement.GetProperty("request");
             Require(payload.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet().SetEquals(expected.EnumerateObject().Select(p => p.Name)), "all 12 shared wire fields, no internal validity or progress fields");
             foreach (var field in expected.EnumerateObject())
@@ -166,7 +166,7 @@ internal static partial class ContractAchievementTests
             GameIdentityHandle: "Pilot_A", GameIdentityStatus: StarBridge.Core.Identity.ScmGameIdentityStatus.Verified);
         using var host = new ScmAccountBridgeHost(new OAuthPkceClient(http, new NoVault(), options),
             new ScmProfileCacheStore(Root()), "fixture", () => null, initialSession: session, initialGeneration: 1);
-        using var sample = JsonDocument.Parse(File.ReadAllText(SamplePath("contract-observation.json")));
+        using var sample = JsonDocument.Parse(RestrictedSamples.Read("contract-observation.json"));
         var observation = sample.RootElement.GetProperty("request").Deserialize<ContractObservation>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         var remote = (IAchievementRemote)host; var owner = host.CurrentContext!;
         var receipt = await remote.ObserveContractAsync(owner, 1, observation, default);

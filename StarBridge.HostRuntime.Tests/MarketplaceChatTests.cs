@@ -19,12 +19,22 @@ internal static class MarketplaceChatTests
     private sealed class Handler : HttpMessageHandler
     {
         internal bool ProfileFails;
-        internal readonly List<(string Method, string PathAndQuery, string? Body)> Requests = [];
+        private readonly List<(string Method, string PathAndQuery, string? Body)> _requests = [];
+
+        internal List<(string Method, string PathAndQuery, string? Body)> Requests
+        {
+            get
+            {
+                lock (_requests)
+                    return [.. _requests];
+            }
+        }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(token);
             var path = request.RequestUri!.PathAndQuery;
-            lock (Requests) Requests.Add((request.Method.Method, path, body));
+            lock (_requests) _requests.Add((request.Method.Method, path, body));
             if (path == "/app-api/member/user/get" && ProfileFails)
                 return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             var snapshot = JsonSerializer.Serialize(new { type = "order", orderId = 88, orderNo = "SO88", itemName = "Aurora", amount = 1200000, buyerId = 4242000000000042, sellerId = 9090000000000009, senderId = 9090000000000009, buyerNickname = "Self", displayType = 2, status = "1", qualityData = "{}", mainImage = "https://fixture.invalid/x.png" });

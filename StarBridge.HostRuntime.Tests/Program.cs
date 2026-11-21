@@ -82,11 +82,13 @@ if (args is ["--cx-mission-accept-only"]) {
         ("history clear isolation", LocalContractHistoryTests.ClearIsolationAndWriteFailure),
     };
     var acceptFailed = 0;
+    var acceptSkipped = 0;
     foreach (var acceptGroup in acceptGroups) {
         try { await acceptGroup.Run(); Console.WriteLine("PASS MISSION ACCEPT GROUP " + acceptGroup.Name); }
+        catch (RestrictedSampleAbsentException e) { acceptSkipped++; e.Report(acceptGroup.Name); }
         catch (Exception e) { acceptFailed++; Console.WriteLine("FAIL MISSION ACCEPT GROUP " + acceptGroup.Name + ": " + e.Message); }
     }
-    Console.WriteLine($"SUMMARY MISSION ACCEPT groupsPassed={acceptGroups.Length - acceptFailed} groupsFailed={acceptFailed}");
+    Console.WriteLine($"SUMMARY MISSION ACCEPT groupsPassed={acceptGroups.Length - acceptFailed - acceptSkipped} groupsFailed={acceptFailed} groupsSkipped={acceptSkipped}");
     return acceptFailed == 0 ? 0 : 1;
 }
 if (args is ["--application-preferences-only"]) { await ApplicationPreferencesTests.PreviewGuidePersistsIndependently(); await ApplicationPreferencesTests.HolidayAppearancePersistsIndependently(); await ApplicationPreferencesTests.HolidayAppearanceRejectsInvalidPatches(); await ApplicationPreferencesTests.PerformanceModeDefaultsOffAndPersists(); return 0; }
@@ -2004,6 +2006,7 @@ if (args.Length == 2 && args[0] == "--hangar-catalog-bundle")
 
 var tests = new (string Name, Func<Task> Test)[]
 {
+    ("Present malformed restricted sample fails JSON parsing", RestrictedSamplesTests.MalformedSampleFails),
     ("TOKEN-BACKOFF 404AndConcurrency", AccountSessionRestoreTests.Backoff404AndConcurrency),
     ("TOKEN-BACKOFF DoublingAndCap", AccountSessionRestoreTests.BackoffDoublingAndCap),
     ("TOKEN-BACKOFF JitterBounds", AccountSessionRestoreTests.BackoffJitterBounds),
@@ -2908,6 +2911,7 @@ tests = tests.Concat(PrivacyIdentityLoopTests.Cases).Concat(AppStatsHeartbeatTes
 
 var failures = new List<string>();
 var executed = 0;
+var skipped = 0;
 foreach (var (name, test) in tests)
 {
     if (args is ["--token-backoff-only"] && !name.StartsWith("TOKEN-BACKOFF ", StringComparison.Ordinal)) continue;
@@ -2921,6 +2925,11 @@ foreach (var (name, test) in tests)
     {
         await test();
         Console.WriteLine($"PASS {name}");
+    }
+    catch (RestrictedSampleAbsentException exception)
+    {
+        skipped++;
+        exception.Report(name);
     }
     catch (Exception exception)
     {
@@ -2936,7 +2945,8 @@ if (executed == 0)
     Console.Error.WriteLine("No test matched the requested filter.");
     return 1;
 }
-Console.WriteLine($"SUMMARY PASS {executed - failures.Count}/{executed}");
+Console.WriteLine($"SUMMARY PASS {executed - failures.Count - skipped}/{executed}");
+if (skipped != 0) Console.WriteLine($"SUMMARY SKIP {skipped}/{executed}");
 if (failures.Count != 0)
 {
     Console.WriteLine();

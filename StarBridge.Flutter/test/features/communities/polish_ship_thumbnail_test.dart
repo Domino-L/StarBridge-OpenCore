@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starbridge_flutter/features/communities/community_catalog_ship_image.dart';
 import 'package:starbridge_flutter/features/onboarding/connection_mode_port.dart';
@@ -8,8 +9,17 @@ import 'package:starbridge_flutter/shared/remote_image.dart';
 import 'package:starbridge_flutter/shared/remote_image_loader.dart';
 import 'package:starbridge_flutter/shared/ships/scm_ship_thumbnail.dart';
 
+import '../../support/synthetic_image.dart';
 import '../official_fleet/polish_evidence_refresh_test.dart' show app;
 import 'bridge_communities_test.dart' show CommunityHarness;
+
+class _CatalogueArtBundle extends CachingAssetBundle {
+  static const asset = 'assets/ships/synthetic-catalogue.png';
+
+  @override
+  Future<ByteData> load(String key) async =>
+      key == asset ? syntheticImageData() : rootBundle.load(key);
+}
 
 class _Mode extends ChangeNotifier implements ConnectionModeControl {
   @override
@@ -38,15 +48,25 @@ void main() {
               reads++;
               return 'https://media.example.test/ship.png';
             },
-            child: const CommunityCatalogShipImage(
-              asset: 'assets/achievements/collection-earned.png',
-              model: 'ANVL_Carrack',
+            child: DefaultAssetBundle(
+              bundle: _CatalogueArtBundle(),
+              child: const CommunityCatalogShipImage(
+                asset: _CatalogueArtBundle.asset,
+                model: 'ANVL_Carrack',
+              ),
             ),
           ),
         ),
       );
       await tester.pumpAndSettle();
+      final context = tester.element(find.byType(CommunityCatalogShipImage));
+      await tester.runAsync(
+        () =>
+            precacheImage(const AssetImage(_CatalogueArtBundle.asset), context),
+      );
+      await tester.pumpAndSettle();
       expect(reads, 0);
+      expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
       expect(find.byType(ScmShipThumbnail), findsNothing);
       expect(tester.takeException(), isNull);
     },

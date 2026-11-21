@@ -20,6 +20,7 @@ internal static class OwnerGate073CityTests
             ("CorruptCachedSettingsStayVisible", CorruptCachedSettingsStayVisible) })
         {
             try { run(); Console.WriteLine("PASS CX073 " + name); }
+            catch (RestrictedSampleAbsentException e) { e.Report(name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL CX073 " + name + " " + e.Message); }
         }
         return Task.FromResult(failed);
@@ -56,6 +57,7 @@ internal static class OwnerGate073CityTests
 
     private static void CityArrivalFaultIsIsolated()
     {
+        RestrictedSamples.RequireCityLocationCatalog();
         var root = Path.Combine(Path.GetTempPath(), "sb-cx073-city-" + Guid.NewGuid().ToString("N"));
         var log = Path.Combine(root, "StarCitizen", "LIVE", "Game.log");
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);

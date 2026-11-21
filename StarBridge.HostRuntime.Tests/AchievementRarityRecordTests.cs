@@ -37,12 +37,14 @@ internal static class AchievementRarityRecordTests
             ("acceptance name and stage capture", () => { Capture(); return Task.CompletedTask; })
         };
         var failed = 0;
+        var skipped = 0;
         foreach (var (name, test) in cases)
         {
             try { await test(); Console.WriteLine("PASS RARITY RECORD " + name); }
+            catch (RestrictedSampleAbsentException e) { skipped++; e.Report(name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL RARITY RECORD " + name + ": " + e.Message); }
         }
-        Console.WriteLine($"SUMMARY RARITY RECORD passed={cases.Length-failed} failed={failed}");
+        Console.WriteLine($"SUMMARY RARITY RECORD passed={cases.Length - failed - skipped} failed={failed} skipped={skipped}");
         Require(failed == 0, "rarity/record regressions");
     }
     private sealed class Vault : ITokenVault
@@ -105,7 +107,7 @@ internal static class AchievementRarityRecordTests
         (Valid with { Percentages = new() { ["contract-first"] = 1000 }, Tiers = [] }).Validate();
         var encoded = JsonSerializer.Serialize(Valid, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Require(encoded.Contains("\"tiers\":{\"contract-first\":\"veryRare\"}"), "server tier round trip");
-        using var fixture = JsonDocument.Parse(File.ReadAllText("contracts/achievements/rarity-response.json"));
+        using var fixture = JsonDocument.Parse(RestrictedSamples.Read("rarity-response.json"));
         foreach (var sample in fixture.RootElement.EnumerateObject())
             JsonSerializer.Deserialize<AchievementRarity>(sample.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.Validate();
     }

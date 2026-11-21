@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -12,6 +11,8 @@ import 'package:starbridge_flutter/design_system/tokens/color_tokens.dart';
 import 'package:starbridge_flutter/features/achievements/swift_leaderboard.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_collection_port.dart';
 import 'package:starbridge_flutter/features/achievements/swift_leaderboard_page.dart';
+
+import 'restricted_samples.dart';
 
 const _at = '2026-11-03T12:00:00Z';
 Map<String, Object?> _consent(String state) => {
@@ -106,27 +107,36 @@ Widget _app(
   home: Scaffold(body: child),
 );
 void main() {
-  test('shared byte fixtures validate all board and consent states', () {
-    final boards = jsonDecode(
-      File('../contracts/achievements/leaderboard-response.json')
-          .readAsStringSync(),
-    ) as Map;
-    for (final sample in boards.values) {
-      SwiftBoard.parse(Map<String, Object?>.from(sample as Map));
-    }
-    final choices = jsonDecode(
-      File('../contracts/achievements/leaderboard-consent.json')
-          .readAsStringSync(),
-    ) as Map;
-    for (final sample in choices.values) {
-      SwiftConsent.parse(Map<String, Object?>.from(sample as Map));
-    }
-    expect(
-      SwiftBoard.parse(Map<String, Object?>.from(boards['meUnranked'] as Map))
-          .rank,
-      isNull,
-    );
-  });
+  const boardTest = 'shared byte fixture validates all board states';
+  final boardSample = restrictedAchievementSample('leaderboard-response.json');
+  final consentSample = restrictedAchievementSample('leaderboard-consent.json');
+  test(
+    boardTest,
+    () {
+      final boards = jsonDecode(boardSample.readAsStringSync()) as Map;
+      for (final sample in boards.values) {
+        SwiftBoard.parse(Map<String, Object?>.from(sample as Map));
+      }
+      expect(
+        SwiftBoard.parse(
+          Map<String, Object?>.from(boards['meUnranked'] as Map),
+        ).rank,
+        isNull,
+      );
+    },
+    skip: restrictedSampleSkipReason(boardTest, boardSample),
+  );
+  const consentTest = 'shared byte fixture validates all consent states';
+  test(
+    consentTest,
+    () {
+      final choices = jsonDecode(consentSample.readAsStringSync()) as Map;
+      for (final sample in choices.values) {
+        SwiftConsent.parse(Map<String, Object?>.from(sample as Map));
+      }
+    },
+    skip: restrictedSampleSkipReason(consentTest, consentSample),
+  );
   test('rejects invalid handles, times, ordering, rank and consent', () {
     for (final patch in [
       {'schemaVersion': 2},

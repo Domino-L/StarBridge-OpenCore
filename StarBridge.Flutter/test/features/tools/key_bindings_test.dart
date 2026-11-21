@@ -16,6 +16,7 @@ import 'package:starbridge_flutter/features/tools/key_bindings_port.dart';
 import 'package:starbridge_flutter/features/tools/key_bindings_split.dart';
 import 'package:starbridge_flutter/platform/bridge/bridge_envelope.dart';
 
+import '../../_support/restricted_files.dart';
 import '../friends/social_layout_test.dart' show app;
 
 Finder inList(Finder finder) => find.descendant(
@@ -292,12 +293,10 @@ void main() {
     });
   });
 
-  testWidgets('key caps paint above an opaque page ground, as in the shell', (
-    tester,
-  ) async {
+  const ground = Key('test-page-ground');
+  Future<void> pumpOverOpaqueGround(WidgetTester tester) async {
     // The shell lays an opaque ground over the app's Material; Ink drawn on that Material
     // would sit beneath it and leave only the text (build 63).
-    const ground = Key('test-page-ground');
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -313,6 +312,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('key caps paint above an opaque page ground, as in the shell', (
+    tester,
+  ) async {
+    await pumpOverOpaqueGround(tester);
     void above(Finder control, String what) {
       final painter = find
           .ancestor(of: control, matching: find.byType(Material))
@@ -336,10 +341,6 @@ void main() {
           .first,
       'a list row',
     );
-    await expectLater(
-      find.byKey(ground),
-      matchesGoldenFile('goldens/key_bindings_keyboard_dark.png'),
-    );
     // A 60% board lists the keys it lacks under it, inked the same way.
     await tester.tap(find.byKey(const Key('key-bindings-size-p60')));
     await tester.pumpAndSettle();
@@ -349,6 +350,19 @@ void main() {
     above(find.byKey(const Key('key-missing-f8')), 'the missing F8');
     await _clear(tester);
   });
+
+  const golden = 'goldens/key_bindings_keyboard_dark.png';
+  const goldenTest = 'key bindings keyboard dark golden';
+  restrictedTestWidgets(
+    goldenTest,
+    (tester) async {
+      await pumpOverOpaqueGround(tester);
+      await expectLater(find.byKey(ground), matchesGoldenFile(golden));
+      await _clear(tester);
+    },
+    kind: 'golden',
+    path: 'test/features/tools/$golden',
+  );
 
   testWidgets('the list folds to its search line, and a search unfolds it', (
     tester,

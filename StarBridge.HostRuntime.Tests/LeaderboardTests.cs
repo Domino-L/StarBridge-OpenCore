@@ -22,12 +22,13 @@ internal static class LeaderboardTests
             ("cache, withdrawal and old backend", Runtime),
             ("late owner and malformed bridge request", Ownership),
         };
-        int failed = 0;
+        int failed = 0, skipped = 0;
         foreach (var (name, test) in tests) {
             try { await test(); Console.WriteLine("PASS LEADERBOARD " + name); }
+            catch (RestrictedSampleAbsentException e) { skipped++; e.Report(name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL LEADERBOARD " + name + ": " + e); }
         }
-        Console.WriteLine($"SUMMARY LEADERBOARD passed={tests.Length-failed} failed={failed}");
+        Console.WriteLine($"SUMMARY LEADERBOARD passed={tests.Length - failed - skipped} failed={failed} skipped={skipped}");
         Check(failed == 0, "leaderboard regressions");
     }
     private sealed class Vault : ITokenVault
@@ -127,7 +128,7 @@ internal static class LeaderboardTests
             catch (JsonException) { }
         }
         foreach(var file in new[]{"leaderboard-response.json","leaderboard-consent.json"}) {
-            using var json=JsonDocument.Parse(File.ReadAllText("contracts/achievements/"+file));
+            using var json=JsonDocument.Parse(RestrictedSamples.Read(file));
             foreach(var sample in json.RootElement.EnumerateObject()) {
                 if(file.Contains("response")) JsonSerializer.Deserialize<TsgSwiftLeaderboard>(sample.Value,options)!.Validate();
                 else JsonSerializer.Deserialize<LeaderboardConsent>(sample.Value,options)!.Validate();

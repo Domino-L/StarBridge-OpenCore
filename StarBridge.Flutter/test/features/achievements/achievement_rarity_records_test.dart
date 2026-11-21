@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -17,6 +16,8 @@ import 'package:starbridge_flutter/features/achievements/achievement_extras.dart
 import 'package:starbridge_flutter/features/achievements/achievement_presentation.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_sources.dart';
 import 'package:starbridge_flutter/features/achievements/bridge_achievement_collection.dart';
+
+import 'restricted_samples.dart';
 
 final _at = DateTime.utc(2026, 11, 3);
 final _definition = achievementCatalog.firstWhere(
@@ -85,13 +86,13 @@ Widget _app(Locale locale, Widget child, {double scale = 1}) => MaterialApp(
   home: Scaffold(body: child),
 );
 void main() {
+  const fixtureTest =
+      'shared rarity fixtures carry both server tiers and empty population';
+  final raritySample = restrictedAchievementSample('rarity-response.json');
   test(
-    'shared rarity fixtures carry both server tiers and empty population',
+    fixtureTest,
     () {
-      final samples = jsonDecode(
-        File('../contracts/achievements/rarity-response.json')
-            .readAsStringSync(),
-      ) as Map;
+      final samples = jsonDecode(raritySample.readAsStringSync()) as Map;
       final available = samples['available'];
       expect(
         parseAchievementTiers(available).values,
@@ -108,6 +109,7 @@ void main() {
       }, 1);
       expect(data.tiers, parseAchievementTiers(available));
     },
+    skip: restrictedSampleSkipReason(fixtureTest, raritySample),
   );
   test('rarity parser accepts bounded basis points and hides insufficient population', () {
     expect(parseAchievementRarity(_rarity({'contract-first': 320})), {

@@ -9,7 +9,10 @@ import 'package:starbridge_flutter/features/achievements/achievement_catalog.dar
 import 'package:starbridge_flutter/features/achievements/achievement_collection_port.dart';
 import 'package:starbridge_flutter/features/achievements/achievement_presentation.dart';
 
+import '../../_support/restricted_files.dart';
+
 void main() {
+  const grimhexNote = '【旅程成就】新增“法外六角湾”：抵达耶拉小行星带里的六角湾。';
   test('Grim HEX approved names, conditions and memories are exact', () {
     for (final (values, name, condition, memory) in [
       (achievementsZhCn, '法外六角湾', '抵达耶拉小行星带里的六角湾', '环中暗礁，自成一港'),
@@ -99,21 +102,7 @@ void main() {
           .cast<Map<String, dynamic>>()
           .singleWhere((entry) => entry['version'] == '0.7.3');
       final lines = (version['highlights'] as List).cast<String>();
-      const grimhexNote = '【旅程成就】新增“法外六角湾”：抵达耶拉小行星带里的六角湾。';
       expect(lines.where((line) => line == grimhexNote), hasLength(1));
-      // 0.7.3.md is generated from catalog.json: the 【分类】 tag becomes the
-      // "## 分类" heading and each item is listed without the tag.
-      // Windows checkouts may use CRLF (core.autocrlf); compare line content only.
-      final markdown = File('../release-notes/0.7.3.md')
-          .readAsStringSync()
-          .replaceAll('\r\n', '\n');
-      final journeySection = markdown
-          .split('\n## ')
-          .singleWhere((section) => section.startsWith('旅程成就\n'));
-      expect(
-        journeySection,
-        contains('- ${grimhexNote.substring('【旅程成就】'.length)}\n'),
-      );
       for (final key in [
         'levski',
         'grimhex',
@@ -150,4 +139,21 @@ void main() {
       }
     },
   );
+
+  const markdownPath = '../release-notes/0.7.3.md';
+  const markdownTest =
+      'generated 0.7.3 notes include the approved Grim HEX line';
+  test(markdownTest, () {
+    // The generator turns the 【分类】 tag into a heading.
+    final markdown = File(markdownPath)
+        .readAsStringSync()
+        .replaceAll('\r\n', '\n');
+    final journeySection = markdown
+        .split('\n## ')
+        .singleWhere((section) => section.startsWith('旅程成就\n'));
+    expect(
+      journeySection,
+      contains('- ${grimhexNote.substring('【旅程成就】'.length)}\n'),
+    );
+  }, skip: restrictedFileSkip(markdownTest, 'generated notes', markdownPath));
 }

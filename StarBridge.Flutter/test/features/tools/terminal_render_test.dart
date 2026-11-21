@@ -15,6 +15,7 @@ import 'package:starbridge_flutter/features/tools/tools_page.dart';
 import 'package:starbridge_flutter/features/tools/tools_card_data.dart';
 import 'package:starbridge_flutter/features/tools/tools_style.dart';
 
+import '../../_support/restricted_files.dart';
 import 'catalog_browse_test.dart' show size, settle, reveal, disposePage;
 import 'catalog_samples.dart';
 import 'mission_records_samples.dart';
@@ -430,74 +431,78 @@ void main() {
   }
   for (final light in [false, true]) {
     for (final page in ['tools', 'missions', 'blueprints', 'records']) {
-      testWidgets('mainstyle golden $page ${light ? 'light' : 'dark'}', (
-        t,
-      ) async {
-        size(t, 1440);
-        for (final font in {
-          'Saira': 'assets/fonts/Saira-VF.ttf',
-          'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
-        }.entries) {
-          final loader = FontLoader(font.key)
-            ..addFont(rootBundle.load(font.value));
-          await loader.load();
-        }
-        final records = RecordsPort(), cache = terminalCache();
-        cache.keysReadAt = DateTime.utc(2026, 11, 9, 10);
-        final recent = CatalogRecent(MemoryCatalogRecentStore());
-        await recent.switchOwner('golden');
-        await recent.view(CatalogKind.missions, missionSample);
-        final controller = MissionRecordsController(records);
-        await controller.load();
-        final hangar = await terminalHangar();
-        final Widget child = switch (page) {
-          'tools' => ToolsPage(
-            hangar: hangar,
-            cache: cache,
-            recordsPort: records,
-            recent: recent,
-          ),
-          'records' => MissionRecordsPage(
-            controller: controller,
-            catalog: SampleCatalogPort(),
-            known: const [missionSample],
-          ),
-          _ => CatalogPage(
-            kind: page == 'missions'
-                ? CatalogKind.missions
-                : CatalogKind.blueprints,
-            port: SampleCatalogPort(),
-            recordsPort: records,
-          ),
-        };
-        await t.pumpWidget(
-          terminalApp(
-            RepaintBoundary(key: const Key('terminal-golden'), child: child),
-            light: light,
-          ),
-        );
-        await settle(t);
-        if (page == 'missions' || page == 'blueprints') {
-          await t.tap(
-            find.byKey(
-              Key('catalog-row-${page == 'missions' ? missionGuid : 73}'),
+      final mode = light ? 'light' : 'dark';
+      final name = 'mainstyle golden $page $mode';
+      final golden = 'goldens/mainstyle_${page}_$mode.png';
+      restrictedTestWidgets(
+        name,
+        (t) async {
+          size(t, 1440);
+          for (final font in {
+            'Saira': 'assets/fonts/Saira-VF.ttf',
+            'Source Han Sans CN': 'assets/fonts/SourceHanSansCN-VF.ttf',
+          }.entries) {
+            final loader = FontLoader(font.key)
+              ..addFont(rootBundle.load(font.value));
+            await loader.load();
+          }
+          final records = RecordsPort(), cache = terminalCache();
+          cache.keysReadAt = DateTime.utc(2026, 11, 9, 10);
+          final recent = CatalogRecent(MemoryCatalogRecentStore());
+          await recent.switchOwner('golden');
+          await recent.view(CatalogKind.missions, missionSample);
+          final controller = MissionRecordsController(records);
+          await controller.load();
+          final hangar = await terminalHangar();
+          final Widget child = switch (page) {
+            'tools' => ToolsPage(
+              hangar: hangar,
+              cache: cache,
+              recordsPort: records,
+              recent: recent,
+            ),
+            'records' => MissionRecordsPage(
+              controller: controller,
+              catalog: SampleCatalogPort(),
+              known: const [missionSample],
+            ),
+            _ => CatalogPage(
+              kind: page == 'missions'
+                  ? CatalogKind.missions
+                  : CatalogKind.blueprints,
+              port: SampleCatalogPort(),
+              recordsPort: records,
+            ),
+          };
+          await t.pumpWidget(
+            terminalApp(
+              RepaintBoundary(key: const Key('terminal-golden'), child: child),
+              light: light,
             ),
           );
           await settle(t);
-        }
-        expect(t.takeException(), isNull);
-        await expectLater(
-          find.byKey(const Key('terminal-golden')),
-          matchesGoldenFile(
-            'goldens/mainstyle_${page}_${light ? 'light' : 'dark'}.png',
-          ),
-        );
-        await disposePage(t);
-        controller.dispose();
-        records.dispose();
-        cache.dispose();
-        recent.dispose();
-      });
+          if (page == 'missions' || page == 'blueprints') {
+            await t.tap(
+              find.byKey(
+                Key('catalog-row-${page == 'missions' ? missionGuid : 73}'),
+              ),
+            );
+            await settle(t);
+          }
+          expect(t.takeException(), isNull);
+          await expectLater(
+            find.byKey(const Key('terminal-golden')),
+            matchesGoldenFile(golden),
+          );
+          await disposePage(t);
+          controller.dispose();
+          records.dispose();
+          cache.dispose();
+          recent.dispose();
+        },
+        kind: 'golden',
+        path: 'test/features/tools/$golden',
+      );
     }
   }
 }

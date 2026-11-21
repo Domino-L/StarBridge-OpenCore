@@ -8,8 +8,7 @@ internal static partial class ContractAchievementTests
 
     internal static async Task<int> OwnerGate073Contracts()
     {
-        var failed = 0;
-        foreach (var (name, run) in new (string, Func<Task>)[] {
+        var tests = new (string, Func<Task>)[] {
             ("ContractTimeoutIsolation", OwnerGate073ContractTimeout),
             ("ContractStorageRecoveryAndHistoryIndependence", OwnerGate073ContractStorage),
             ("ContractHistoryFailureDoesNotBreakAchievements", OwnerGate073HistoryFault),
@@ -17,12 +16,16 @@ internal static partial class ContractAchievementTests
             ("RecognitionRecoversAfterDelayedOwner", OwnerGate073RecognitionOwnerRecovery),
             ("HistoryFaultsPreserveAuthority", LocalContractHistoryTests.HistoryFaultsPreserveAuthority),
             ("ShipChannelSurvivesContractFault", OwnerGate073ShipAfterFault),
-        })
+        };
+        var failed = 0;
+        var skipped = 0;
+        foreach (var (name, run) in tests)
         {
             try { await run(); Console.WriteLine("PASS CX073 " + name); }
+            catch (RestrictedSampleAbsentException e) { skipped++; e.Report(name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL CX073 " + name + " " + e.Message); }
         }
-        Console.WriteLine($"CX073 contract: {7 - failed} passed, {failed} failed");
+        Console.WriteLine($"CX073 contract: {tests.Length - failed - skipped} passed, {failed} failed, {skipped} skipped");
         return failed;
     }
 

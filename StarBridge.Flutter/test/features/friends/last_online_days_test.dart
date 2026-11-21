@@ -26,6 +26,7 @@ import 'package:starbridge_flutter/features/settings/sync_privacy_models.dart';
 import 'package:starbridge_flutter/features/settings/sync_privacy_module.dart';
 import 'package:starbridge_flutter/features/settings/sync_privacy_page.dart';
 
+import '../../_support/restricted_files.dart';
 import '../communities/community_workspace_test.dart' show workspacePayload;
 import '../settings/friend_sharing_controller_test.dart' show Harness;
 import 'friends_test.dart' as friends;
@@ -104,11 +105,13 @@ void main() {
     },
   );
 
-  test('shared contract sample and detached conversation preserve days', () {
-    final wire = jsonDecode(
-      File('../shared/test-fixtures/last-online-conversations-v1.json')
-          .readAsStringSync(),
-    ) as Map<String, dynamic>;
+  const samplePath =
+      '../shared/test-fixtures/last-online-conversations-v1.json';
+  const sampleTest =
+      'shared contract sample and detached conversation preserve days';
+  test(sampleTest, () {
+    final wire =
+        jsonDecode(File(samplePath).readAsStringSync()) as Map<String, dynamic>;
     final rows = parseConversations(wire);
     expect(rows.map((r) => r.lastOnlineDays), [3, null, null]);
     final restored = decodeConversation(encodeConversation(rows.first));
@@ -118,7 +121,7 @@ void main() {
       sameDirectMessageDirectory([restored], [restored.withoutPresence()]),
       isFalse,
     );
-  });
+  }, skip: restrictedFileSkip(sampleTest, 'sample', samplePath));
 
   test('community offline projection retains days and never derives from lastUpdated', () {
     final source = Map<String, Object?>.from(

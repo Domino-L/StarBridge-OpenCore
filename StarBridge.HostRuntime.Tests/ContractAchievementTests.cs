@@ -26,7 +26,7 @@ internal static partial class ContractAchievementTests
     }
     internal static (string Source, string Line)[] Lines()
     {
-        using var sample = JsonDocument.Parse(File.ReadAllText(SamplePath("tsg-replay.json")));
+        using var sample = JsonDocument.Parse(RestrictedSamples.Read("tsg-replay.json"));
         return sample.RootElement.GetProperty("lines").EnumerateArray().Select(v =>
             (v.GetProperty("source").GetString()!, v.GetProperty("line").GetString()!)).ToArray();
     }
@@ -271,10 +271,12 @@ internal static partial class ContractAchievementTests
             ("runtime reader eligibility and rotation", RuntimeReading),
             ("in-memory HTTP wire contract", WireContract) };
         var failed = 0;
+        var skipped = 0;
         foreach (var (name, run) in tests)
             try { await run(); Console.WriteLine("PASS CONTRACT HOST " + name); }
+            catch (RestrictedSampleAbsentException e) { skipped++; e.Report(name); }
             catch (Exception e) { failed++; Console.WriteLine("FAIL CONTRACT HOST " + name + ": " + e.Message); }
-        Console.WriteLine($"SUMMARY CONTRACT HOST passed={tests.Length - failed} failed={failed}");
+        Console.WriteLine($"SUMMARY CONTRACT HOST passed={tests.Length - failed - skipped} failed={failed} skipped={skipped}");
         if (failed > 0) throw new Exception("Contract achievement regressions failed.");
     }
 }

@@ -10,7 +10,7 @@ internal static partial class ContractAchievementTests
 {
     internal static Task TimestampedPhysicalLines()
     {
-        using var fixture = JsonDocument.Parse(File.ReadAllText(SamplePath("timestamped-notifications.json")));
+        using var fixture = JsonDocument.Parse(RestrictedSamples.Read("timestamped-notifications.json"));
         var physical = fixture.RootElement.GetProperty("physicalLines").EnumerateArray().Select(l => l.GetString()!).ToArray();
         Require(physical.Length == 4 && physical.All(l => l.StartsWith("<2026-", StringComparison.Ordinal)), "original four physical timestamps retained");
         using var h = new ReaderHarness();

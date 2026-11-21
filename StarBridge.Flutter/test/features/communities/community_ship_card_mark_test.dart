@@ -28,6 +28,8 @@ import 'package:starbridge_flutter/shared/ships/scm_ship_thumbnail.dart';
 import 'package:starbridge_flutter/shared/ships/ship_classification_tag.dart';
 import 'package:starbridge_flutter/shared/ships/ship_silhouette_store.dart';
 
+import '../../_support/restricted_files.dart';
+import '../../support/synthetic_image.dart';
 import '../friends/social_layout_test.dart' show app, loadFonts, size;
 import 'community_ships_test.dart' show shipRow;
 
@@ -260,6 +262,12 @@ class _PreviewAssets extends CachingAssetBundle {
       final bytes = _logoBytes[key];
       if (bytes != null) return bytes;
       throw StateError('Optional preview logo absent');
+    }
+    if (openCoreTestSource &&
+        key.startsWith('assets/ships/catalog-') &&
+        restrictedFileIsAbsent(key)) {
+      // Layout tests need a decodable image, independent of the ship preview.
+      return syntheticImageData();
     }
     return rootBundle.load(key);
   }
