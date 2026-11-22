@@ -5,7 +5,7 @@
 - [开始使用](docs/GETTING_STARTED.md)
 - [下载与校验](docs/DOWNLOADS.md)
 - 应用内“帮助与反馈”
-- QQ 测试群：`534268220`
+- SCM 团队 QQ 反馈群：`588620092`
 
 ## 提交问题
 

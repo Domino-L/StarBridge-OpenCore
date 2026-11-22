@@ -46,7 +46,7 @@
 
 官方安装包带有舰船图片、星系地图和首页视频。这是维护者的决定，不代表已获权利人授权：
 
-- 舰船图片和星系地图的来源待核实；
+- 舰船图片和星系地图来源是 RSI / Cloud Imperium 官方发布的图片，版权归原权利人；
 - 首页视频由维护者在游戏内录制，权利归 Cloud Imperium Games，没有书面许可。
 
 这些素材不采用 Apache-2.0，也不在公开源码中；从公开源码构建时显示应用自带的占位图。详见 [第三方媒体说明](THIRD-PARTY-MEDIA-NOTICE.md)。
@@ -181,7 +181,7 @@ CIG/RSI 的用户协议对未获授权的第三方软件、信息收集、客户
 - 使用问题或功能建议：[提交反馈](https://github.com/Domino-L/StarBridge-OpenCore/issues/new/choose)
 - 已知问题与处理进度：[查看 Issues](https://github.com/Domino-L/StarBridge-OpenCore/issues)
 - 安全问题：请按 [安全说明](SECURITY.md) 私下报告，不要在公开 Issue 中附带个人日志、账号信息、邮箱、令牌或其他隐私数据。
-- QQ 反馈群：`534268220`
+- SCM 团队 QQ 反馈群：`588620092`（如果希望加入我们，也请进入此群）
 
 更多联系方式和产品说明见 [星海舰桥官网](https://scstarbridge.com/)。
 
@@ -208,7 +208,7 @@ pwsh -NoProfile -File "scripts/Test StarBridge Public Client.ps1" -MenuOverlay
 **验证状态：**
 
 - 公开 CI 运行上面的入口。0.7.2 的公开 CI 没有全部通过：Core、Host 通过，Flutter 有 12 项失败（测试在 UTC 时区下的问题，0.7.2.1 已修），Windows 构建步骤没跑到。维护者当时决定不等 CI 通过就发布。
-- 0.7.3 的 CI 状态见[公开 CI](https://github.com/Domino-L/StarBridge-OpenCore/actions/workflows/validate.yml)。本版须整轮通过后才激活更新通道或转为正式 Release；本地校验不等于公开 CI 通过。
+- 0.7.3 的公开 CI 整轮通过（[运行 44929930233](https://github.com/Domino-L/StarBridge-OpenCore/actions/runs/44929930233)），之后才激活更新通道并转为正式 Release。各版本的 CI 状态见[公开 CI](https://github.com/Domino-L/StarBridge-OpenCore/actions/workflows/validate.yml)；本地校验不等于公开 CI 通过。
 - 公开版的浮层动画测试在机器负载高时可能不稳定。
 
 公开源码不带游戏截图、背景媒体和专有素材的视觉基线，公开测试模式会跳过这些截图比较。缺少可选媒体时使用中性占位，不需要从其他仓库复制素材。少量由控件和合成数据生成的测试图见 [测试图说明](docs/UI_TEST_FIXTURES.md)，不含真实聊天或账号截图。

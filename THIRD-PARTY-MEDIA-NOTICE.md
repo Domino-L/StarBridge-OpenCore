@@ -6,9 +6,9 @@
 StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情图和星系地图原图。
 这些图片即使出现在 StarBridge 的内部工作区或官方客户端中，也不会因此自动采用 Apache-2.0。
 
-## 0.7.2 官方安装包
+## 0.7.2 起的官方安装包
 
-0.7.2 官方安装包带有舰船图片、星系地图和首页视频。这是维护者为非商业测试版自行作出的决定，不代表已获权利人授权：舰船图片和星系地图的来源待核实（计划在 0.7.3 核实），首页视频是维护者在游戏内录制，没有书面许可。这些素材不在公开源码中，也不采用 Apache-2.0。下面是历史版本的记录。
+0.7.2 及以后的官方安装包（0.7.2、0.7.2.1、0.7.3）都带有舰船图片、星系地图和首页视频。这是维护者为非商业测试版自行作出的决定，不代表已获权利人授权：舰船图片和星系地图来源是 RSI / Cloud Imperium 官方发布的图片，版权归原权利人；首页视频是维护者在游戏内录制，没有书面许可。这些素材不在公开源码中，也不采用 Apache-2.0。下面是历史版本的记录。
 
 ## 0.7.3 官方安装包
 
@@ -31,7 +31,7 @@ StarBridge 的 Apache-2.0 开放源码包不包含舰船缩略图、舰船详情
 
 ## 经媒体审计的打包路径
 
-这一节只适用于运行媒体审计的旧版 WPF 安装和更新脚本。0.7.2 的 Flutter 官方安装包不走这条路径，见上面“0.7.2 官方安装包”。在这条路径上，只有同时满足以下条件，才可以恢复第三方媒体：
+这一节只适用于运行媒体审计的旧版 WPF 安装和更新脚本。0.7.2 起的 Flutter 官方安装包不走这条路径，见上面“0.7.2 起的官方安装包”。在这条路径上，只有同时满足以下条件，才可以恢复第三方媒体：
 
 - 图片列入 `third-party-media-manifest.json`，且文件路径、大小和 SHA-256 完全一致；
 - `third-party-media-sources.json` 中记录可追溯的来源、权利人、许可或书面授权；
@@ -70,8 +70,9 @@ evidence file, its SHA-256, and every path component; expired permissions are
 rejected. Payload audits validate the same registration fields without
 requiring private evidence to be distributed.
 
-Media with unknown provenance does not pass that audited path. The 0.7.2 Flutter
-official binary does not run it: that binary ships ship images, system maps and
+Media with unknown provenance does not pass that audited path. Flutter official
+binaries from 0.7.2 on do not run it: they ship ship images, system maps and
 home scene videos by the maintainer's own decision, which is not a grant of
-rights. The copyright and other rights in third-party media remain with their respective
+rights. The ship images and system maps are images officially published by
+RSI / Cloud Imperium. The copyright and other rights in third-party media remain with their respective
 owners.
